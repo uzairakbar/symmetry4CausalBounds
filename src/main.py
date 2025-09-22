@@ -9,10 +9,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.experiments.simulation import (
     linear as linear_simulation,
 )
-# from src.experiments.real import (
-#     optical_device as optical_device_experiment,
-#     cmnist as colored_mnist_experiment,
-# )
+from src.experiments.real import (
+    optical_device as optical_device_experiment,
+    # cmnist as colored_mnist_experiment,
+)
 
 
 def main():
@@ -28,12 +28,12 @@ def main():
             hyperparameters=config.hyperparameters
         )
     
-    # if 'optical_device' in config:
-    #     logger.info('Running optical device experiment.')
-    #     optical_device_experiment.run(
-    #         **config.optical_device,
-    #         hyperparameters=config.hyperparameters
-    #     )
+    if 'optical_device' in config:
+        logger.info('Running optical device experiment.')
+        optical_device_experiment.run(
+            **config.optical_device,
+            hyperparameters=config.hyperparameters
+        )
     
     # if 'colored_mnist' in config:
     #     logger.info('Running colored MNIST experiment.')

@@ -10,10 +10,10 @@ from src.sem.utils import (
     fit_ground_truth_f,
 )
 from src.sem.abstract import StructuralEquationModel as SEM
-from src.regressors.erm import LeastSquaresClosedForm as ERM
+from src.methods.regression import LeastSquaresClosedForm as ERM
 
 
-MAX_PLOYNOMIAL_DEGREE: int=5
+MAX_PLOYNOMIAL_DEGREE: int=3
 
 
 class OpticalDeviceSEM(SEM):
@@ -72,7 +72,7 @@ class OpticalDeviceSEM(SEM):
             logger.info(
                 f'Experiment {experiment} polynomial degree: {best_degree}'
             )
-            W_XY, _, _ = fit_ground_truth_f(
+            W_XY, _, epsilon = fit_ground_truth_f(
                 X, y, C, best_degree
             )
         else:
@@ -83,6 +83,13 @@ class OpticalDeviceSEM(SEM):
         self.W_XY = W_XY
         self.poly_degree = best_degree
         self.y, self.X, self.C = y, X, C
+
+        self.varXi = np.std(epsilon * self.C)
+        self.varEXiX = np.std(
+            self.X @ np.linalg.pinv(self.X) @ (
+                epsilon * self.C
+            )
+        )
     
     def sample(self, N: int=1, **kwargs) -> Tuple[NDArray, NDArray]:
         N_max, M = self.X.shape
