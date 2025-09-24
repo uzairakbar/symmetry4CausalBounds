@@ -3,7 +3,7 @@ linear_simulation:
     seed: 42
     n_samples: 2_048
     kernel_dim: -1          # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
-    n_experiments: 32
+    n_experiments: 5 #32
     sweep_samples: 32
     methods:
         - ERM
@@ -12,6 +12,7 @@ linear_simulation:
         - PI
         - DA+PI
     augmentation: translate
+    plot_panel: true
 
 optical_device:
     seed: 42
@@ -24,6 +25,7 @@ optical_device:
         - PI
         - DA+PI
     augmentation: all
+    plot_panel: true
 
 # colored_mnist:
 #     seed: 42

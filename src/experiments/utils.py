@@ -56,8 +56,8 @@ TEX_MAPPER: Dict[str, str] = {
     'ATE': r'$\operatorname{ate}$',
     'PI': r'$\operatorname{pi}$',
     'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'ERM': r'$\operatorname{stat}$',
-    'DA+ERM': r'$\operatorname{da}+\operatorname{stat}$',
+    'ERM': r'$\operatorname{erm}$',
+    'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
 }
 ANNOTATE_BOX_PLOT: Dict[Experiment, Dict[str, Any]] = {
     'linear_simulation': {
