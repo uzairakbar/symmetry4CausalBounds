@@ -56,8 +56,9 @@ TEX_MAPPER: Dict[str, str] = {
     'ATE': r'$\operatorname{ate}$',
     'PI': r'$\operatorname{pi}$',
     'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'ERM': r'$\operatorname{stat}$',
-    'DA+ERM': r'$\operatorname{da}+\operatorname{stat}$',
+    'INV+PI': r'$\operatorname{pi}+\operatorname{inv}$',
+    'ERM': r'$\operatorname{erm}$',
+    'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
 }
 ANNOTATE_BOX_PLOT: Dict[Experiment, Dict[str, Any]] = {
     'linear_simulation': {
@@ -96,6 +97,7 @@ color_map = {
     'DA+ERM':   3,
     'PI':   0,
     'DA+PI':    3,
+    'INV+PI':    2,
 }
 
 
@@ -747,6 +749,10 @@ def fit_model(
         model.fit(
             X=GX, y=y, **sgd_params
         )
+    elif name =='INV+PI':
+        model.fit(
+            X=X, y=y, GX=GX, **sgd_params
+        )
     elif name == 'ERM':
         model.fit(
             X=X, y=y, pbar_manager=pbar_manager, **sgd_params
@@ -768,6 +774,10 @@ def fit_model_nopbar(model, name, X, y, G, GX, hyperparameters=None, da=None):
     elif name =='DA+PI':
         model.fit(
             X=GX, y=y, **sgd_params
+        )
+    elif name =='INV+PI':
+        model.fit(
+            X=X, y=y, GX=GX, **sgd_params
         )
     elif name == 'ERM':
         model.fit(

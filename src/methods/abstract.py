@@ -5,7 +5,7 @@ from sklearn.metrics import make_scorer
 from sklearn.model_selection._search import BaseSearchCV
 
 
-class pointIdentifier(ABC, BaseEstimator):
+class pointEstimator(ABC, BaseEstimator):
     def fit(self, X, y, **kwargs):
         method_name = self.__class__.__name__
         if method_name == 'RICE':
@@ -33,10 +33,6 @@ class pointIdentifier(ABC, BaseEstimator):
 
 class partialIdentifier(ABC, BaseEstimator):
     def fit(self, X, y, **kwargs):
-        method_name = self.__class__.__name__
-        if method_name == 'RICE':
-            return self._fit(X, y, **kwargs)
-        
         X = X.reshape(*X.shape[:1], -1)
         return self._fit(X, y, **kwargs)
     
@@ -58,15 +54,15 @@ class partialIdentifier(ABC, BaseEstimator):
 
 
 class sensitivityAnalyzer(partialIdentifier):
-    def __init__(self, theta=1.0):
-        self._theta = theta
+    def __init__(self, gamma=1.0):
+        self._gamma = gamma
         super(sensitivityAnalyzer, self).__init__()
     
     @property
-    def theta(self):
-        return self._theta
+    def gamma(self):
+        return self._gamma
 
-    @theta.setter
-    def theta(self, theta):
-        self._theta = theta
+    @gamma.setter
+    def gamma(self, gamma):
+        self._gamma = gamma
 
