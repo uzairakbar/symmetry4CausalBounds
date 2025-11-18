@@ -17,18 +17,18 @@ LOG_FREQUENCY: int=100
 
 
 class PartialR2(SA):
-    def __init__(self, theta = 10.0):
-        assert theta >= 0.0,\
-            f'Value of {theta} should be greater than or equal to 0.'
-        self.theta0 = theta
-        super(PartialR2, self).__init__(theta)
+    def __init__(self, gamma = 10.0):
+        assert gamma >= 0.0,\
+            f'Value of {gamma} should be greater than or equal to 0.'
+        self.gamma0 = gamma
+        super(PartialR2, self).__init__(gamma)
 
     def _fit(self, X, y, **kwargs):
         # ellipsoid constraint set params
         self.h_erm = OLS().fit(X, y).solution
         self.metric = np.linalg.inv(X.T @ X)
         self.radius = (
-            (self.theta0**2) * ((self.theta**2) - 1.0)
+            (self.gamma0**2) * ((self.gamma**2) - 1.0)
         )
         return self
     
@@ -82,34 +82,65 @@ class PartialR2(SA):
         )
 
 
-# class ConstrainedLeastSquaresUnfaithfulIV(UIV):
-#     def __init__(self, alpha = None):
-#         super(ConstrainedLeastSquaresUnfaithfulIV, self).__init__(alpha)
+class InvarianceConstrainedPartialR2(PartialR2):
+    def __init__(self, gamma = 10.0, epsilon=0.15):
+        self.epsilon = epsilon
+        super(
+            InvarianceConstrainedPartialR2, self
+        ).__init__(gamma)
 
-#     def _fit(self, X, y, G=None, GX=None, **kwargs):
-#         h_erm = OLS().fit(GX, y).solution
-
-#         s1 = OLS().fit(G, GX).solution
-#         GXhat = G @ s1
-        
-#         A = GXhat.T @ GXhat
-#         b = GXhat.T @ y
-
-#         h = cp.Variable(h_erm.shape)
-#         cost = cp.norm(GX@h - y)
-#         constraints = [A @ h == b]
-#         prob = cp.Problem(
-#             cp.Minimize(cost),
-#             constraints
-#         )
-#         try:
-#             result = prob.solve(solver=cp.CLARABEL)
-#         except:
-#             logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
-#             result = prob.solve(solver=cp.ECOS)
-#         self._W = h.value
-#         return self
+    def _fit(self, X, y, GX=None, **kwargs):
+        # default to vanilla partial R2 if GX is None
+        if GX is None:
+            GX = X
+        self.X, self.GX = X, GX
+        return super(
+            InvarianceConstrainedPartialR2, self
+        )._fit(X, y, **kwargs)
     
-#     def _predict(self, X):
-#         return X @ self._W
+    def _optimize(self, x):
+        N = len(self.X)
+        h = cp.Variable(self.h_erm.shape)
+        cost = cp.Constant(x) @ h
+        constraints = ([
+            cp.quad_form(
+                h - self.h_erm,
+                cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
+            ) <= self.radius,
+            # self.GX @ h == self.X @ h,
+            cp.norm(self.GX @ h - self.X @ h, p=2) <= N * self.epsilon
+        ])
+        minimize = cp.Problem(
+            cp.Minimize(cost),
+            constraints
+        )
+        try:
+            lower_bound = minimize.solve(solver=cp.CLARABEL)
+        except:
+            logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
+            lower_bound = minimize.solve(solver=cp.ECOS)
+        
+        h = cp.Variable(self.h_erm.shape)
+        cost = cp.Constant(x) @ h
+        constraints = ([
+            cp.quad_form(
+                h - self.h_erm,
+                cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
+            ) <= self.radius,
+            # self.GX @ h == self.X @ h,
+            cp.norm(self.GX @ h - self.X @ h, p=2) <= N * self.epsilon
+        ])
+        maximize = cp.Problem(
+            cp.Maximize(cost),
+            constraints
+        )
+        try:
+            upper_bound = maximize.solve(solver=cp.CLARABEL)
+        except:
+            logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
+            upper_bound = maximize.solve(solver=cp.ECOS)
+        
+        return (
+            lower_bound, upper_bound
+        )
 

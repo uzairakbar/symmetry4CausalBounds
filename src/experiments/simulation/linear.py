@@ -14,7 +14,8 @@ from src.sem.simulation.linear import LinearSimulationSEM as SEM
 from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM
 from src.methods.sensitivity_models import (
-    PartialR2
+    PartialR2,
+    InvarianceConstrainedPartialR2 as invPartialR2,
 )
 
 from src.experiments.utils import (
@@ -47,6 +48,8 @@ DEFAULT_CV_SAMPLES: int=10
 DEFAULT_CV_FRAC: float=0.2
 DEFAULT_CV_FOLDS: int=5
 DEFAULT_CV_JOBS: int=1
+EPSILON: float=2.75
+GAMMA: float=20.0
 
 
 class SweepExperiment:
@@ -128,18 +131,18 @@ class SweepExperiment:
         
         experiment_name = self.__class__.__name__
         pbar_experiment = MANAGER.counter(
-            total=self.sweep_samples, desc=f'{experiment_name}', unit='params'
+            total=self.n_experiments, desc=f'{experiment_name}', unit='SEMs',
         )
-        for i, query in enumerate(query_values[:, np.newaxis, :]):
+        for j in range(self.n_experiments):
+            sem_solution = sem.solution
+            X, y, G, GX = self.generate_dataset(sem, da)
+            
             pbar_sem = MANAGER.counter(
-                total=self.n_experiments, desc=f'Query. {i}', unit='experiments', leave=False
+                total=self.sweep_samples, desc=f'SEM {j}', unit='queries', leave=False
             )
-            for j in range(self.n_experiments):
-                sem_solution = sem.solution
-                X, y, G, GX = self.generate_dataset(sem, da)
-                
+            for i, query in enumerate(query_values[:, np.newaxis, :]):
                 pbar_methods = MANAGER.counter(
-                    total=len(self.methods), desc=f'SEM {j}', unit='methods', leave=False
+                    total=len(self.methods), desc=f'Query. {i}', unit='methods', leave=False
                 )
                 for method_name, method in self.methods.items():
                     if method_name == 'ATE':
@@ -163,7 +166,7 @@ def make_panel_4x3(
     kernel_dim: int = 3,
     n_experiments: int = 10,
     sweep_samples: int = 21,
-    methods: List[str] = ('ATE','ERM','DA+ERM','PI','DA+PI'),
+    methods: List[str] = ('ATE','ERM','DA+ERM','PI','DA+PI','INV+PI'),
     hyperparameters: Optional[Dict[str, Dict[str, float]]] = None,
     experiment: str = EXPERIMENT,
     legend_ncols: int = 2,           # tweak legend layout
@@ -189,8 +192,9 @@ def make_panel_4x3(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(),
-        'DA+PI': lambda: PartialR2(),
+        'PI': lambda: PartialR2(gamma=GAMMA),
+        'DA+PI': lambda: PartialR2(gamma=GAMMA),
+        'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
     }
     methods = [m for m in methods if m in all_methods]
     builders: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods}
@@ -201,12 +205,12 @@ def make_panel_4x3(
         res: Dict[str, np.ndarray] = {name: (np.zeros((S, E, 2)) if 'PI' in name else np.zeros((S, E)))
                                       for name in builders}
         gt = np.zeros(S)
-        for i in range(S):
-            q = query_points[i][np.newaxis, :]
-            gt[i] = (q @ sem.solution).item()
-            for j in range(E):
-                Xj, yj = sem(N=n_samples, kappa=10.0)
-                GXj, Gj = da(Xj)
+        for j in range(E):
+            Xj, yj = sem(N=n_samples, kappa=10.0)
+            GXj, Gj = da(Xj)
+            for i in range(S):
+                q = query_points[i][np.newaxis, :]
+                gt[i] = (q @ sem.solution).item()
                 for name, build in builders.items():
                     if name == 'ATE':
                         res[name][i, j] = (q @ sem.solution).item()
@@ -347,7 +351,7 @@ def make_panel_4x3(
 
         # ---- Row 2: E_worst (PI and DA+PI only) ----
         ax_ew = axes[1, col]
-        methods_ew = ('PI', 'DA+PI')
+        methods_ew = ('PI', 'DA+PI', 'INV+PI')
         plotted_any = False
         for name in methods_ew:
             if name not in builders or name not in res:
@@ -456,12 +460,13 @@ def run(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(),
-        'DA+PI': lambda: PartialR2(),
+        'PI': lambda: PartialR2(gamma=GAMMA),
+        'DA+PI': lambda: PartialR2(gamma=GAMMA),
+        'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
     }
     methods: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods if m in all_methods}
     sweep_methods: Dict[str, ModelBuilder] = {
-        m: all_methods[m] for m in methods if m in ('ERM', 'DA+ERM', 'ATE', 'PI', 'DA+PI')
+        m: all_methods[m] for m in methods if m in ('ERM', 'DA+ERM', 'ATE', 'PI', 'DA+PI', 'INV+PI')
     }
     
     # sweep over treatment queries

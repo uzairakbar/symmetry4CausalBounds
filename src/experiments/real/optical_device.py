@@ -18,7 +18,8 @@ from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM
 
 from src.methods.sensitivity_models import (
-    PartialR2
+    PartialR2,
+    InvarianceConstrainedPartialR2 as invPartialR2,
 )
 
 from src.experiments.utils import (
@@ -53,6 +54,8 @@ DEFAULT_CV_FOLDS: int=5
 DEFAULT_CV_JOBS: int=1
 GROUND_TRUTH: str='polynomial'
 OPTICAL_DEVICE_DATASET: int=9
+EPSILON: float=0.125
+GAMMA: float=10.0
 
 
 class SweepExperiment:
@@ -175,7 +178,7 @@ def make_panel_4x3(
     seed: int = 42,
     n_samples: int = 2_500,
     sweep_samples: int = 21,
-    methods: List[str] = ('ATE','ERM','DA+ERM','PI','DA+PI'),
+    methods: List[str] = ('ATE','ERM','DA+ERM','PI','DA+PI', 'INV+PI'),
     augmentation: Optional[str] = None,
     hyperparameters: Optional[Dict[str, Dict[str, float]]] = None,
     experiment: str = EXPERIMENT,
@@ -213,8 +216,9 @@ def make_panel_4x3(
             'ATE': lambda: None,
             'ERM': lambda: ERM(),
             'DA+ERM': lambda: ERM(),
-            'PI': lambda: PartialR2(),
-            'DA+PI': lambda: PartialR2(),
+            'PI': lambda: PartialR2(gamma=GAMMA),
+            'DA+PI': lambda: PartialR2(gamma=GAMMA),
+            'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
         }
         chosen = [m for m in methods if m in all_methods]
         builders: Dict[str, ModelBuilder] = {m: all_methods[m] for m in chosen}
@@ -331,7 +335,7 @@ def make_panel_4x3(
 
         # Row 3: Width (PI only)
         ax_w = axes[2, col]
-        for name in ('PI', 'DA+PI'):
+        for name in ('PI', 'DA+PI', 'INV+PI'):
             if name in res:
                 w = width(res[name])
                 ax_w.fill_between(xgrid, 0.0, w, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
@@ -342,7 +346,7 @@ def make_panel_4x3(
 
         # Row 2: E_worst^2 (PI and DA+PI only)
         ax_ew = axes[1, col]
-        for name in ('PI', 'DA+PI'):
+        for name in ('PI', 'DA+PI', 'INV+PI'):
             if name in res:
                 ew2 = e_worst_sq(res[name], gt, reduce='max')
                 ax_ew.fill_between(xgrid, 0.0, ew2, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
@@ -408,14 +412,15 @@ def run(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(),
-        'DA+PI': lambda: PartialR2(),
+        'PI': lambda: PartialR2(gamma=GAMMA),
+        'DA+PI': lambda: PartialR2(gamma=GAMMA),
+        'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
     }
     methods: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods}
     sweep_methods: Dict[str, ModelBuilder] = {
         m: all_methods[m] for m in methods if m in (
             'ERM', 'DA+ERM', 'ATE',
-            'PI', 'DA+PI',
+            'PI', 'DA+PI', 'INV+PI'
         )
     }
     
