@@ -14,7 +14,7 @@ from src.data_augmentors.real.optical_device import OpticalDeviceDA as DA
 
 from src.sem.real.optical_device import OpticalDeviceSEM as SEM
 
-from src.methods.abstract import pointIdentifier as Regressor
+from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM
 
 from src.methods.sensitivity_models import (

@@ -18,14 +18,14 @@ LOG_FREQUENCY: int=100
 
 class PartialR2(SA):
     def __init__(self, theta = 10.0):
-        assert theta >= 1.0,\
-            f'Value of {theta} should be greater than or equal to 1.'
-        self.theta0 = theta #1.0
+        assert theta >= 0.0,\
+            f'Value of {theta} should be greater than or equal to 0.'
+        self.theta0 = theta
         super(PartialR2, self).__init__(theta)
 
     def _fit(self, X, y, **kwargs):
         # ellipsoid constraint set params
-        self.h_stats = OLS().fit(X, y).solution
+        self.h_erm = OLS().fit(X, y).solution
         self.metric = np.linalg.inv(X.T @ X)
         self.radius = (
             (self.theta0**2) * ((self.theta**2) - 1.0)
@@ -41,11 +41,11 @@ class PartialR2(SA):
         return bounds
     
     def _optimize(self, x):
-        Sigma_XiX = cp.Variable(self.h_stats.shape)
-        cost = cp.Constant(x) @ Sigma_XiX
+        h = cp.Variable(self.h_erm.shape)
+        cost = cp.Constant(x) @ h
         constraints = ([
             cp.quad_form(
-                Sigma_XiX,
+                h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
             ) <= self.radius
         ])
@@ -59,11 +59,11 @@ class PartialR2(SA):
             logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
             lower_bound = minimize.solve(solver=cp.ECOS)
         
-        Sigma_XiX = cp.Variable(self.h_stats.shape)
-        cost = cp.Constant(x) @ Sigma_XiX
+        h = cp.Variable(self.h_erm.shape)
+        cost = cp.Constant(x) @ h
         constraints = ([
             cp.quad_form(
-                Sigma_XiX,
+                h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
             ) <= self.radius
         ])
@@ -77,13 +77,8 @@ class PartialR2(SA):
             logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
             upper_bound = maximize.solve(solver=cp.ECOS)
         
-        # # closed form
-        # lower_bound = - np.sqrt(self.radius * x.T @ self.metric @ x)
-        # upper_bound = + np.sqrt(self.radius * x.T @ self.metric @ x)
-        
         return (
-            x @ self.h_stats + lower_bound,
-            x @ self.h_stats + upper_bound
+            lower_bound, upper_bound
         )
 
 

@@ -5,7 +5,7 @@ from sklearn.metrics import make_scorer
 from sklearn.model_selection._search import BaseSearchCV
 
 
-class pointIdentifier(ABC, BaseEstimator):
+class pointEstimator(ABC, BaseEstimator):
     def fit(self, X, y, **kwargs):
         method_name = self.__class__.__name__
         if method_name == 'RICE':

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from src.data_augmentors.simulation.linear import NullSpaceTranslation as DA
 from src.sem.simulation.linear import LinearSimulationSEM as SEM
 
-from src.methods.abstract import pointIdentifier as Regressor
+from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM
 from src.methods.sensitivity_models import (
     PartialR2
