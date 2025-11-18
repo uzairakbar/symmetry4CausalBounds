@@ -21,12 +21,12 @@ def main():
         config = yaml.safe_load(file)
     config = munchify(config)
 
-    # if 'linear_simulation' in config:
-    #     logger.info('Running linear simulation experiment.')
-    #     linear_simulation.run(
-    #         **config.linear_simulation,
-    #         hyperparameters=config.hyperparameters
-    #     )
+    if 'linear_simulation' in config:
+        logger.info('Running linear simulation experiment.')
+        linear_simulation.run(
+            **config.linear_simulation,
+            hyperparameters=config.hyperparameters
+        )
     
     if 'optical_device' in config:
         logger.info('Running optical device experiment.')

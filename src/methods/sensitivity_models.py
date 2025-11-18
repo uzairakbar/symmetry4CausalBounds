@@ -16,12 +16,12 @@ MAX_BATCH: int=256
 LOG_FREQUENCY: int=100
 
 
-class MarginalSensitivityModel(SA):
+class PartialR2(SA):
     def __init__(self, theta = 10.0):
         assert theta >= 1.0,\
             f'Value of {theta} should be greater than or equal to 1.'
         self.theta0 = theta #1.0
-        super(MarginalSensitivityModel, self).__init__(theta)
+        super(PartialR2, self).__init__(theta)
 
     def _fit(self, X, y, **kwargs):
         # ellipsoid constraint set params

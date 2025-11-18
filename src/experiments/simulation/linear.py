@@ -14,7 +14,7 @@ from src.sem.simulation.linear import LinearSimulationSEM as SEM
 from src.methods.abstract import pointIdentifier as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM
 from src.methods.sensitivity_models import (
-    MarginalSensitivityModel as partialR2
+    PartialR2
 )
 
 from src.experiments.utils import (
@@ -189,8 +189,8 @@ def make_panel_4x3(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: partialR2(),
-        'DA+PI': lambda: partialR2(),
+        'PI': lambda: PartialR2(),
+        'DA+PI': lambda: PartialR2(),
     }
     methods = [m for m in methods if m in all_methods]
     builders: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods}
@@ -456,8 +456,8 @@ def run(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: partialR2(),
-        'DA+PI': lambda: partialR2(),
+        'PI': lambda: PartialR2(),
+        'DA+PI': lambda: PartialR2(),
     }
     methods: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods if m in all_methods}
     sweep_methods: Dict[str, ModelBuilder] = {
