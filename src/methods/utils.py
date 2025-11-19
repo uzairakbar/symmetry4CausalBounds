@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import cvxpy as cp
 from torch import nn
 from loguru import logger
 from numpy.typing import NDArray
@@ -55,3 +56,21 @@ def device():
         device = 'cpu'
     logger.info(f'Using {device} device.')
     return torch.device(device)
+
+
+def check_feasibility(
+        constraints
+    ) -> bool:
+    feasibility = cp.Problem(cp.Minimize(0), constraints)
+    feasibility.solve(
+        solver=cp.CLARABEL, time_limit_secs=10.0, verbose=False
+    )
+    if feasibility.status in [cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE]:
+        logger.warning(f'CLARABLE infeasible! Checking ECOS.')
+        feasibility.solve(
+            solver=cp.ECOS, time_limit_secs=10.0, verbose=False
+        )
+        if feasibility.status in [cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE]:
+            logger.warning('ESOC infeasible!')
+            return False
+    return True

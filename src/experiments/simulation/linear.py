@@ -24,7 +24,6 @@ from src.experiments.utils import (
     tex_table,
     fit_model,
     sweep_plot,
-    estimation_error,
     ANNOTATE_SWEEP_PLOT,
     radial_sweep_pcs,
     sweep_along_pc,
@@ -42,10 +41,7 @@ ModelBuilder = Callable[[Optional[float]], Regressor]
 
 MANAGER = enlighten.get_manager()
 EXPERIMENT: str='linear_simulation'
-DEFAULT_CV_SAMPLES: int=10
-DEFAULT_CV_FRAC: float=0.2
-DEFAULT_CV_FOLDS: int=5
-DEFAULT_CV_JOBS: int=1
+DEFAULT_QUERY_JOBS: int=1
 EPSILON: float=2**0
 GAMMA0: float=2**10
 GAMMA: float=2**10

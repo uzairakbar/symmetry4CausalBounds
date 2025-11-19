@@ -836,52 +836,50 @@ def fit_model(
     if not pbar_manager:
         return fit_model_nopbar(model, name, X, y, GX, hyperparameters, da)
 
-    sgd_params = getattr(hyperparameters, 'sgd', dict())
     if name == 'PI':
         model.fit(
-            X=X, y=y, **sgd_params
+            X=X, y=y, **hyperparameters
         )
     elif name =='DA+PI':
         model.fit(
-            X=GX, y=y, **sgd_params
+            X=GX, y=y, **hyperparameters
         )
     elif name =='INV+PI':
         model.fit(
-            X=X, y=y, GX=GX, **sgd_params
+            X=X, y=y, GX=GX, **hyperparameters
         )
     elif name == 'ERM':
         model.fit(
-            X=X, y=y, pbar_manager=pbar_manager, **sgd_params
+            X=X, y=y, pbar_manager=pbar_manager, **hyperparameters
         )
     elif name == 'DA+ERM':
         model.fit(
-            X=GX, y=y, pbar_manager=pbar_manager, **sgd_params
+            X=GX, y=y, pbar_manager=pbar_manager, **hyperparameters
         )
     else:
         raise ValueError(f'Model {name} not implemented.')
 
 
 def fit_model_nopbar(model, name, X, y, GX, hyperparameters=None, da=None):
-    sgd_params = getattr(hyperparameters, 'sgd', dict())
     if name == 'PI':
         model.fit(
-            X=X, y=y, **sgd_params
+            X=X, y=y, **hyperparameters
         )
     elif name =='DA+PI':
         model.fit(
-            X=GX, y=y, **sgd_params
+            X=GX, y=y, **hyperparameters
         )
     elif name =='INV+PI':
         model.fit(
-            X=X, y=y, GX=GX, **sgd_params
+            X=X, y=y, GX=GX, **hyperparameters
         )
     elif name == 'ERM':
         model.fit(
-            X=X, y=y, **sgd_params
+            X=X, y=y, **hyperparameters
         )
     elif name == 'DA+ERM':
         model.fit(
-            X=GX, y=y, **sgd_params
+            X=GX, y=y, **hyperparameters
         )
     else:
         raise ValueError(f'Model {name} not implemented.')

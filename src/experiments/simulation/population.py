@@ -35,13 +35,12 @@ ModelBuilder = Callable[[Optional[float]], Regressor]
 
 MANAGER = enlighten.get_manager()
 EXPERIMENT: str='linear_simulation'
-DEFAULT_CV_SAMPLES: int=10
-DEFAULT_CV_FRAC: float=0.2
-DEFAULT_CV_FOLDS: int=5
-DEFAULT_CV_JOBS: int=1
-EPSILON: float=2.75
-GAMMA0: float=400
-GAMMA: float=400
+DEFAULT_QUERY_JOBS: int=1
+TEST_FRAC: float=0.1
+EPSILON: float=2**-1
+GAMMA0: float=1_600
+GAMMA: float=1_600
+
 
 
 class SweepExperiment(ABC):
@@ -165,8 +164,9 @@ class KappaSweep(SweepExperiment):
         return model.predict(X_test)
     
     def generate_dataset(self, sem: SEM, da: DA, param: float):
-        X, y = sem(N = self.n_samples, kappa = param)
-        X_test, y_test = sem(N = self.n_samples, kappa = param)
+        N = self.n_samples
+        X, y = sem(N = N, kappa = param)
+        X_test, y_test = sem(N = int(TEST_FRAC * N), kappa = param)
         GX, _ = da(X, gamma = 1.0)
         return X, y, GX, X_test, y_test
 
@@ -182,8 +182,9 @@ class AlphaSweep(SweepExperiment):
         return model.predict(X_test)
     
     def generate_dataset(self, sem: SEM, da: DA, param: float):
-        X, y = sem(N = self.n_samples)
-        X_test, y_test = sem(N = self.n_samples)
+        N = self.n_samples
+        X, y = sem(N = N)
+        X_test, y_test = sem(N = int(TEST_FRAC * N))
         GX, _ = da(X, gamma = param)
         return X, y, GX, X_test, y_test
     
@@ -199,14 +200,15 @@ class GammaSweep(SweepExperiment):
         return model.predict(X_test, gamma=param, gamma0=GAMMA0)
     
     def generate_dataset(self, sem: SEM, da: DA, param: float):
-        X, y = sem(N = self.n_samples)
-        X_test, y_test = sem(N = self.n_samples)
+        N = self.n_samples
+        X, y = sem(N = N)
+        X_test, y_test = sem(N = int(TEST_FRAC * N))
         GX, _ = da(X, gamma = 1.0)
         return X, y, GX, X_test, y_test
 
     def param_sweep(self):
         gamma_values = np.logspace(
-            0, 3, base=10, num=self.sweep_samples
+            0, 11, base=2, num=self.sweep_samples
         )
         return gamma_values
 
@@ -229,14 +231,22 @@ def run(
         autorefresh=True, min_delta=0.5
     )
 
-    cv = getattr(hyperparameters, 'cv', None)
     all_methods: Dict[str, ModelBuilder] = {
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
-        'DA+PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
-        'INV+PI': lambda: invPartialR2(gamma=GAMMA, gamma0=GAMMA0, epsilon=EPSILON),
+        'PI': lambda: PartialR2(
+            gamma=GAMMA, gamma0=GAMMA0,
+            n_jobs=getattr(hyperparameters, 'n_jobs', DEFAULT_QUERY_JOBS)
+        ),
+        'DA+PI': lambda: PartialR2(
+            gamma=GAMMA, gamma0=GAMMA0,
+            n_jobs=getattr(hyperparameters, 'n_jobs', DEFAULT_QUERY_JOBS)
+        ),
+        'INV+PI': lambda: invPartialR2(
+            gamma=GAMMA, gamma0=GAMMA0, epsilon=EPSILON,
+            n_jobs=getattr(hyperparameters, 'n_jobs', DEFAULT_QUERY_JOBS)
+        ),
     }
     methods: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods}
     sweep_methods: Dict[str, ModelBuilder] = {
