@@ -22,9 +22,9 @@ class pointEstimator(ABC, BaseEstimator):
     def solution(self):
         return self._W
 
-    def predict(self, X):
+    def predict(self, X, **kwargs):
         X = X.reshape(*X.shape[:1], -1)
-        return self._predict(X)
+        return self._predict(X, **kwargs)
     
     @abstractmethod
     def _predict(self, X):
@@ -44,9 +44,9 @@ class partialIdentifier(ABC, BaseEstimator):
     def solution(self):
         return self._W
 
-    def predict(self, X):
+    def predict(self, X, **kwargs):
         X = X.reshape(*X.shape[:1], -1)
-        return self._predict(X)
+        return self._predict(X, **kwargs)
     
     @abstractmethod
     def _predict(self, X):

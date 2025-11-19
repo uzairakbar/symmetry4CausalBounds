@@ -12,42 +12,71 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 
 
 DEVICE: str=device()
-MAX_BATCH: int=256
+CLOSED_FORM_SOLUTION: bool=True
 LOG_FREQUENCY: int=100
+MAX_BATCH: int=256
+GAMMA0: float=100
+EPSILON: float=1
+GAMMA: float=100
 
 
 class PartialR2(SA):
-    def __init__(self, gamma = 10.0):
-        assert gamma >= 0.0,\
+    def __init__(
+            self,
+            gamma=GAMMA,
+            gamma0=GAMMA0,
+        ):
+        assert gamma >= 0.0 and gamma0 >= 0.0, \
             f'Value of {gamma} should be greater than or equal to 0.'
-        self.gamma0 = gamma
+        self.gamma0 = gamma0
         super(PartialR2, self).__init__(gamma)
 
     def _fit(self, X, y, **kwargs):
         # ellipsoid constraint set params
         self.h_erm = OLS().fit(X, y).solution
         self.metric = np.linalg.inv(X.T @ X)
-        self.radius = (
-            (self.gamma0**2) * ((self.gamma**2) - 1.0)
-        )
         return self
     
-    def _predict(self, X):
+    def _predict(
+            self,
+            X,
+            gamma=None,
+            gamma0=None,
+        ):
         N, M = X.shape
+        gamma = (
+            self.gamma if gamma is None else gamma
+        )
+        gamma0 = (
+            self.gamma0 if gamma0 is None else gamma0
+        )
+        radius = self._compute_radius(gamma0, gamma)
+
         bounds = np.zeros((N, 2))
         for i, x in enumerate(X):
-            lower, upper = self._optimize(x)
+            lower, upper = self._optimize(x, radius)
             bounds[i, 0], bounds[i, 1] = lower, upper
         return bounds
     
-    def _optimize(self, x):
+    def _optimize(self, x, radius):
+        if CLOSED_FORM_SOLUTION:
+            lower_bound = (
+                x @ self.h_erm
+                - np.sqrt(radius * (x @ self.metric @ x))
+            )
+            upper_bound = (
+                x @ self.h_erm
+                + np.sqrt(radius * (x @ self.metric @ x))
+            )
+            return lower_bound, upper_bound
+
         h = cp.Variable(self.h_erm.shape)
         cost = cp.Constant(x) @ h
         constraints = ([
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
-            ) <= self.radius
+            ) <= radius
         ])
         minimize = cp.Problem(
             cp.Minimize(cost),
@@ -65,7 +94,7 @@ class PartialR2(SA):
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
-            ) <= self.radius
+            ) <= radius
         ])
         maximize = cp.Problem(
             cp.Maximize(cost),
@@ -76,18 +105,25 @@ class PartialR2(SA):
         except:
             logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
             upper_bound = maximize.solve(solver=cp.ECOS)
-        
-        return (
-            lower_bound, upper_bound
-        )
+
+        return lower_bound, upper_bound
+    
+    @classmethod
+    def _compute_radius(cls, gamma0, gamma):
+        return gamma0 * gamma
 
 
 class InvarianceConstrainedPartialR2(PartialR2):
-    def __init__(self, gamma = 10.0, epsilon=0.15):
+    def __init__(
+            self,
+            gamma=GAMMA,
+            gamma0=GAMMA0,
+            epsilon=EPSILON
+        ):
         self.epsilon = epsilon
         super(
             InvarianceConstrainedPartialR2, self
-        ).__init__(gamma)
+        ).__init__(gamma, gamma0)
 
     def _fit(self, X, y, GX=None, **kwargs):
         # default to vanilla partial R2 if GX is None
@@ -98,7 +134,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             InvarianceConstrainedPartialR2, self
         )._fit(X, y, **kwargs)
     
-    def _optimize(self, x):
+    def _optimize(self, x, radius):
         N = len(self.X)
         h = cp.Variable(self.h_erm.shape)
         cost = cp.Constant(x) @ h
@@ -106,7 +142,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
-            ) <= self.radius,
+            ) <= radius,
             # self.GX @ h == self.X @ h,
             cp.norm(self.GX @ h - self.X @ h, p=2) <= N * self.epsilon
         ])
@@ -126,7 +162,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(np.linalg.inv(self.metric)))
-            ) <= self.radius,
+            ) <= radius,
             # self.GX @ h == self.X @ h,
             cp.norm(self.GX @ h - self.X @ h, p=2) <= N * self.epsilon
         ])
@@ -140,7 +176,5 @@ class InvarianceConstrainedPartialR2(PartialR2):
             logger.warning(f'CLARABLE solver failed, falling back to ECOS.')
             upper_bound = maximize.solve(solver=cp.ECOS)
         
-        return (
-            lower_bound, upper_bound
-        )
+        return lower_bound, upper_bound
 

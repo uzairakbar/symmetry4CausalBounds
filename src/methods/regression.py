@@ -20,6 +20,6 @@ class LeastSquaresClosedForm(pointEstimator):
         self._W = np.linalg.pinv(X) @ y
         return self
     
-    def _predict(self, X):
+    def _predict(self, X, **kwargs):
         return X @ self._W
 

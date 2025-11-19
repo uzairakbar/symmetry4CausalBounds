@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments.simulation import (
     linear as linear_simulation,
+    # population as linear_simulation,
 )
 from src.experiments.real import (
     optical_device as optical_device_experiment,

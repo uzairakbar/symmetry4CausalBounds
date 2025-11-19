@@ -6,9 +6,9 @@ linear_simulation:
     n_experiments: 1
     sweep_samples: 16
     methods:
+        - ATE
         - ERM
         - DA+ERM
-        - ATE
         - PI
         - DA+PI
         - INV+PI
@@ -20,9 +20,9 @@ optical_device:
     n_samples: 1_000
     sweep_samples: 32
     methods:
+        - ATE
         - ERM
         - DA+ERM
-        - ATE
         - PI
         - DA+PI
         - INV+PI

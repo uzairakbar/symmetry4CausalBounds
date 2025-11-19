@@ -21,12 +21,10 @@ from src.methods.sensitivity_models import (
 from src.experiments.utils import (
     save,
     set_seed,
-    box_plot,
     tex_table,
     fit_model,
     sweep_plot,
     estimation_error,
-    ANNOTATE_BOX_PLOT,
     ANNOTATE_SWEEP_PLOT,
     radial_sweep_pcs,
     sweep_along_pc,
@@ -49,7 +47,8 @@ DEFAULT_CV_FRAC: float=0.2
 DEFAULT_CV_FOLDS: int=5
 DEFAULT_CV_JOBS: int=1
 EPSILON: float=2.75
-GAMMA: float=20.0
+GAMMA0: float=400.0
+GAMMA: float=400.0
 
 
 class SweepExperiment:
@@ -75,7 +74,7 @@ class SweepExperiment:
     def fit(
             method_name: str,
             method: Callable[[Optional[str]], Regressor],
-            X, y, G, GX,
+            X, y, GX,
             param: float=10.0,
             da: Optional[DA]=None,
             hyperparameters: Optional[Dict[str, Dict[str, float]]]=None
@@ -84,7 +83,7 @@ class SweepExperiment:
         fit_model(
             model=model,
             name=method_name,
-            X=X, y=y, G=G, GX=GX,
+            X=X, y=y, GX=GX,
             hyperparameters=hyperparameters,
             da=da
         )
@@ -92,8 +91,8 @@ class SweepExperiment:
     
     def generate_dataset(self, sem: SEM, da: DA, param: float=10.0):
         X, y = sem(N=self.n_samples, kappa=param)
-        GX, G = da(X)
-        return X, y, G, GX
+        GX, _ = da(X)
+        return X, y, GX
 
     def query_sweep(self, X):
         # Sweep over radial angle in PC1–PC2 plane
@@ -103,11 +102,11 @@ class SweepExperiment:
     def compute_result(self,
                method_name: str,
                method: Callable[[Optional[str]], Regressor],
-               X, y, G, GX,
+               X, y, GX,
                query: np.ndarray,
                da: Optional[DA]=None) -> float:
         model = self.fit(
-            method_name, method, X, y, G, GX, da=da,
+            method_name, method, X, y, GX, da=da,
             hyperparameters=self.hyperparameters
         )
         bounds = model.predict(query)
@@ -120,7 +119,7 @@ class SweepExperiment:
         sem = SEM()
         da = DA(sem.W_XY, kernel_dim=self.kernel_dim)
 
-        X, y, G, GX = self.generate_dataset(sem, da)
+        X, y, GX = self.generate_dataset(sem, da)
         query_values = self.query_sweep(X)
         
         bounds_dim = (self.sweep_samples, self.n_experiments, 2)
@@ -135,7 +134,7 @@ class SweepExperiment:
         )
         for j in range(self.n_experiments):
             sem_solution = sem.solution
-            X, y, G, GX = self.generate_dataset(sem, da)
+            X, y, GX = self.generate_dataset(sem, da)
             
             pbar_sem = MANAGER.counter(
                 total=self.sweep_samples, desc=f'SEM {j}', unit='queries', leave=False
@@ -149,7 +148,7 @@ class SweepExperiment:
                         results[method_name][i][j] = query @ sem_solution
                     else:
                         results[method_name][i][j] = self.compute_result(
-                            method_name, method, X, y, G, GX, query, da=da
+                            method_name, method, X, y, GX, query, da=da
                         )
                     pbar_methods.update()
                 pbar_methods.close()
@@ -192,9 +191,9 @@ def make_panel_4x3(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(gamma=GAMMA),
-        'DA+PI': lambda: PartialR2(gamma=GAMMA),
-        'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
+        'PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
+        'DA+PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
+        'INV+PI': lambda: invPartialR2(gamma=GAMMA, gamma0=GAMMA0, epsilon=EPSILON),
     }
     methods = [m for m in methods if m in all_methods]
     builders: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods}
@@ -207,7 +206,7 @@ def make_panel_4x3(
         gt = np.zeros(S)
         for j in range(E):
             Xj, yj = sem(N=n_samples, kappa=10.0)
-            GXj, Gj = da(Xj)
+            GXj, _ = da(Xj)
             for i in range(S):
                 q = query_points[i][np.newaxis, :]
                 gt[i] = (q @ sem.solution).item()
@@ -216,7 +215,7 @@ def make_panel_4x3(
                         res[name][i, j] = (q @ sem.solution).item()
                         continue
                     model = build()
-                    fit_model(model=model, name=name, X=Xj, y=yj, G=Gj, GX=GXj,
+                    fit_model(model=model, name=name, X=Xj, y=yj, GX=GXj,
                               hyperparameters=hyperparameters, da=da)
                     out = np.asarray(model.predict(q)).squeeze()
                     if 'PI' in name:
@@ -460,9 +459,9 @@ def run(
         'ATE': lambda: None,
         'ERM': lambda: ERM(),
         'DA+ERM': lambda: ERM(),
-        'PI': lambda: PartialR2(gamma=GAMMA),
-        'DA+PI': lambda: PartialR2(gamma=GAMMA),
-        'INV+PI': lambda: invPartialR2(gamma=GAMMA, epsilon=EPSILON),
+        'PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
+        'DA+PI': lambda: PartialR2(gamma=GAMMA, gamma0=GAMMA0),
+        'INV+PI': lambda: invPartialR2(gamma=GAMMA, gamma0=GAMMA0, epsilon=EPSILON),
     }
     methods: Dict[str, ModelBuilder] = {m: all_methods[m] for m in methods if m in all_methods}
     sweep_methods: Dict[str, ModelBuilder] = {

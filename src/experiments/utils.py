@@ -35,7 +35,7 @@ PLOT_DPI: int=1200
 PAGE_WIDTH: float=6.75
 PLOT_FORMAT: Plot='pdf'
 HILIGHT_OURS: bool=False
-RICE_AUGMENTATIONS: int=3
+NORMALIZE_ERROR: bool=False
 ARTIFACTS_DIRECTORY: str='artifacts'
 RC_PARAMS: Dict[str, str | int | bool] = {
     # Set LaTeX for rendering text.
@@ -91,6 +91,27 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
         # 'hide_legend': True,
     },
 }
+ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
+    'kappa': {
+        'xlabel': r'$\kappa$',
+        'xscale': 'linear',
+        # 'yscale': 'log',
+        # 'hide_legend': True,
+    },
+    'alpha': {
+        'xlabel': r'$a$',
+        'xscale': 'log',
+        # 'vertical_plots': ['DA+IVL-CV', 'DA+IVL-LCV', 'DA+IVL-CC'],
+        # 'legend_items': ['DA+IVL-CV', 'DA+IVL-LCV', 'DA+IVL-CC', 'DA+IVL-a'],
+        # 'y_color': 'w',
+        # 'legend_loc': (0.465, 0.230),
+    },
+    'gamma': {
+        'xlabel': r'$\Gamma$',
+        'xscale': 'log',
+        # 'y_color': 'w',
+    }
+}
 color_map = {
     'ATE':  3,
     'ERM':  0,
@@ -101,26 +122,12 @@ color_map = {
 }
 
 
-def discretize(
-        G: NDArray,
-        n_bins: int=2,
-        strategy: str='uniform'
-    ):
-    binner = KBinsDiscretizer(
-        n_bins=n_bins, encode='ordinal', strategy=strategy
-    )
-    scaler = StandardScaler()
-    G = binner.fit_transform(G)
-    G = scaler.fit_transform(G).round(decimals=2)
-    return G
-
-
 def estimation_error(
         estimand,       # ground-truth target f or f(x)
         estimate,       # hypothesis h or h(x)
-        normalize=True,
+        normalize=NORMALIZE_ERROR,
     ) -> float:
-    sq_norm = lambda x: (x**2).sum()
+    sq_norm = lambda x: (x**2).mean()
 
     sq_error = sq_norm(
         estimate - estimand
@@ -130,6 +137,98 @@ def estimation_error(
             sq_error / (sq_error + sq_norm(estimand))
         )
     return sq_error
+
+
+def approximation_error(
+        estimand,       # ground-truth target f or f(x)
+        estimate,       # hypothesis h or h(x)
+        normalize=NORMALIZE_ERROR,
+    ) -> float:
+    assert estimate.ndim >= estimand.ndim, \
+        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
+    assert estimate.shape[0] == estimand.shape[0], \
+        f'Estimate sample size {estimate.shape[0]} not equal to estimand sample size {estimand.shape[0]}.'
+    
+    if estimate.shape[-1] == 1:
+        estimate = np.repeat(estimate, 2, axis=1)
+    
+    L = estimate[:, 0]
+    U = estimate[:, 1]
+    estimand = estimand.squeeze()
+    # valid bounds
+    inside = (estimand >= L) & (estimand <= U)
+    # invalid bounds
+    dist_sq = np.minimum((L - estimand)**2, (U - estimand)**2)
+    # combine
+    result = np.where(inside, 0, dist_sq)
+    approx_sq_error = result[:, None].mean()
+
+    if normalize:
+        baseline = estimation_error(
+            estimand,
+            np.zeros_like(estimand),
+            normalize=False
+        )
+        approx_sq_error = (
+            approx_sq_error / (approx_sq_error + baseline)
+        )
+    return approx_sq_error
+
+
+def worst_error(
+        estimand,       # ground-truth target f or f(x)
+        estimate,       # hypothesis h or h(x)
+        normalize=NORMALIZE_ERROR,
+    ) -> float:    
+    assert estimate.ndim >= estimand.ndim, \
+        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
+    assert estimate.shape[0] == estimand.shape[0], \
+        f'Estimate sample size {estimate.shape[0]} not equal to estimand sample size {estimand.shape[0]}.'
+    
+    if estimate.shape[-1] == 1:
+        estimate = np.repeat(estimate, 2, axis=1)
+    
+    diff = estimate - estimand
+    sq = diff**2
+    worst_sq_error = sq.max(axis=1).mean()
+
+    if normalize:
+        baseline = estimation_error(
+            estimand,
+            np.zeros_like(estimand),
+            normalize=False
+        )
+        worst_sq_error = (
+            worst_sq_error / (worst_sq_error + baseline)
+        )
+    return worst_sq_error
+
+
+def interval_width(
+        estimand,       # ground-truth target f or f(x)
+        estimate,       # hypothesis h or h(x)
+        normalize=NORMALIZE_ERROR,
+    ) -> float:    
+    assert estimate.ndim >= estimand.ndim, \
+        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
+    assert estimate.shape[0] == estimand.shape[0], \
+        f'Estimate sample size {estimate.shape[0]} not equal to estimand sample size {estimand.shape[0]}.'
+    
+    if estimate.shape[-1] == 1:
+        estimate = np.repeat(estimate, 2, axis=1)
+
+    width = (
+        estimate[:, 1] - estimate[:, 0]
+    ).mean()
+
+    assert np.all(width >= 0), \
+        'Upper bound should be greater than lower bound for all samples.'
+    
+    if normalize:
+        width = (
+            width / (width + np.std(estimand))
+        )
+    return width
 
 
 def set_seed(seed: int=42):
@@ -148,6 +247,134 @@ def set_seed(seed: int=42):
     logger.info(f'Random seed set as {seed}.')
 
 
+def ci_sweep_plot(
+        x, y,
+        xlabel: str,
+        ylabel: Optional[str]='nCER',
+        xscale: Optional[Literal['linear', 'log']]='linear',
+        yscale: Optional[Literal['linear', 'log']]='linear',
+        vertical_plots: Optional[List]=[],
+        trivial_solution: Optional[bool]=False,
+        savefig: Optional[bool]=True,
+        format: Optional[Plot]=PLOT_FORMAT,
+        legend_items: Optional[List]=[],
+        legend_loc: Optional[str | Tuple[float, float]]='best',
+        y_color: Optional[bool]='k',
+        hide_legend: Optional[bool]=False,
+        hilight_ours: Optional[bool]=HILIGHT_OURS,
+        bootstrapped: Optional[bool]=True,
+    ):
+    if bootstrapped:
+        y = bootstrap(y)
+    
+    legend_items = [item for item in legend_items if item in y]
+
+    # Define color palette (e.g., 'deep') and style (e.g., 'ticks')
+    plt.rcParams.update(RC_PARAMS)
+    sns.set_palette('deep')
+    colors = sns.color_palette()
+    fig = plt.figure()
+
+    max_mean = 0.0
+    min_mean = float('inf')
+    all_labels = []
+    plot_handles = []
+    for i, (method, errors) in enumerate(y.items()):
+
+        # if method == 'DA+IVL-Pi' or method == 'DA+IVL':
+        #     continue
+        # if 'CV' in method or 'LCV' in method or 'CC' in method:
+        #     continue
+        
+        mean = errors.mean(axis = 1)
+
+        label = TEX_MAPPER.get(method, method)
+        if method in vertical_plots:
+            label = f'average {label.split("--")[-1]}'
+        all_labels.append(label)
+        if method in legend_items:
+            legend_items[legend_items.index(method)] = label
+
+        if method in vertical_plots:
+            handle = plt.axvline(
+                x=mean.mean(), color=colors[i], label=label, linestyle='--'
+            )
+        else:
+            max_mean = max(max_mean, max(mean))
+            min_mean = min(min_mean, min(mean))
+            handle = plt.plot(x, mean, color=colors[i], label=label)[0]
+        
+        plot_handles.append(handle)
+    
+    if trivial_solution:
+        label = fr'$0_{{{COVARIATE_DIMENSION}}}$'
+        all_labels.append(label)
+        if method in legend_items:
+            legend_items[legend_items.index(method)] = label
+        
+        handle = plt.axhline(
+            y = 0.5, color=colors[-1], label=label
+        )
+        max_mean = max(max_mean, 0.5)
+        plot_handles.append(handle)
+        
+    for i, (method, errors) in enumerate(y.items()):
+
+        # if method == 'DA+IVL-Pi' or method == 'DA+IVL':
+        #     continue
+        # if 'CV' in method or 'LCV' in method or 'CC' in method:
+        #     continue
+        
+        if method not in vertical_plots:
+            low = np.percentile(errors, 2.5, axis=1)
+            high = np.percentile(errors, 97.5, axis=1)
+            plt.fill_between(x, low, high, color=colors[i], alpha = 0.2)
+    
+    plt.xlabel(xlabel, fontsize=FS_LABEL)
+    plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
+    plt.yticks(fontsize=FS_TICK, color=y_color)
+    plt.xticks(fontsize=FS_TICK)
+    plt.xlim([min(x), max(x)])
+    padding = 0.05 * (max_mean - min_mean)
+    plt.ylim([min_mean - padding, max_mean + padding])
+    plt.xscale(xscale)
+    plt.yscale(yscale)
+
+    # Legend all items if None are specified
+    if legend_items:
+        labels = legend_items
+    else:
+        labels = all_labels
+    handles = [plot_handles[all_labels.index(item)] for item in labels]
+
+    if hilight_ours:
+        for i, label in enumerate(labels):
+            if label == TEX_MAPPER['DA+IVL-a']:
+                continue
+            elif 'IVL' in label or 'average' in label:
+                bold = label
+                bold = bold.replace(r'\alpha',r'{\boldsymbol{\alpha}}')
+                bold = bold.replace(r'\Pi',r'{\boldsymbol{\Pi}}')
+                bold = fr'\textbf{{{bold}}}'
+                labels[i] = bold                
+
+    if not hide_legend:
+        plt.legend(
+            handles=handles, labels=labels, fontsize=FS_TICK,
+            loc=legend_loc, frameon=True, edgecolor='black', fancybox=False
+        )
+
+    plt.tight_layout()
+    plt.show()
+    if savefig:
+        fname = ''.join(c for c in xlabel if c.isalnum()) + '_sweep'
+        save(
+            obj=fig,
+            fname=fname,
+            experiment='linear_simulation',
+            format=format,
+            dpi=PLOT_DPI
+        )
 
 
 def sweep_plot(
@@ -164,7 +391,7 @@ def sweep_plot(
         y_color: Optional[bool]='k',
         hide_legend: Optional[bool]=False,
         hilight_ours: Optional[bool]=HILIGHT_OURS,
-        bootstrapped: Optional[bool]=True,
+        bootstrapped: Optional[bool]=False,
         experiment: str='linear_simulation',
     ):
     # if bootstrapped:
@@ -307,183 +534,6 @@ def populate_dummy_data(
         return data
 
 
-def box_plot(
-        data: Dict[str, NDArray],
-        fname: str,
-        experiment: Experiment,
-        title: Optional[str]='',
-        xlabel: Optional[str]='nCER',
-        ylabel: Optional[str]='Method',
-        zlabel: Optional[str]='Augmentation',
-        orient: Optional[Literal['h', 'v']]='h',
-        savefig: Optional[bool]=True,
-        format: Optional[Plot]=PLOT_FORMAT,
-        annotate_best: Optional[bool]=True,
-        dummies: Optional[List[str]]=[],
-        y_color: Optional[bool]='k',
-        hilight_ours: Optional[bool]=HILIGHT_OURS,
-        bootstrapped: Optional[bool]=True,
-    ):
-    if bootstrapped:
-        data = bootstrap(data)
-    
-    def prepare_data_for_plotting(
-            data: Dict[str, Dict[str, NDArray]]
-        ) -> pd.DataFrame:
-        records = []
-        minimum, maximum = float('inf'), float('-inf')
-        for augmentation, methods in data.items():
-            for method, values in methods.items():
-                for value in values.flatten():
-                    records.append({
-                        zlabel: augmentation,
-                        ylabel: TEX_MAPPER.get(method, method),
-                        xlabel: value
-                    })
-                    if method not in dummies:
-                        minimum = min(value, minimum)
-                        maximum = max(value, maximum)
-        df = pd.DataFrame.from_records(records)
-        return df, minimum, maximum
-    
-    # check if data keys are subset of TEX_MAPPER keys
-    # i.e., check if data keys only correspond to methods
-    # if yes, then dont use zlabel as hue, else use zlabel.
-    single_row = (
-        set(data) <= set(TEX_MAPPER) or len(data) == 1
-    )
-    if single_row:
-        zlabel = ylabel
-        if len(data) > 1:
-            data = {None : data}
-    
-    if (
-        'cer' in (xlabel.lower() + ylabel.lower())
-        or
-        'error' in (xlabel.lower() + ylabel.lower())
-    ):
-        data = populate_dummy_data(data, dummies, scaler=2.0)
-    elif 'accuracy' in (xlabel.lower() + ylabel.lower()):
-        data = populate_dummy_data(data, dummies, scaler=-1.0)
-    else:
-        raise ValueError(
-            'Specify either `error` or `accuracy` in `xlabel` or `ylabel`.'
-        )
-    
-    df, minimum, maximum = prepare_data_for_plotting(data)
-
-    if annotate_best and single_row:
-        average_scores = df.groupby(ylabel, sort=False).mean()[xlabel]
-        if (
-            'cer' in (xlabel.lower() + ylabel.lower())
-            or
-            'error' in (xlabel.lower() + ylabel.lower())
-        ):
-            best_idx = average_scores.argmin()
-        elif 'accuracy' in (xlabel.lower() + ylabel.lower()):
-            best_idx = average_scores.argmax()
-        else:
-            raise ValueError(
-                'Specify either `error` or `accuracy` in `xlabel` or `ylabel`.'
-            )
-    
-    # Define color palette (e.g., 'deep') and style (e.g., 'ticks')
-    plt.rcParams.update(RC_PARAMS)
-    sns.set_palette('deep')
-    fig = plt.figure()
-
-    num_categories = df[zlabel].nunique()
-    cmap = plt.get_cmap("tab20")
-    palette = ([
-        sns.color_palette("deep")[i % 10] if i < 10 
-        else cmap(i) for i in range(num_categories)
-    ])
-
-    if orient == 'v':
-        xlabel, ylabel = ylabel, xlabel
-
-    ax = sns.boxplot(
-        x=xlabel, y=ylabel,
-        hue=zlabel,
-        data=df,
-        palette=palette,
-        orient=orient,
-        showmeans=True,
-        meanprops={
-            'markerfacecolor': 'white',
-            'markeredgecolor': 'black'
-            },
-        flierprops={'marker': 'x'}
-    )
-
-    spread = maximum - minimum
-    padding = 0.05 * spread
-    if orient == 'h':
-        plt.xlim([minimum - padding, maximum + padding])
-    else:
-        plt.ylim([minimum - padding, maximum + padding])
-    
-    if title:
-        plt.title(title, fontsize=FS_LABEL)
-    plt.ylabel('', fontsize=FS_LABEL, color=y_color)
-    plt.xlabel(xlabel, fontsize=FS_LABEL)
-    plt.xticks(fontsize=FS_TICK)
-    plt.yticks(fontsize=FS_TICK, color=y_color)
-
-    if dummies and single_row:
-        method_ordered_list = list(list(data.values())[0].keys())
-        for dummy in dummies:
-            dummy_idx = method_ordered_list.index(dummy)
-            if orient == 'h':
-                plt.axhline(dummy_idx, color='r', linestyle='--', alpha=0.333)
-            else:
-                plt.axhline(dummy_idx, color='r', linestyle='--', alpha=0.333)
-
-    if annotate_best and single_row:
-        padding = 0.45
-        if orient == 'v':
-            plt.axvspan(best_idx-padding,best_idx+padding, color='r', alpha=0.1)
-        else:
-            plt.axhspan(best_idx-0.45,best_idx+0.45, color='r', alpha=0.1)
-    
-    def bold_tick(tick):
-        tick.set_fontweight('bold')
-        bold = tick.get_text()
-        bold = bold.replace(r'\alpha',r'{\boldsymbol{\alpha}}')
-        bold = bold.replace(r'\Pi',r'{\boldsymbol{\Pi}}')
-        bold = fr'\textbf{{{bold}}}'
-        tick.set_text(bold)
-        return tick
-
-    if hilight_ours:
-        if orient == 'h':
-            new_ticks = []
-            for tick in ax.get_yticklabels():
-                if 'IVL' in tick.get_text():
-                    tick = bold_tick(tick)
-                new_ticks.append(tick)
-            ax.set_yticklabels(new_ticks)
-        else:
-            new_ticks = []
-            for tick in ax.get_xticklabels():
-                if 'IVL' in tick.get_text():
-                    tick = bold_tick(tick)
-                new_ticks.append(tick)
-            ax.set_xticklabels(new_ticks)
-
-    plt.tight_layout()
-    plt.show()
-    
-    if savefig:
-        save(
-            obj=fig,
-            fname=fname,
-            experiment=experiment,
-            format=format,
-            dpi=PLOT_DPI
-        )
-
-
 def tex_table(
         data: Dict,
         label: str,
@@ -597,6 +647,56 @@ def tex_table(
     '''.strip()
 
 
+# def bootstrap(
+#         data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
+#         n_samples: int=1000
+#     ) -> Dict:
+#     def bootstrap_single_row(
+#             data: Dict[str, NDArray], n_samples: int=n_samples
+#         ):
+#         if len(list(data.values())[0].shape) == 1:
+#             data = {
+#                 key: value.copy().reshape(1, -1)
+#                 for key, value in data.items()
+#             }
+
+#         def bootstrap_sample(data, n_bootstrap: Optional[int]=None):
+#             if len(data.shape) == 1:
+#                 data = data.copy().reshape(1, -1)
+#             if n_bootstrap is None:
+#                 n_bootstrap = data.shape[-1]
+#             N, M = data.shape
+#             idx = np.random.randint(0, M, (N, n_bootstrap))
+#             sample = np.take_along_axis(data, idx, axis=1)
+#             return sample
+        
+
+#         bootstrapped_data = {
+#             model: np.zeros((data[model].shape[0], n_samples)) for model in data
+#         }
+#         for model in data:
+#             if 'PI' not in model:
+#                 for i in range(n_samples):
+#                     bootstrapped_data[model][:, i] = np.mean(
+#                         bootstrap_sample(data[model][:, :, 0]),
+#                         axis = 1
+#                     )
+#             else:
+#                 pass
+
+#         return bootstrapped_data
+    
+#     # check if data keys are subset of TEX_MAPPER keys
+#     # i.e., check if data keys only correspond to methods
+#     # if yes, then bootstrap, else access method sub-dict.
+#     single_row = set(data) <= set(TEX_MAPPER)
+#     if single_row:
+#         return bootstrap_single_row(data)
+#     else:
+#         return {
+#             key: bootstrap_single_row(data[key]) for key in data
+#         }
+
 def bootstrap(
         data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
         n_samples: int=1000
@@ -625,15 +725,11 @@ def bootstrap(
             model: np.zeros((data[model].shape[0], n_samples)) for model in data
         }
         for model in data:
-            if 'PI' not in model:
-                for i in range(n_samples):
-                    bootstrapped_data[model][:, i] = np.mean(
-                        bootstrap_sample(data[model][:, :, 0]),
-                        axis = 1
-                    )
-            else:
-                pass
-
+            for i in range(n_samples):
+                bootstrapped_data[model][:, i] = np.mean(
+                    bootstrap_sample(data[model]),
+                    axis = 1
+                )
         return bootstrapped_data
     
     # check if data keys are subset of TEX_MAPPER keys
@@ -735,10 +831,10 @@ def load(path: str):
 
 
 def fit_model(
-        model, name, X, y, G, GX, hyperparameters=None, pbar_manager=None, da=None
+        model, name, X, y, GX, hyperparameters=None, pbar_manager=None, da=None
     ):
     if not pbar_manager:
-        return fit_model_nopbar(model, name, X, y, G, GX, hyperparameters, da)
+        return fit_model_nopbar(model, name, X, y, GX, hyperparameters, da)
 
     sgd_params = getattr(hyperparameters, 'sgd', dict())
     if name == 'PI':
@@ -765,7 +861,7 @@ def fit_model(
         raise ValueError(f'Model {name} not implemented.')
 
 
-def fit_model_nopbar(model, name, X, y, G, GX, hyperparameters=None, da=None):
+def fit_model_nopbar(model, name, X, y, GX, hyperparameters=None, da=None):
     sgd_params = getattr(hyperparameters, 'sgd', dict())
     if name == 'PI':
         model.fit(
