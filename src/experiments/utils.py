@@ -13,11 +13,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
 from typing import Any, Literal, List, Dict, Optional, Tuple
-from sklearn.preprocessing import StandardScaler, KBinsDiscretizer
 
-from src.sem.simulation.linear import COVARIATE_DIMENSION
+from src.sem.simulation.linear import TREATMENT_DIMENSION
 
 
 Experiment = Literal[
@@ -95,20 +93,22 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
     'kappa': {
         'xlabel': r'$\kappa$',
         'xscale': 'linear',
+        'dotted_lines': ['ERM', 'DA+ERM'],
         # 'yscale': 'log',
         # 'hide_legend': True,
     },
     'alpha': {
         'xlabel': r'$a$',
         'xscale': 'log',
-        # 'vertical_plots': ['DA+IVL-CV', 'DA+IVL-LCV', 'DA+IVL-CC'],
-        # 'legend_items': ['DA+IVL-CV', 'DA+IVL-LCV', 'DA+IVL-CC', 'DA+IVL-a'],
+        'dotted_lines': ['ERM', 'DA+ERM'],
+        # 'legend_items': ['ERM', 'DA+ERM', 'PI', 'DA+PI', 'INV+PI'],
         # 'y_color': 'w',
         # 'legend_loc': (0.465, 0.230),
     },
     'gamma': {
         'xlabel': r'$\Gamma$',
         'xscale': 'log',
+        'dotted_lines': ['ERM', 'DA+ERM'],
         # 'y_color': 'w',
     }
 }
@@ -253,7 +253,7 @@ def ci_sweep_plot(
         ylabel: Optional[str]='nCER',
         xscale: Optional[Literal['linear', 'log']]='linear',
         yscale: Optional[Literal['linear', 'log']]='linear',
-        vertical_plots: Optional[List]=[],
+        dotted_lines: Optional[List]=[],
         trivial_solution: Optional[bool]=False,
         savefig: Optional[bool]=True,
         format: Optional[Plot]=PLOT_FORMAT,
@@ -289,25 +289,24 @@ def ci_sweep_plot(
         mean = errors.mean(axis = 1)
 
         label = TEX_MAPPER.get(method, method)
-        if method in vertical_plots:
-            label = f'average {label.split("--")[-1]}'
         all_labels.append(label)
         if method in legend_items:
             legend_items[legend_items.index(method)] = label
-
-        if method in vertical_plots:
-            handle = plt.axvline(
-                x=mean.mean(), color=colors[i], label=label, linestyle='--'
-            )
+        
+        if method in dotted_lines:
+            handle = plt.plot(
+                x, mean, color=colors[i], label=label, linestyle='--'
+            )[0]
         else:
-            max_mean = max(max_mean, max(mean))
-            min_mean = min(min_mean, min(mean))
             handle = plt.plot(x, mean, color=colors[i], label=label)[0]
+        
+        max_mean = max(max_mean, max(mean))
+        min_mean = min(min_mean, min(mean))
         
         plot_handles.append(handle)
     
     if trivial_solution:
-        label = fr'$0_{{{COVARIATE_DIMENSION}}}$'
+        label = fr'$0_{{{TREATMENT_DIMENSION}}}$'
         all_labels.append(label)
         if method in legend_items:
             legend_items[legend_items.index(method)] = label
@@ -319,16 +318,9 @@ def ci_sweep_plot(
         plot_handles.append(handle)
         
     for i, (method, errors) in enumerate(y.items()):
-
-        # if method == 'DA+IVL-Pi' or method == 'DA+IVL':
-        #     continue
-        # if 'CV' in method or 'LCV' in method or 'CC' in method:
-        #     continue
-        
-        if method not in vertical_plots:
-            low = np.percentile(errors, 2.5, axis=1)
-            high = np.percentile(errors, 97.5, axis=1)
-            plt.fill_between(x, low, high, color=colors[i], alpha = 0.2)
+        low = np.percentile(errors, 2.5, axis=1)
+        high = np.percentile(errors, 97.5, axis=1)
+        plt.fill_between(x, low, high, color=colors[i], alpha = 0.2)
     
     plt.xlabel(xlabel, fontsize=FS_LABEL)
     plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
@@ -454,7 +446,7 @@ def sweep_plot(
         plot_handles.append(handle)
     
     if trivial_solution:
-        label = fr'$0_{{{COVARIATE_DIMENSION}}}$'
+        label = fr'$0_{{{TREATMENT_DIMENSION}}}$'
         all_labels.append(label)
         if method in legend_items:
             legend_items[legend_items.index(method)] = label

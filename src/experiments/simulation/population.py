@@ -37,9 +37,9 @@ MANAGER = enlighten.get_manager()
 EXPERIMENT: str='linear_simulation'
 DEFAULT_QUERY_JOBS: int=1
 TEST_FRAC: float=0.1
-EPSILON: float=2**-1
-GAMMA0: float=1_600
-GAMMA: float=1_600
+EPSILON: float=2**0
+GAMMA0: float=2**10
+GAMMA: float=2**10
 
 
 
@@ -166,7 +166,9 @@ class KappaSweep(SweepExperiment):
     def generate_dataset(self, sem: SEM, da: DA, param: float):
         N = self.n_samples
         X, y = sem(N = N, kappa = param)
-        X_test, y_test = sem(N = int(TEST_FRAC * N), kappa = param)
+        X_test, y_test = sem(
+            N = int(TEST_FRAC * N), intervention=True, kappa = param
+        )
         GX, _ = da(X, gamma = 1.0)
         return X, y, GX, X_test, y_test
 
@@ -184,7 +186,9 @@ class AlphaSweep(SweepExperiment):
     def generate_dataset(self, sem: SEM, da: DA, param: float):
         N = self.n_samples
         X, y = sem(N = N)
-        X_test, y_test = sem(N = int(TEST_FRAC * N))
+        X_test, y_test = sem(
+            N = int(TEST_FRAC * N), intervention=True
+        )
         GX, _ = da(X, gamma = param)
         return X, y, GX, X_test, y_test
     
@@ -202,13 +206,15 @@ class GammaSweep(SweepExperiment):
     def generate_dataset(self, sem: SEM, da: DA, param: float):
         N = self.n_samples
         X, y = sem(N = N)
-        X_test, y_test = sem(N = int(TEST_FRAC * N))
+        X_test, y_test = sem(
+            N = int(TEST_FRAC * N), intervention=True
+        )
         GX, _ = da(X, gamma = 1.0)
         return X, y, GX, X_test, y_test
 
     def param_sweep(self):
         gamma_values = np.logspace(
-            0, 11, base=2, num=self.sweep_samples
+            -5, 11, base=2, num=self.sweep_samples
         )
         return gamma_values
 
