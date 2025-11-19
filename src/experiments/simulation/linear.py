@@ -46,9 +46,9 @@ DEFAULT_CV_SAMPLES: int=10
 DEFAULT_CV_FRAC: float=0.2
 DEFAULT_CV_FOLDS: int=5
 DEFAULT_CV_JOBS: int=1
-EPSILON: float=2.75
-GAMMA0: float=400.0
-GAMMA: float=400.0
+EPSILON: float=2**0
+GAMMA0: float=2**10
+GAMMA: float=2**10
 
 
 class SweepExperiment:

@@ -4,7 +4,7 @@ linear_simulation:
     n_samples: 2_048
     kernel_dim: -1          # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
     n_experiments: 1
-    sweep_samples: 16
+    sweep_samples: 32
     methods:
         - ATE
         - ERM

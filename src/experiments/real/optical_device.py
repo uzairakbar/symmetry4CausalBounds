@@ -52,9 +52,9 @@ DEFAULT_CV_FOLDS: int=5
 DEFAULT_CV_JOBS: int=1
 GROUND_TRUTH: str='polynomial'
 OPTICAL_DEVICE_DATASET: int=9
-EPSILON: float=0.125
-GAMMA0: float=100.0
-GAMMA: float=100.0
+EPSILON: float=2**-3
+GAMMA0: float=2**7
+GAMMA: float=2**7
 
 
 class SweepExperiment:

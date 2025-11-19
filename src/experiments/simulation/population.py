@@ -309,33 +309,6 @@ def run(
         alpha_values, results, **ANNOTATE_POPULATION_PLOT['alpha']
     )
 
-    # # no sweep, just compare baselines with gamma=1 and kappa=1
-    # status.update(sweep='N/A')
-    # logger.info('Linear experiemnt with gamma=1 and kappa=1.')
-    # _, results = BaselineExperiment(
-    #     seed=seed,
-    #     n_samples=n_samples,
-    #     kernel_dim=kernel_dim,
-    #     n_experiments=n_experiments,
-    #     methods=methods,
-    #     hyperparameters=hyperparameters
-    # ).run_experiment()
-    # save(
-    #     obj=results, fname=EXPERIMENT, experiment=EXPERIMENT, format='pkl'
-    # )
-    # box_plot(
-    #     results, fname=EXPERIMENT, experiment=EXPERIMENT,
-    #     savefig=True, **ANNOTATE_BOX_PLOT[EXPERIMENT]
-    # )
-    
-    # caption = fr'nCER $\pm$ one std across {n_experiments} experiments of {n_samples} samples each.',
-    # table = tex_table(
-    #     results, label=EXPERIMENT, caption=caption
-    # )
-    # save(
-    #     obj=table, fname=EXPERIMENT, experiment=EXPERIMENT, format='tex'
-    # )
-
     MANAGER.stop()
 
 

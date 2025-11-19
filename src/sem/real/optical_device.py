@@ -84,12 +84,15 @@ class OpticalDeviceSEM(SEM):
         self.poly_degree = best_degree
         self.y, self.X, self.C = y, X, C
 
-        self.varXi = np.std(epsilon * self.C)
-        self.varEXiX = np.std(
+        self.varXi = np.var(epsilon * self.C)
+        self.varEXiX = np.var(
             self.X @ np.linalg.pinv(self.X) @ (
                 epsilon * self.C
             )
         )
+        # for debugging
+        # print('optical Var(xi): ', self.varXi)
+        # print('optical Var(E[xi|X]): ', self.varEXiX)
     
     def sample(self, N: int=1, **kwargs) -> Tuple[NDArray, NDArray]:
         N_max, M = self.X.shape

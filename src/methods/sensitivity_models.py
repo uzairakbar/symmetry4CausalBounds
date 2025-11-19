@@ -12,7 +12,7 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 
 
 DEVICE: str=device()
-CLOSED_FORM_SOLUTION: bool=True
+CLOSED_FORM_SOLUTION: bool=False
 LOG_FREQUENCY: int=100
 MAX_BATCH: int=256
 GAMMA0: float=100

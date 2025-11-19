@@ -84,5 +84,15 @@ class LinearSimulationSEM(SEM):
             XY[:, :self.covariate_dimension],
             XY[:, -self.label_dimension:],
         )
-        
+
+        self.varXi = np.var(Y - X @ self.W_XY)
+        self.varEXiX = np.var(
+            X @ np.linalg.pinv(X) @ (
+                Y - X @ self.W_XY
+            )
+        )
+        # for debugging
+        # print('linear Var(xi): ', self.varXi)
+        # print('linear Var(E[xi|X]): ', self.varEXiX)
+
         return X, Y
