@@ -176,8 +176,9 @@ class InvarianceConstrainedPartialR2(PartialR2):
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(self.SigmaX))
             ) <= radius,
-            cp.norm(self.GX @ h - self.X @ h, p=2) <= N * self.epsilon
+            cp.norm(
+                cp.Constant(self.GX - self.X) @ h, p=2
+            ) <= N * self.epsilon
         ])
         cost = cp.Constant(x) @ h
         return self._optimize(cost, constraints)
-

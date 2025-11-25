@@ -54,7 +54,7 @@ TEX_MAPPER: Dict[str, str] = {
     'ATE': r'$\operatorname{ate}$',
     'PI': r'$\operatorname{pi}$',
     'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'INV+PI': r'$\operatorname{pi}+\operatorname{inv}$',
+    'INV+PI': r'$\operatorname{inv}+\operatorname{pi}$',
     'ERM': r'$\operatorname{erm}$',
     'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
 }
@@ -114,9 +114,9 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
 }
 color_map = {
     'ATE':  3,
-    'ERM':  0,
+    'ERM':  0,  # 9
     'DA+ERM':   3,
-    'PI':   0,
+    'PI':   0,  # 9
     'DA+PI':    3,
     'INV+PI':    2,
 }
@@ -295,10 +295,10 @@ def ci_sweep_plot(
         
         if method in dotted_lines:
             handle = plt.plot(
-                x, mean, color=colors[i], label=label, linestyle='--'
+                x, mean, color=colors[color_map[method]], label=label, linestyle='--'
             )[0]
         else:
-            handle = plt.plot(x, mean, color=colors[i], label=label)[0]
+            handle = plt.plot(x, mean, color=colors[color_map[method]], label=label)[0]
         
         max_mean = max(max_mean, max(mean))
         min_mean = min(min_mean, min(mean))
@@ -320,7 +320,7 @@ def ci_sweep_plot(
     for i, (method, errors) in enumerate(y.items()):
         low = np.percentile(errors, 2.5, axis=1)
         high = np.percentile(errors, 97.5, axis=1)
-        plt.fill_between(x, low, high, color=colors[i], alpha = 0.2)
+        plt.fill_between(x, low, high, color=colors[color_map[method]], alpha = 0.2)
     
     plt.xlabel(xlabel, fontsize=FS_LABEL)
     plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
@@ -435,8 +435,10 @@ def sweep_plot(
             low = np.percentile(high_values, 2.5, axis=1)
             high = np.percentile(high_values, 97.5, axis=1)
             # plt.fill_between(x, low, high, color=colors[i])
-            
-            handle = plt.fill_between(x, low_mean, high_mean, color=color, alpha=0.2)
+            if 'INV' in method:
+                handle = plt.fill_between(x, low_mean, high_mean, color=color, alpha=0.3)
+            else:
+                handle = plt.fill_between(x, low_mean, high_mean, color=color, alpha=0.2)
         else:
             if method == 'ATE':
                 handle = plt.plot(x, low_mean, color='black', label=label, lw=2, solid_capstyle='round', linestyle='dashed')[0]

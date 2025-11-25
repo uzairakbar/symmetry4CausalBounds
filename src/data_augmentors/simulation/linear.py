@@ -8,7 +8,7 @@ from src.data_augmentors.abstract import DataAugmenter as DA
 
 
 DA_STD: float=1.0
-BASIS_SELECTOIN_PROBABILITY: float=2.0/3.0
+BASIS_SELECTOIN_PROBABILITY: float=9.0/10.0
 
 
 class NullSpaceTranslation(DA):
@@ -48,6 +48,7 @@ class NullSpaceTranslation(DA):
         np.random.shuffle(sample)
         
         self.std = std
+        self.W_XY = W_XY
         self.W_ZXtilde = null_basis[sample]
         self.param_dimension, _ = self.W_ZXtilde.shape
     
@@ -56,13 +57,21 @@ class NullSpaceTranslation(DA):
         return 'translate'
     
     def augment(
-            self, X: NDArray, gamma: float=10.0
+            self, X: NDArray, gamma: float=16.0
         ) -> Tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
 
         GX = X + gamma * G @ self.W_ZXtilde
-        
+
+        self.epsilon = self.compute_epsilon(
+            f=self.W_XY,
+            X=X,
+            GX=GX
+        )
+        # # debugging purposes
+        # print('epsilon: ', self.epsilon)
+
         return GX, G
     
     @staticmethod
@@ -81,6 +90,15 @@ class NullSpaceTranslation(DA):
         null_space_basis = VT[num_singular:].T
         
         return null_space_basis
+    
+    @staticmethod
+    def compute_epsilon(
+        f, X, GX
+    ):
+        N = len(X)
+        residuals = X @ f - GX @ f
+        epsilon = np.sum(residuals**2) / N
+        return epsilon
 
 
 class Identity(DA):

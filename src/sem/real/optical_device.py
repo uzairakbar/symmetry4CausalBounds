@@ -63,8 +63,9 @@ class OpticalDeviceSEM(SEM):
 
         best_degree = 1
         if ground_truth == 'linear':
-            W_XCY = ERM().fit(XC, y).solution
-            W_XY = W_XCY[:-1, :]
+            W_XY, _, epsilon = fit_ground_truth_f(
+                X, y, C, 1
+            )
         elif ground_truth == 'polynomial':
             best_degree, _ = select_best_degree(
                 X, y, C, max_degree=MAX_PLOYNOMIAL_DEGREE

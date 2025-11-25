@@ -244,8 +244,8 @@ def make_panel_4x3(
     res2, gt2 = run_sweep(pc2_pts)
     resR, gtR = run_sweep(radial_pts)
 
-    xs = [t1, t2, theta]
-    packs = [(res1, gt1), (res2, gt2), (resR, gtR)]
+    xs = [t1, theta, t2]
+    packs = [(res1, gt1), (resR, gtR), (res2, gt2)]
 
     # helpers
     def mean_band(m):  return m[:, :, 0].mean(axis=1), m[:, :, 1].mean(axis=1)
@@ -293,12 +293,18 @@ def make_panel_4x3(
     aug_color  = palette[color_map.get('DA+ERM', 3) % len(palette)]
 
     legend_handles: Dict[str, any] = {}
-    bottom_ylabs = [
-        r'${\bm{h}}^\top {\bm{x}}_0$',
-        r'${\bm{h}}^\top {\bm{x}}_1$',
-        r'${\bm{h}}^\top {\bm{x}}(\theta)$'
+    # === SWAP LOGIC: Reorder titles and labels for the new layout ===
+    column_titles = [
+        r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
+        r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
+        r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
     ]
-    bottom_titles = ['PC1', 'PC2', 'Radial sweep']
+    bottom_ylabs = [
+        r'${\bm{h}}^\top {\bm{x}}$',
+        # r'${\bm{h}}^\top {\bm{x}}_1$',
+        # r'${\bm{h}}^\top {\bm{x}}(\theta)$'
+    ]
+    bottom_titles = ['', '', '']
 
     for col in range(3):
         (res, gt), xgrid = packs[col], xs[col]
@@ -309,7 +315,10 @@ def make_panel_4x3(
             label = TEX_MAPPER.get(name, name)
             if 'PI' in name:
                 low, high = mean_band(m)
-                h = ax_pred.fill_between(xgrid, low, high, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
+                if "INV" in name:
+                    h = ax_pred.fill_between(xgrid, low, high, alpha=0.3, edgecolor='none', facecolor=mcolor(name))
+                else:
+                    h = ax_pred.fill_between(xgrid, low, high, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
             else:
                 y = mean_line(m)
                 if name == 'ATE':
@@ -319,42 +328,56 @@ def make_panel_4x3(
             if label not in legend_handles:
                 legend_handles[label] = h
 
-        ax_pred.set_xlabel(r'$t$' if col < 2 else r'$\theta$', fontsize=FS_LABEL)
-        ax_pred.set_ylabel(bottom_ylabs[col], fontsize=FS_LABEL)
+        # ax_pred.set_xlabel(r'$t$' if col < 2 else r'$\theta$', fontsize=FS_LABEL)
+        
+        # === SWAP LOGIC: Check if col is 1 (Radial) for theta label ===
+        ax_pred.set_xlabel(r'$\theta$' if col == 1 else r'$t$', fontsize=FS_LABEL)
+        # ax_pred.set_ylabel(bottom_ylabs[col], fontsize=FS_LABEL)
+        if col == 0:
+            ax_pred.set_ylabel(bottom_ylabs[col], fontsize=FS_LABEL)
+
         ax_pred.tick_params(labelsize=FS_TICK)
         ax_pred.set_xlim([xgrid.min(), xgrid.max()])
         ax_pred.text(0.5, -0.25, bottom_titles[col], transform=ax_pred.transAxes,
                      ha='center', va='top', fontsize=FS_LABEL)
 
         # Row 3: Width (PI only)
-        ax_w = axes[2, col]
+        ax_w = axes[1, col]
         for name in ('PI', 'DA+PI', 'INV+PI'):
             if name in res:
                 w = width(res[name])
-                ax_w.fill_between(xgrid, 0.0, w, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
+                if 'INV' in name:
+                    ax_w.fill_between(xgrid, 0.0, w, alpha=0.3, edgecolor='none', facecolor=mcolor(name))    
+                else:
+                    ax_w.fill_between(xgrid, 0.0, w, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
                 ax_w.plot(xgrid, w, linewidth=1.5, color=mcolor(name))
-        if col == 0: ax_w.set_ylabel('Width', fontsize=FS_LABEL)
+        if col == 0: ax_w.set_ylabel('width', fontsize=FS_LABEL)
         ax_w.tick_params(labelsize=FS_TICK)
         ax_w.set_ylim(0, None); ax_w.margins(y=0)
 
         # Row 2: E_worst^2 (PI and DA+PI only)
-        ax_ew = axes[1, col]
+        ax_ew = axes[0, col]
         for name in ('PI', 'DA+PI', 'INV+PI'):
             if name in res:
                 ew2 = e_worst_sq(res[name], gt, reduce='max')
-                ax_ew.fill_between(xgrid, 0.0, ew2, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
+                if 'INV' in name:
+                    ax_ew.fill_between(xgrid, 0.0, ew2, alpha=0.3, edgecolor='none', facecolor=mcolor(name))    
+                else:
+                    ax_ew.fill_between(xgrid, 0.0, ew2, alpha=0.2, edgecolor='none', facecolor=mcolor(name))
                 ax_ew.plot(xgrid, ew2, linewidth=1.5, color=mcolor(name))
-        if col == 0: ax_ew.set_ylabel(r'$E_{\mathrm{worst}}$', fontsize=FS_LABEL)
+        if col == 0: ax_ew.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
         ax_ew.tick_params(labelsize=FS_TICK)
         ax_ew.set_ylim(0, None); ax_ew.margins(y=0)
 
-        # Row 1: density (PC columns only; top-right is legend)
-        ax_hist = axes[0, col]
+        ax_ew.set_title(column_titles[col], fontsize=FS_LABEL, pad=8)
+
+        # Row 2: density (PC columns only; top-right is legend)
+        ax_hist = axes[2, col]
         if col == 0:
             ax_hist.hist(h_pc1_X, bins=40, density=True, alpha=0.45, color=orig_color)
             ax_hist.hist(h_pc1_G, bins=40, density=True, alpha=0.45, color=aug_color)
-            ax_hist.set_ylabel('Density', fontsize=FS_LABEL)
-        elif col == 1:
+            ax_hist.set_ylabel('density', fontsize=FS_LABEL)
+        elif col == 2:
             ax_hist.hist(h_pc2_X, bins=40, density=True, alpha=0.45, color=orig_color)
             ax_hist.hist(h_pc2_G, bins=40, density=True, alpha=0.45, color=aug_color)
         else:
@@ -363,17 +386,30 @@ def make_panel_4x3(
         ax_hist.set_ylim(0, None); ax_hist.margins(y=0)
 
     # Legend in top-right
-    ax_legend = axes[0, 2]
-    ax_legend.axis('off')
+    ax_legend = axes[2,1]
+    # === SWAP LOGIC: Legend moved from [2,2] to [2,1] ===
+    ax_legend = axes[2, 1]
+    ax_legend.spines['top'].set_visible(True)
+    ax_legend.spines['right'].set_visible(True)
+    ax_legend.spines['bottom'].set_visible(True)
+    ax_legend.spines['left'].set_visible(True)
+    # ax_legend.axis('off')
     label_order = [TEX_MAPPER.get(n, n) for n in res1.keys()]  # keep method order
     handles = [legend_handles[lbl] for lbl in label_order if lbl in legend_handles]
     leg = ax_legend.legend(
-        handles=handles, labels=label_order,
-        loc='center', ncol=legend_ncols, fontsize=FS_TICK + 2,
-        frameon=True, edgecolor='black', fancybox=False,
-        borderpad=0.35, labelspacing=0.5, handlelength=2.2,
-        handletextpad=0.6, columnspacing=1.1,
-        bbox_to_anchor=(0.5, 0.5), bbox_transform=ax_legend.transAxes,
+        handles=handles,
+        labels=label_order,
+        loc='center',
+        ncol=legend_ncols,
+        fontsize=FS_TICK + 2,
+        frameon=False,  # No legend frame since the axis provides the border
+        borderpad=0.3475,
+        labelspacing=0.5,
+        handlelength=2.5,
+        handletextpad=0.6,
+        columnspacing=1.1,
+        bbox_to_anchor=(0.5, 0.5),
+        bbox_transform=ax_legend.transAxes,
     )
     for h in leg.legendHandles:
         try: h.set_linewidth(2.0)

@@ -23,16 +23,17 @@ class LinearSimulationSEM(SEM):
         self.confounder_dimension = confounder_dimension
         self.outcome_dimension = outcome_dimension
 
-        self.W_CX = np.random.randn(
+        self.W_UX = np.random.randn(
             confounder_dimension,
             treatment_dimension
         )
-        self.W_CY = np.random.randn(
+        self.W_UY = np.random.randn(
             confounder_dimension,
             outcome_dimension
         )
         self.W_XY = np.random.randn(
-            treatment_dimension, outcome_dimension
+            treatment_dimension,
+            outcome_dimension
         )
         
         super(LinearSimulationSEM, self).__init__()
@@ -41,7 +42,9 @@ class LinearSimulationSEM(SEM):
             self, N: int= 1, kappa: float=1.0, intervention: bool=False, **kwargs
         ) -> Tuple[NDArray, NDArray]:
 
-        U = np.random.randn(N, self.confounder_dimension)
+        U = np.random.randn(
+            N, self.confounder_dimension
+        )
         N_X = np.random.randn(
             N, self.treatment_dimension
         )
@@ -52,11 +55,14 @@ class LinearSimulationSEM(SEM):
         if intervention:
             X = N_X
         else:
-            X = U @ self.W_CX + NOISE_STD * N_X
+            X = (
+                U @ self.W_UX
+                + NOISE_STD * N_X
+            )
         
         Y = (
             X @ self.W_XY               # f(X)
-            + kappa * U @ self.W_CY     # \xi
+            + kappa * U @ self.W_UY     # \xi
             + NOISE_STD * N_Y           # noise
         )
 
