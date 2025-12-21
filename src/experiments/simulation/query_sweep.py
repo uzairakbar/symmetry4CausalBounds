@@ -8,8 +8,8 @@ from argparse import ArgumentParser
 from typing import Dict, Callable, Optional, List, Tuple
 import matplotlib.pyplot as plt
 
-from src.data_augmentors.simulation.linear import NullSpaceTranslation as DA
-from src.sem.simulation.linear import LinearSimulationSEM as SEM
+from src.data_augmentors.simulation import NullSpaceTranslation as DA
+from src.sem.simulation import LinearSimulationSEM as SEM
 
 from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM

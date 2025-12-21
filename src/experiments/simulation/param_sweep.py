@@ -7,9 +7,9 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from typing import Dict, Callable, Optional, List
 
-from src.data_augmentors.simulation.linear import NullSpaceTranslation as DA
+from src.data_augmentors.simulation import NullSpaceTranslation as DA
 
-from src.sem.simulation.linear import LinearSimulationSEM as SEM
+from src.sem.simulation import LinearSimulationSEM as SEM
 
 from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM

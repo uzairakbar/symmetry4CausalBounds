@@ -10,9 +10,9 @@ from argparse import ArgumentParser
 from sklearn.preprocessing import PolynomialFeatures
 from typing import Dict, Callable, Optional, List
 
-from src.data_augmentors.real.optical_device import OpticalDeviceDA as DA
+from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 
-from src.sem.real.optical_device import OpticalDeviceSEM as SEM
+from src.sem.optical_device import OpticalDeviceSEM as SEM
 
 from src.methods.abstract import pointEstimator as Regressor
 from src.methods.regression import LeastSquaresClosedForm as ERM

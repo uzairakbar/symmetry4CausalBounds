@@ -7,13 +7,17 @@ from munch import munchify
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments.simulation import (
-    linear as linear_simulation,
-    # population as linear_simulation,
+    query_sweep as linear_simulation,
+    # param_sweep as linear_simulation,
 )
-from src.experiments.real import (
-    optical_device as optical_device_experiment,
-    # cmnist as colored_mnist_experiment,
+from src.experiments.optical_device import (
+    query_sweep as optical_device_experiment,
+    param_sweep as optical_device_experiment,
 )
+# from src.experiments.cmnist import (
+#     # query_sweep as colored_mnist_experiment,
+#     # param_sweep as colored_mnist_experiment,
+# )
 
 
 def main():

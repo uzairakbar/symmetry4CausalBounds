@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from typing import Any, Literal, List, Dict, Optional, Tuple
 
-from src.sem.simulation.linear import TREATMENT_DIMENSION
+from src.sem.simulation import TREATMENT_DIMENSION
 
 
 Experiment = Literal[
