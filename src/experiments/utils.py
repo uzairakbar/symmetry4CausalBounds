@@ -57,60 +57,6 @@ TEX_MAPPER: Dict[str, str] = {
     'ERM': r'$\operatorname{erm}$',
     'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
 }
-ANNOTATE_BOX_PLOT: Dict[Experiment, Dict[str, Any]] = {
-    'simulation': {
-        'title': 'Simulation Data',
-    },
-    'optical_device': {
-        'title': 'Optical Device Data',
-        # 'y_color': 'w',
-    },
-    'colored_mnist': {
-        'title': 'Colored MNIST Data',
-        'dummies': ['DA+IVL-CC', 'ICP', 'L1Janzing', 'L2Janzing', 'Kania&Wit'],
-        # 'y_color': 'w',
-    }
-}
-ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
-    'pc1': {
-        'xlabel': r'$t$',
-        'xscale': 'linear',
-        # 'hide_legend': True,
-    },
-    'pc2': {
-        'xlabel': r'$t$',
-        'xscale': 'linear',
-        # 'hide_legend': True,
-    },
-    'pc12': {
-        'xlabel': r'$\theta$',
-        'xscale': 'linear',
-        # 'hide_legend': True,
-    },
-}
-ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
-    'kappa': {
-        'xlabel': r'$\kappa$',
-        'xscale': 'linear',
-        'dotted_lines': ['ERM', 'DA+ERM'],
-        # 'yscale': 'log',
-        # 'hide_legend': True,
-    },
-    'alpha': {
-        'xlabel': r'$a$',
-        'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
-        # 'legend_items': ['ERM', 'DA+ERM', 'PI', 'DA+PI', 'INV+PI'],
-        # 'y_color': 'w',
-        # 'legend_loc': (0.465, 0.230),
-    },
-    'gamma': {
-        'xlabel': r'$\Gamma$',
-        'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
-        # 'y_color': 'w',
-    }
-}
 color_map = {
     'ATE':  3,
     'ERM':  0,  # 9
