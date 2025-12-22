@@ -51,4 +51,4 @@ Comment out (or remove) the experiemnts from `./config.yaml` that you are not in
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
 ## CPU vs. GPU backend
-The code uses a CPU backend for PyTroch by default (recommended for `optical_device` and `linear_simulation` sweep experiments). To use a GPU or MPS backend, however, change the `CPU_ONLY` variable specified in `./src/regressors/utils.py` to `False`.
+The code uses a CPU backend for PyTroch by default (recommended for `optical_device` and `simulation` sweep experiments). To use a GPU or MPS backend, however, change the `CPU_ONLY` variable specified in `./src/regressors/utils.py` to `False`.

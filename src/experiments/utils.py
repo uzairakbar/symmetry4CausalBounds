@@ -19,8 +19,7 @@ from src.sem.simulation import TREATMENT_DIMENSION
 
 
 Experiment = Literal[
-    'linear_simulation',
-    'nonlinear_simulation',
+    'simulation',
     'optical_device',
     'colored_mnist',
     'rotated_mnist'
@@ -59,7 +58,7 @@ TEX_MAPPER: Dict[str, str] = {
     'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
 }
 ANNOTATE_BOX_PLOT: Dict[Experiment, Dict[str, Any]] = {
-    'linear_simulation': {
+    'simulation': {
         'title': 'Simulation Data',
     },
     'optical_device': {
@@ -247,7 +246,7 @@ def set_seed(seed: int=42):
     logger.info(f'Random seed set as {seed}.')
 
 
-def ci_sweep_plot(
+def param_sweep_plot(
         x, y,
         xlabel: str,
         ylabel: Optional[str]='nCER',
@@ -363,13 +362,13 @@ def ci_sweep_plot(
         save(
             obj=fig,
             fname=fname,
-            experiment='linear_simulation',
+            experiment='simulation',
             format=format,
             dpi=PLOT_DPI
         )
 
 
-def sweep_plot(
+def query_sweep_plot(
         x, y,
         xlabel: str,
         ylabel: Optional[str]=r'${\bm{h}}^\top {\bm{x}}$',
@@ -384,7 +383,7 @@ def sweep_plot(
         hide_legend: Optional[bool]=False,
         hilight_ours: Optional[bool]=HILIGHT_OURS,
         bootstrapped: Optional[bool]=False,
-        experiment: str='linear_simulation',
+        experiment: str='simulation',
     ):
     # if bootstrapped:
     #     y = bootstrap(y)
@@ -641,56 +640,6 @@ def tex_table(
     '''.strip()
 
 
-# def bootstrap(
-#         data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
-#         n_samples: int=1000
-#     ) -> Dict:
-#     def bootstrap_single_row(
-#             data: Dict[str, NDArray], n_samples: int=n_samples
-#         ):
-#         if len(list(data.values())[0].shape) == 1:
-#             data = {
-#                 key: value.copy().reshape(1, -1)
-#                 for key, value in data.items()
-#             }
-
-#         def bootstrap_sample(data, n_bootstrap: Optional[int]=None):
-#             if len(data.shape) == 1:
-#                 data = data.copy().reshape(1, -1)
-#             if n_bootstrap is None:
-#                 n_bootstrap = data.shape[-1]
-#             N, M = data.shape
-#             idx = np.random.randint(0, M, (N, n_bootstrap))
-#             sample = np.take_along_axis(data, idx, axis=1)
-#             return sample
-        
-
-#         bootstrapped_data = {
-#             model: np.zeros((data[model].shape[0], n_samples)) for model in data
-#         }
-#         for model in data:
-#             if 'PI' not in model:
-#                 for i in range(n_samples):
-#                     bootstrapped_data[model][:, i] = np.mean(
-#                         bootstrap_sample(data[model][:, :, 0]),
-#                         axis = 1
-#                     )
-#             else:
-#                 pass
-
-#         return bootstrapped_data
-    
-#     # check if data keys are subset of TEX_MAPPER keys
-#     # i.e., check if data keys only correspond to methods
-#     # if yes, then bootstrap, else access method sub-dict.
-#     single_row = set(data) <= set(TEX_MAPPER)
-#     if single_row:
-#         return bootstrap_single_row(data)
-#     else:
-#         return {
-#             key: bootstrap_single_row(data[key]) for key in data
-#         }
-
 def bootstrap(
         data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
         n_samples: int=1000
@@ -825,58 +774,54 @@ def load(path: str):
 
 
 def fit_model(
-        model, name, X, y, GX, hyperparameters=None, pbar_manager=None, da=None
+        model, name, X, y, GX, G=None, hyperparameters=None, pbar_manager=None, da=None
     ):
+    """
+    Wrapper to fit models with or without progress bars, handling various 
+    input requirements (GX, G, etc).
+    """
     if not pbar_manager:
-        return fit_model_nopbar(model, name, X, y, GX, hyperparameters, da)
+        return fit_model_nopbar(model, name, X, y, GX, G, hyperparameters, da)
+
+    # Standardize kwargs to pass to model.fit
+    fit_kwargs = {**(hyperparameters or {})}
+    
+    if name == 'PI':
+        model.fit(X=X, y=y, **fit_kwargs)
+    elif name =='DA+PI':
+        model.fit(X=GX, y=y, **fit_kwargs)
+    elif name =='INV+PI':
+        # INV+PI might use GX. Future methods might use G.
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+    elif name == 'ERM':
+        model.fit(X=X, y=y, pbar_manager=pbar_manager, **fit_kwargs)
+    elif name == 'DA+ERM':
+        model.fit(X=GX, y=y, pbar_manager=pbar_manager, **fit_kwargs)
+    else:
+        # Fallback for future custom methods that might need everything
+        # We try passing G if provided, assuming model handles **kwargs
+        model.fit(X=X, y=y, GX=GX, G=G, pbar_manager=pbar_manager, **fit_kwargs)
+
+
+def fit_model_nopbar(model, name, X, y, GX, G=None, hyperparameters=None, da=None):
+    fit_kwargs = {**(hyperparameters or {})}
 
     if name == 'PI':
-        model.fit(
-            X=X, y=y, **hyperparameters
-        )
+        model.fit(X=X, y=y, **fit_kwargs)
     elif name =='DA+PI':
-        model.fit(
-            X=GX, y=y, **hyperparameters
-        )
+        model.fit(X=GX, y=y, **fit_kwargs)
     elif name =='INV+PI':
-        model.fit(
-            X=X, y=y, GX=GX, **hyperparameters
-        )
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
     elif name == 'ERM':
-        model.fit(
-            X=X, y=y, pbar_manager=pbar_manager, **hyperparameters
-        )
+        model.fit(X=X, y=y, **fit_kwargs)
     elif name == 'DA+ERM':
-        model.fit(
-            X=GX, y=y, pbar_manager=pbar_manager, **hyperparameters
-        )
+        model.fit(X=GX, y=y, **fit_kwargs)
+    elif name == 'ATE':
+        # ATE is usually calculated directly, but if a model is passed, do nothing or raise
+        pass 
     else:
-        raise ValueError(f'Model {name} not implemented.')
-
-
-def fit_model_nopbar(model, name, X, y, GX, hyperparameters=None, da=None):
-    if name == 'PI':
-        model.fit(
-            X=X, y=y, **hyperparameters
-        )
-    elif name =='DA+PI':
-        model.fit(
-            X=GX, y=y, **hyperparameters
-        )
-    elif name =='INV+PI':
-        model.fit(
-            X=X, y=y, GX=GX, **hyperparameters
-        )
-    elif name == 'ERM':
-        model.fit(
-            X=X, y=y, **hyperparameters
-        )
-    elif name == 'DA+ERM':
-        model.fit(
-            X=GX, y=y, **hyperparameters
-        )
-    else:
-        raise ValueError(f'Model {name} not implemented.')
+        # Fallback for future methods
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
 
 
 def radial_sweep_pcs(X, n_points=100):

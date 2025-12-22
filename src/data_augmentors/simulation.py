@@ -140,7 +140,7 @@ class LinearSimulationDA(DA):
         
     @property
     def augmentation(self):
-        return 'linear_simulation'
+        return 'simulation'
     
     def augment(
             self,

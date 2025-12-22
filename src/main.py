@@ -6,30 +6,18 @@ from munch import munchify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.experiments.simulation import (
-    query_sweep as linear_simulation,
-    # param_sweep as linear_simulation,
-)
-from src.experiments.optical_device import (
-    query_sweep as optical_device_experiment,
-    param_sweep as optical_device_experiment,
-)
-# from src.experiments.cmnist import (
-#     # query_sweep as colored_mnist_experiment,
-#     # param_sweep as colored_mnist_experiment,
-# )
-
+from src.experiments import simulation as simulation_experiment
+from src.experiments import optical_device as optical_device_experiment
 
 def main():
-
     with open('config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     config = munchify(config)
 
-    if 'linear_simulation' in config:
+    if 'simulation' in config:
         logger.info('Running linear simulation experiment.')
-        linear_simulation.run(
-            **config.linear_simulation,
+        simulation_experiment.run(
+            **config.simulation,
             hyperparameters=config.hyperparameters
         )
     
@@ -39,14 +27,6 @@ def main():
             **config.optical_device,
             hyperparameters=config.hyperparameters
         )
-    
-    # if 'colored_mnist' in config:
-    #     logger.info('Running colored MNIST experiment.')
-    #     colored_mnist_experiment.run(
-    #         **config.colored_mnist,
-    #         hyperparameters=config.hyperparameters
-    #     )
-
 
 if __name__ == '__main__':
     main()
