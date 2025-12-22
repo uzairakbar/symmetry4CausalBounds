@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.sem.simulation import LinearSimulationSEM as SEM
 from src.experiments.base import QuerySweepRunner, ParamSweepRunner
-from src.experiments.configs import MethodRegistry, SIMULATION_PARAMS, SWEEP_CONFIGS
+from src.experiments.configs import MethodRegistry, SIMULATION_PARAMS, SWEEP_CONFIGS, METRIC_CONFIGS
 from src.experiments.panels import PanelBuilder
 from src.experiments.utils import (
     save, query_sweep_plot, param_sweep_plot, 
@@ -134,17 +134,10 @@ class GammaSweep(SimParamSweepBase):
 # ============================================================================
 
 def run(seed, n_samples, kernel_dim, n_experiments, sweep_samples, methods, 
-        sweep_mode='query', hyperparameters=None, plot_panel=False, 
-        panel_only=False, **kwargs):
+        metric='approximation_error', sweep_mode='query', hyperparameters=None, 
+        plot_panel=False, panel_only=False, **kwargs):
     """
     Main entry point for simulation experiments.
-    
-    Modes:
-        - query: Radial sweep visualization
-        - param: Parameter sensitivity analysis (kappa, alpha, gamma)
-    Flags:
-        - plot_panel: Generate 4x3 panel plot
-        - panel_only: Only generate panel, skip main plot
     """
     # Build methods
     active_methods = MethodRegistry.build_methods(
@@ -160,8 +153,12 @@ def run(seed, n_samples, kernel_dim, n_experiments, sweep_samples, methods,
         'kernel_dim': kernel_dim,
         'n_experiments': n_experiments,
         'sweep_samples': sweep_samples,
-        'hyperparameters': hyperparameters
+        'hyperparameters': hyperparameters,
+        'metric': metric  # Pass metric to runner
     }
+    
+    # Get Y-axis label from metric config
+    ylabel = METRIC_CONFIGS[metric]['ylabel']
     
     # ========================================================================
     # Parameter Sweep Mode
@@ -169,26 +166,25 @@ def run(seed, n_samples, kernel_dim, n_experiments, sweep_samples, methods,
     if sweep_mode == 'param':
         gamma_methods = MethodRegistry.filter_gamma_methods(active_methods)
         
-        # Kappa sweep
-        runner = KappaSweep(**common_args, methods=active_methods)
-        x, res = runner.run("Kappa Sweep")
-        save(x, 'kappa_values', EXPERIMENT, 'pkl')
-        save(res, 'kappa_results', EXPERIMENT, 'pkl')
-        param_sweep_plot(x, res, **ANNOTATE_POPULATION_PLOT['kappa'])
-        
-        # Gamma sweep
-        runner = GammaSweep(**common_args, methods=gamma_methods)
-        x, res = runner.run("Gamma Sweep")
-        save(x, 'gamma_values', EXPERIMENT, 'pkl')
-        save(res, 'gamma_results', EXPERIMENT, 'pkl')
-        param_sweep_plot(x, res, **ANNOTATE_POPULATION_PLOT['gamma'])
-        
-        # Alpha sweep
-        runner = AlphaSweep(**common_args, methods=gamma_methods)
-        x, res = runner.run("Alpha Sweep")
-        save(x, 'alpha_values', EXPERIMENT, 'pkl')
-        save(res, 'alpha_results', EXPERIMENT, 'pkl')
-        param_sweep_plot(x, res, **ANNOTATE_POPULATION_PLOT['alpha'])
+        # Helper to run and plot
+        def run_sweep(runner_cls, param_name, config_key):
+            runner = runner_cls(**common_args, methods=active_methods if param_name=='kappa' else gamma_methods)
+            x, res = runner.run(f"{param_name.title()} Sweep")
+            
+            # Save with metric name in filename
+            save(x, f'{param_name}_values', EXPERIMENT, 'pkl')
+            save(res, f'{param_name}_{metric}', EXPERIMENT, 'pkl')
+            
+            # Update plot config with correct Y-label
+            plot_config = ANNOTATE_POPULATION_PLOT[config_key].copy()
+            plot_config['ylabel'] = ylabel
+            
+            param_sweep_plot(x, res, **plot_config)
+
+        # Run sweeps
+        run_sweep(KappaSweep, 'kappa', 'kappa')
+        run_sweep(GammaSweep, 'gamma', 'gamma')
+        run_sweep(AlphaSweep, 'alpha', 'alpha')
         return
     
     # ========================================================================
@@ -245,6 +241,9 @@ if __name__ == '__main__':
                      default=['ERM', 'DA+ERM', 'PI', 'DA+PI', 'INV+PI'])
     CLI.add_argument('--sweep_mode', type=str, 
                      choices=['query', 'param'], default='query')
+    CLI.add_argument('--metric', type=str, 
+                     choices=['approximation_error', 'worst_error', 'interval_width'], 
+                     default='approximation_error')
     CLI.add_argument('--plot-panel', action='store_true')
     CLI.add_argument('--panel-only', action='store_true')
     args = CLI.parse_args()

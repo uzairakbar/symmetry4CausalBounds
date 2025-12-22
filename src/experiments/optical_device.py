@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.sem.optical_device import OpticalDeviceSEM as SEM
 from src.experiments.base import QuerySweepRunner, ParamSweepRunner
-from src.experiments.configs import MethodRegistry, OPTICAL_PARAMS, SWEEP_CONFIGS
+from src.experiments.configs import MethodRegistry, OPTICAL_PARAMS, SWEEP_CONFIGS, METRIC_CONFIGS
 from src.experiments.panels import PanelBuilder
 from src.experiments.utils import (
     save, query_sweep_plot, param_sweep_plot,
@@ -111,17 +111,10 @@ class OpticalGammaSweep(ParamSweepRunner):
 # ============================================================================
 
 def run(seed, n_samples, sweep_samples, methods, augmentation=None,
-        sweep_mode='query', hyperparameters=None, plot_panel=False,
-        panel_only=False, n_experiments=10, **kwargs):
+        metric='approximation_error', sweep_mode='query', hyperparameters=None, 
+        plot_panel=False, panel_only=False, n_experiments=10, **kwargs):
     """
     Main entry point for optical device experiments.
-    
-    Modes:
-        - query: Radial sweep visualization
-        - param: Gamma parameter sweep
-    Flags:
-        - plot_panel: Generate 4x3 panel plot
-        - panel_only: Only generate panel, skip main plot
     """
     # Build methods
     active_methods = MethodRegistry.build_methods(
@@ -135,8 +128,12 @@ def run(seed, n_samples, sweep_samples, methods, augmentation=None,
         'seed': seed,
         'n_samples': n_samples,
         'sweep_samples': sweep_samples,
-        'hyperparameters': hyperparameters
+        'hyperparameters': hyperparameters,
+        'metric': metric # Pass metric to runner
     }
+    
+    # Get Y-axis label from metric config
+    ylabel = METRIC_CONFIGS[metric]['ylabel']
     
     # ========================================================================
     # Parameter Sweep Mode
@@ -150,9 +147,16 @@ def run(seed, n_samples, sweep_samples, methods, augmentation=None,
             **common_args
         )
         x, res = runner.run("Gamma Sweep")
+        
+        # Save with metric name in filename
         save(x, 'gamma_values', EXPERIMENT, 'pkl')
-        save(res, 'gamma_results', EXPERIMENT, 'pkl')
-        param_sweep_plot(x, res, **ANNOTATE_POPULATION_PLOT['gamma'])
+        save(res, f'gamma_{metric}', EXPERIMENT, 'pkl')
+        
+        # Update plot config with correct Y-label
+        plot_config = ANNOTATE_POPULATION_PLOT['gamma'].copy()
+        plot_config['ylabel'] = ylabel
+        
+        param_sweep_plot(x, res, **plot_config)
         return
     
     # ========================================================================
@@ -208,6 +212,9 @@ if __name__ == '__main__':
     CLI.add_argument('--augmentation', type=str, default='all')
     CLI.add_argument('--sweep_mode', type=str,
                      choices=['query', 'param'], default='query')
+    CLI.add_argument('--metric', type=str, 
+                     choices=['approximation_error', 'worst_error', 'interval_width'], 
+                     default='approximation_error')
     CLI.add_argument('--plot-panel', action='store_true')
     CLI.add_argument('--panel-only', action='store_true')
     args = CLI.parse_args()

@@ -6,7 +6,9 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, Callable, Optional, Any, Tuple
 from src.methods.abstract import pointEstimator as Regressor
-from src.experiments.utils import fit_model, set_seed, approximation_error
+# Import utils as a module to access functions dynamically
+import src.experiments.utils as experiment_utils
+from src.experiments.utils import fit_model, set_seed
 
 ModelBuilder = Callable[[], Regressor]
 MANAGER = enlighten.get_manager()
@@ -40,14 +42,6 @@ class BaseExperimentRunner(ABC):
 class DataSetupMixin:
     """Mixin for common data setup patterns"""
     def setup_experiment_data(self, sem, da, transform_fn=None):
-        """
-        Generic data setup for experiments.
-        
-        Args:
-            sem: Structural equation model instance
-            da: Data augmenter instance
-            transform_fn: Optional transformation (e.g., PolynomialFeatures)
-        """
         self.sem = sem
         self.da = da
         
@@ -108,20 +102,25 @@ class QuerySweepRunner(DataSetupMixin, BaseExperimentRunner):
 
     @abstractmethod
     def get_sweep_values(self): 
-        """Override to define sweep geometry"""
         pass
 
     @abstractmethod
     def setup_data(self) -> Dict[str, Any]: 
-        """Override to define data setup"""
         pass
 
 
 class ParamSweepRunner(DataSetupMixin, BaseExperimentRunner):
     """Runner for parameter sweep experiments"""
     
-    def __init__(self, **kwargs):
+    def __init__(self, metric: str = 'approximation_error', **kwargs):
         super().__init__(**kwargs)
+        self.metric_name = metric
+        # Dynamically get the metric function from utils
+        if hasattr(experiment_utils, metric):
+            self.metric_fn = getattr(experiment_utils, metric)
+        else:
+            raise ValueError(f"Metric '{metric}' not found in src.experiments.utils")
+            
         self.setup_sems_and_das()
 
     def run(self, desc: str = "Param Sweep"):
@@ -151,7 +150,8 @@ class ParamSweepRunner(DataSetupMixin, BaseExperimentRunner):
                         kwargs = self.get_predict_kwargs(param)
                         estimate = model.predict(X_test, **kwargs)
 
-                    results[name][i, j] = approximation_error(estimand, estimate)
+                    # Use the configured metric function
+                    results[name][i, j] = self.metric_fn(estimand, estimate)
             
             pbar_exp.update()
         pbar_exp.close()
@@ -159,24 +159,19 @@ class ParamSweepRunner(DataSetupMixin, BaseExperimentRunner):
 
     @abstractmethod
     def setup_sems_and_das(self):
-        """Initialize SEMs and DAs for all experiments"""
         pass
     
     @abstractmethod
     def get_da(self, experiment_index): 
-        """Get DA for specific experiment"""
         pass
     
     def get_predict_kwargs(self, param): 
-        """Override if predict needs param-specific kwargs"""
         return {}
     
     @abstractmethod
     def get_param_range(self): 
-        """Define parameter sweep range"""
         pass
     
     @abstractmethod
     def generate_data(self, experiment_index, param): 
-        """Generate data for specific experiment and parameter"""
         pass

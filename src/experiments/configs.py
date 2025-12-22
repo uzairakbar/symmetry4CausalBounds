@@ -24,7 +24,23 @@ OPTICAL_PARAMS = {
     'ground_truth': 'polynomial',
 }
 
-# Sweep configurations
+# Metric configurations for Y-axis labels and settings
+METRIC_CONFIGS = {
+    'approximation_error': {
+        'ylabel': r'average $E_{\mathrm{approx}}^{\operatorname{do}({\bm{x}})}$',
+        'normalize': False
+    },
+    'worst_error': {
+        'ylabel': r'average $E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$',
+        'normalize': False
+    },
+    'interval_width': {
+        'ylabel': r'average interval width',
+        'normalize': False
+    }
+}
+
+# Sweep configurations (X-axis settings)
 SWEEP_CONFIGS = {
     'simulation': {
         'kappa': {
@@ -60,13 +76,6 @@ class MethodRegistry:
     def build_methods(method_names, gamma=None, gamma0=None, epsilon=None):
         """
         Build only requested methods with given hyperparameters.
-        
-        Args:
-            method_names: List of method names to build
-            gamma, gamma0, epsilon: Hyperparameters for PI methods
-            
-        Returns:
-            Dict mapping method names to builder functions
         """
         all_builders = {
             'ATE': lambda: None,
