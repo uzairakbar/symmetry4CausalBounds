@@ -3,8 +3,89 @@ import numpy as np
 from typing import Dict, List, Tuple
 from src.experiments.utils import (
     RC_PARAMS, TEX_MAPPER, FS_LABEL, FS_TICK, color_map, 
-    save, PLOT_FORMAT, PLOT_DPI
+    save, PLOT_FORMAT, PLOT_DPI, radial_sweep_pcs, sweep_along_pc
 )
+
+
+class PanelBuilder:
+    """Builds 4x3 panel plots for any experiment"""
+    
+    def __init__(self, runner, experiment_name, use_augmented_geometry=True):
+        """
+        Args:
+            runner: QuerySweepRunner instance with data already loaded
+            experiment_name: Name for saving ('simulation', 'optical_device', etc)
+            use_augmented_geometry: Use GX_raw (True) or X_raw (False) for geometry
+        """
+        self.runner = runner
+        self.experiment_name = experiment_name
+        self.use_augmented = use_augmented_geometry
+        
+    def build(self, sweep_samples):
+        """Generate full 4x3 panel"""
+        # 1. Define geometry
+        # For PC calculations, use the geometry specified
+        # But for histograms, ALWAYS compare X vs GX
+        geometry_for_pcs = self.runner.GX_raw if self.use_augmented else self.runner.X_raw
+        
+        # Calculate PC sweep points on chosen geometry
+        pc1_pts, _, mean, pc1_vec = sweep_along_pc(geometry_for_pcs, 0, sweep_samples, 3.0)
+        pc2_pts, _, _, pc2_vec = sweep_along_pc(geometry_for_pcs, 1, sweep_samples, 3.0)
+        rad_pts = radial_sweep_pcs(geometry_for_pcs, sweep_samples)
+        
+        # 2. Run models on these geometries
+        res1, gt1 = self._run_sweep(pc1_pts)
+        res2, gt2 = self._run_sweep(pc2_pts)
+        resR, gtR = self._run_sweep(rad_pts)
+        
+        # 3. Build histogram data - ALWAYS compare X vs GX
+        hist_data = self._build_histograms(
+            self.runner.X_raw, self.runner.GX_raw, mean, pc1_vec, pc2_vec
+        )
+        
+        # 4. Define plot grids using the SAME geometry as PC calculations
+        std_pc1 = np.std((geometry_for_pcs - mean) @ pc1_vec)
+        std_pc2 = np.std((geometry_for_pcs - mean) @ pc2_vec)
+        
+        t1 = np.linspace(-3 * std_pc1, 3 * std_pc1, sweep_samples)
+        t2 = np.linspace(-3 * std_pc2, 3 * std_pc2, sweep_samples)
+        theta = np.linspace(0, 2*np.pi, sweep_samples)
+        
+        cols = [(res1, gt1, t1), (resR, gtR, theta), (res2, gt2, t2)]
+        
+        # 5. Generate panel
+        make_panel_4x3(self.experiment_name, cols, hist_data)
+    
+    def _run_sweep(self, raw_points):
+        """Run models on specific geometry"""
+        # Transform if needed
+        if hasattr(self.runner, 'poly'):
+            poly_points = self.runner.poly.fit_transform(raw_points)
+        else:
+            poly_points = raw_points
+        
+        # Temporarily override sweep values
+        original_get = self.runner.get_sweep_values
+        self.runner.get_sweep_values = lambda: poly_points
+        _, results = self.runner.run(desc="Panel Sweep")
+        self.runner.get_sweep_values = original_get
+        
+        # Get ground truth
+        ate = poly_points @ self.runner.sem.solution
+        return results, ate
+    
+    def _build_histograms(self, X0, GX0, mean, pc1_vec, pc2_vec):
+        """Build histogram projection data"""
+        proj_X_pc1 = (X0 - mean) @ pc1_vec
+        proj_GX_pc1 = (GX0 - mean) @ pc1_vec
+        proj_X_pc2 = (X0 - mean) @ pc2_vec
+        proj_GX_pc2 = (GX0 - mean) @ pc2_vec
+        
+        return {
+            'pc1': (proj_X_pc1, proj_GX_pc1),
+            'pc2': (proj_X_pc2, proj_GX_pc2),
+        }
+
 
 def make_panel_4x3(
     experiment_name: str,
@@ -103,8 +184,6 @@ def make_panel_4x3(
         has_ew = False
         
         # Prepare GT for broadcasting
-        # If gt is (S,), make it (S, 1) to broadcast against (S, E)
-        # If gt is (S, E), leave it alone.
         if gt.ndim == 1:
             gt_col = gt[:, None] 
         else:
@@ -113,14 +192,8 @@ def make_panel_4x3(
         for name, m in res.items():
             if 'PI' in name:
                 has_ew = True
-                # Worst case sq error per step
-                # m is (S, E, 2)
                 lo, hi = m[:, :, 0], m[:, :, 1]
-                
-                # Calculation: (S, E) - (S, E) or (S, E) - (S, 1)
                 se = np.maximum((lo - gt_col)**2, (hi - gt_col)**2)
-                
-                # Reduce max over experiments -> (S,)
                 ew = se.max(axis=1) 
 
                 alpha = 0.3 if 'INV' in name else 0.2
