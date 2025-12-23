@@ -8,18 +8,18 @@ from src.methods.sensitivity_models import PartialR2, InvarianceConstrainedParti
 
 # Hyperparameters for different experiments
 SIMULATION_PARAMS = {
-    'gamma': 2**9,
-    'gamma0': 2**9,
-    'epsilon': 2**0,
-    'kappa': 2**2.5,
+    'gamma': 1.0,
+    'gamma0': 1.0,
+    'epsilon': 2**-7,
+    'kappa': 1.0,
     'test_frac': 0.1,
 }
 
 OPTICAL_PARAMS = {
-    'gamma': 2**7,
-    'gamma0': 2**7,
-    'epsilon': 2**-3,
-    'test_frac': 0.1,
+    'gamma': 4.0,
+    'gamma0': 4.0,
+    'epsilon': 4.0,
+    'test_frac': 0.2,
     'optical_ds_idx': 9,
     'ground_truth': 'polynomial',
 }
@@ -61,7 +61,7 @@ SWEEP_CONFIGS = {
     },
     'optical_device': {
         'gamma': {
-            'range_fn': lambda n: np.logspace(-5, 11, base=2, num=n),
+            'range_fn': lambda n: np.logspace(-1, 2, base=2, num=n),
             'xlabel': r'$\Gamma$',
             'xscale': 'log',
         },

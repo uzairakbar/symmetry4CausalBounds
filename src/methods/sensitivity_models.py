@@ -36,9 +36,10 @@ class PartialR2(SA):
 
     def _fit(self, X, y, **kwargs):
         # ellipsoid constraint set params
+        N = len(X)
         self.h_erm = OLS().fit(X, y).solution
-        self.invSigmaX = np.linalg.inv(X.T @ X)
-        self.SigmaX = X.T @ X
+        self.SigmaX = X.T @ X / N
+        self.invSigmaX = np.linalg.inv(self.SigmaX)
         return self
     
     def _predict(
@@ -178,7 +179,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             ) <= radius,
             cp.norm(
                 cp.Constant(self.GX - self.X) @ h, p=2
-            ) <= N * self.epsilon
+            ) <= np.sqrt(N * self.epsilon)
         ])
         cost = cp.Constant(x) @ h
         return self._optimize(cost, constraints)

@@ -12,7 +12,7 @@ simulation:
         - PI
         - DA+PI
         - INV+PI
-    sweep_mode: param
+    sweep_mode: query
     metric: approximation_error     # Options: approximation_error, worst_error, interval_width
     augmentation: translate
     plot_panel: true

@@ -57,7 +57,7 @@ class NullSpaceTranslation(DA):
         return 'translate'
     
     def augment(
-            self, X: NDArray, gamma: float=16.0
+            self, X: NDArray, gamma: float=1.0
         ) -> Tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
