@@ -18,7 +18,7 @@ class SimulationConfig:
     """Configuration for simulation experiments."""
     gamma: float = 1.0
     gamma0: float = 1.0
-    epsilon: float = 2**-7
+    epsilon: float = 2**-8
     kappa: float = 1.0
     test_fraction: float = 0.1
 
@@ -26,9 +26,9 @@ class SimulationConfig:
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
-    gamma: float = 4.0
-    gamma0: float = 4.0
-    epsilon: float = 4.0
+    gamma: float = 2**2
+    gamma0: float = 2**2
+    epsilon: float = 2**3
     test_fraction: float = 0.1
     dataset_index: int = 9
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'

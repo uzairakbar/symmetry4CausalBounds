@@ -74,7 +74,7 @@ class PartialR2(SA):
     
     def _find_bounds(self, x, radius):
         if CLOSED_FORM_SOLUTION:
-            margin = np.sqrt(radius * (x @ self.invSigmaX @ x))
+            margin = radius * np.sqrt((x @ self.invSigmaX @ x))
             lower_bound = x @ self.h_erm - margin
             upper_bound = x @ self.h_erm + margin
             return lower_bound, upper_bound
@@ -84,7 +84,7 @@ class PartialR2(SA):
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(self.SigmaX))
-            ) <= radius
+            ) <= radius**2
         ])
         cost = cp.Constant(x) @ h
         return self._optimize(cost, constraints)
@@ -144,7 +144,7 @@ class PartialR2(SA):
     
     @staticmethod
     def _compute_radius(gamma0, gamma):
-        return gamma0 * gamma
+        return np.sqrt(gamma0 * gamma)
 
 
 class InvarianceConstrainedPartialR2(PartialR2):
@@ -176,7 +176,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(self.SigmaX))
-            ) <= radius,
+            ) <= radius**2,
             cp.norm(
                 cp.Constant(self.GX - self.X) @ h, p=2
             ) <= np.sqrt(N * self.epsilon)

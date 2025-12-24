@@ -8,7 +8,7 @@ from src.data_augmentors.abstract import DataAugmenter as DA
 
 
 DA_STD: float=1.0
-BASIS_SELECTOIN_PROBABILITY: float=9.0/10.0
+BASIS_SELECTOIN_PROBABILITY: float=8.0/10.0
 
 
 class NullSpaceTranslation(DA):
