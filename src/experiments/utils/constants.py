@@ -33,8 +33,10 @@ TEX_MAPPER: Dict[str, str] = {
     'PI': r'$\operatorname{pi}$',
     'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
     'INV+PI': r'$\operatorname{inv}+\operatorname{pi}$',
+    'DA+IV+PI': r'$\operatorname{da}+\operatorname{iv}+\operatorname{pi}$',
     'ERM': r'$\operatorname{erm}$',
     'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
+    'DA+IV': r'$\operatorname{da}+\operatorname{iv}$',
 }
 
 # Color mapping for methods
@@ -42,9 +44,11 @@ COLOR_MAP: Dict[str, int] = {
     'ATE': 3,
     'ERM': 0,
     'DA+ERM': 3,
+    'DA+IV': 4,
     'PI': 0,
     'DA+PI': 3,
     'INV+PI': 2,
+    'DA+IV+PI': 4,
 }
 
 # Plotting defaults

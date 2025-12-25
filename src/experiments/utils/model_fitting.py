@@ -52,6 +52,10 @@ def fit_model(
         # INV+PI uses both original and augmented data
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
     
+    elif method_name == 'DA+IV+PI':
+        # INV+PI uses both original and augmented data
+        model.fit(X=GX, y=y, Z=G, **fit_kwargs)
+    
     elif method_name == 'ERM':
         # ERM uses original data
         model.fit(X=X, y=y, **fit_kwargs)
@@ -59,6 +63,10 @@ def fit_model(
     elif method_name == 'DA+ERM':
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, **fit_kwargs)
+    
+    elif method_name == 'DA+IV':
+        # DA+ERM uses augmented data
+        model.fit(X=GX, y=y, Z=G, **fit_kwargs)
     
     else:
         # Fallback for any custom methods - pass everything

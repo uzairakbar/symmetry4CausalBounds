@@ -6,8 +6,16 @@ import numpy as np
 from typing import Dict, Any, Literal, Callable
 from dataclasses import dataclass
 
-from src.methods.regression import LeastSquaresClosedForm as ERM
-from src.methods.sensitivity_models import PartialR2, InvarianceConstrainedPartialR2 as InvPartialR2
+from src.methods.regression import (
+    LeastSquaresClosedForm as ERM,
+    TwoStageLeastSquaresIV as IV,
+    GeneralizedMomentMethodIV as GMMIV,
+)
+from src.methods.sensitivity_models import (
+    PartialR2,
+    InstrumentalVariablePartialR2 as IVPartialR2,
+    InvarianceConstrainedPartialR2 as InvPartialR2,
+)
 
 
 # =============================================================================
@@ -172,9 +180,11 @@ class MethodRegistry:
             'ATE': lambda: None,  # ATE computed analytically
             'ERM': lambda: ERM(),
             'DA+ERM': lambda: ERM(),
+            'DA+IV': lambda: IV(),
             'PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
             'DA+PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
             'INV+PI': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
+            'DA+IV+PI': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
         }
         
         return {

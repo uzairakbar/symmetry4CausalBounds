@@ -9,9 +9,11 @@ simulation:
         - ATE
         - ERM
         - DA+ERM
+        - DA+IV
         - INV+PI
         - PI
         - DA+PI
+        - DA+IV+PI
     sweep_mode: query
     metric: approximation_error     # Options: approximation_error, worst_error, interval_width
     augmentation: translate
@@ -26,9 +28,11 @@ optical_device:
         - ATE
         - ERM
         - DA+ERM
+        - DA+IV
         - INV+PI
         - PI
         - DA+PI
+        - DA+IV+PI
     sweep_mode: query
     metric: approximation_error
     augmentation: all
