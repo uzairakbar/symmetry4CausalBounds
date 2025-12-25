@@ -10,7 +10,7 @@ from src.sem.abstract import StructuralEquationModel as SEM
 
 
 def torch_xor(a: FloatTensor, b: FloatTensor) -> FloatTensor:
-    # Assumes both inputs are either 0 or 1
+    # assumes both inputs are either 0 or 1
     return (a - b).abs()
 
 
@@ -61,13 +61,13 @@ class ColoredDigitsSEM(SEM):
         
         # get MNIST image and ground truth label
         N_X = images.reshape((-1, 28, 28))[:, ::2, ::2] # MNIST image with 2x subsample for computational convenience
-        fX = (targets < 5).float()                      # Assign ground truth lables based on image
+        fX = (targets < 5).float()                      # assign ground truth lables based on image
         
         # add noise to labelling function -- flip label with probability 0.25
         n_y = torch_bernoulli(0.25, N)
         y = torch_xor(fX, n_y)
         
-        # Assign a color based on the label; flip the color with probability e
+        # assign a color based on the label; flip the color with probability e
         if self.train:
             e_space = torch.tensor([0.1, 0.2])
         else:
@@ -76,15 +76,10 @@ class ColoredDigitsSEM(SEM):
         e = e_space[idx]
         C = torch_xor(y, torch_bernoulli(e, N))         # color C confounds X and y
         
-        # Apply the color to the image by zeroing out the other color channel
+        # apply the color to the image by zeroing out the other color channel
         X = colour_image(image_grey=N_X, color=C)
-        if self.train:
-            return (
-                (X.float() / 255.).numpy(), # treatment
-                y[:, None].numpy(),         # outcome
-            )
-        else:
-            return (
-                (X.float() / 255.).numpy(), # treatment
-                fX[:, None].numpy(),        # ATE
-            )
+        return (
+            (X.float() / 255.).numpy(), # treatment
+            y[:, None].numpy(),         # outcome
+        )
+

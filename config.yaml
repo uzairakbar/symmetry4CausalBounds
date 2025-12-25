@@ -1,31 +1,36 @@
 ---
-linear_simulation:
+simulation:
     seed: 42
     n_samples: 2_048
-    kernel_dim: 0          # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
-    n_experiments: 1
+    kernel_dim: 0                   # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
+    n_experiments: 10
     sweep_samples: 32
     methods:
         - ATE
         - ERM
         - DA+ERM
+        - INV+PI
         - PI
         - DA+PI
-        - INV+PI
+    sweep_mode: query
+    metric: approximation_error     # Options: approximation_error, worst_error, interval_width
     augmentation: translate
     plot_panel: true
 
 optical_device:
     seed: 42
     n_samples: 1_000
+    n_experiments: 10
     sweep_samples: 32
     methods:
         - ATE
         - ERM
         - DA+ERM
+        - INV+PI
         - PI
         - DA+PI
-        - INV+PI
+    sweep_mode: query
+    metric: approximation_error
     augmentation: all
     plot_panel: true
 

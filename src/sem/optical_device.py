@@ -13,7 +13,9 @@ from src.sem.abstract import StructuralEquationModel as SEM
 from src.methods.regression import LeastSquaresClosedForm as ERM
 
 
-MAX_PLOYNOMIAL_DEGREE: int=3
+# change to 5 if verification needed -- best fit is only either 1 or 2.
+# kept at 2 for faster runtimes in generating experiment results/plots.
+MAX_PLOYNOMIAL_DEGREE: int=2
 
 
 class OpticalDeviceSEM(SEM):
@@ -111,3 +113,4 @@ class OpticalDeviceSEM(SEM):
     @classmethod
     def num_experiments(cls) -> int:
         return len(cls._DATASET)
+

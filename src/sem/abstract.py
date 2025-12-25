@@ -16,3 +16,4 @@ class StructuralEquationModel(ABC):
     @property
     def solution(self) -> NDArray:
         return self.W_XY
+

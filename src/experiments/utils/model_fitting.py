@@ -1,0 +1,65 @@
+"""
+Utilities for fitting causal estimation models.
+"""
+from typing import Optional, Dict, Any
+
+
+def fit_model(
+    model,
+    method_name: str,
+    X,
+    y,
+    GX=None,
+    G=None,
+    hyperparameters: Optional[Dict[str, Any]] = None,
+    **kwargs
+):
+    """
+    Fit a causal estimation model with appropriate data.
+    
+    The key insight: Methods are the same class but used differently:
+    - PI uses original data X
+    - DA+PI uses augmented data GX
+    - INV+PI uses both X and GX
+    
+    Args:
+        model: Model instance to fit
+        method_name: Name of the method ('PI', 'DA+PI', 'INV+PI', 'ERM', 'DA+ERM', 'ATE')
+        X: Original treatment data
+        y: Outcome data
+        GX: Augmented treatment data (optional)
+        G: Augmentation parameters (optional)
+        hyperparameters: Training hyperparameters (optional)
+        **kwargs: Additional arguments (e.g., pbar_manager, da)
+    """
+    if method_name == 'ATE':
+        # ATE is computed analytically, no fitting required
+        return
+    
+    # Prepare fit kwargs with hyperparameters
+    fit_kwargs = {**(hyperparameters or {}), **kwargs}
+    
+    # Dispatch based on method name to use correct data
+    if method_name == 'PI':
+        # PI uses original data only
+        model.fit(X=X, y=y, **fit_kwargs)
+    
+    elif method_name == 'DA+PI':
+        # DA+PI uses augmented data only
+        model.fit(X=GX, y=y, **fit_kwargs)
+    
+    elif method_name == 'INV+PI':
+        # INV+PI uses both original and augmented data
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+    
+    elif method_name == 'ERM':
+        # ERM uses original data
+        model.fit(X=X, y=y, **fit_kwargs)
+    
+    elif method_name == 'DA+ERM':
+        # DA+ERM uses augmented data
+        model.fit(X=GX, y=y, **fit_kwargs)
+    
+    else:
+        # Fallback for any custom methods - pass everything
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)

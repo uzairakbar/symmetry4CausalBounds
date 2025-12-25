@@ -64,3 +64,4 @@ def fit_ground_truth_f(
         X_features, y_deconfounded
     ).coef_.reshape(-1, 1)
     return f, features, epsilon
+

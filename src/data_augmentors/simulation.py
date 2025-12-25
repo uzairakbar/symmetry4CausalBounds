@@ -8,7 +8,7 @@ from src.data_augmentors.abstract import DataAugmenter as DA
 
 
 DA_STD: float=1.0
-BASIS_SELECTOIN_PROBABILITY: float=9.0/10.0
+BASIS_SELECTOIN_PROBABILITY: float=8.0/10.0
 
 
 class NullSpaceTranslation(DA):
@@ -57,7 +57,7 @@ class NullSpaceTranslation(DA):
         return 'translate'
     
     def augment(
-            self, X: NDArray, gamma: float=16.0
+            self, X: NDArray, gamma: float=1.0
         ) -> Tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
@@ -140,7 +140,7 @@ class LinearSimulationDA(DA):
         
     @property
     def augmentation(self):
-        return 'linear_simulation'
+        return 'simulation'
     
     def augment(
             self,

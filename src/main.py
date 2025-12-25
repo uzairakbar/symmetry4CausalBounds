@@ -1,3 +1,6 @@
+"""
+Main entry point for experiments.
+"""
 import os
 import sys
 import yaml
@@ -6,42 +9,37 @@ from munch import munchify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.experiments.simulation import (
-    linear as linear_simulation,
-    # population as linear_simulation,
-)
-from src.experiments.real import (
-    optical_device as optical_device_experiment,
-    # cmnist as colored_mnist_experiment,
-)
+from src.experiments.simulation import SimulationOrchestrator
+from src.experiments.optical_device import OpticalOrchestrator
 
 
 def main():
-
+    """Run experiments based on config.yaml."""
     with open('config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     config = munchify(config)
-
-    if 'linear_simulation' in config:
+    
+    if 'simulation' in config:
         logger.info('Running linear simulation experiment.')
-        linear_simulation.run(
-            **config.linear_simulation,
+        orchestrator = SimulationOrchestrator(
+            **config.simulation,
             hyperparameters=config.hyperparameters
+        )
+        orchestrator.run(
+            sweep_mode=config.simulation.sweep_mode,
+            plot_panel=config.simulation.plot_panel
         )
     
     if 'optical_device' in config:
         logger.info('Running optical device experiment.')
-        optical_device_experiment.run(
+        orchestrator = OpticalOrchestrator(
             **config.optical_device,
             hyperparameters=config.hyperparameters
         )
-    
-    # if 'colored_mnist' in config:
-    #     logger.info('Running colored MNIST experiment.')
-    #     colored_mnist_experiment.run(
-    #         **config.colored_mnist,
-    #         hyperparameters=config.hyperparameters
-    #     )
+        orchestrator.run(
+            sweep_mode=config.optical_device.sweep_mode,
+            plot_panel=config.optical_device.plot_panel
+        )
 
 
 if __name__ == '__main__':
