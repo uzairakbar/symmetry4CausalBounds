@@ -1,5 +1,6 @@
 """
 Unified configuration management for experiments.
+All parameters defined here - no defaults in method classes.
 """
 import numpy as np
 from typing import Dict, Any, Literal, Callable
@@ -105,8 +106,6 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
 # PLOT ANNOTATIONS
 # =============================================================================
 
-ExperimentType = Literal['simulation', 'optical_device', 'colored_mnist']
-
 ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
     'pc1': {
         'xlabel': r'$t$',
@@ -151,12 +150,14 @@ class MethodRegistry:
     @staticmethod
     def build_methods(
         method_names: list[str],
-        gamma: float = None,
-        gamma0: float = None,
-        epsilon: float = None
+        gamma: float,
+        gamma0: float,
+        epsilon: float
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
+        
+        All parameters are now required - no defaults allowed.
         
         Args:
             method_names: List of method names to build

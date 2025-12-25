@@ -1,6 +1,6 @@
 """
 Experiments utilities package.
-Provides metrics, plotting, data operations, and model fitting utilities.
+Provides metrics, plotting, data operations, model fitting, and panels.
 """
 
 from .constants import *
@@ -8,6 +8,7 @@ from .metrics import *
 from .plotting import *
 from .data_operations import *
 from .model_fitting import *
+from .panels import *
 
 __all__ = [
     # Constants
@@ -29,4 +30,7 @@ __all__ = [
     
     # Model fitting
     'fit_model',
+    
+    # Panels
+    'PanelBuilder',
 ]

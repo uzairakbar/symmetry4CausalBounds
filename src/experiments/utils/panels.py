@@ -1,10 +1,10 @@
 """
-Panel plot builder for 4x3 visualization panels.
+Panel plot utilities for 4x3 visualization panels.
 """
 import numpy as np
 from typing import Dict, Tuple
 
-from src.experiments.utils import radial_sweep_pcs, sweep_along_pc
+from src.experiments.utils.data_operations import radial_sweep_pcs, sweep_along_pc
 from src.experiments.utils.plotting import create_panel_plot
 
 
@@ -23,6 +23,8 @@ class PanelBuilder:
         self.runner = runner
         self.experiment_name = experiment_name
         self.use_augmented = use_augmented_geometry
+        self.fitted_models = {}  # Cache fitted models
+        self.radial_results = None  # Cache radial sweep results
     
     def build(self, sweep_samples: int):
         """
@@ -39,10 +41,16 @@ class PanelBuilder:
         pc2_points, _, _, pc2_vector = sweep_along_pc(geometry_for_pcs, 1, sweep_samples, 3.0)
         radial_points = radial_sweep_pcs(geometry_for_pcs, sweep_samples)
         
-        # Run predictions on these geometries
-        results_pc1, ground_truth_pc1 = self._run_sweep(pc1_points)
-        results_pc2, ground_truth_pc2 = self._run_sweep(pc2_points)
-        results_radial, ground_truth_radial = self._run_sweep(radial_points)
+        # Fit models ONCE using radial sweep (standard query sweep)
+        self._fit_all_models()
+        
+        # Run predictions on different geometries (reusing fitted models)
+        results_pc1, ground_truth_pc1 = self._predict_sweep(pc1_points)
+        results_pc2, ground_truth_pc2 = self._predict_sweep(pc2_points)
+        results_radial, ground_truth_radial = self._predict_sweep(radial_points)
+        
+        # Cache radial results for later use
+        self.radial_results = results_radial
         
         # Build histogram data (ALWAYS compare X vs GX)
         histogram_data = self._build_histogram_data(
@@ -55,7 +63,7 @@ class PanelBuilder:
         
         t_values_pc1 = np.linspace(-3 * std_pc1, 3 * std_pc1, sweep_samples)
         t_values_pc2 = np.linspace(-3 * std_pc2, 3 * std_pc2, sweep_samples)
-        theta_values = np.linspace(0, 2*np.pi, sweep_samples)
+        theta_values = np.linspace(0, 2 * np.pi, sweep_samples, endpoint=False)
         
         # Organize column data: (results, ground_truth, x_axis)
         column_data = [
@@ -67,9 +75,36 @@ class PanelBuilder:
         # Generate panel plot
         create_panel_plot(self.experiment_name, column_data, histogram_data)
     
-    def _run_sweep(self, raw_points: np.ndarray) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    def get_radial_results(self):
+        """Return cached radial sweep results."""
+        return self.radial_results
+    
+    def _fit_all_models(self):
+        """Fit all models once and cache them."""
+        from src.experiments.utils import fit_model
+        
+        context = self.runner.setup_data()
+        
+        for name, builder in self.runner.methods.items():
+            if name == 'ATE':
+                self.fitted_models[name] = None  # ATE has no model
+            else:
+                model = builder()
+                fit_model(
+                    model=model,
+                    method_name=name,
+                    X=context.X,
+                    y=context.y,
+                    GX=context.GX,
+                    G=context.G,
+                    hyperparameters=self.runner.hyperparameters,
+                    da=context.da
+                )
+                self.fitted_models[name] = model
+    
+    def _predict_sweep(self, raw_points: np.ndarray) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
         """
-        Run models on specific geometry.
+        Run predictions on specific geometry using cached models.
         
         Args:
             raw_points: Query points in raw feature space
@@ -78,19 +113,24 @@ class PanelBuilder:
             Tuple of (predictions_dict, ground_truth)
         """
         # Apply polynomial transformation if needed
-        if hasattr(self.runner, 'poly'):
+        if hasattr(self.runner, 'poly') and self.runner.poly is not None:
             transformed_points = self.runner.poly.fit_transform(raw_points)
         else:
             transformed_points = raw_points
         
-        # Temporarily override sweep values
-        original_get_sweep = self.runner.get_sweep_values
-        self.runner.get_sweep_values = lambda: transformed_points
-        
-        _, results = self.runner.run(desc="Panel Sweep")
-        
-        # Restore original method
-        self.runner.get_sweep_values = original_get_sweep
+        results = {}
+        for name in self.runner.methods.keys():
+            if name == 'ATE':
+                predictions = transformed_points @ self.runner.sem.solution
+            else:
+                model = self.fitted_models[name]
+                predictions = model.predict(transformed_points)
+            
+            # Reshape for consistent output format
+            if 'PI' in name:
+                results[name] = predictions[:, np.newaxis, :]
+            else:
+                results[name] = predictions.reshape(len(transformed_points), 1)
         
         # Compute ground truth
         ground_truth = transformed_points @ self.runner.sem.solution

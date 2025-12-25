@@ -38,7 +38,7 @@ class LinearSimulationSEM(SEM):
     def sample(
         self,
         N: int = 1,
-        kappa: float = 0.0,
+        kappa: float = 1.0,
         intervention: bool = False,
         **kwargs
     ) -> Tuple[NDArray, NDArray]:

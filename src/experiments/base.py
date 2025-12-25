@@ -1,5 +1,6 @@
 """
 Base classes for experiment orchestration with unified runner logic.
+Updated to use simplified fit_model signature.
 """
 import enlighten
 import numpy as np
@@ -90,13 +91,19 @@ class QuerySweepRunner(BaseExperimentRunner):
                     predictions = queries @ context.sem.solution
                 else:
                     model = builder()
+                    
+                    # Pass method name so fit_model knows which data to use
                     fit_model(
-                        model, name,
-                        context.X, context.y, context.GX,
+                        model=model,
+                        method_name=name,
+                        X=context.X,
+                        y=context.y,
+                        GX=context.GX,
                         G=context.G,
                         hyperparameters=self.hyperparameters,
                         da=context.da
                     )
+                    
                     predictions = model.predict(queries)
                 
                 # Reshape for consistent output format
@@ -163,12 +170,19 @@ class ParamSweepRunner(BaseExperimentRunner):
                             estimate = estimand
                         else:
                             model = builder()
+                            
+                            # Pass method name so fit_model knows which data to use
                             fit_model(
-                                model, name, X, y, GX,
+                                model=model,
+                                method_name=name,
+                                X=X,
+                                y=y,
+                                GX=GX,
                                 G=G,
                                 hyperparameters=self.hyperparameters,
                                 da=self.get_da(j)
                             )
+                            
                             estimate = model.predict(X_test, **self.get_predict_kwargs(param))
                         
                         results[name][i, j] = self.metric_fn(estimand, estimate)
@@ -288,7 +302,7 @@ class ExperimentOrchestrator(ABC):
     
     def _run_query_sweep(self, plot_panel: bool, panel_only: bool):
         """Execute query sweep and generate visualizations."""
-        from src.experiments.panel_builder import PanelBuilder
+        from src.experiments.utils import PanelBuilder
         
         RunnerCls = self.get_query_runner_cls()
         
@@ -296,20 +310,29 @@ class ExperimentOrchestrator(ABC):
         run_kwargs = self._get_clean_kwargs()
         run_kwargs['n_experiments'] = 1
         
+        # Create runner ONCE - used for both panel and radial sweep
         runner = RunnerCls(methods=self.methods, **run_kwargs)
         
         # Generate panel plot if requested
+        panel_builder = None
         if plot_panel or panel_only:
             # Optical uses augmented geometry, simulation uses raw
             use_augmented_geometry = 'optical' in self.name
-            PanelBuilder(runner, self.name, use_augmented_geometry).build(
-                self.kwargs['sweep_samples']
-            )
+            panel_builder = PanelBuilder(runner, self.name, use_augmented_geometry)
+            panel_builder.build(self.kwargs['sweep_samples'])
+            
             if panel_only:
                 return
         
-        # Generate standard radial sweep plot
-        _, results = runner.run("Radial Sweep")
+        # Generate standard radial sweep plot using CACHED results from panel
+        if panel_builder is not None:
+            # Reuse results from panel builder
+            results = panel_builder.get_radial_results()
+        else:
+            # No panel, run fresh
+            _, results = runner.run("Radial Sweep")
+        
+        # Create angle values for plotting (x-axis)
         angles = np.linspace(0, 2*np.pi, self.kwargs['sweep_samples'], endpoint=False)
         
         save(angles, 'treatment_values', self.name, 'pkl')
