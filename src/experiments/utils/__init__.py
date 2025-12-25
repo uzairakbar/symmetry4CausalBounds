@@ -12,7 +12,7 @@ from .panels import *
 
 __all__ = [
     # Constants
-    'RC_PARAMS', 'TEX_MAPPER', 'COLOR_MAP',
+    'RC_PARAMS', 'TEX_MAPPER', 'COLOR_MAP', 'ALPHA_MAP',
     'FS_TICK', 'FS_LABEL', 'PLOT_DPI', 'PLOT_FORMAT',
     'ARTIFACTS_DIRECTORY',
     

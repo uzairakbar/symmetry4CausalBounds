@@ -8,9 +8,9 @@ from numpy.typing import NDArray
 from typing import Dict, List, Tuple, Optional, Literal
 
 from .constants import (
-    RC_PARAMS, TEX_MAPPER, COLOR_MAP,
+    RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
     FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
-    DEFAULT_HILIGHT_OURS
+    DEFAULT_HILIGHT_OURS,
 )
 from .data_operations import bootstrap, save
 
@@ -230,7 +230,7 @@ def create_query_sweep_plot(
         
         # Plot based on method type
         if 'PI' in method_name:
-            alpha = 0.3 if 'INV' in method_name else 0.2
+            alpha = ALPHA_MAP.get(method_name, 0.2)
             handle = plt.fill_between(
                 x_values, lower_bound, upper_bound,
                 color=color, alpha=alpha
@@ -314,7 +314,7 @@ def create_panel_plot(
         4, 3, figsize=(15, 8),
         sharex='col',
         gridspec_kw={'height_ratios': [0.2, 0.2, 0.2, 0.7]},
-        constrained_layout=True
+        constrained_layout=True,
     )
     
     # Get colors for original and augmented data
@@ -343,7 +343,7 @@ def create_panel_plot(
             
             # Plot
             if 'PI' in method_name:
-                alpha = 0.3 if 'INV' in method_name else 0.2
+                alpha = ALPHA_MAP.get(method_name, 0.2)
                 handle = ax_pred.fill_between(
                     x_grid, lower, upper,
                     alpha=alpha, edgecolor='none',
@@ -374,7 +374,7 @@ def create_panel_plot(
             if 'PI' in method_name:
                 has_pi = True
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
-                alpha = 0.3 if 'INV' in method_name else 0.2
+                alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
                 ax_width.fill_between(x_grid, 0, width, alpha=alpha, edgecolor='none', facecolor=color)
                 ax_width.plot(x_grid, width, linewidth=1.5, color=color)
@@ -406,7 +406,7 @@ def create_panel_plot(
                 )
                 worst_err = squared_errors.max(axis=1)
                 
-                alpha = 0.3 if 'INV' in method_name else 0.2
+                alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
                 ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, edgecolor='none', facecolor=color)
                 ax_worst.plot(x_grid, worst_err, linewidth=1.5, color=color)
@@ -449,10 +449,12 @@ def create_panel_plot(
         handles=handles, labels=label_order,
         loc='center', ncol=legend_ncols,
         fontsize=FS_TICK + 2, frameon=False,
-        columnspacing=1.1
+        borderpad=-0.3,
+        borderaxespad=0,
+        labelspacing=0.25,
     )
     for h in leg.legendHandles:
         h.set_linewidth(2.0)
     
     fig.align_ylabels(axes[:, 0])
-    save(fig, 'panel_4x3', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
+    save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)

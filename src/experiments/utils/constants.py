@@ -51,6 +51,20 @@ COLOR_MAP: Dict[str, int] = {
     'DA+PI_IV': 4,
 }
 
+# Alpha (transparency) mapping for methods
+ALPHA_MAP: Dict[str, float] = {
+    # Point identification methods (solid)
+    'ATE': 1.0,
+    'ERM': 1.0,
+    'DA+ERM': 1.0,
+    'DA+IV': 1.0,
+    # Partial identification methods (transparent)
+    'PI_INV': 0.3,
+    'PI': 0.15,
+    'DA+PI': 0.2,
+    'DA+PI_IV': 0.25,
+}
+
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
