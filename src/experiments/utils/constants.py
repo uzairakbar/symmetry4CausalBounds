@@ -30,13 +30,13 @@ RC_PARAMS: Dict[str, str | int | bool] = {
 TEX_MAPPER: Dict[str, str] = {
     'Data': r'Data',
     'ATE': r'$\operatorname{ate}$',
-    'PI': r'$\operatorname{pi}$',
-    'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'INV+PI': r'$\operatorname{inv}+\operatorname{pi}$',
-    'DA+IV+PI': r'$\operatorname{da}+\operatorname{iv}+\operatorname{pi}$',
     'ERM': r'$\operatorname{erm}$',
     'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
     'DA+IV': r'$\operatorname{da}+\operatorname{iv}$',
+    'PI_INV': r'$\operatorname{pi}_{\operatorname{inv}}$',
+    'PI': r'$\operatorname{pi}$',
+    'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
+    'DA+PI_IV': r'$\operatorname{da}+\operatorname{pi}_{\operatorname{iv}}$',
 }
 
 # Color mapping for methods
@@ -45,10 +45,10 @@ COLOR_MAP: Dict[str, int] = {
     'ERM': 0,
     'DA+ERM': 3,
     'DA+IV': 4,
+    'PI_INV': 2,
     'PI': 0,
     'DA+PI': 3,
-    'INV+PI': 2,
-    'DA+IV+PI': 4,
+    'DA+PI_IV': 4,
 }
 
 # Plotting defaults

@@ -10,10 +10,10 @@ simulation:
         - ERM
         - DA+ERM
         - DA+IV
-        - INV+PI
+        - PI_INV
         - PI
         - DA+PI
-        - DA+IV+PI
+        - DA+PI_IV
     sweep_mode: query
     metric: approximation_error     # Options: approximation_error, worst_error, interval_width
     augmentation: translate
@@ -29,10 +29,10 @@ optical_device:
         - ERM
         - DA+ERM
         - DA+IV
-        - INV+PI
+        - PI_INV
         - PI
         - DA+PI
-        - DA+IV+PI
+        - DA+PI_IV
     sweep_mode: query
     metric: approximation_error
     augmentation: all
@@ -43,12 +43,18 @@ optical_device:
 #     num_seeds: 10
 #     n_samples: 60_000
 #     methods:
+#         - ATE
 #         - ERM
 #         - DA+ERM
-#         - ATE
+#         - DA+IV
+#         - PI_INV
 #         - PI
 #         - DA+PI
+#         - DA+PI_IV
+#     sweep_mode: query
+#     metric: approximation_error
 #     augmentation: jitter > translate
+#     plot_panel: true
 
 hyperparameters:
     lr: 0.01            # learning rate for stochastic gradient descent

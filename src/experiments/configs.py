@@ -133,17 +133,17 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
     'kappa': {
         'xlabel': r'$\kappa$',
         'xscale': 'linear',
-        'dotted_lines': ['ERM', 'DA+ERM'],
+        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     },
     'alpha': {
         'xlabel': r'$a$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
+        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     },
     'gamma': {
         'xlabel': r'$\Gamma$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
+        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     }
 }
 
@@ -181,10 +181,10 @@ class MethodRegistry:
             'ERM': lambda: ERM(),
             'DA+ERM': lambda: ERM(),
             'DA+IV': lambda: IV(),
+            'PI_INV': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
             'PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
             'DA+PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
-            'INV+PI': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
-            'DA+IV+PI': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
+            'DA+PI_IV': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
         }
         
         return {
