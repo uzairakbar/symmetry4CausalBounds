@@ -8,7 +8,12 @@ from sklearn.preprocessing import PolynomialFeatures
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.sem.optical_device import OpticalDeviceSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.generic_runner import GenericQuerySweep, GammaSweep
+from src.experiments.generic_runner import (
+    GenericQuerySweep, 
+    GammaSweep, 
+    AugmentationFoldSweep,
+    GenericParamSweep
+)
 from src.experiments.configs import (
     MethodRegistry,
     OPTICAL_CONFIG,
@@ -28,10 +33,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
     def __init__(self, augmentation: str, **kwargs):
         """
         Initialize optical orchestrator.
-        
-        Args:
-            augmentation: Augmentation type ('all', 'rotation', etc.)
-            **kwargs: Other experiment parameters
         """
         self.augmentation = augmentation
         
@@ -57,12 +58,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         )
     
     def _da_factory(self, sem=None):
-        """
-        Factory for creating DA instances.
-        
-        Args:
-            sem: SEM instance (not used for optical device, but kept for consistency)
-        """
+        """Factory for creating DA instances."""
         return DA(self.augmentation)
     
     def _poly_factory(self):
@@ -86,6 +82,8 @@ class OpticalOrchestrator(ExperimentOrchestrator):
     
     def get_param_sweeps(self) -> List[Tuple[Type, str]]:
         """Return parameter sweeps to run."""
+        
+        # 1. Standard Gamma Sweep
         class OpticalGammaSweep(GammaSweep):
             def __init__(inner_self, **kwargs):
                 super().__init__(
@@ -95,8 +93,23 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     test_fraction=OPTICAL_CONFIG.test_fraction,
                     sweep_config=SWEEP_CONFIGS['optical_device']['gamma'],
                     gamma0=OPTICAL_CONFIG.gamma0,
-                    use_train_test_split=True,  # Optical uses train/test split
+                    use_train_test_split=True,
                     **kwargs
                 )
-        
-        return [(OpticalGammaSweep, 'gamma')]
+
+        # 2. Augmentation Folds Sweep
+        class OpticalFoldSweep(AugmentationFoldSweep):
+            def __init__(inner_self, **kwargs):
+                super().__init__(
+                    sem_factory=self._sem_factory,
+                    da_factory=self._da_factory,
+                    poly_transform=self._poly_factory(),
+                    test_fraction=OPTICAL_CONFIG.test_fraction,
+                    sweep_config=SWEEP_CONFIGS['optical_device']['folds'],
+                    **kwargs
+                )
+
+        return [
+            (OpticalGammaSweep, 'gamma'),
+            (OpticalFoldSweep, 'folds'),
+        ]

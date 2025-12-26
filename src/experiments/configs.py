@@ -101,11 +101,24 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
             xlabel=r'$\Gamma$',
             xscale='log',
         ),
+        # RENAMED: 'folds' (Augmentation Multiplicity)
+        # We sweep 1x, 2x, 4x, ... 32x augmentations
+        'folds': SweepConfig(
+            range_fn=lambda n: np.array([1, 2, 4, 8, 16, 32]),
+            xlabel=r'Augmentation Folds ($k$)',
+            xscale='log',
+        ),
     },
     'optical_device': {
         'gamma': SweepConfig(
             range_fn=lambda n: np.logspace(-1, 2, base=2, num=n),
             xlabel=r'$\Gamma$',
+            xscale='log',
+        ),
+        # RENAMED: 'folds'
+        'folds': SweepConfig(
+            range_fn=lambda n: np.array([1, 2, 4, 8, 16, 32]),
+            xlabel=r'Augmentation Folds ($k$)',
             xscale='log',
         ),
     },
@@ -132,18 +145,10 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
 }
 
 ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
-    'kappa': {
-        'xlabel': r'$\kappa$',
-        'xscale': 'linear',
-    },
-    'alpha': {
-        'xlabel': r'$a$',
-        'xscale': 'log',
-    },
-    'gamma': {
-        'xlabel': r'$\Gamma$',
-        'xscale': 'log',
-    }
+    'kappa': {'xlabel': r'$\kappa$', 'xscale': 'linear'},
+    'alpha': {'xlabel': r'$a$', 'xscale': 'log'},
+    'gamma': {'xlabel': r'$\Gamma$', 'xscale': 'log'},
+    'folds': {'xlabel': r'Augmentation Folds ($k$)', 'xscale': 'log'}, # Updated label
 }
 
 

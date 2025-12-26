@@ -11,7 +11,8 @@ from src.experiments.generic_runner import (
     GenericQuerySweep,
     KappaSweep,
     AlphaSweep,
-    GammaSweep
+    GammaSweep,
+    AugmentationFoldSweep,
 )
 from src.experiments.configs import (
     MethodRegistry,
@@ -121,4 +122,5 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             (make_sweep_cls(KappaSweep, 'kappa'), 'kappa'),
             (ConfiguredGammaSweep, 'gamma'),
             (make_sweep_cls(AlphaSweep, 'alpha'), 'alpha'),
+            (make_sweep_cls(AugmentationFoldSweep, 'folds'), 'folds'),
         ]

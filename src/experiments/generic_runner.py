@@ -247,3 +247,148 @@ class GammaSweep(GenericParamSweep):
             estimand = X_test @ sem.solution
             
             return X, y, GX, G, X_test, estimand
+
+
+class SampleSweep(GenericParamSweep):
+    """
+    Sweep over sample size N.
+    """
+    def __init__(self, sweep_config, **kwargs):
+        self.sweep_config = sweep_config
+        super().__init__(**kwargs)
+    
+    @property
+    def data_depends_on_param(self) -> bool:
+        return True # Data size changes, must refit
+    
+    def get_param_range(self) -> np.ndarray:
+        return self.sweep_config.range_fn(self.sweep_samples)
+    
+    def generate_data(self, experiment_index: int, n_samples_param):
+        """
+        Generate data with specific sample size N.
+        """
+        N = int(n_samples_param)
+        sem = self.sems[experiment_index]
+        da = self.das[experiment_index]
+        
+        # Training data
+        X_raw, y = sem(N=N)
+        GX_raw, G = da(X_raw)
+        
+        X = self.apply_transform(X_raw)
+        GX = self.apply_transform(GX_raw)
+        
+        # Test data (Keep test set large and constant for fair comparison if possible, 
+        # or scale with N. Here scaling with N via test_fraction)
+        test_size = max(50, int(self.test_fraction * N)) 
+        
+        if 'OpticalDeviceSEM' in str(type(sem)):
+            # Optical uses train/test split from finite pool
+            X_train, X_test, y_train, _, GX_train, _, G_train, _ = train_test_split(
+                X, y, GX, G,
+                test_size=self.test_fraction,
+                random_state=self.seed + experiment_index
+            )
+            # Recalculate estimand on specific test set
+            estimand = X_test @ sem.solution
+            return X_train, y_train, GX_train, G_train, X_test, estimand
+        else:
+            # Simulation uses fresh interventional generation
+            X_test_raw, _ = sem(N=test_size, intervention=True)
+            X_test = self.apply_transform(X_test_raw)
+            estimand = X_test @ sem.solution
+            return X, y, GX, G, X_test, estimand
+
+
+class AugmentationFoldSweep(GenericParamSweep):
+    """
+    Sweep over the number of augmentation folds (multiplicity).
+    Fixed N, increasing Augmentations k.
+    """
+    def __init__(self, sweep_config, **kwargs):
+        self.sweep_config = sweep_config
+        super().__init__(**kwargs)
+    
+    @property
+    def data_depends_on_param(self) -> bool:
+        return True # Changing folds changes dataset size
+    
+    def get_param_range(self) -> np.ndarray:
+        return self.sweep_config.range_fn(self.sweep_samples)
+    
+    def generate_data(self, experiment_index: int, n_folds_param):
+        """
+        Generate data where X is replicated k times, and GX contains k distinct augmentations.
+        """
+        k = int(n_folds_param)
+        sem = self.sems[experiment_index]
+        da = self.das[experiment_index]
+        
+        # Branch for Optical Device (Limited Data Pool)
+        if 'OpticalDeviceSEM' in str(type(sem)):
+            # A. Load raw single-fold data
+            X_all, y_all = sem(N=self.n_samples)
+            
+            # B. Split Train/Test on unique instances
+            X_tr, X_te, y_tr, _, _, _, _, _ = train_test_split(
+                X_all, y_all, X_all, X_all, # dummies
+                test_size=self.test_fraction,
+                random_state=self.seed + experiment_index
+            )
+            
+            # C. Augment Training Train k times
+            X_tr_list, y_tr_list, GX_tr_list, G_tr_list = [], [], [], []
+            for _ in range(k):
+                # Optical DA does NOT take gamma argument
+                gx, g = da(X_tr)
+                X_tr_list.append(X_tr)
+                y_tr_list.append(y_tr)
+                GX_tr_list.append(gx)
+                G_tr_list.append(g)
+            
+            X_train_raw = np.vstack(X_tr_list)
+            y_train = np.vstack(y_tr_list)
+            GX_train_raw = np.vstack(GX_tr_list)
+            G_train = np.vstack(G_tr_list)
+            
+            # D. Transform
+            X_train = self.apply_transform(X_train_raw)
+            GX_train = self.apply_transform(GX_train_raw)
+            X_test = self.apply_transform(X_te)
+            
+            estimand = X_test @ sem.solution
+            return X_train, y_train, GX_train, G_train, X_test, estimand
+
+        # Branch for Simulation (Infinite Data Generator)
+        else:
+            # 1. Generate Base Data (Fixed N)
+            X_base, y_base = sem(N=self.n_samples)
+            
+            # 2. Generate Augmented Data (GX) - k distinct passes
+            GX_list, G_list = [], []
+            for _ in range(k):
+                # Simulation DA DOES take gamma argument (default 1.0)
+                # We can omit it to use default or pass it safely if we want
+                # Removing explicit kwarg ensures compat if da.__call__ signature changes
+                gx, g = da(X_base) 
+                GX_list.append(gx)
+                G_list.append(g)
+                
+            GX_raw = np.vstack(GX_list)
+            G = np.vstack(G_list)
+            
+            # 3. Replicate Baseline Data
+            X_raw = np.tile(X_base, (k, 1))
+            y = np.tile(y_base, (k, 1))
+            
+            # 4. Transforms
+            X = self.apply_transform(X_raw)
+            GX = self.apply_transform(GX_raw)
+            
+            # 5. Test Data
+            X_test_raw, _ = sem(N=int(self.test_fraction * self.n_samples), intervention=True)
+            X_test = self.apply_transform(X_test_raw)
+            estimand = X_test @ sem.solution
+            
+            return X, y, GX, G, X_test, estimand
