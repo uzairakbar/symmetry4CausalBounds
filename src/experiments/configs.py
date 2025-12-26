@@ -121,6 +121,11 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
             xlabel=r'Augmentation Folds ($k$)',
             xscale='log',
         ),
+        'kappa': SweepConfig(
+            range_fn=lambda n: np.arange(12),
+            xlabel=r'$\hat{\kappa}$ (Confounding Strength)',
+            xscale='linear',
+        )
     },
 }
 
