@@ -135,17 +135,14 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
     'kappa': {
         'xlabel': r'$\kappa$',
         'xscale': 'linear',
-        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     },
     'alpha': {
         'xlabel': r'$a$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     },
     'gamma': {
         'xlabel': r'$\Gamma$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM', 'DA+IV'],
     }
 }
 

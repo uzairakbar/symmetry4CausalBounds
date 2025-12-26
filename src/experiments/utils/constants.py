@@ -1,7 +1,7 @@
 """
 Centralized constants for experiments.
 """
-from typing import Dict, Literal
+from typing import Dict, Literal, List
 
 # Plot formatting
 FS_TICK: int = 15
@@ -59,11 +59,16 @@ ALPHA_MAP: Dict[str, float] = {
     'DA+ERM': 1.0,
     'DA+IV': 1.0,
     # Partial identification methods (transparent)
-    'PI_INV': 0.75,
+    'PI_INV': 0.8,
     'PI': 0.2,
     'DA+PI': 0.2,
-    'DA+PI_IV': 0.3,
+    'DA+PI_IV': 0.4,
 }
+
+# Visual style configuration
+POINT_ESTIMATES: List[str] = ['ATE', 'ERM', 'DA+ERM', 'DA+IV']
+POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
+PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = '-'
 
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False

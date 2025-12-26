@@ -8,9 +8,10 @@ from numpy.typing import NDArray
 from typing import Dict, List, Tuple, Optional, Literal
 
 from .constants import (
-    RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
+    DEFAULT_HILIGHT_OURS, POINT_ESTIMATES,
     FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
-    DEFAULT_HILIGHT_OURS,
+    RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
+    POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE,
 )
 from .data_operations import bootstrap, save
 
@@ -49,7 +50,6 @@ def create_param_sweep_plot(
     ylabel: str = 'nCER',
     xscale: Literal['linear', 'log'] = 'linear',
     yscale: Literal['linear', 'log'] = 'linear',
-    dotted_lines: Optional[List[str]] = None,
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     legend_items: Optional[List[str]] = None,
@@ -69,7 +69,6 @@ def create_param_sweep_plot(
         ylabel: Label for y-axis
         xscale: Scale for x-axis ('linear' or 'log')
         yscale: Scale for y-axis ('linear' or 'log')
-        dotted_lines: Methods to plot with dotted lines
         savefig: Whether to save the figure
         format: File format for saving
         legend_items: Specific methods to include in legend
@@ -82,7 +81,6 @@ def create_param_sweep_plot(
     if bootstrapped:
         y_results = bootstrap(y_results)
     
-    dotted_lines = dotted_lines or []
     legend_items = [item for item in (legend_items or []) if item in y_results]
     
     # Setup plot
@@ -108,7 +106,7 @@ def create_param_sweep_plot(
             legend_items[legend_items.index(method_name)] = label
         
         # Choose line style
-        linestyle = '--' if method_name in dotted_lines else '-'
+        linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
         color = colors[COLOR_MAP[method_name]]
         
         # Plot mean
@@ -236,7 +234,7 @@ def create_query_sweep_plot(
                 color=color, alpha=alpha
             )
         else:
-            linestyle = '--' if method_name == 'ATE' else '-'
+            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
             line_color = 'black' if method_name == 'ATE' else color
             handle = plt.plot(
                 x_values, mean_pred,
@@ -345,17 +343,19 @@ def create_panel_plot(
             if 'PI' in method_name:
                 alpha = ALPHA_MAP.get(method_name, 0.2)
                 handle = ax_pred.fill_between(
-                    x_grid, lower, upper,
-                    alpha=alpha, edgecolor='none',
-                    facecolor=_get_method_color(method_name)
+                    x_grid, lower, upper, alpha=alpha,
+                    color=_get_method_color(method_name),
+                    zorder=-1,
                 )
             else:
-                linestyle = '--' if method_name == 'ATE' else '-'
+                linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
                 line_color = 'black' if method_name == 'ATE' else _get_method_color(method_name)
+                zorder = 1 if method_name == 'ATE' else 0
                 handle = ax_pred.plot(
                     x_grid, y_mean,
                     linestyle=linestyle, linewidth=2,
-                    color=line_color
+                    color=line_color,
+                    zorder=zorder,
                 )[0]
             
             if label not in legend_handles:
@@ -376,8 +376,8 @@ def create_panel_plot(
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
                 alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
-                ax_width.fill_between(x_grid, 0, width, alpha=alpha, edgecolor='none', facecolor=color)
-                ax_width.plot(x_grid, width, linewidth=1.5, color=color)
+                ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
+                ax_width.plot(x_grid, width, linewidth=0.5, color=color)
         
         if not has_pi:
             ax_width.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
@@ -408,8 +408,8 @@ def create_panel_plot(
                 
                 alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
-                ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, edgecolor='none', facecolor=color)
-                ax_worst.plot(x_grid, worst_err, linewidth=1.5, color=color)
+                ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
+                ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
         
         if not has_worst:
             ax_worst.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
@@ -427,8 +427,8 @@ def create_panel_plot(
         
         if hist_key and hist_key in histograms:
             orig_proj, aug_proj = histograms[hist_key]
-            ax_hist.hist(orig_proj, bins=40, density=True, alpha=0.45, color=orig_color)
-            ax_hist.hist(aug_proj, bins=40, density=True, alpha=0.45, color=aug_color)
+            ax_hist.hist(orig_proj, bins=50, density=True, alpha=0.45, color=orig_color)
+            ax_hist.hist(aug_proj, bins=50, density=True, alpha=0.45, color=aug_color)
             if col_idx == 0:
                 ax_hist.set_ylabel('density', fontsize=FS_LABEL)
         else:
@@ -453,8 +453,6 @@ def create_panel_plot(
         borderaxespad=0,
         labelspacing=0.25,
     )
-    for h in leg.legendHandles:
-        h.set_linewidth(2.0)
     
     fig.align_ylabels(axes[:, 0])
     save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
