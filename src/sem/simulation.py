@@ -11,27 +11,27 @@ from numpy.typing import NDArray
 from src.sem.abstract import StructuralEquationModel as SEM
 
 
-TREATMENT_DIMENSION: int = 32
 OUTCOME_DIMENSION: int = 1
+TREATMENT_DIMENSION: int = 32
 
 
 class LinearSimulationSEM(SEM):
     def __init__(
         self,
-        treatment_dimension: int = TREATMENT_DIMENSION,
         outcome_dimension: int = OUTCOME_DIMENSION,
+        treatment_dimension: int = TREATMENT_DIMENSION,
     ):
-        self.treatment_dimension = treatment_dimension
         self.outcome_dimension = outcome_dimension
+        self.treatment_dimension = treatment_dimension
+
+        # Confounding direction W_XXi ~ N(0, I), normalized
+        W_XXi = np.random.randn(treatment_dimension)
+        self.W_XXi = W_XXi / np.linalg.norm(W_XXi)
 
         # Structural coefficients f ~ N(0, I)
         self.W_XY = np.random.randn(
             treatment_dimension, outcome_dimension
         )
-
-        # Confounding direction W_XXi ~ N(0, I), normalized
-        W_XXi = np.random.randn(treatment_dimension)
-        self.W_XXi = W_XXi / np.linalg.norm(W_XXi)
 
         super().__init__()
 

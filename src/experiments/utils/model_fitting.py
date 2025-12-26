@@ -20,11 +20,11 @@ def fit_model(
     The key insight: Methods are the same class but used differently:
     - PI uses original data X
     - DA+PI uses augmented data GX
-    - INV+PI uses both X and GX
+    - PI_INV uses both X and GX
     
     Args:
         model: Model instance to fit
-        method_name: Name of the method ('PI', 'DA+PI', 'INV+PI', 'ERM', 'DA+ERM', 'ATE')
+        method_name: Name of the method ('PI', 'DA+PI', 'PI_INV', 'ERM', 'DA+ERM', 'ATE')
         X: Original treatment data
         y: Outcome data
         GX: Augmented treatment data (optional)
@@ -48,9 +48,13 @@ def fit_model(
         # DA+PI uses augmented data only
         model.fit(X=GX, y=y, **fit_kwargs)
     
-    elif method_name == 'INV+PI':
-        # INV+PI uses both original and augmented data
+    elif method_name == 'PI_INV':
+        # PI_INV uses both original and augmented data
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+    
+    elif method_name == 'DA+PI_IV':
+        # DA+PI_IV uses both original and augmented data
+        model.fit(X=GX, y=y, Z=G, **fit_kwargs)
     
     elif method_name == 'ERM':
         # ERM uses original data
@@ -59,6 +63,10 @@ def fit_model(
     elif method_name == 'DA+ERM':
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, **fit_kwargs)
+    
+    elif method_name == 'DA+IV':
+        # DA+ERM uses augmented data
+        model.fit(X=GX, y=y, Z=G, **fit_kwargs)
     
     else:
         # Fallback for any custom methods - pass everything

@@ -178,47 +178,79 @@ class InvarianceConstrainedPartialR2(PartialR2):
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(self.SigmaX))
             ) <= radius ** 2,
-            cp.sum_squares(
-                cp.Constant(self.GX - self.X) @ h
-            ) <= N * self.epsilon
+            cp.norm(
+                cp.Constant(self.GX - self.X) @ h, p=2
+            ) <= np.sqrt(N * self.epsilon)
         ]
         
         cost = cp.Constant(x) @ h
         return self._optimize(cost, constraints)
 
 
+class InstrumentalVariablePartialR2(PartialR2):
     def __init__(
             self,
-            gamma=GAMMA,
-            gamma0=GAMMA0,
-            epsilon=EPSILON,
+            gamma=None,
+            gamma0=None,
+            delta=None,
             n_jobs=1,
         ):
-        self.epsilon = epsilon
-        super(
-            InvarianceConstrainedPartialR2, self
-        ).__init__(gamma, gamma0, n_jobs)
+        if delta is None:
+            delta = 0.0
+            # raise ValueError("delta must be explicitly provided")
+        
+        self.delta = delta
+        super(InstrumentalVariablePartialR2, self).__init__(gamma, gamma0, n_jobs)
 
-    def _fit(self, X, y, GX=None, **kwargs):
-        # default to vanilla partial R2 if GX is None
-        if GX is None:
-            GX = X
-        self.X, self.GX = X, GX
-        return super(
-            InvarianceConstrainedPartialR2, self
-        )._fit(X, y, **kwargs)
+    def _fit(self, X, y, Z=None, **kwargs):
+        if Z is None:
+            Z = X
+            
+        self.X, self.y, self.Z = X, y, Z
+        
+        # PRE-COMPUTATION FOR EFFICIENCY
+        # Instead of the N x N projection matrix, we compute components 
+        # in the dimension of Z (K x K).
+        
+        # 1. Compute (Z^T Z)^-1
+        N = len(Z)
+        # ZtZ = Z.T @ Z / N
+        self.ZtZ_inv = Z @ np.linalg.pinv(Z)
+        
+        # 2. Pre-compute Z^T y and Z^T X (Size K x 1 and K x D)
+        self.Zty = Z.T @ y
+        self.ZtX = Z.T @ X
+        
+        # Ensure parent _fit is called to set up standard PI variables (SigmaX, etc.)
+        # Note: Ensure parent uses the N-scaling fix from previous conversation
+        return super(InstrumentalVariablePartialR2, self)._fit(X, y, **kwargs)
     
     def _find_bounds(self, x, radius):
         N = len(self.X)
         h = cp.Variable(self.h_erm.shape)
+        
+        # The IV constraint: || Z^T (y - Xh) ||^2_{ (Z^T Z)^-1 } <= N * epsilon
+        # This effectively calculates (y-Xh)^T P_Z (y-Xh) but using K x K matrices
+        
+        iv_cost_vector = cp.Constant(self.y) - cp.Constant(self.X) @ h
+
         constraints = ([
+            # 1. Standard PI Constraint (Ensure PartialR2 parent has the 1/N fix!)
             cp.quad_form(
                 h - self.h_erm,
                 cp.psd_wrap(cp.Constant(self.SigmaX))
-            ) <= radius**2,
-            cp.norm(
-                cp.Constant(self.GX - self.X) @ h, p=2
-            ) <= np.sqrt(N * self.epsilon)
+            ) <= radius ** 2,
+            
+            # 2. GMM IV Constraint
+            # We scale epsilon by N because the LHS is a sum over N samples
+            cp.quad_form(
+                iv_cost_vector,
+                cp.psd_wrap(cp.Constant(self.ZtZ_inv))
+            ) <= N * self.delta
         ])
+        
         cost = cp.Constant(x) @ h
         return self._optimize(cost, constraints)
+    
+
+    

@@ -43,6 +43,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     names,
                     gamma=OPTICAL_CONFIG.gamma,
                     gamma0=OPTICAL_CONFIG.gamma0,
+                    delta=OPTICAL_CONFIG.delta,
                     epsilon=OPTICAL_CONFIG.epsilon
                 )
         

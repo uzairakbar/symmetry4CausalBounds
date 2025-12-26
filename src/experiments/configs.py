@@ -6,8 +6,16 @@ import numpy as np
 from typing import Dict, Any, Literal, Callable
 from dataclasses import dataclass
 
-from src.methods.regression import LeastSquaresClosedForm as ERM
-from src.methods.sensitivity_models import PartialR2, InvarianceConstrainedPartialR2 as InvPartialR2
+from src.methods.regression import (
+    LeastSquaresClosedForm as ERM,
+    TwoStageLeastSquaresIV as IV,
+    GeneralizedMomentMethodIV as GMMIV,
+)
+from src.methods.sensitivity_models import (
+    PartialR2,
+    InstrumentalVariablePartialR2 as IVPartialR2,
+    InvarianceConstrainedPartialR2 as InvPartialR2,
+)
 
 
 # =============================================================================
@@ -19,6 +27,7 @@ class SimulationConfig:
     """Configuration for simulation experiments."""
     gamma: float = 1.0
     gamma0: float = 1.0
+    delta: float = 2**-8
     epsilon: float = 2**-8
     kappa: float = 1.0
     test_fraction: float = 0.1
@@ -29,7 +38,8 @@ class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
     gamma: float = 2**2
     gamma0: float = 2**2
-    epsilon: float = 2**3
+    delta: float = 2**-1
+    epsilon: float = 2**2
     test_fraction: float = 0.1
     dataset_index: int = 9
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
@@ -125,17 +135,14 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
     'kappa': {
         'xlabel': r'$\kappa$',
         'xscale': 'linear',
-        'dotted_lines': ['ERM', 'DA+ERM'],
     },
     'alpha': {
         'xlabel': r'$a$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
     },
     'gamma': {
         'xlabel': r'$\Gamma$',
         'xscale': 'log',
-        'dotted_lines': ['ERM', 'DA+ERM'],
     }
 }
 
@@ -152,7 +159,8 @@ class MethodRegistry:
         method_names: list[str],
         gamma: float,
         gamma0: float,
-        epsilon: float
+        delta: float,
+        epsilon: float,
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -172,9 +180,11 @@ class MethodRegistry:
             'ATE': lambda: None,  # ATE computed analytically
             'ERM': lambda: ERM(),
             'DA+ERM': lambda: ERM(),
+            'DA+IV': lambda: IV(),
+            'PI_INV': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
             'PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
             'DA+PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
-            'INV+PI': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
+            'DA+PI_IV': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, delta=delta),
         }
         
         return {
