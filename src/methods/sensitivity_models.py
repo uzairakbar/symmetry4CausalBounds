@@ -192,14 +192,14 @@ class InstrumentalVariablePartialR2(PartialR2):
             self,
             gamma=None,
             gamma0=None,
-            epsilon=None,
+            delta=None,
             n_jobs=1,
         ):
-        if epsilon is None:
-            epsilon = 0.0
-            # raise ValueError("epsilon must be explicitly provided")
+        if delta is None:
+            delta = 0.0
+            # raise ValueError("delta must be explicitly provided")
         
-        self.epsilon = epsilon
+        self.delta = delta
         super(InstrumentalVariablePartialR2, self).__init__(gamma, gamma0, n_jobs)
 
     def _fit(self, X, y, Z=None, **kwargs):
@@ -246,7 +246,7 @@ class InstrumentalVariablePartialR2(PartialR2):
             cp.quad_form(
                 iv_cost_vector,
                 cp.psd_wrap(cp.Constant(self.ZtZ_inv))
-            ) <= N * self.epsilon
+            ) <= N * self.delta
         ])
         
         cost = cp.Constant(x) @ h

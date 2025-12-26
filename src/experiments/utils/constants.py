@@ -44,11 +44,11 @@ COLOR_MAP: Dict[str, int] = {
     'ATE': 3,
     'ERM': 0,
     'DA+ERM': 3,
-    'DA+IV': 4,
-    'PI_INV': 2,
+    'DA+IV': 2,
+    'PI_INV': 7,
     'PI': 0,
     'DA+PI': 3,
-    'DA+PI_IV': 4,
+    'DA+PI_IV': 2,
 }
 
 # Alpha (transparency) mapping for methods
@@ -59,10 +59,10 @@ ALPHA_MAP: Dict[str, float] = {
     'DA+ERM': 1.0,
     'DA+IV': 1.0,
     # Partial identification methods (transparent)
-    'PI_INV': 0.3,
-    'PI': 0.15,
+    'PI_INV': 0.75,
+    'PI': 0.2,
     'DA+PI': 0.2,
-    'DA+PI_IV': 0.25,
+    'DA+PI_IV': 0.3,
 }
 
 # Plotting defaults

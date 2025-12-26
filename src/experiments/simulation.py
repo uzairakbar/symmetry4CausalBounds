@@ -47,6 +47,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     names,
                     gamma=SIMULATION_CONFIG.gamma,
                     gamma0=SIMULATION_CONFIG.gamma0,
+                    delta=SIMULATION_CONFIG.delta,
                     epsilon=SIMULATION_CONFIG.epsilon
                 )
         

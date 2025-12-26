@@ -27,6 +27,7 @@ class SimulationConfig:
     """Configuration for simulation experiments."""
     gamma: float = 1.0
     gamma0: float = 1.0
+    delta: float = 2**-8
     epsilon: float = 2**-8
     kappa: float = 1.0
     test_fraction: float = 0.1
@@ -37,7 +38,8 @@ class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
     gamma: float = 2**2
     gamma0: float = 2**2
-    epsilon: float = 2**3
+    delta: float = 2**-1
+    epsilon: float = 2**2
     test_fraction: float = 0.1
     dataset_index: int = 9
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
@@ -160,7 +162,8 @@ class MethodRegistry:
         method_names: list[str],
         gamma: float,
         gamma0: float,
-        epsilon: float
+        delta: float,
+        epsilon: float,
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -184,7 +187,7 @@ class MethodRegistry:
             'PI_INV': lambda: InvPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
             'PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
             'DA+PI': lambda: PartialR2(gamma=gamma, gamma0=gamma0),
-            'DA+PI_IV': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, epsilon=epsilon),
+            'DA+PI_IV': lambda: IVPartialR2(gamma=gamma, gamma0=gamma0, delta=delta),
         }
         
         return {
