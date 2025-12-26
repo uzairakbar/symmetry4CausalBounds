@@ -19,8 +19,6 @@ from src.experiments.utils import fit_model, radial_sweep_pcs
 class GenericQuerySweep(QuerySweepRunner):
     """
     Generic query sweep runner that works with any SEM/DA.
-    
-    Eliminates duplication between simulation and optical experiments.
     """
     
     def __init__(
@@ -30,15 +28,6 @@ class GenericQuerySweep(QuerySweepRunner):
         poly_transform: Optional[Callable] = None,
         **kwargs
     ):
-        """
-        Initialize generic query sweep.
-        
-        Args:
-            sem_factory: Function that returns a SEM instance
-            da_factory: Function that returns a DA instance
-            poly_transform: Optional polynomial feature transformer
-            **kwargs: Base runner arguments (seed, n_samples, etc.)
-        """
         super().__init__(**kwargs)
         
         # Create SEM and DA
@@ -92,13 +81,7 @@ class GenericQuerySweep(QuerySweepRunner):
 # =============================================================================
 
 class GenericParamSweep(ParamSweepRunner):
-    """
-    Generic parameter sweep base class.
-    
-    Subclasses only need to implement:
-    - get_param_range()
-    - generate_single_experiment_data()
-    """
+    """Generic parameter sweep base class."""
     
     def __init__(
         self,
@@ -108,39 +91,21 @@ class GenericParamSweep(ParamSweepRunner):
         test_fraction: float = 0.1,
         **kwargs
     ):
-        """
-        Initialize generic parameter sweep.
-        
-        Args:
-            sem_factory: Function that returns a SEM instance
-            da_factory: Function that takes a SEM and returns a DA instance
-            poly_transform: Optional polynomial feature transformer
-            test_fraction: Fraction of data for testing
-            **kwargs: Base runner arguments
-        """
         self.sem_factory = sem_factory
         self.da_factory = da_factory
         self.poly = poly_transform
         self.test_fraction = test_fraction
-        
         super().__init__(**kwargs)
     
     def setup_sems_and_das(self):
-        """
-        Setup SEMs and DAs for all experiments.
-        
-        CRITICAL: Each DA must be created from its corresponding SEM,
-        since DA computes null space of that specific SEM's W_XY.
-        """
+        """Setup SEMs and DAs for all experiments."""
         self.sems = [self.sem_factory() for _ in range(self.n_experiments)]
         self.das = [self.da_factory(sem) for sem in self.sems]
     
     def get_da(self, experiment_index: int):
-        """Get DA for specific experiment."""
         return self.das[experiment_index]
     
     def apply_transform(self, X: np.ndarray) -> np.ndarray:
-        """Apply polynomial transformation if available."""
         if self.poly:
             return self.poly.fit_transform(X)
         return X
@@ -151,17 +116,20 @@ class GenericParamSweep(ParamSweepRunner):
 # =============================================================================
 
 class KappaSweep(GenericParamSweep):
-    """Sweep over kappa (confounding strength)."""
+    """Sweep over kappa (confounding strength). Data changes every step."""
     
     def __init__(self, sweep_config, **kwargs):
         self.sweep_config = sweep_config
         super().__init__(**kwargs)
     
+    @property
+    def data_depends_on_param(self) -> bool:
+        return True  # Kappa changes data generation
+    
     def get_param_range(self) -> np.ndarray:
         return self.sweep_config.range_fn(self.sweep_samples)
     
     def generate_data(self, experiment_index: int, kappa: float):
-        """Generate data for one experiment at given kappa."""
         sem = self.sems[experiment_index]
         da = self.das[experiment_index]
         
@@ -183,17 +151,20 @@ class KappaSweep(GenericParamSweep):
 
 
 class AlphaSweep(GenericParamSweep):
-    """Sweep over alpha (augmentation strength)."""
+    """Sweep over alpha (augmentation strength). G matrix changes every step."""
     
     def __init__(self, sweep_config, **kwargs):
         self.sweep_config = sweep_config
         super().__init__(**kwargs)
     
+    @property
+    def data_depends_on_param(self) -> bool:
+        return True  # Alpha changes G matrix, so re-fit is required
+    
     def get_param_range(self) -> np.ndarray:
         return self.sweep_config.range_fn(self.sweep_samples)
     
     def generate_data(self, experiment_index: int, alpha: float):
-        """Generate data for one experiment at given alpha."""
         sem = self.sems[experiment_index]
         da = self.das[experiment_index]
         
@@ -215,7 +186,7 @@ class AlphaSweep(GenericParamSweep):
 
 
 class GammaSweep(GenericParamSweep):
-    """Sweep over gamma (sensitivity parameter)."""
+    """Sweep over gamma (sensitivity parameter). Data is CONSTANT."""
     
     def __init__(
         self,
@@ -228,16 +199,19 @@ class GammaSweep(GenericParamSweep):
         self.gamma0 = gamma0
         self.use_split = use_train_test_split
         super().__init__(**kwargs)
+        
+    @property
+    def data_depends_on_param(self) -> bool:
+        return False  # Gamma only changes constraint RHS, not the data
     
     def get_param_range(self) -> np.ndarray:
         return self.sweep_config.range_fn(self.sweep_samples)
     
     def get_predict_kwargs(self, gamma: float):
-        """Pass gamma to predict method."""
         return {'gamma': gamma, 'gamma0': self.gamma0}
     
     def generate_data(self, experiment_index: int, gamma: float):
-        """Generate data for one experiment at given gamma."""
+        """Generate data. 'gamma' param is ignored for generation."""
         sem = self.sems[experiment_index]
         da = self.das[experiment_index]
         
