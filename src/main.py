@@ -9,6 +9,7 @@ from munch import munchify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.experiments.utils import set_seed
 from src.experiments.simulation import SimulationOrchestrator
 from src.experiments.optical_device import OpticalOrchestrator
 
@@ -21,6 +22,7 @@ def main():
     
     if 'simulation' in config:
         logger.info('Running linear simulation experiment.')
+        set_seed(config.simulation.seed)
         orchestrator = SimulationOrchestrator(
             **config.simulation,
             hyperparameters=config.hyperparameters
@@ -32,6 +34,7 @@ def main():
     
     if 'optical_device' in config:
         logger.info('Running optical device experiment.')
+        set_seed(config.optical_device.seed)
         orchestrator = OpticalOrchestrator(
             **config.optical_device,
             hyperparameters=config.hyperparameters
