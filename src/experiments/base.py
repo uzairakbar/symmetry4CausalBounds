@@ -1,6 +1,6 @@
 """
 Base classes for experiment orchestration with unified runner logic.
-Updated to use simplified fit_model signature.
+Updated to use simplified fit_model signature and OPTIMIZED LOOP ORDER.
 """
 import enlighten
 import numpy as np
@@ -146,48 +146,91 @@ class ParamSweepRunner(BaseExperimentRunner):
             raise ValueError(f"Metric '{metric}' not found in metrics module")
         
         self.setup_sems_and_das()
-    
+
+    @property
+    def data_depends_on_param(self) -> bool:
+        """
+        Optimization flag:
+        If False (e.g. Gamma sweep), we fit once and sweep params.
+        If True (e.g. Kappa/Alpha sweep), we must regenerate data and refit every step.
+        """
+        return True
+
     def run(self, desc: str = "Param Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         """
         Run parameter sweep computing metrics.
-        
-        Returns:
-            Tuple of (parameter_values, metric_results_dict)
+        OPTIMIZED: Inverted loop structure to maximize DPP cache reuse.
         """
+        # FIX: Get actual params first to determine size
         param_values = self.get_param_range()
+        n_steps = len(param_values)
+        
         results = {
-            name: np.zeros((self.sweep_samples, self.n_experiments))
+            name: np.zeros((n_steps, self.n_experiments))
             for name in self.methods
         }
         
-        with MANAGER.counter(total=self.sweep_samples, desc=desc, unit='params') as pbar:
-            for i, param in enumerate(param_values):
-                for j in range(self.n_experiments):
-                    X, y, GX, G, X_test, estimand = self.generate_data(j, param)
+        # Iterate Experiments Outer Loop (Allows reusing fitted models)
+        with MANAGER.counter(total=self.n_experiments * n_steps, desc=desc, unit='runs') as pbar:
+            for j in range(self.n_experiments):
+                
+                # OPTIMIZATION:
+                # If data does NOT depend on the parameter (e.g., Gamma Sweep),
+                # we generate data and fit the models ONCE per experiment.
+                cached_models = {}
+                cached_data = None
+                
+                if not self.data_depends_on_param:
+                    # Generate data once using the first param value (dummy)
+                    cached_data = self.generate_data(j, param_values[0])
+                    X, y, GX, G, _, _ = cached_data
                     
+                    # Fit all models once
+                    for name, builder in self.methods.items():
+                        if name == 'ATE': continue
+                        model = builder()
+                        fit_model(
+                            model=model,
+                            method_name=name,
+                            X=X, y=y, GX=GX, G=G,
+                            hyperparameters=self.hyperparameters,
+                            da=self.get_da(j)
+                        )
+                        cached_models[name] = model
+
+                # Iterate Parameters Inner Loop
+                for i, param in enumerate(param_values):
+                    
+                    if self.data_depends_on_param:
+                        # Full regeneration for Kappa/Alpha sweeps
+                        X, y, GX, G, X_test, estimand = self.generate_data(j, param)
+                    else:
+                        # Reuse data for Gamma sweeps
+                        _, _, _, _, X_test, estimand = cached_data
+
                     for name, builder in self.methods.items():
                         if name == 'ATE':
                             estimate = estimand
                         else:
-                            model = builder()
+                            # Use cached model or fit new one
+                            if self.data_depends_on_param:
+                                model = builder()
+                                fit_model(
+                                    model=model,
+                                    method_name=name,
+                                    X=X, y=y, GX=GX, G=G,
+                                    hyperparameters=self.hyperparameters,
+                                    da=self.get_da(j)
+                                )
+                            else:
+                                model = cached_models[name]
                             
-                            # Pass method name so fit_model knows which data to use
-                            fit_model(
-                                model=model,
-                                method_name=name,
-                                X=X,
-                                y=y,
-                                GX=GX,
-                                G=G,
-                                hyperparameters=self.hyperparameters,
-                                da=self.get_da(j)
-                            )
-                            
+                            # Predict (DPP makes this fast if model is cached)
                             estimate = model.predict(X_test, **self.get_predict_kwargs(param))
                         
                         results[name][i, j] = self.metric_fn(estimand, estimate)
-                
-                pbar.update()
+                    
+                    pbar.update()
         
         return param_values, results
     
