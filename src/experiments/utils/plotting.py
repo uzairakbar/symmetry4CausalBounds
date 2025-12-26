@@ -1,6 +1,7 @@
 """
 Plotting utilities for experiment results.
 """
+import warnings
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -61,98 +62,127 @@ def create_param_sweep_plot(
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
-    
-    Args:
-        x_values: Parameter values for x-axis
-        y_results: Dictionary mapping method names to error arrays
-        xlabel: Label for x-axis
-        ylabel: Label for y-axis
-        xscale: Scale for x-axis ('linear' or 'log')
-        yscale: Scale for y-axis ('linear' or 'log')
-        savefig: Whether to save the figure
-        format: File format for saving
-        legend_items: Specific methods to include in legend
-        legend_loc: Location for legend
-        y_color: Color for y-axis label and ticks
-        hide_legend: Whether to hide the legend
-        hilight_ours: Whether to highlight our methods
-        bootstrapped: Whether to apply bootstrapping
+    Aggressively robust to NaN/Inf values.
     """
-    if bootstrapped:
-        y_results = bootstrap(y_results)
-    
-    legend_items = [item for item in (legend_items or []) if item in y_results]
-    
-    # Setup plot
-    plt.rcParams.update(RC_PARAMS)
-    sns.set_palette('deep')
-    colors = sns.color_palette()
-    fig = plt.figure()
-    
-    # Track bounds for ylim
-    max_mean = 0.0
-    min_mean = float('inf')
-    all_labels = []
-    plot_handles = []
-    
-    # Plot each method
-    for method_name, errors in y_results.items():
-        mean_error = errors.mean(axis=1)
+    try:
+        if bootstrapped:
+            y_results = bootstrap(y_results)
         
-        # Get display label
-        label = TEX_MAPPER.get(method_name, method_name)
-        all_labels.append(label)
-        if method_name in legend_items:
-            legend_items[legend_items.index(method_name)] = label
+        legend_items = [item for item in (legend_items or []) if item in y_results]
         
-        # Choose line style
-        linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
-        color = colors[COLOR_MAP[method_name]]
+        plt.rcParams.update(RC_PARAMS)
+        sns.set_palette('deep')
+        colors = sns.color_palette()
+        fig = plt.figure()
         
-        # Plot mean
-        handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=linestyle)[0]
-        plot_handles.append(handle)
+        # Track global min/max for scaling
+        global_min = np.inf
+        global_max = -np.inf
         
-        # Update bounds
-        max_mean = max(max_mean, max(mean_error))
-        min_mean = min(min_mean, min(mean_error))
-    
-    # Add confidence intervals
-    for method_name, errors in y_results.items():
-        low = np.percentile(errors, 2.5, axis=1)
-        high = np.percentile(errors, 97.5, axis=1)
-        color = colors[COLOR_MAP[method_name]]
-        plt.fill_between(x_values, low, high, color=color, alpha=0.2)
-    
-    # Formatting
-    plt.xlabel(xlabel, fontsize=FS_LABEL)
-    plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
-    plt.yticks(fontsize=FS_TICK, color=y_color)
-    plt.xticks(fontsize=FS_TICK)
-    plt.xlim([min(x_values), max(x_values)])
-    
-    padding = 0.05 * (max_mean - min_mean)
-    plt.ylim([min_mean - padding, max_mean + padding])
-    plt.xscale(xscale)
-    plt.yscale(yscale)
-    
-    # Legend
-    if not hide_legend:
-        labels = legend_items if legend_items else all_labels
-        handles = [plot_handles[all_labels.index(item)] for item in labels]
-        labels = _apply_tex_highlighting(labels, hilight_ours)
+        all_labels = []
+        plot_handles = []
         
-        plt.legend(
-            handles=handles, labels=labels, fontsize=FS_TICK,
-            loc=legend_loc, frameon=True, edgecolor='black', fancybox=False
-        )
-    
-    plt.tight_layout()
-    plt.show()
-    
-    if savefig:
-        fname = ''.join(c for c in xlabel if c.isalnum()) + '_sweep'
-        save(fig, fname, 'simulation', format, dpi=PLOT_DPI)
+        for method_name, errors in y_results.items():
+            # 1. Sanitize Data: Convert to float64, replace Infs with NaNs
+            clean_data = np.array(errors, dtype=np.float64)
+            clean_data[np.isinf(clean_data)] = np.nan
+            
+            # 2. Compute Mean (ignoring NaNs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                mean_error = np.nanmean(clean_data, axis=1)
+            
+            # 3. Check if we have ANYTHING valid to plot
+            if np.all(np.isnan(mean_error)):
+                continue
+
+            # Update global bounds based on valid data only
+            valid_indices = ~np.isnan(mean_error)
+            if np.any(valid_indices):
+                global_min = min(global_min, np.min(mean_error[valid_indices]))
+                global_max = max(global_max, np.max(mean_error[valid_indices]))
+
+            # Labeling
+            label = TEX_MAPPER.get(method_name, method_name)
+            all_labels.append(label)
+            if method_name in legend_items:
+                legend_items[legend_items.index(method_name)] = label
+            
+            # Plot
+            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
+            color = colors[COLOR_MAP[method_name]]
+            
+            handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=linestyle)[0]
+            plot_handles.append(handle)
+            
+            # Confidence Intervals
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                low = np.nanpercentile(clean_data, 2.5, axis=1)
+                high = np.nanpercentile(clean_data, 97.5, axis=1)
+            
+            # Fill between requires matching shapes; if all NaNs, skip fill
+            if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
+                plt.fill_between(x_values, low, high, color=color, alpha=0.2)
+        
+        # Formatting
+        plt.xlabel(xlabel, fontsize=FS_LABEL)
+        plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
+        plt.yticks(fontsize=FS_TICK, color=y_color)
+        plt.xticks(fontsize=FS_TICK)
+        
+        # Robust Limits
+        if len(x_values) > 0:
+             plt.xlim([min(x_values), max(x_values)])
+        
+        # SAFE Y-LIM CALCULATION
+        if np.isfinite(global_min) and np.isfinite(global_max):
+            if global_max > global_min:
+                padding = 0.05 * (global_max - global_min)
+                plt.ylim([global_min - padding, global_max + padding])
+            else:
+                # Flat line case
+                plt.ylim([global_min - 0.1, global_max + 0.1])
+        
+        plt.xscale(xscale)
+        plt.yscale(yscale)
+        
+        # Legend
+        if not hide_legend and plot_handles:
+            # Reconstruct legend based on what actually plotted
+            final_handles = []
+            final_labels = []
+            
+            # Use requested order if possible
+            targets = legend_items if legend_items else all_labels
+            
+            for target_lbl in targets:
+                if target_lbl in all_labels:
+                    idx = all_labels.index(target_lbl)
+                    if idx < len(plot_handles):
+                        final_handles.append(plot_handles[idx])
+                        final_labels.append(target_lbl)
+            
+            final_labels = _apply_tex_highlighting(final_labels, hilight_ours)
+            
+            plt.legend(
+                handles=final_handles, labels=final_labels, fontsize=FS_TICK,
+                loc=legend_loc, frameon=True, edgecolor='black', fancybox=False
+            )
+        
+        plt.tight_layout()
+        plt.show()
+        
+        if savefig:
+            fname = ''.join(c for c in xlabel if c.isalnum()) + '_sweep'
+            save(fig, fname, 'simulation', format, dpi=PLOT_DPI)
+
+    except Exception as e:
+        # Fallback so one plot failure doesn't kill the whole experiment batch
+        from loguru import logger
+        logger.error(f"Failed to plot param sweep {xlabel}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 def create_query_sweep_plot(
@@ -369,18 +399,13 @@ def create_panel_plot(
         
         # === ROW 1: Interval Width ===
         ax_width = axes[1, col_idx]
-        has_pi = False
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
-                has_pi = True
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
                 alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
                 ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
                 ax_width.plot(x_grid, width, linewidth=0.5, color=color)
-        
-        if not has_pi:
-            ax_width.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
         
         if col_idx == 0:
             ax_width.set_ylabel('width', fontsize=FS_LABEL)
@@ -390,14 +415,12 @@ def create_panel_plot(
         
         # === ROW 0: Worst-Case Error ===
         ax_worst = axes[0, col_idx]
-        has_worst = False
         
         # Prepare ground truth for broadcasting
         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
         
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
-                has_worst = True
                 lower = predictions[:, :, 0]
                 upper = predictions[:, :, 1]
                 squared_errors = np.maximum(
@@ -410,9 +433,6 @@ def create_panel_plot(
                 color = _get_method_color(method_name)
                 ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
-        
-        if not has_worst:
-            ax_worst.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
         
         if col_idx == 0:
             ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
