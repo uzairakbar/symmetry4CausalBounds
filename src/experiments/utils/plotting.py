@@ -369,18 +369,13 @@ def create_panel_plot(
         
         # === ROW 1: Interval Width ===
         ax_width = axes[1, col_idx]
-        has_pi = False
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
-                has_pi = True
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
                 alpha = ALPHA_MAP.get(method_name, 0.2)
                 color = _get_method_color(method_name)
                 ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
                 ax_width.plot(x_grid, width, linewidth=0.5, color=color)
-        
-        if not has_pi:
-            ax_width.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
         
         if col_idx == 0:
             ax_width.set_ylabel('width', fontsize=FS_LABEL)
@@ -390,14 +385,12 @@ def create_panel_plot(
         
         # === ROW 0: Worst-Case Error ===
         ax_worst = axes[0, col_idx]
-        has_worst = False
         
         # Prepare ground truth for broadcasting
         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
         
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
-                has_worst = True
                 lower = predictions[:, :, 0]
                 upper = predictions[:, :, 1]
                 squared_errors = np.maximum(
@@ -410,9 +403,6 @@ def create_panel_plot(
                 color = _get_method_color(method_name)
                 ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
-        
-        if not has_worst:
-            ax_worst.fill_between(x_grid, 0, 0, alpha=0.1, facecolor='0.8')
         
         if col_idx == 0:
             ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
