@@ -57,7 +57,7 @@ class NullSpaceTranslation(DA):
         return 'translate'
     
     def augment(
-            self, X: NDArray, gamma: float=1.0
+            self, X: NDArray, gamma: float=1.0, **kwargs
         ) -> Tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
@@ -106,7 +106,7 @@ class Identity(DA):
     def augmentation(self):
         return 'identity'
     
-    def augment(self, X):
+    def augment(self, X, **kwargs):
         GX, G = X, X
         return GX, G
 
@@ -144,13 +144,14 @@ class LinearSimulationDA(DA):
     
     def augment(
             self,
-            X: NDArray
+            X: NDArray,
+            **kwargs
         ) -> Tuple[NDArray, NDArray]:
 
         GX: NDArray = X.copy()
         G_list: List[NDArray] = []
         for i, augmentation in enumerate(self._augmentations):
-            GX, G = augmentation(GX)
+            GX, G = augmentation(GX, **kwargs)
             G_list.append(G)
         G: NDArray = np.hstack(G_list)
         

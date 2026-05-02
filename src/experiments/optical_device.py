@@ -2,7 +2,7 @@
 Optical device experiment using generic runners.
 Dramatically reduced code duplication.
 """
-from typing import Type, List, Tuple
+from typing import Type, List, Tuple, Dict
 import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.model_selection import train_test_split
@@ -21,6 +21,7 @@ from src.experiments.configs import (
     OPTICAL_CONFIG,
     SWEEP_CONFIGS
 )
+from src.experiments.utils.metrics import augmentation_strength_metric
 
 EXPERIMENT_NAME = 'optical_device'
 
@@ -195,8 +196,85 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 
                 return sorted_k_values, sorted_results
 
+        # 4. Strength Sweep (Augmentation Strength)
+        class OpticalStrengthSweep(GenericParamSweep):
+            def __init__(inner_self, **kwargs):
+                # Manually extract config
+                config = SWEEP_CONFIGS['optical_device']['strength']
+                inner_self.sweep_config = config
+                
+                super().__init__(
+                    sem_factory=self._sem_factory,
+                    da_factory=self._da_factory,
+                    poly_transform=self._poly_factory(),
+                    test_fraction=OPTICAL_CONFIG.test_fraction,
+                    **kwargs
+                )
+                inner_self.strength_values = []
+
+            @property
+            def data_depends_on_param(inner_self) -> bool:
+                return True
+
+            def get_param_range(inner_self) -> np.ndarray:
+                return inner_self.sweep_config.range_fn(inner_self.sweep_samples)
+
+            def run(inner_self, desc: str = "Strength Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+                """Run sweep and return measured strength values as x-axis."""
+                inner_self.strength_values = []
+                _, results = super().run(desc)
+                
+                # Average strengths across experiments
+                strength_array = np.array(inner_self.strength_values).reshape(inner_self.n_experiments, inner_self.sweep_samples)
+                mean_strength = strength_array.mean(axis=0)
+                
+                return mean_strength, results
+
+            def generate_data(inner_self, experiment_index: int, strength: float):
+                # Map strength [0, 1] to specific parameters
+                
+                # 1. Flip/Rotation Probability: 0.0 to 0.5
+                p = 0.5 * strength
+                
+                # 2. Gaussian Noise Coeff: 0.0 to sqrt(0.1)
+                # Matches target variance of 0.0 to 0.1 * Var(X)
+                noise_coeff = np.sqrt(0.1 * strength)
+
+                # FIX: use inner_self to access GenericParamSweep's stored list of SEMs/DAs
+                sem = inner_self.sems[experiment_index]
+                da = inner_self.das[experiment_index]
+                
+                # Load Raw Data
+                X_raw, y = sem(N=inner_self.n_samples) 
+                
+                # Augment with dynamic strength parameters
+                GX_raw, G = da(X_raw, p=p, noise_coeff=noise_coeff)
+                
+                # Compute Metric in Ambient Space
+                N = len(X_raw)
+                Sigma_X = X_raw.T @ X_raw / N
+                Sigma_GX = GX_raw.T @ GX_raw / N
+                
+                # Call shared metric utility
+                metric_val = augmentation_strength_metric(Sigma_X, Sigma_GX)
+                inner_self.strength_values.append(metric_val)
+                
+                # Transform using the runner's poly transformer
+                X = inner_self.apply_transform(X_raw)
+                GX = inner_self.apply_transform(GX_raw)
+                
+                X_train, X_test, y_train, _, GX_train, _, G_train, _ = train_test_split(
+                    X, y, GX, G,
+                    test_size=inner_self.test_fraction,
+                    random_state=inner_self.seed + experiment_index
+                )
+                
+                estimand = X_test @ sem.solution
+                return X_train, y_train, GX_train, G_train, X_test, estimand
+
         return [
             (OpticalGammaSweep, 'gamma'),
             (OpticalFoldSweep, 'folds'),
-            (OpticalKappaSweep, 'kappa')
+            (OpticalKappaSweep, 'kappa'),
+            (OpticalStrengthSweep, 'strength')
         ]

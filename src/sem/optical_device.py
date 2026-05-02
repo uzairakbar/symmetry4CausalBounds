@@ -33,7 +33,7 @@ class OpticalDeviceSEM(SEM):
                 directory
             )
 
-        download_dataset(directory)
+        # download_dataset(directory)
 
         file_list = os.listdir(directory)
         file_list = [f for f in file_list if 'confounder' in f and 'random' not in f]
@@ -83,19 +83,34 @@ class OpticalDeviceSEM(SEM):
                 f'Ground truth {ground_truth} model not supported/implemented.'
             )
         
-        self.W_XY = W_XY
+        # 1. Calculate original noise statistics
+        # epsilon is the coefficient of C. Noise xi = epsilon * C.
+        original_varXi = np.var(epsilon * C)
+        
+        # 2. Calculate the scaling factor (sigma_xi)
+        noise_scale = np.sqrt(original_varXi)
+        
+        # 3. Scale Y and the Ground Truth weights
+        # Y_new = Y_old / sigma
+        # f_new(X) = f_old(X) / sigma
+        self.y = y / noise_scale
+        self.W_XY = W_XY / noise_scale 
+        self.X = X
+        self.C = C
         self.poly_degree = best_degree
-        self.y, self.X, self.C = y, X, C
 
-        self.varXi = np.var(epsilon * self.C)
-        self.varEXiX = np.var(
-            self.X @ np.linalg.pinv(self.X) @ (
-                epsilon * self.C
-            )
+        # 4. Normalize stored variances
+        # Var(xi_new) = Var(xi_old) / sigma^2 = 1.0
+        self.varXi = 1.0 
+        
+        # Var(E[xi|X]) scales by 1/sigma^2 as well
+        original_varEXiX = np.var(
+            self.X @ np.linalg.pinv(self.X) @ (epsilon * self.C)
         )
+        self.varEXiX = original_varEXiX / (noise_scale ** 2)
         # for debugging
-        # print('optical Var(xi): ', self.varXi)
-        # print('optical Var(E[xi|X]): ', self.varEXiX)
+        print('optical Var(xi): ', self.varXi)
+        print('optical Var(E[xi|X]): ', self.varEXiX)
     
     def sample(self, N: int=1, **kwargs) -> Tuple[NDArray, NDArray]:
         N_max, M = self.X.shape

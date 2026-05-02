@@ -24,14 +24,14 @@ class LinearSimulationSEM(SEM):
         self.outcome_dimension = outcome_dimension
         self.treatment_dimension = treatment_dimension
 
+        # Confounding direction W_XXi ~ N(0, I), normalized
+        W_XXi = np.random.randn(treatment_dimension)
+        self.W_XXi = W_XXi / np.linalg.norm(W_XXi)
+
         # Structural coefficients f ~ N(0, I)
         self.W_XY = np.random.randn(
             treatment_dimension, outcome_dimension
         )
-
-        # Confounding direction W_XXi ~ N(0, I), normalized
-        W_XXi = np.random.randn(treatment_dimension)
-        self.W_XXi = W_XXi / np.linalg.norm(W_XXi)
 
         super().__init__()
 

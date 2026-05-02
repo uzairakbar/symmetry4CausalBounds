@@ -160,3 +160,27 @@ def interval_width(
         width = width / (width + np.std(estimand))
     
     return width
+
+
+def augmentation_strength_metric(Sigma_X: NDArray, Sigma_GX: NDArray) -> float:
+    """
+    Compute a scalar metric representing the strength of data augmentation.
+    
+    Current implementation: Trace( (Sigma_GX - Sigma_X) @ Sigma_X^-1 )
+    
+    Args:
+        Sigma_X: Covariance/Second-moment of original data (Ambient Space)
+        Sigma_GX: Covariance/Second-moment of augmented data (Ambient Space)
+        
+    Returns:
+        Scalar strength metric.
+    """
+    Delta = Sigma_GX - Sigma_X
+    
+    try:
+        # Use pseudo-inverse for stability against rank-deficient ambient spaces
+        Sigma_X_inv = np.linalg.pinv(Sigma_X)
+        metric = np.trace(Delta @ Sigma_X_inv)
+        return float(metric)
+    except Exception:
+        return np.nan

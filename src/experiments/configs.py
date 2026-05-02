@@ -22,6 +22,15 @@ from src.methods.sensitivity_models import (
 # EXPERIMENT PARAMETERS
 # =============================================================================
 
+# @dataclass(frozen=True)
+# class SimulationConfig:
+#     """Configuration for simulation experiments."""
+#     gamma: float = 1.0
+#     gamma0: float = 1.0
+#     delta: float = 2**-8
+#     epsilon: float = 2**-8
+#     kappa: float = 1.0
+#     test_fraction: float = 0.1
 @dataclass(frozen=True)
 class SimulationConfig:
     """Configuration for simulation experiments."""
@@ -33,14 +42,25 @@ class SimulationConfig:
     test_fraction: float = 0.1
 
 
+# @dataclass(frozen=True)
+# class OpticalDeviceConfig:
+#     """Configuration for optical device experiments."""
+#     gamma: float = 2**-1
+#     gamma0: float = 2**-1
+#     delta: float = 2**-7
+#     epsilon: float = 2**-3
+#     test_fraction: float = 0.1
+#     dataset_index: int = 9
+#     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
-    gamma: float = 2**2
-    gamma0: float = 2**2
-    delta: float = 2**-1
-    epsilon: float = 2**2
+    gamma: float = 0.32
+    gamma0: float = 1.0 + 0.2
+    delta: float = 2**-7.5
+    epsilon: float = 2**-4.5
     test_fraction: float = 0.1
+    # dataset_index: int = 3
     dataset_index: int = 9
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 
@@ -59,6 +79,7 @@ MetricName = Literal['approximation_error', 'worst_error', 'interval_width']
 METRIC_CONFIGS: Dict[MetricName, Dict[str, Any]] = {
     'approximation_error': {
         'ylabel': r'average $E_{\mathrm{approx}}^{\operatorname{do}({\bm{x}})}$',
+        'yscale': 'asinh',
         'normalize': False
     },
     'worst_error': {
@@ -93,16 +114,14 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
         ),
         'alpha': SweepConfig(
             range_fn=lambda n: np.logspace(-1, 2, base=10, num=n),
-            xlabel=r'$a$',
+            xlabel=r'$\operatorname{Tr}(\Delta \Sigma_X^{-1})$', # Updated Label
             xscale='log',
         ),
         'gamma': SweepConfig(
-            range_fn=lambda n: np.logspace(-5, 11, base=2, num=n),
+            range_fn=lambda n: np.linspace(0.1, 1.0, num=n), #np.logspace(-3, 1, base=2, num=n),
             xlabel=r'$\Gamma$',
             xscale='log',
         ),
-        # RENAMED: 'folds' (Augmentation Multiplicity)
-        # We sweep 1x, 2x, 4x, ... 32x augmentations
         'folds': SweepConfig(
             range_fn=lambda n: np.array([1, 2, 4, 8, 16, 32]),
             xlabel=r'Augmentation Folds ($k$)',
@@ -111,11 +130,11 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
     },
     'optical_device': {
         'gamma': SweepConfig(
-            range_fn=lambda n: np.logspace(-1, 2, base=2, num=n),
+            # range_fn=lambda n: np.logspace(-1, 1.0, base=2, num=n),
+            range_fn=lambda n: np.linspace(0.1, 1.0, num=n),
             xlabel=r'$\Gamma$',
             xscale='log',
         ),
-        # RENAMED: 'folds'
         'folds': SweepConfig(
             range_fn=lambda n: np.array([1, 2, 4, 8, 16, 32]),
             xlabel=r'Augmentation Folds ($k$)',
@@ -125,7 +144,13 @@ SWEEP_CONFIGS: Dict[str, Dict[str, SweepConfig]] = {
             range_fn=lambda n: np.arange(12),
             xlabel=r'$\hat{\kappa}$ (Confounding Strength)',
             xscale='linear',
-        )
+        ),
+        # New Strength Sweep
+        'strength': SweepConfig(
+            range_fn=lambda n: np.linspace(0.01, 1.0, num=n),
+            xlabel=r'$\operatorname{Tr}(\Delta \Sigma_X^{-1})$',
+            xscale='linear',
+        ),
     },
 }
 
@@ -150,10 +175,11 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
 }
 
 ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
-    'kappa': {'xlabel': r'$\kappa$', 'xscale': 'linear'},
-    'alpha': {'xlabel': r'$a$', 'xscale': 'log'},
-    'gamma': {'xlabel': r'$\Gamma$', 'xscale': 'log'},
-    'folds': {'xlabel': r'Augmentation Folds ($k$)', 'xscale': 'log'}, # Updated label
+    'kappa': {'xlabel': r'$\kappa$', 'xscale': 'linear', 'yscale': 'asinh'},
+    'alpha': {'xlabel': r'$\operatorname{tr}(\bm{\Delta} \bm{\Sigma}^{-1}_X)$', 'xscale': 'log', 'yscale': 'asinh'},
+    'gamma': {'xlabel': r'$\Gamma$', 'xscale': 'linear', 'yscale': 'asinh'},
+    'folds': {'xlabel': r'Augmentation Folds ($k$)', 'xscale': 'log', 'yscale': 'asinh'},
+    'strength': {'xlabel': r'$\operatorname{tr}(\bm{\Delta} \bm{\Sigma}^{-1}_X)$', 'xscale': 'linear', 'yscale': 'asinh'},
 }
 
 

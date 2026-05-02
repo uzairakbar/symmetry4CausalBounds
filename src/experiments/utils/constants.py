@@ -73,3 +73,37 @@ PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = '-'
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
+
+# Panel Plot Specific Configurations
+# Requirement 2: specification of y-axis clip values for Row 4 (index 3: h^T x)
+PANEL_PREDICTION_LIMITS: Dict[str, tuple[float, float]] = {
+    'simulation': (-3, 3),
+    'optical_device': (-2.625, 3.375),
+}
+
+# Requirement 3: specification of scale (log vs linear) for rows 1 and 2 (indices 0 and 1)
+PANEL_Y_SCALES: Dict[str, Literal['linear', 'log']] = {
+    'worst_error': 'asinh',  # Row 1 (index 0)
+    'width': 'asinh'         # Row 2 (index 1)
+}
+
+
+
+# src/experiments/utils/constants.py
+
+# Configuration for panel plots per experiment and per row
+# Row index mapping: 0: Worst Error, 1: Width, 2: Density, 3: Predictions
+PANEL_CONFIGS = {
+    'simulation': {
+        0: {'scale': 'asinh', 'ylim': (0, 10.01), 'linear_width': 0.25, 'linthresh': 2.0},
+        1: {'scale': 'asinh', 'ylim': (0, 10.01), 'linear_width': 0.25, 'linthresh': 2.0},
+        2: {'scale': 'linear', 'ylim': (0, 0.5), 'linear_width': 1.0, 'linthresh': 2.0},
+        3: {'ylim': (-3, 3)}
+    },
+    'optical_device': {
+        0: {'scale': 'asinh', 'ylim': (0, 100), 'linear_width': 0.15, 'linthresh': 2.0},
+        1: {'scale': 'asinh', 'ylim': (0, 10.01), 'linear_width': 0.25, 'linthresh': 2.0},
+        2: {'scale': 'linear', 'ylim': (0, 0.01), 'linear_width': 1.0, 'linthresh': 2.0},
+        3: {'ylim': (-2.625, 3.375)}
+    }
+}

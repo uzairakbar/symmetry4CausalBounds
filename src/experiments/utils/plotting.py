@@ -135,14 +135,15 @@ def create_param_sweep_plot(
         if len(x_values) > 0:
              plt.xlim([min(x_values), max(x_values)])
         
-        # SAFE Y-LIM CALCULATION
-        if np.isfinite(global_min) and np.isfinite(global_max):
-            if global_max > global_min:
-                padding = 0.05 * (global_max - global_min)
-                plt.ylim([global_min - padding, global_max + padding])
-            else:
-                # Flat line case
-                plt.ylim([global_min - 0.1, global_max + 0.1])
+        # # SAFE Y-LIM CALCULATION
+        # if np.isfinite(global_min) and np.isfinite(global_max):
+        #     if global_max > global_min:
+        #         padding = 0.05 * (global_max - global_min)
+        #         # plt.ylim([global_min - padding, global_max + padding])
+        #         plt.ylim([None, global_max + padding])
+        #     else:
+        #         # Flat line case
+        #         plt.ylim([global_min - 0.1, global_max + 0.1])
         
         plt.xscale(xscale)
         plt.yscale(yscale)
@@ -305,32 +306,207 @@ def create_query_sweep_plot(
         save(fig, fname, experiment, format, dpi=PLOT_DPI)
 
 
+# def create_panel_plot(
+#     experiment_name: str,
+#     column_data: List[Tuple[Dict[str, NDArray], NDArray, NDArray]],
+#     histograms: Dict[str, Tuple[NDArray, NDArray]],
+#     legend_ncols: int = 2
+# ):
+#     """
+#     Create a 4x3 panel plot showing multiple visualizations.
+    
+#     Panel layout:
+#     - Row 0: Worst-case error
+#     - Row 1: Interval width
+#     - Row 2: Histograms
+#     - Row 3: Predictions
+    
+#     Columns: PC1, Radial sweep, PC2
+    
+#     Args:
+#         experiment_name: Name for saving
+#         column_data: List of (results_dict, ground_truth, x_grid) for each column
+#         histograms: Dictionary with 'pc1' and 'pc2' histogram data
+#         legend_ncols: Number of columns in legend
+#     """
+#     plt.rcParams.update(RC_PARAMS)
+    
+#     # Column configuration
+#     column_titles = [
+#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
+#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
+#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
+#     ]
+#     x_labels = [r'$t$', r'$\theta$', r'$t$']
+    
+#     fig, axes = plt.subplots(
+#         4, 3, figsize=(15, 8),
+#         sharex='col',
+#         gridspec_kw={'height_ratios': [0.2, 0.2, 0.2, 0.7]},
+#         constrained_layout=True,
+#     )
+    
+#     # Get colors for original and augmented data
+#     orig_color = _get_method_color('ERM')
+#     aug_color = _get_method_color('DA+ERM')
+    
+#     legend_handles = {}
+    
+#     # Process each column
+#     for col_idx in range(3):
+#         results_dict, ground_truth, x_grid = column_data[col_idx]
+        
+#         # === ROW 3: Predictions ===
+#         ax_pred = axes[3, col_idx]
+#         for method_name, predictions in results_dict.items():
+#             label = TEX_MAPPER.get(method_name, method_name)
+            
+#             # Aggregate across experiments
+#             if predictions.ndim == 3:  # PI methods: (samples, experiments, 2)
+#                 lower = predictions[:, :, 0].mean(axis=1)
+#                 upper = predictions[:, :, 1].mean(axis=1)
+#                 y_mean = None
+#             else:  # Point estimates: (samples, experiments)
+#                 y_mean = predictions.mean(axis=1)
+#                 lower = upper = None
+            
+#             # Plot
+#             if 'PI' in method_name:
+#                 alpha = ALPHA_MAP.get(method_name, 0.2)
+#                 handle = ax_pred.fill_between(
+#                     x_grid, lower, upper, alpha=alpha,
+#                     color=_get_method_color(method_name),
+#                     zorder=-1,
+#                 )
+#             else:
+#                 linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
+#                 line_color = 'black' if method_name == 'ATE' else _get_method_color(method_name)
+#                 zorder = 1 if method_name == 'ATE' else 0
+#                 handle = ax_pred.plot(
+#                     x_grid, y_mean,
+#                     linestyle=linestyle, linewidth=2,
+#                     color=line_color,
+#                     zorder=zorder,
+#                 )[0]
+            
+#             if label not in legend_handles:
+#                 legend_handles[label] = handle
+        
+#         ax_pred.set_xlabel(x_labels[col_idx], fontsize=FS_LABEL)
+#         if col_idx == 0:
+#             ax_pred.set_ylabel(r'${\bm{h}}^\top {\bm{x}}$', fontsize=FS_LABEL)
+#         ax_pred.tick_params(labelsize=FS_TICK)
+#         ax_pred.set_xlim([x_grid.min(), x_grid.max()])
+        
+#         # === ROW 1: Interval Width ===
+#         ax_width = axes[1, col_idx]
+#         for method_name, predictions in results_dict.items():
+#             if 'PI' in method_name:
+#                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
+#                 alpha = ALPHA_MAP.get(method_name, 0.2)
+#                 color = _get_method_color(method_name)
+#                 ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
+#                 ax_width.plot(x_grid, width, linewidth=0.5, color=color)
+        
+#         if col_idx == 0:
+#             ax_width.set_ylabel('width', fontsize=FS_LABEL)
+#         ax_width.tick_params(labelsize=FS_TICK)
+#         ax_width.set_ylim(0, None)
+#         ax_width.margins(y=0)
+        
+#         # === ROW 0: Worst-Case Error ===
+#         ax_worst = axes[0, col_idx]
+        
+#         # Prepare ground truth for broadcasting
+#         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
+        
+#         for method_name, predictions in results_dict.items():
+#             if 'PI' in method_name:
+#                 lower = predictions[:, :, 0]
+#                 upper = predictions[:, :, 1]
+#                 squared_errors = np.maximum(
+#                     (lower - gt_for_broadcast)**2,
+#                     (upper - gt_for_broadcast)**2
+#                 )
+#                 worst_err = squared_errors.max(axis=1)
+                
+#                 alpha = ALPHA_MAP.get(method_name, 0.2)
+#                 color = _get_method_color(method_name)
+#                 ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
+#                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
+        
+#         if col_idx == 0:
+#             ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
+#         ax_worst.set_title(column_titles[col_idx], fontsize=FS_LABEL, pad=8)
+#         ax_worst.tick_params(labelsize=FS_TICK)
+#         ax_worst.set_ylim(0, None)
+#         ax_worst.margins(y=0)
+        
+#         # === ROW 2: Histograms ===
+#         ax_hist = axes[2, col_idx]
+#         hist_key = 'pc1' if col_idx == 0 else ('pc2' if col_idx == 2 else None)
+        
+#         if hist_key and hist_key in histograms:
+#             orig_proj, aug_proj = histograms[hist_key]
+#             ax_hist.hist(orig_proj, bins=50, density=True, alpha=0.45, color=orig_color)
+#             ax_hist.hist(aug_proj, bins=50, density=True, alpha=0.45, color=aug_color)
+#             if col_idx == 0:
+#                 ax_hist.set_ylabel('density', fontsize=FS_LABEL)
+#         else:
+#             ax_hist.axis('off')
+        
+#         ax_hist.tick_params(labelsize=FS_TICK)
+#         ax_hist.set_ylim(0, None)
+#         ax_hist.margins(y=0)
+    
+#     # === Center Legend ===
+#     ax_legend = axes[2, 1]
+#     ax_legend.axis('off')
+    
+#     label_order = [TEX_MAPPER.get(n, n) for n in results_dict.keys()]
+#     handles = [legend_handles[l] for l in label_order if l in legend_handles]
+    
+#     leg = ax_legend.legend(
+#         handles=handles, labels=label_order,
+#         loc='center', ncol=legend_ncols,
+#         fontsize=FS_TICK + 2, frameon=False,
+#         borderpad=-0.3,
+#         borderaxespad=0,
+#         labelspacing=0.25,
+#     )
+    
+#     fig.align_ylabels(axes[:, 0])
+#     save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
+
+
+
+
+
+
+
+
+
+
+
+
+# src/experiments/utils/plotting.py
+
+from .constants import (
+    DEFAULT_HILIGHT_OURS, POINT_ESTIMATES,
+    FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
+    RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
+    POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE,
+    PANEL_CONFIGS # Ensure this is imported
+)
+
 def create_panel_plot(
     experiment_name: str,
     column_data: List[Tuple[Dict[str, NDArray], NDArray, NDArray]],
     histograms: Dict[str, Tuple[NDArray, NDArray]],
     legend_ncols: int = 2
 ):
-    """
-    Create a 4x3 panel plot showing multiple visualizations.
-    
-    Panel layout:
-    - Row 0: Worst-case error
-    - Row 1: Interval width
-    - Row 2: Histograms
-    - Row 3: Predictions
-    
-    Columns: PC1, Radial sweep, PC2
-    
-    Args:
-        experiment_name: Name for saving
-        column_data: List of (results_dict, ground_truth, x_grid) for each column
-        histograms: Dictionary with 'pc1' and 'pc2' histogram data
-        legend_ncols: Number of columns in legend
-    """
     plt.rcParams.update(RC_PARAMS)
     
-    # Column configuration
     column_titles = [
         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
@@ -338,56 +514,48 @@ def create_panel_plot(
     ]
     x_labels = [r'$t$', r'$\theta$', r'$t$']
     
+    # 1. Share the y axis for each row
     fig, axes = plt.subplots(
         4, 3, figsize=(15, 8),
         sharex='col',
+        sharey='row',
         gridspec_kw={'height_ratios': [0.2, 0.2, 0.2, 0.7]},
         constrained_layout=True,
     )
     
-    # Get colors for original and augmented data
     orig_color = _get_method_color('ERM')
     aug_color = _get_method_color('DA+ERM')
-    
     legend_handles = {}
+
+    # Define a small epsilon to prevent log(0) errors on fills
+    LOG_EPS = 1e-9
     
-    # Process each column
     for col_idx in range(3):
         results_dict, ground_truth, x_grid = column_data[col_idx]
+        exp_cfg = PANEL_CONFIGS.get(experiment_name, {})
         
         # === ROW 3: Predictions ===
         ax_pred = axes[3, col_idx]
         for method_name, predictions in results_dict.items():
             label = TEX_MAPPER.get(method_name, method_name)
-            
-            # Aggregate across experiments
-            if predictions.ndim == 3:  # PI methods: (samples, experiments, 2)
+            if predictions.ndim == 3:
                 lower = predictions[:, :, 0].mean(axis=1)
                 upper = predictions[:, :, 1].mean(axis=1)
                 y_mean = None
-            else:  # Point estimates: (samples, experiments)
+            else:
                 y_mean = predictions.mean(axis=1)
                 lower = upper = None
             
-            # Plot
             if 'PI' in method_name:
                 alpha = ALPHA_MAP.get(method_name, 0.2)
-                handle = ax_pred.fill_between(
-                    x_grid, lower, upper, alpha=alpha,
-                    color=_get_method_color(method_name),
-                    zorder=-1,
-                )
+                handle = ax_pred.fill_between(x_grid, lower, upper, alpha=alpha,
+                    color=_get_method_color(method_name), zorder=-1)
             else:
                 linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
                 line_color = 'black' if method_name == 'ATE' else _get_method_color(method_name)
                 zorder = 1 if method_name == 'ATE' else 0
-                handle = ax_pred.plot(
-                    x_grid, y_mean,
-                    linestyle=linestyle, linewidth=2,
-                    color=line_color,
-                    zorder=zorder,
-                )[0]
-            
+                handle = ax_pred.plot(x_grid, y_mean, linestyle=linestyle, linewidth=2,
+                    color=line_color, zorder=zorder)[0]
             if label not in legend_handles:
                 legend_handles[label] = handle
         
@@ -399,52 +567,44 @@ def create_panel_plot(
         
         # === ROW 1: Interval Width ===
         ax_width = axes[1, col_idx]
+        row_cfg = exp_cfg.get(1, {})
+        baseline = LOG_EPS if row_cfg.get('scale') in ['log', 'asinh', 'symlog'] else 0
+        
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
-                alpha = ALPHA_MAP.get(method_name, 0.2)
+                if baseline > 0: width = np.maximum(width, baseline)
                 color = _get_method_color(method_name)
-                ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
+                ax_width.fill_between(x_grid, baseline, width, alpha=ALPHA_MAP.get(method_name, 0.2), color=color)
                 ax_width.plot(x_grid, width, linewidth=0.5, color=color)
         
         if col_idx == 0:
             ax_width.set_ylabel('width', fontsize=FS_LABEL)
         ax_width.tick_params(labelsize=FS_TICK)
-        ax_width.set_ylim(0, None)
-        ax_width.margins(y=0)
         
         # === ROW 0: Worst-Case Error ===
         ax_worst = axes[0, col_idx]
-        
-        # Prepare ground truth for broadcasting
+        row_cfg = exp_cfg.get(0, {})
+        baseline = LOG_EPS if row_cfg.get('scale') in ['log', 'asinh', 'symlog'] else 0
         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
         
         for method_name, predictions in results_dict.items():
             if 'PI' in method_name:
-                lower = predictions[:, :, 0]
-                upper = predictions[:, :, 1]
-                squared_errors = np.maximum(
-                    (lower - gt_for_broadcast)**2,
-                    (upper - gt_for_broadcast)**2
-                )
-                worst_err = squared_errors.max(axis=1)
-                
-                alpha = ALPHA_MAP.get(method_name, 0.2)
+                lower, upper = predictions[:, :, 0], predictions[:, :, 1]
+                worst_err = np.maximum((lower - gt_for_broadcast)**2, (upper - gt_for_broadcast)**2).max(axis=1)
+                if baseline > 0: worst_err = np.maximum(worst_err, baseline)
                 color = _get_method_color(method_name)
-                ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
+                ax_worst.fill_between(x_grid, baseline, worst_err, alpha=ALPHA_MAP.get(method_name, 0.2), color=color)
                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
         
         if col_idx == 0:
             ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
         ax_worst.set_title(column_titles[col_idx], fontsize=FS_LABEL, pad=8)
         ax_worst.tick_params(labelsize=FS_TICK)
-        ax_worst.set_ylim(0, None)
-        ax_worst.margins(y=0)
         
         # === ROW 2: Histograms ===
         ax_hist = axes[2, col_idx]
         hist_key = 'pc1' if col_idx == 0 else ('pc2' if col_idx == 2 else None)
-        
         if hist_key and hist_key in histograms:
             orig_proj, aug_proj = histograms[hist_key]
             ax_hist.hist(orig_proj, bins=50, density=True, alpha=0.45, color=orig_color)
@@ -453,26 +613,211 @@ def create_panel_plot(
                 ax_hist.set_ylabel('density', fontsize=FS_LABEL)
         else:
             ax_hist.axis('off')
-        
         ax_hist.tick_params(labelsize=FS_TICK)
-        ax_hist.set_ylim(0, None)
-        ax_hist.margins(y=0)
-    
-    # === Center Legend ===
+
+    # 2, 3, 4: Apply row-specific scales, limits, and log-params from constants.py
+    for row_idx in range(4):
+        cfg = PANEL_CONFIGS.get(experiment_name, {}).get(row_idx, {})
+        ax = axes[row_idx, 0] # Applied via sharey
+        
+        if 'scale' in cfg:
+            s_type = cfg['scale']
+            s_kwargs = {}
+            if s_type == 'asinh': s_kwargs['linear_width'] = cfg.get('linear_width', 1.0)
+            if s_type == 'symlog': s_kwargs['linthresh'] = cfg.get('linthresh', 0.1)
+            ax.set_yscale(s_type, **s_kwargs)
+            
+        if 'ylim' in cfg:
+            ax.set_ylim(cfg['ylim'])
+
+    # === Legend ===
     ax_legend = axes[2, 1]
     ax_legend.axis('off')
-    
     label_order = [TEX_MAPPER.get(n, n) for n in results_dict.keys()]
     handles = [legend_handles[l] for l in label_order if l in legend_handles]
-    
-    leg = ax_legend.legend(
-        handles=handles, labels=label_order,
-        loc='center', ncol=legend_ncols,
-        fontsize=FS_TICK + 2, frameon=False,
-        borderpad=-0.3,
-        borderaxespad=0,
-        labelspacing=0.25,
-    )
+    ax_legend.legend(handles=handles, labels=label_order, loc='center', ncol=legend_ncols,
+        fontsize=FS_TICK + 2, frameon=False, borderpad=-0.3, borderaxespad=0, labelspacing=0.25)
     
     fig.align_ylabels(axes[:, 0])
     save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ################################################
+# # File: src/experiments/utils/plotting.py
+# ################################################
+# import warnings
+# import numpy as np
+# import seaborn as sns
+# import matplotlib.pyplot as plt
+# from numpy.typing import NDArray
+# from typing import Dict, List, Tuple, Optional, Literal
+
+# from .constants import (
+#     DEFAULT_HILIGHT_OURS, POINT_ESTIMATES,
+#     FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
+#     RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
+#     POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE,
+#     PANEL_PREDICTION_LIMITS, PANEL_Y_SCALES  # Added imports
+# )
+# from .data_operations import bootstrap, save
+
+# # ... (_get_method_color and _apply_tex_highlighting remain unchanged)
+
+# def create_panel_plot(
+#     experiment_name: str,
+#     column_data: List[Tuple[Dict[str, NDArray], NDArray, NDArray]],
+#     histograms: Dict[str, Tuple[NDArray, NDArray]],
+#     legend_ncols: int = 2
+# ):
+#     """
+#     Create a 4x3 panel plot showing multiple visualizations.
+    
+#     Panel layout:
+#     - Row 0: Worst-case error
+#     - Row 1: Interval width
+#     - Row 2: Histograms (Density)
+#     - Row 3: Predictions (h^T x)
+#     """
+#     plt.rcParams.update(RC_PARAMS)
+    
+#     column_titles = [
+#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
+#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
+#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
+#     ]
+#     x_labels = [r'$t$', r'$\theta$', r'$t$']
+    
+#     # Requirement 1: Set sharey='row' so all plots in a row share the y-axis
+#     fig, axes = plt.subplots(
+#         4, 3, figsize=(15, 8),
+#         sharex='col',
+#         sharey='row',
+#         gridspec_kw={'height_ratios': [0.2, 0.2, 0.2, 0.7]},
+#         constrained_layout=True,
+#     )
+    
+#     orig_color = _get_method_color('ERM')
+#     aug_color = _get_method_color('DA+ERM')
+#     legend_handles = {}
+    
+#     for col_idx in range(3):
+#         results_dict, ground_truth, x_grid = column_data[col_idx]
+        
+#         # === ROW 3: Predictions (h^T x) ===
+#         ax_pred = axes[3, col_idx]
+#         for method_name, predictions in results_dict.items():
+#             label = TEX_MAPPER.get(method_name, method_name)
+#             if predictions.ndim == 3:
+#                 lower = predictions[:, :, 0].mean(axis=1)
+#                 upper = predictions[:, :, 1].mean(axis=1)
+#                 y_mean = None
+#             else:
+#                 y_mean = predictions.mean(axis=1)
+#                 lower = upper = None
+            
+#             if 'PI' in method_name:
+#                 alpha = ALPHA_MAP.get(method_name, 0.2)
+#                 handle = ax_pred.fill_between(
+#                     x_grid, lower, upper, alpha=alpha,
+#                     color=_get_method_color(method_name), zorder=-1,
+#                 )
+#             else:
+#                 linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
+#                 line_color = 'black' if method_name == 'ATE' else _get_method_color(method_name)
+#                 zorder = 1 if method_name == 'ATE' else 0
+#                 handle = ax_pred.plot(
+#                     x_grid, y_mean, linestyle=linestyle, linewidth=2,
+#                     color=line_color, zorder=zorder,
+#                 )[0]
+#             if label not in legend_handles:
+#                 legend_handles[label] = handle
+        
+#         ax_pred.set_xlabel(x_labels[col_idx], fontsize=FS_LABEL)
+#         if col_idx == 0:
+#             ax_pred.set_ylabel(r'${\bm{h}}^\top {\bm{x}}$', fontsize=FS_LABEL)
+#         ax_pred.tick_params(labelsize=FS_TICK)
+#         ax_pred.set_xlim([x_grid.min(), x_grid.max()])
+
+#         # === ROW 1: Interval Width ===
+#         ax_width = axes[1, col_idx]
+#         for method_name, predictions in results_dict.items():
+#             if 'PI' in method_name:
+#                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
+#                 alpha = ALPHA_MAP.get(method_name, 0.2)
+#                 color = _get_method_color(method_name)
+#                 ax_width.fill_between(x_grid, 0, width, alpha=alpha, color=color)
+#                 ax_width.plot(x_grid, width, linewidth=0.5, color=color)
+        
+#         if col_idx == 0:
+#             ax_width.set_ylabel('width', fontsize=FS_LABEL)
+#         ax_width.tick_params(labelsize=FS_TICK)
+#         ax_width.set_ylim(0, None)
+        
+#         # === ROW 0: Worst-Case Error ===
+#         ax_worst = axes[0, col_idx]
+#         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
+#         for method_name, predictions in results_dict.items():
+#             if 'PI' in method_name:
+#                 lower, upper = predictions[:, :, 0], predictions[:, :, 1]
+#                 squared_errors = np.maximum((lower - gt_for_broadcast)**2, (upper - gt_for_broadcast)**2)
+#                 worst_err = squared_errors.max(axis=1)
+#                 alpha, color = ALPHA_MAP.get(method_name, 0.2), _get_method_color(method_name)
+#                 ax_worst.fill_between(x_grid, 0, worst_err, alpha=alpha, color=color)
+#                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
+        
+#         if col_idx == 0:
+#             ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
+#         ax_worst.set_title(column_titles[col_idx], fontsize=FS_LABEL, pad=8)
+#         ax_worst.tick_params(labelsize=FS_TICK)
+#         ax_worst.set_ylim(0, None)
+        
+#         # === ROW 2: Histograms (Density) ===
+#         ax_hist = axes[2, col_idx]
+#         hist_key = 'pc1' if col_idx == 0 else ('pc2' if col_idx == 2 else None)
+#         if hist_key and hist_key in histograms:
+#             orig_proj, aug_proj = histograms[hist_key]
+#             ax_hist.hist(orig_proj, bins=50, density=True, alpha=0.45, color=orig_color)
+#             ax_hist.hist(aug_proj, bins=50, density=True, alpha=0.45, color=aug_color)
+#             if col_idx == 0:
+#                 ax_hist.set_ylabel('density', fontsize=FS_LABEL)
+#         else:
+#             ax_hist.axis('off')
+#         ax_hist.tick_params(labelsize=FS_TICK)
+#         ax_hist.set_ylim(0, None)
+
+#     # Applying specific Row-based configurations from constants.py
+#     # Requirement 3: Row 1 & 2 scales
+#     axes[0, 0].set_yscale(PANEL_Y_SCALES.get('worst_error', 'linear'), linear_width=0.333) #linthresh=1)
+#     axes[1, 0].set_yscale(PANEL_Y_SCALES.get('width', 'linear'), linear_width=0.333) #linthresh=1)
+
+#     # Requirement 2: Row 4 (index 3) clip values
+#     if experiment_name in PANEL_PREDICTION_LIMITS:
+#         ymin, ymax = PANEL_PREDICTION_LIMITS[experiment_name]
+#         axes[3, 0].set_ylim(ymin, ymax)
+    
+#     # === Legend ===
+#     ax_legend = axes[2, 1]
+#     ax_legend.axis('off')
+#     label_order = [TEX_MAPPER.get(n, n) for n in results_dict.keys()]
+#     handles = [legend_handles[l] for l in label_order if l in legend_handles]
+#     ax_legend.legend(
+#         handles=handles, labels=label_order, loc='center', ncol=legend_ncols,
+#         fontsize=FS_TICK + 2, frameon=False, labelspacing=0.25,
+#     )
+    
+#     fig.align_ylabels(axes[:, 0])
+#     save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)

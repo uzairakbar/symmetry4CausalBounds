@@ -10,6 +10,7 @@ from src.experiments.base import (
     QuerySweepRunner, ParamSweepRunner, ExperimentDataContext
 )
 from src.experiments.utils import fit_model, radial_sweep_pcs
+from src.experiments.utils.metrics import augmentation_strength_metric
 
 
 # =============================================================================
@@ -151,11 +152,17 @@ class KappaSweep(GenericParamSweep):
 
 
 class AlphaSweep(GenericParamSweep):
-    """Sweep over alpha (augmentation strength). G matrix changes every step."""
+    """
+    Sweep over alpha (augmentation strength). 
+    
+    Calculates the metric using `augmentation_strength_metric` in ambient space.
+    The x-axis returned by run() is the measured metric, not the input alpha.
+    """
     
     def __init__(self, sweep_config, **kwargs):
         self.sweep_config = sweep_config
         super().__init__(**kwargs)
+        self.strength_values = []
     
     @property
     def data_depends_on_param(self) -> bool:
@@ -164,6 +171,22 @@ class AlphaSweep(GenericParamSweep):
     def get_param_range(self) -> np.ndarray:
         return self.sweep_config.range_fn(self.sweep_samples)
     
+    def run(self, desc: str = "Alpha Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+        """Run sweep and return measured strength values as x-axis."""
+        self.strength_values = []
+        
+        # Run standard sweep logic
+        _, results = super().run(desc)
+        
+        # Process strength values collected during generation
+        # Shape: (n_experiments, n_steps) due to loop order in ParamSweepRunner
+        strength_array = np.array(self.strength_values).reshape(self.n_experiments, self.sweep_samples)
+        
+        # Use average strength across experiments for the x-axis
+        mean_strength = strength_array.mean(axis=0)
+        
+        return mean_strength, results
+
     def generate_data(self, experiment_index: int, alpha: float):
         sem = self.sems[experiment_index]
         da = self.das[experiment_index]
@@ -172,6 +195,16 @@ class AlphaSweep(GenericParamSweep):
         X_raw, y = sem(N=self.n_samples)
         GX_raw, G = da(X_raw, gamma=alpha)
         
+        # Compute Metric in Ambient Space
+        N = len(X_raw)
+        Sigma_X = X_raw.T @ X_raw / N
+        Sigma_GX = GX_raw.T @ GX_raw / N
+        
+        # Call shared metric utility
+        metric_val = augmentation_strength_metric(Sigma_X, Sigma_GX)
+        self.strength_values.append(metric_val)
+        
+        # Transform
         X = self.apply_transform(X_raw)
         GX = self.apply_transform(GX_raw)
         
