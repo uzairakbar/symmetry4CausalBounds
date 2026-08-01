@@ -35,8 +35,9 @@ class OpticalDeviceSEM(SEM):
 
         # download_dataset(directory)
 
-        file_list = os.listdir(directory)
-        file_list = [f for f in file_list if 'confounder' in f and 'random' not in f]
+        file_list = sorted([
+            f for f in os.listdir(directory) if 'confounder' in f and 'random' not in f
+        ])
         
         dataset = {}
         for experiment, file_name in enumerate(file_list):

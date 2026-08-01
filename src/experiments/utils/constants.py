@@ -31,12 +31,12 @@ TEX_MAPPER: Dict[str, str] = {
     'Data': r'Data',
     'ATE': r'$\operatorname{ate}$',
     'ERM': r'$\operatorname{erm}$',
-    'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
-    'DA+IV': r'$\operatorname{da}+\operatorname{iv}$',
-    'PI_INV': r'$\operatorname{pi}_{\operatorname{inv}}$',
+    'DA+ERM': r'$\tilde{\operatorname{erm}}$',
+    'DA+IV': r'$\tilde{\operatorname{iv}}$',
+    'PI_INV': r'$\operatorname{pi}+\operatorname{inv}$',
     'PI': r'$\operatorname{pi}$',
-    'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'DA+PI_IV': r'$\operatorname{da}+\operatorname{pi}_{\operatorname{iv}}$',
+    'DA+PI': r'$\tilde{\operatorname{pi}}$',
+    'DA+PI_IV': r'$\tilde{\operatorname{pi}}+\tilde{\operatorname{iv}}$',
 }
 
 # Color mapping for methods

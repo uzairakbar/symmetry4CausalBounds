@@ -11,7 +11,7 @@ from sklearn.model_selection import BaseCrossValidator
 Model = Literal['linear', '2-layer', 'cmnist', 'rmnist']
 
 
-CPU_ONLY: bool = True
+CPU_ONLY: bool = False
 MODELS: Dict[Model, Callable[[int], nn.Sequential]] = {
     'linear': lambda input_dim: nn.Sequential(
         nn.Linear(input_dim, 1, bias=False)

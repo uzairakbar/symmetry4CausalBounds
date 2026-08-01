@@ -555,7 +555,7 @@ from src.methods.abstract import sensitivityAnalyzer as SA
 from src.methods.regression import LeastSquaresClosedForm as OLS
 
 # Global flag: Use closed form analytic solutions where possible (Standard PI)
-CLOSED_FORM_SOLUTION: bool = True
+CLOSED_FORM_SOLUTION: bool = False
 
 class PartialR2(SA):
     """
@@ -720,7 +720,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
-        threshold = np.sqrt(self.N_samples * self.epsilon)
+        threshold = np.sqrt(self.N_samples * self.epsilon**2)
         
         constraints.append(
             cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2) 

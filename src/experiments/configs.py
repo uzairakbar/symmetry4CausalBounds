@@ -22,15 +22,6 @@ from src.methods.sensitivity_models import (
 # EXPERIMENT PARAMETERS
 # =============================================================================
 
-# @dataclass(frozen=True)
-# class SimulationConfig:
-#     """Configuration for simulation experiments."""
-#     gamma: float = 1.0
-#     gamma0: float = 1.0
-#     delta: float = 2**-8
-#     epsilon: float = 2**-8
-#     kappa: float = 1.0
-#     test_fraction: float = 0.1
 @dataclass(frozen=True)
 class SimulationConfig:
     """Configuration for simulation experiments."""
@@ -42,27 +33,27 @@ class SimulationConfig:
     test_fraction: float = 0.1
 
 
-# @dataclass(frozen=True)
-# class OpticalDeviceConfig:
-#     """Configuration for optical device experiments."""
-#     gamma: float = 2**-1
-#     gamma0: float = 2**-1
-#     delta: float = 2**-7
-#     epsilon: float = 2**-3
-#     test_fraction: float = 0.1
-#     dataset_index: int = 9
-#     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
-    gamma: float = 0.32
-    gamma0: float = 1.0 + 0.2
-    delta: float = 2**-7.5
-    epsilon: float = 2**-4.5
+    gamma: float = 2**-2
+    gamma0: float = 2**0
+    delta: float = 2**-16
+    epsilon: float = 2**-2
     test_fraction: float = 0.1
-    # dataset_index: int = 3
-    dataset_index: int = 9
+    dataset_index: int = 8
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
+# @dataclass(frozen=True)
+# class OpticalDeviceConfig:
+#     """Configuration for optical device experiments."""
+#     gamma: float = 0.32
+#     gamma0: float = 1.0 #+ 0.2
+#     delta: float = 0 #2**-7.5
+#     epsilon: float = 2**-4.5
+#     test_fraction: float = 0.1
+#     dataset_index: int = 8
+#     # dataset_index: int = 9
+#     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 
 
 # Default configurations
