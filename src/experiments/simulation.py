@@ -9,8 +9,8 @@ from src.sem.simulation import LinearSimulationSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.generic_runner import (
     GenericQuerySweep,
-    KappaSweep,
-    AlphaSweep,
+    GammaStarSweep,
+    TraceSSweep,
     GammaSweep,
     AugmentationFoldSweep,
 )
@@ -29,17 +29,22 @@ EXPERIMENT_NAME = 'simulation'
 
 class SimulationOrchestrator(ExperimentOrchestrator):
     """Orchestrator for simulation experiments."""
-    
+
     def __init__(self, kernel_dim: int, **kwargs):
         """
         Initialize simulation orchestrator.
-        
+
         Args:
             kernel_dim: Dimensionality of DA kernel
             **kwargs: Other experiment parameters
         """
         self.kernel_dim = kernel_dim
-        
+        toggles = dict(
+            calibrate=kwargs.get('calibrate', False),
+            pad=kwargs.get('pad', False),
+            clipy=kwargs.get('clipy', True),
+        )
+
         # Create registry with simulation-specific parameters
         class SimulationRegistry(MethodRegistry):
             @staticmethod
@@ -47,26 +52,25 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                 return MethodRegistry.build_methods(
                     names,
                     gamma=SIMULATION_CONFIG.gamma,
-                    gamma0=SIMULATION_CONFIG.gamma0,
-                    delta=SIMULATION_CONFIG.delta,
-                    epsilon=SIMULATION_CONFIG.epsilon
+                    epsilon=SIMULATION_CONFIG.epsilon,
+                    **toggles
                 )
-        
+
         super().__init__(EXPERIMENT_NAME, SimulationRegistry(), **kwargs)
-    
+
     def _sem_factory(self):
         """Factory for creating SEM instances."""
-        return SEM()
-    
+        return SEM(gamma=SIMULATION_CONFIG.gamma_true)
+
     def _da_factory(self, sem):
         """
         Factory for creating DA instances.
-        
+
         CRITICAL: DA must be created from the SAME SEM instance,
         since it computes null space of that specific SEM's W_XY.
         """
         return DA(sem.W_XY, kernel_dim=self.kernel_dim)
-    
+
     def get_query_runner_cls(self) -> Type[GenericQuerySweep]:
         """Return query sweep runner."""
         # Create a configured class
@@ -74,20 +78,20 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             def __init__(inner_self, **kwargs):
                 # Create SEM first
                 sem = self._sem_factory()
-                
+
                 # Create DA from SAME SEM
                 def da_factory_from_sem():
                     return self._da_factory(sem)
-                
+
                 super().__init__(
                     sem_factory=lambda: sem,  # Return same instance
                     da_factory=da_factory_from_sem,
                     poly_transform=None,
                     **kwargs
                 )
-        
+
         return SimulationQuerySweep
-    
+
     def get_param_sweeps(self) -> List[Tuple[Type, str]]:
         """Return parameter sweeps to run."""
         # Helper to create configured sweep classes
@@ -103,8 +107,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                         **kwargs
                     )
             return ConfiguredSweep
-        
-        # Gamma sweep needs gamma0
+
         class ConfiguredGammaSweep(GammaSweep):
             def __init__(inner_self, **kwargs):
                 super().__init__(
@@ -113,14 +116,13 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     poly_transform=None,
                     test_fraction=SIMULATION_CONFIG.test_fraction,
                     sweep_config=SWEEP_CONFIGS['simulation']['gamma'],
-                    gamma0=SIMULATION_CONFIG.gamma0,
                     use_train_test_split=False,
                     **kwargs
                 )
-        
+
         return [
-            (make_sweep_cls(KappaSweep, 'kappa'), 'kappa'),
+            (make_sweep_cls(GammaStarSweep, 'gamma_star'), 'gamma_star'),
             (ConfiguredGammaSweep, 'gamma'),
-            (make_sweep_cls(AlphaSweep, 'alpha'), 'alpha'),
+            (make_sweep_cls(TraceSSweep, 'trS'), 'trS'),
             (make_sweep_cls(AugmentationFoldSweep, 'folds'), 'folds'),
         ]

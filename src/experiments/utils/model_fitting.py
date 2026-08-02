@@ -43,19 +43,27 @@ def fit_model(
     if method_name == 'PI':
         # PI uses original data only
         model.fit(X=X, y=y, **fit_kwargs)
-    
+
     elif method_name == 'DA+PI':
         # DA+PI uses augmented data only
         model.fit(X=GX, y=y, **fit_kwargs)
-    
+
     elif method_name == 'PI_INV':
         # PI_INV uses both original and augmented data
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
-    
+
+    elif method_name == 'PI_IV':
+        # baseline IV PI: no instrument in the original data
+        model.fit(X=X, y=y, Z=None, **fit_kwargs)
+
     elif method_name == 'DA+PI_IV':
         # DA+PI_IV uses both original and augmented data
         model.fit(X=GX, y=y, Z=G, **fit_kwargs)
-    
+
+    elif method_name in ('PI&DA+PI', 'PI&DA+PI_IV'):
+        # intersections fit a baseline branch on X and a DA branch on GX
+        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+
     elif method_name == 'ERM':
         # ERM uses original data
         model.fit(X=X, y=y, **fit_kwargs)

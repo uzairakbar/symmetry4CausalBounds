@@ -32,6 +32,7 @@ class ExperimentDataContext:
     G: np.ndarray
     X_raw: Optional[np.ndarray] = None
     GX_raw: Optional[np.ndarray] = None
+    oracle: Optional[Any] = None    # OracleParameters; unused by default
 
 
 # =============================================================================
@@ -49,17 +50,24 @@ class BaseExperimentRunner(ABC):
         sweep_samples: int,
         methods: Dict[str, ModelBuilder],
         hyperparameters: Optional[Dict[str, Any]] = None,
+        calibrate: bool = False,
+        pad: bool = False,
+        clipy: bool = True,
         **kwargs
     ):
         if seed >= 0:
             set_seed(seed)
-        
+
         self.seed = seed
         self.n_samples = n_samples
         self.n_experiments = n_experiments
         self.sweep_samples = sweep_samples
         self.methods = methods
         self.hyperparameters = hyperparameters
+        # toggles: needed here only to report oracle parameters in matching units
+        self.calibrate = calibrate
+        self.pad = pad
+        self.clipy = clipy
     
     @abstractmethod
     def run(self, desc: str):
@@ -328,8 +336,8 @@ class ExperimentOrchestrator(ABC):
         clean_kwargs = self._get_clean_kwargs()
         
         for RunnerCls, param_name in self.get_param_sweeps():
-            # Kappa sweeps need all methods (including ATE), others use gamma-dependent only
-            methods = self.methods if param_name == 'kappa' else self.gamma_only_methods
+            # gamma* sweeps need all methods (including ATE), others use gamma-dependent only
+            methods = self.methods if param_name == 'gamma_star' else self.gamma_only_methods
             
             runner = RunnerCls(methods=methods, **clean_kwargs)
             param_values, metric_results = runner.run(f"{param_name.title()} Sweep")
@@ -341,7 +349,10 @@ class ExperimentOrchestrator(ABC):
             # Plot
             plot_config = ANNOTATE_POPULATION_PLOT.get(param_name, {}).copy()
             plot_config['ylabel'] = self.ylabel
-            create_param_sweep_plot(param_values, metric_results, **plot_config)
+            create_param_sweep_plot(
+                param_values, metric_results,
+                experiment=self.name, fname=param_name, **plot_config
+            )
     
     def _run_query_sweep(self, plot_panel: bool, panel_only: bool):
         """Execute query sweep and generate visualizations."""

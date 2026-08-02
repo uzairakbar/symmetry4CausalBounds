@@ -35,8 +35,11 @@ TEX_MAPPER: Dict[str, str] = {
     'DA+IV': r'$\tilde{\operatorname{iv}}$',
     'PI_INV': r'$\operatorname{pi}+\operatorname{inv}$',
     'PI': r'$\operatorname{pi}$',
+    'PI_IV': r'$\operatorname{pi}+\operatorname{iv}$',
     'DA+PI': r'$\tilde{\operatorname{pi}}$',
     'DA+PI_IV': r'$\tilde{\operatorname{pi}}+\tilde{\operatorname{iv}}$',
+    'PI&DA+PI': r'$\operatorname{pi}\cap\tilde{\operatorname{pi}}$',
+    'PI&DA+PI_IV': r'$\operatorname{pi}\cap(\tilde{\operatorname{pi}}+\tilde{\operatorname{iv}})$',
 }
 
 # Color mapping for methods
@@ -47,8 +50,11 @@ COLOR_MAP: Dict[str, int] = {
     'DA+IV': 2,
     'PI_INV': 7,
     'PI': 0,
+    'PI_IV': 1,
     'DA+PI': 3,
     'DA+PI_IV': 2,
+    'PI&DA+PI': 4,
+    'PI&DA+PI_IV': 6,
 }
 
 # Alpha (transparency) mapping for methods
@@ -61,8 +67,11 @@ ALPHA_MAP: Dict[str, float] = {
     # Partial identification methods (transparent)
     'PI_INV': 0.8,
     'PI': 0.2,
+    'PI_IV': 0.2,
     'DA+PI': 0.2,
     'DA+PI_IV': 0.4,
+    'PI&DA+PI': 0.4,
+    'PI&DA+PI_IV': 0.4,
 }
 
 # Visual style configuration

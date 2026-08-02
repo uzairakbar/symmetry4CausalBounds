@@ -18,7 +18,7 @@ __all__ = [
     
     # Metrics
     'estimation_error', 'approximation_error', 
-    'worst_error', 'interval_width',
+    'worst_error', 'interval_width', 'trace_S_over_k',
     
     # Plotting
     'create_param_sweep_plot', 'create_query_sweep_plot',

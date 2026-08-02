@@ -59,6 +59,8 @@ def create_param_sweep_plot(
     hide_legend: bool = False,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
     bootstrapped: bool = True,
+    experiment: str = 'simulation',
+    fname: Optional[str] = None,
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
@@ -175,8 +177,8 @@ def create_param_sweep_plot(
         plt.show()
         
         if savefig:
-            fname = ''.join(c for c in xlabel if c.isalnum()) + '_sweep'
-            save(fig, fname, 'simulation', format, dpi=PLOT_DPI)
+            fname = fname or ''.join(c for c in xlabel if c.isalnum())
+            save(fig, f'{fname}_sweep', experiment, format, dpi=PLOT_DPI)
 
     except Exception as e:
         # Fallback so one plot failure doesn't kill the whole experiment batch

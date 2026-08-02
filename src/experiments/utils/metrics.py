@@ -8,7 +8,7 @@ from .constants import DEFAULT_NORMALIZE_ERROR
 
 def _compute_squared_norm(x: NDArray) -> float:
     """Compute squared L2 norm divided by sample size."""
-    return (x**2).mean()
+    return np.nanmean(x**2)
 
 
 def estimation_error(
@@ -79,7 +79,7 @@ def approximation_error(
     
     # Combine: 0 if inside, distance_squared if outside
     errors = np.where(inside_interval, 0, distance_squared)
-    approx_sq_error = errors[:, None].mean()
+    approx_sq_error = np.nanmean(errors[:, None])
     
     if normalize:
         baseline = estimation_error(estimand, np.zeros_like(estimand), normalize=False)
@@ -117,7 +117,7 @@ def worst_error(
     
     difference = estimate - estimand
     squared_errors = difference**2
-    worst_sq_error = squared_errors.max(axis=1).mean()
+    worst_sq_error = np.nanmean(squared_errors.max(axis=1))
     
     if normalize:
         baseline = estimation_error(estimand, np.zeros_like(estimand), normalize=False)
@@ -151,9 +151,10 @@ def interval_width(
     if estimate.shape[-1] == 1:
         estimate = np.repeat(estimate, 2, axis=1)
     
-    width = (estimate[:, 1] - estimate[:, 0]).mean()
+    widths = estimate[:, 1] - estimate[:, 0]
+    width = np.nanmean(widths)
     
-    assert np.all(width >= 0), \
+    assert np.all(widths[~np.isnan(widths)] >= 0), \
         'Upper bound should be greater than lower bound for all samples.'
     
     if normalize:
@@ -162,25 +163,28 @@ def interval_width(
     return width
 
 
-def augmentation_strength_metric(Sigma_X: NDArray, Sigma_GX: NDArray) -> float:
+def trace_S_over_k(X: NDArray, GX: NDArray) -> float:
     """
-    Compute a scalar metric representing the strength of data augmentation.
-    
-    Current implementation: Trace( (Sigma_GX - Sigma_X) @ Sigma_X^-1 )
-    
+    Augmentation strength as tr(S)/k (Prop. 2), where S = Sigma_GX^-1 Sigma_X
+    is the variance-shift operator. Sharpening iff tr(S)/k <= 1/rho.
+
     Args:
-        Sigma_X: Covariance/Second-moment of original data (Ambient Space)
-        Sigma_GX: Covariance/Second-moment of augmented data (Ambient Space)
-        
+        X: Original data in the feature space the methods use
+        GX: Augmented data in the same space
+
     Returns:
-        Scalar strength metric.
+        tr(S)/k, in (0, 1] for variance-inflating DA.
     """
-    Delta = Sigma_GX - Sigma_X
-    
+    X = X - X.mean(axis=0)
+    GX = GX - GX.mean(axis=0)
+    k = X.shape[1]
+
+    Sigma_X = X.T @ X / len(X)
+    Sigma_GX = GX.T @ GX / len(GX)
+
     try:
-        # Use pseudo-inverse for stability against rank-deficient ambient spaces
-        Sigma_X_inv = np.linalg.pinv(Sigma_X)
-        metric = np.trace(Delta @ Sigma_X_inv)
-        return float(metric)
+        # pseudo-inverse for stability against rank-deficient feature spaces
+        S = np.linalg.pinv(Sigma_GX) @ Sigma_X
+        return float(np.trace(S) / k)
     except Exception:
         return np.nan

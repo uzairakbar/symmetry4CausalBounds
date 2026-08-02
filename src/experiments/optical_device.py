@@ -11,8 +11,8 @@ from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.sem.optical_device import OpticalDeviceSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.generic_runner import (
-    GenericQuerySweep, 
-    GammaSweep, 
+    GenericQuerySweep,
+    GammaSweep,
     AugmentationFoldSweep,
     GenericParamSweep
 )
@@ -21,7 +21,8 @@ from src.experiments.configs import (
     OPTICAL_CONFIG,
     SWEEP_CONFIGS
 )
-from src.experiments.utils.metrics import augmentation_strength_metric
+from src.experiments.utils.metrics import trace_S_over_k
+from src.oracle import gamma_star
 
 EXPERIMENT_NAME = 'optical_device'
 
@@ -38,7 +39,12 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         Initialize optical orchestrator.
         """
         self.augmentation = augmentation
-        
+        toggles = dict(
+            calibrate=kwargs.get('calibrate', False),
+            pad=kwargs.get('pad', False),
+            clipy=kwargs.get('clipy', True),
+        )
+
         # Create registry with optical-specific parameters
         class OpticalRegistry(MethodRegistry):
             @staticmethod
@@ -46,9 +52,8 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 return MethodRegistry.build_methods(
                     names,
                     gamma=OPTICAL_CONFIG.gamma,
-                    gamma0=OPTICAL_CONFIG.gamma0,
-                    delta=OPTICAL_CONFIG.delta,
-                    epsilon=OPTICAL_CONFIG.epsilon
+                    epsilon=OPTICAL_CONFIG.epsilon,
+                    **toggles
                 )
         
         super().__init__(EXPERIMENT_NAME, OpticalRegistry(), **kwargs)
@@ -78,9 +83,10 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     sem_factory=self._sem_factory,
                     da_factory=self._da_factory,
                     poly_transform=self._poly_factory(),
+                    epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     **kwargs
                 )
-        
+
         return OpticalQuerySweep
     
     def get_param_sweeps(self) -> List[Tuple[Type, str]]:
@@ -95,7 +101,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     poly_transform=self._poly_factory(),
                     test_fraction=OPTICAL_CONFIG.test_fraction,
                     sweep_config=SWEEP_CONFIGS['optical_device']['gamma'],
-                    gamma0=OPTICAL_CONFIG.gamma0,
+                    epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     use_train_test_split=True,
                     **kwargs
                 )
@@ -109,27 +115,29 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     poly_transform=self._poly_factory(),
                     test_fraction=OPTICAL_CONFIG.test_fraction,
                     sweep_config=SWEEP_CONFIGS['optical_device']['folds'],
+                    epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     **kwargs
                 )
 
-        # 3. Kappa (Dataset) Sweep
-        class OpticalKappaSweep(GenericParamSweep):
+        # 3. gamma* (Dataset) Sweep
+        class OpticalGammaStarSweep(GenericParamSweep):
             def __init__(inner_self, **kwargs):
                 # Manually extract config
-                config = SWEEP_CONFIGS['optical_device']['kappa']
-                
+                config = SWEEP_CONFIGS['optical_device']['gamma_star']
+
                 super().__init__(
                     sem_factory=self._sem_factory,
                     da_factory=self._da_factory,
                     poly_transform=self._poly_factory(),
                     test_fraction=OPTICAL_CONFIG.test_fraction,
+                    epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     sweep_config=config,
                     **kwargs
                 )
-                
+
                 # Attach to THIS runner instance
-                inner_self.sweep_config = config 
-                inner_self.kappas = [] 
+                inner_self.sweep_config = config
+                inner_self.gamma_stars = []
 
             @property
             def data_depends_on_param(inner_self) -> bool:
@@ -144,15 +152,15 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 # FRESH SEM for this specific dataset
                 sem = SEM(experiment=dataset_idx, ground_truth=OPTICAL_CONFIG.ground_truth_model)
                 
-                # Estimate Kappa
-                kappa_est = np.sqrt(sem.varEXiX / (sem.varXi + 1e-9))
-                
-                # Store kappa (once per dataset index)
-                if experiment_index == 0:
-                     inner_self.kappas.append((dataset_idx, kappa_est))
+                # Oracle confounding budget of this dataset
+                gamma_star_est = gamma_star(sem, calibrate=inner_self.calibrate)
 
-                # Load Data (using parent factory methods via outer self)
-                da = self._da_factory()
+                # Store gamma* (once per dataset index)
+                if experiment_index == 0:
+                    inner_self.gamma_stars.append((dataset_idx, gamma_star_est))
+
+                # Load Data (DA is dataset-independent, reuse the prepared one)
+                da = inner_self.get_da(experiment_index)
                 X_raw, y = sem(N=inner_self.n_samples) 
                 GX_raw, G = da(X_raw)
                 
@@ -172,16 +180,16 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 return X_train, y_train, GX_train, G_train, X_test, estimand
 
             def run(inner_self, desc: str):
-                """Sort results by Kappa after running."""
+                """Sort results by gamma* after running."""
                 # Run standard sweep
                 indices, raw_results = super().run(desc)
-                
-                # Sort by calculated kappa (value is at index 1)
-                inner_self.kappas.sort(key=lambda x: x[1]) 
-                
+
+                # Sort by calculated gamma* (value is at index 1)
+                inner_self.gamma_stars.sort(key=lambda x: x[1])
+
                 # Extract sorted values and dataset indices
-                sorted_k_values = np.array([k for _, k in inner_self.kappas])
-                sorted_dataset_indices = [idx for idx, _ in inner_self.kappas]
+                sorted_k_values = np.array([g for _, g in inner_self.gamma_stars])
+                sorted_dataset_indices = [idx for idx, _ in inner_self.gamma_stars]
                 
                 sorted_results = {}
                 for method, matrix in raw_results.items():
@@ -196,13 +204,13 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 
                 return sorted_k_values, sorted_results
 
-        # 4. Strength Sweep (Augmentation Strength)
-        class OpticalStrengthSweep(GenericParamSweep):
+        # 4. tr(S)/k Sweep (Augmentation Strength)
+        class OpticalTraceSSweep(GenericParamSweep):
             def __init__(inner_self, **kwargs):
                 # Manually extract config
-                config = SWEEP_CONFIGS['optical_device']['strength']
+                config = SWEEP_CONFIGS['optical_device']['trS']
                 inner_self.sweep_config = config
-                
+
                 super().__init__(
                     sem_factory=self._sem_factory,
                     da_factory=self._da_factory,
@@ -219,7 +227,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             def get_param_range(inner_self) -> np.ndarray:
                 return inner_self.sweep_config.range_fn(inner_self.sweep_samples)
 
-            def run(inner_self, desc: str = "Strength Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+            def run(inner_self, desc: str = "tr(S)/k Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
                 """Run sweep and return measured strength values as x-axis."""
                 inner_self.strength_values = []
                 _, results = super().run(desc)
@@ -249,19 +257,13 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 
                 # Augment with dynamic strength parameters
                 GX_raw, G = da(X_raw, p=p, noise_coeff=noise_coeff)
-                
-                # Compute Metric in Ambient Space
-                N = len(X_raw)
-                Sigma_X = X_raw.T @ X_raw / N
-                Sigma_GX = GX_raw.T @ GX_raw / N
-                
-                # Call shared metric utility
-                metric_val = augmentation_strength_metric(Sigma_X, Sigma_GX)
-                inner_self.strength_values.append(metric_val)
-                
+
                 # Transform using the runner's poly transformer
                 X = inner_self.apply_transform(X_raw)
                 GX = inner_self.apply_transform(GX_raw)
+
+                # tr(S)/k in the feature space the methods use
+                inner_self.strength_values.append(trace_S_over_k(X, GX))
                 
                 X_train, X_test, y_train, _, GX_train, _, G_train, _ = train_test_split(
                     X, y, GX, G,
@@ -275,6 +277,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         return [
             (OpticalGammaSweep, 'gamma'),
             (OpticalFoldSweep, 'folds'),
-            (OpticalKappaSweep, 'kappa'),
-            (OpticalStrengthSweep, 'strength')
+            (OpticalGammaStarSweep, 'gamma_star'),
+            (OpticalTraceSSweep, 'trS')
         ]
