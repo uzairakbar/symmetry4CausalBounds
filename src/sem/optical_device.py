@@ -33,7 +33,14 @@ class OpticalDeviceSEM(SEM):
                 directory
             )
 
-        # download_dataset(directory)
+        def dataset_exists(directory: str) -> bool:
+            if not os.path.isdir(directory):
+                return False
+            files = [f for f in os.listdir(directory) if 'confounder' in f and 'random' not in f]
+            return len(files) > 0
+
+        if not dataset_exists(directory):
+            download_dataset(directory)
 
         file_list = sorted([
             f for f in os.listdir(directory) if 'confounder' in f and 'random' not in f

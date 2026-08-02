@@ -48,19 +48,17 @@ Use the `./config.yaml` file to specify the experiment parameters. The provided 
 
 Comment out (or remove) the experiemnts from `./config.yaml` that you are not interested in, and then run the `./src/main.py` script to run the remaining experiments.
 
-The `defaults` block holds global toggles, overridable per experiment:
-
-| toggle | effect |
-| --- | --- |
-| `calibrate` | `true`: budgets scaled by the noise level, radius `sigma*sqrt(gamma)` (paper). `false`: raw `sqrt(gamma)`. |
-| `pad` | `true`: eps-pad intervals `[l-eps, u+eps]` (Thm. 3). Applied to `DA+` methods only, never to baseline `PI`/`PI_INV`/`PI_IV`. |
-| `clipy` | `true`: clip returned intervals to the outcome range observed at fit time. |
-
-Sensitivity parameters (`gamma`, `epsilon`) are user-specified in `./src/experiments/configs.py`.
-Their oracle counterparts (`gamma*`, `epsilon*`, `gamma_z*`) are computed per (SEM, DA) pair in
-`./src/oracle.py` and reported, but no method consumes them.
-
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
 ## CPU vs. GPU backend
 The code uses a CPU backend for PyTroch by default (recommended for `optical_device` and `simulation` sweep experiments). To use a GPU or MPS backend, however, change the `CPU_ONLY` variable specified in `./src/regressors/utils.py` to `False`.
+
+## PACE
+
+```bash
+bash setup_uv.sh
+```
+
+```bash
+bash fix_torch.sh
+```

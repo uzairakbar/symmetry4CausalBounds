@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "symmetry4CausalBounds"
+version = "0.1.0"
+description = "Symmetry Constrained Causal Partial Identification"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "cvxpy==1.5.3",
+    "enlighten==1.12.4",
+    "fsspec==2024.6.1",
+    "ipywidgets==8.1.2",
+    "loguru==0.5.3",
+    "matplotlib==3.8.4",
+    "munch==4.0.0",
+    "numpy==1.26.4",
+    "pandas==2.2.2",
+    "pandas-profiling==3.0.0",
+    "pymdptoolbox==4.0b3",
+    "pyyaml==6.0.2",
+    "scikit-learn==1.5.1",
+    "scipy==1.13.1",
+    "seaborn==0.13.2",
+    "statsmodels==0.14.6",
+    "torch==2.4.0",
+    "torchvision==0.19.0",
+    "widgetsnbextension==4.0.10",
+]
+
+[project.optional-dependencies]
+# analytic gradients for the non-convex CopSens solve via SLSQP (probit/logit)
+speed = [
+    "jax[cpu]>=0.4.30",
+]
+
+[tool.uv.pip]
+torch-backend = "auto"
