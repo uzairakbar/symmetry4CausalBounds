@@ -18,6 +18,13 @@ def main():
     """Run experiments based on config.yaml."""
     with open('config.yaml', 'r') as file:
         config = yaml.safe_load(file)
+
+    # global toggles, overridable per experiment
+    defaults = config.pop('defaults', {}) or {}
+    for name in ('simulation', 'optical_device', 'colored_mnist'):
+        if name in config:
+            config[name] = {**defaults, **config[name]}
+
     config = munchify(config)
     
     if 'simulation' in config:

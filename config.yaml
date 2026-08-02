@@ -1,3 +1,9 @@
+# global toggles, overridable per experiment
+defaults:
+    calibrate: false    # scale budgets by noise sigma (paper); false = raw gamma
+    pad: false          # eps-pad DA+ intervals (Thm. 3)
+    clipy: true         # clip intervals to observed outcome range
+
 # ---
 # simulation:
 #     seed: 42
@@ -14,6 +20,8 @@
 #         - PI
 #         - DA+PI
 #         - DA+PI_IV
+#         - PI&DA+PI
+#         - PI&DA+PI_IV
 #     sweep_mode: query
 #     metric: worst_error     # Options: approximation_error, worst_error, interval_width
 #     augmentation: translate
@@ -33,6 +41,8 @@ optical_device:
         - PI
         - DA+PI
         - DA+PI_IV
+        - PI&DA+PI
+        - PI&DA+PI_IV
     sweep_mode: query
     metric: worst_error
     # augmentation: all
