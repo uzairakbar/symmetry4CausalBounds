@@ -190,7 +190,7 @@ def create_query_sweep_plot(
     x_values: NDArray,
     y_results: Dict[str, NDArray],
     xlabel: str,
-    ylabel: str = r'${\bm{h}}^\top {\bm{x}}$',
+    ylabel: str = r'$h({\bm{x}})$',
     xscale: Literal['linear', 'log'] = 'linear',
     savefig: bool = True,
     format: str = PLOT_FORMAT,
@@ -333,9 +333,9 @@ def create_query_sweep_plot(
     
 #     # Column configuration
 #     column_titles = [
-#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
-#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
-#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
+#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_1$',
+#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{\nu}}_1 + {\sigma}_2 \cos(\theta){\bm{\nu}}_2$',
+#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_2$',
 #     ]
 #     x_labels = [r'$t$', r'$\theta$', r'$t$']
     
@@ -508,9 +508,9 @@ def create_panel_plot(
     plt.rcParams.update(RC_PARAMS)
     
     column_titles = [
-        r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
-        r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
-        r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
+        r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_1$',
+        r'radial sweep' + '\n' + r'${\bm{x}} := s_1\sin(\theta){\bm{\nu}}_1 + s_2 \cos(\theta){\bm{\nu}}_2$',
+        r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_2$',
     ]
     x_labels = [r'$t$', r'$\theta$', r'$t$']
     
@@ -561,7 +561,7 @@ def create_panel_plot(
         
         ax_pred.set_xlabel(x_labels[col_idx], fontsize=FS_LABEL)
         if col_idx == 0:
-            ax_pred.set_ylabel(r'${\bm{h}}^\top {\bm{x}}$', fontsize=FS_LABEL)
+            ax_pred.set_ylabel(r'$h({\bm{x}})$', fontsize=FS_LABEL)
         ax_pred.tick_params(labelsize=FS_TICK)
         ax_pred.set_xlim([x_grid.min(), x_grid.max()])
         
@@ -598,7 +598,7 @@ def create_panel_plot(
                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
         
         if col_idx == 0:
-            ax_worst.set_ylabel(r'$E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$', fontsize=FS_LABEL)
+            ax_worst.set_ylabel(r'$\overline{E}_{\bm{x}}$', fontsize=FS_LABEL)
         ax_worst.set_title(column_titles[col_idx], fontsize=FS_LABEL, pad=8)
         ax_worst.tick_params(labelsize=FS_TICK)
         
@@ -695,9 +695,9 @@ def create_panel_plot(
 #     plt.rcParams.update(RC_PARAMS)
     
 #     column_titles = [
-#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_1$',
-#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{u}}_1 + {\sigma}_2 \cos(\theta){\bm{u}}_2$',
-#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{u}}_2$',
+#         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_1$',
+#         r'radial sweep' + '\n' + r'${\bm{x}} := {\sigma}_1\sin(\theta){\bm{\nu}}_1 + {\sigma}_2 \cos(\theta){\bm{\nu}}_2$',
+#         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_2$',
 #     ]
 #     x_labels = [r'$t$', r'$\theta$', r'$t$']
     

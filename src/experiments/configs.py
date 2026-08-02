@@ -38,7 +38,7 @@ class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
     gamma: float = 2**-2
     gamma0: float = 2**0
-    delta: float = 2**-16
+    delta: float = 2**-8
     epsilon: float = 2**-2
     test_fraction: float = 0.1
     dataset_index: int = 8
@@ -46,13 +46,12 @@ class OpticalDeviceConfig:
 # @dataclass(frozen=True)
 # class OpticalDeviceConfig:
 #     """Configuration for optical device experiments."""
-#     gamma: float = 0.32
-#     gamma0: float = 1.0 #+ 0.2
-#     delta: float = 0 #2**-7.5
-#     epsilon: float = 2**-4.5
+#     gamma: float = 2**-2
+#     gamma0: float = 1.0
+#     delta: float = 2**-16
+#     epsilon: float = 2**-1
 #     test_fraction: float = 0.1
-#     dataset_index: int = 8
-#     # dataset_index: int = 9
+#     dataset_index: int = 2
 #     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 
 
@@ -69,12 +68,12 @@ MetricName = Literal['approximation_error', 'worst_error', 'interval_width']
 
 METRIC_CONFIGS: Dict[MetricName, Dict[str, Any]] = {
     'approximation_error': {
-        'ylabel': r'average $E_{\mathrm{approx}}^{\operatorname{do}({\bm{x}})}$',
+        'ylabel': r'average $\underline{E}_{{\bm{x}}}$',
         'yscale': 'asinh',
         'normalize': False
     },
     'worst_error': {
-        'ylabel': r'average $E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$',
+        'ylabel': r'average $\overline{E}_{{\bm{x}}}$',
         'normalize': False
     },
     'interval_width': {

@@ -52,7 +52,7 @@ class OpticalDeviceSEM(SEM):
             self,
             experiment: int=0,
             center: bool=True,
-            ground_truth: str='linear'
+            ground_truth: str='polynomial'
         ):
         experiment_data = self.get_experiment_data(experiment)
 
