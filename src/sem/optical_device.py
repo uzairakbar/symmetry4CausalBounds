@@ -66,7 +66,7 @@ class OpticalDeviceSEM(SEM):
 
         best_degree = 1
         if ground_truth == 'linear':
-            W_XY, _, epsilon = fit_ground_truth_f(
+            W_XY, features, epsilon = fit_ground_truth_f(
                 X, y, C, 1
             )
         elif ground_truth == 'polynomial':
@@ -76,7 +76,7 @@ class OpticalDeviceSEM(SEM):
             logger.info(
                 f'Experiment {experiment} polynomial degree: {best_degree}'
             )
-            W_XY, _, epsilon = fit_ground_truth_f(
+            W_XY, features, epsilon = fit_ground_truth_f(
                 X, y, C, best_degree
             )
         else:
@@ -100,19 +100,21 @@ class OpticalDeviceSEM(SEM):
         self.C = C
         self.poly_degree = best_degree
 
-        # 4. Normalize stored variances
-        # Var(xi_new) = Var(xi_old) / sigma^2 = 1.0
-        self.varXi = 1.0 
-        
-        # Var(E[xi|X]) scales by 1/sigma^2 as well
-        original_varEXiX = np.var(
-            self.X @ np.linalg.pinv(self.X) @ (epsilon * self.C)
-        )
-        self.varEXiX = original_varEXiX / (noise_scale ** 2)
-        # for debugging
-        print('optical Var(xi): ', self.varXi)
-        print('optical Var(E[xi|X]): ', self.varEXiX)
-    
+        # 4. Normalized variances. Var(xi_new) = Var(xi_old) / sigma^2 = 1.0
+        # Bias lives in the feature space PI is fit on, i.e. phi(X), not X.
+        Phi = features.fit_transform(self.X)
+        xi_hat = Phi @ np.linalg.pinv(Phi) @ (epsilon * self.C)
+        self._bias_sq = float(np.var(xi_hat) / (noise_scale ** 2))
+
+    @property
+    def bias_sq(self) -> float:
+        return self._bias_sq
+
+    @property
+    def sigma_sq(self) -> float:
+        # Var(xi) = 1 after normalization
+        return 1.0 - self._bias_sq
+
     def sample(self, N: int=1, **kwargs) -> Tuple[NDArray, NDArray]:
         N_max, M = self.X.shape
         indices = np.arange(N_max)
