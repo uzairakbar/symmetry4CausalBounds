@@ -35,6 +35,32 @@ class ExperimentDataContext:
     oracle: Optional[Any] = None    # OracleParameters; unused by default
 
 
+@dataclass
+class SweepData:
+    """One sweep step's data. Unpacks as the legacy 6-tuple."""
+    X: np.ndarray
+    y: np.ndarray
+    GX: np.ndarray
+    G: np.ndarray
+    X_test: np.ndarray
+    estimand: np.ndarray
+    # untiled copies for baselines that are exactly tiling-invariant (m-sweep)
+    X_base: Optional[np.ndarray] = None
+    y_base: Optional[np.ndarray] = None
+
+    def __iter__(self):
+        return iter((self.X, self.y, self.GX, self.G, self.X_test, self.estimand))
+
+    @classmethod
+    def coerce(cls, data) -> 'SweepData':
+        return data if isinstance(data, cls) else cls(*data)
+
+    @property
+    def fit_arrays(self) -> Dict[str, Any]:
+        return dict(X=self.X, y=self.y, GX=self.GX, G=self.G,
+                    X_base=self.X_base, y_base=self.y_base)
+
+
 # =============================================================================
 # BASE RUNNER
 # =============================================================================
@@ -190,9 +216,10 @@ class ParamSweepRunner(BaseExperimentRunner):
                 
                 if not self.data_depends_on_param:
                     # Generate data once using the first param value (dummy)
-                    cached_data = self.generate_data(j, param_values[0])
-                    X, y, GX, G, _, _ = cached_data
-                    
+                    cached_data = SweepData.coerce(
+                        self.generate_data(j, param_values[0])
+                    )
+
                     # Fit all models once
                     for name, builder in self.methods.items():
                         if name == 'ATE': continue
@@ -200,21 +227,22 @@ class ParamSweepRunner(BaseExperimentRunner):
                         fit_model(
                             model=model,
                             method_name=name,
-                            X=X, y=y, GX=GX, G=G,
                             hyperparameters=self.hyperparameters,
-                            da=self.get_da(j)
+                            da=self.get_da(j),
+                            **cached_data.fit_arrays
                         )
                         cached_models[name] = model
 
                 # Iterate Parameters Inner Loop
                 for i, param in enumerate(param_values):
-                    
+
                     if self.data_depends_on_param:
-                        # Full regeneration for Kappa/Alpha sweeps
-                        X, y, GX, G, X_test, estimand = self.generate_data(j, param)
+                        # Full regeneration for data-dependent sweeps
+                        data = SweepData.coerce(self.generate_data(j, param))
                     else:
                         # Reuse data for Gamma sweeps
-                        _, _, _, _, X_test, estimand = cached_data
+                        data = cached_data
+                    X_test, estimand = data.X_test, data.estimand
 
                     for name, builder in self.methods.items():
                         if name == 'ATE':
@@ -226,9 +254,9 @@ class ParamSweepRunner(BaseExperimentRunner):
                                 fit_model(
                                     model=model,
                                     method_name=name,
-                                    X=X, y=y, GX=GX, G=G,
                                     hyperparameters=self.hyperparameters,
-                                    da=self.get_da(j)
+                                    da=self.get_da(j),
+                                    **data.fit_arrays
                                 )
                             else:
                                 model = cached_models[name]
@@ -262,12 +290,12 @@ class ParamSweepRunner(BaseExperimentRunner):
         pass
     
     @abstractmethod
-    def generate_data(self, experiment_index: int, param) -> Tuple:
+    def generate_data(self, experiment_index: int, param) -> 'SweepData':
         """
         Generate data for one experiment at one parameter value.
-        
+
         Returns:
-            Tuple of (X, y, GX, G, X_test, estimand)
+            SweepData, or the legacy (X, y, GX, G, X_test, estimand) tuple.
         """
         pass
 

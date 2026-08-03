@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from typing import Tuple, Callable, Optional, Any, Dict
 
 from src.experiments.base import (
-    QuerySweepRunner, ParamSweepRunner, ExperimentDataContext
+    QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
 )
 from src.experiments.utils import fit_model, radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k
@@ -378,92 +378,70 @@ class SampleSweep(GenericParamSweep):
 
 class AugmentationFoldSweep(GenericParamSweep):
     """
-    Sweep over the number of augmentation folds (multiplicity).
-    Fixed N, increasing Augmentations k.
+    Sweep over the number of augmentation folds m, at FIXED base data.
+
+    Base sample and train/test split are drawn ONCE per experiment, so m is the
+    only thing that varies: GX/G stack m distinct DA passes over the same train
+    X, and X/y are tiled to match. The augmented train set thus grows m-fold --
+    the one sanctioned departure from the paper's fixed-size convention, kept
+    deliberately to study the finite-n benefit of m.
     """
     def __init__(self, sweep_config, **kwargs):
         self.sweep_config = sweep_config
+        self._base = {}
         super().__init__(**kwargs)
-    
+
     @property
     def data_depends_on_param(self) -> bool:
         return True # Changing folds changes dataset size
-    
+
     def get_param_range(self) -> np.ndarray:
         return self.sweep_config.range_fn(self.sweep_samples)
-    
-    def generate_data(self, experiment_index: int, n_folds_param):
-        """
-        Generate data where X is replicated k times, and GX contains k distinct augmentations.
-        """
-        k = int(n_folds_param)
+
+    def _base_data(self, experiment_index: int):
+        """(X_train_raw, X_train, y_train, X_test, estimand); drawn once per experiment."""
+        if experiment_index not in self._base:
+            self._base[experiment_index] = self._draw_base(experiment_index)
+        return self._base[experiment_index]
+
+    def _draw_base(self, experiment_index: int):
         sem = self.sems[experiment_index]
-        da = self.das[experiment_index]
-        
-        # Branch for Optical Device (Limited Data Pool)
+
         if 'OpticalDeviceSEM' in str(type(sem)):
-            # A. Load raw single-fold data
+            # finite pool: split unique instances, test set then fixed across m
             X_all, y_all = sem(N=self.n_samples)
-            
-            # B. Split Train/Test on unique instances
-            X_tr, X_te, y_tr, _, _, _, _, _ = train_test_split(
-                X_all, y_all, X_all, X_all, # dummies
+            X_train_raw, X_test_raw, y_train, _ = train_test_split(
+                X_all, y_all,
                 test_size=self.test_fraction,
                 random_state=self.seed + experiment_index
             )
-            
-            # C. Augment Training Train k times
-            X_tr_list, y_tr_list, GX_tr_list, G_tr_list = [], [], [], []
-            for _ in range(k):
-                # Optical DA does NOT take gamma argument
-                gx, g = da(X_tr)
-                X_tr_list.append(X_tr)
-                y_tr_list.append(y_tr)
-                GX_tr_list.append(gx)
-                G_tr_list.append(g)
-            
-            X_train_raw = np.vstack(X_tr_list)
-            y_train = np.vstack(y_tr_list)
-            GX_train_raw = np.vstack(GX_tr_list)
-            G_train = np.vstack(G_tr_list)
-            
-            # D. Transform
-            X_train = self.apply_transform(X_train_raw)
-            GX_train = self.apply_transform(GX_train_raw)
-            X_test = self.apply_transform(X_te)
-            
-            estimand = X_test @ sem.solution
-            return X_train, y_train, GX_train, G_train, X_test, estimand
-
-        # Branch for Simulation (Infinite Data Generator)
         else:
-            # 1. Generate Base Data (Fixed N)
-            X_base, y_base = sem(N=self.n_samples)
-            
-            # 2. Generate Augmented Data (GX) - k distinct passes
-            GX_list, G_list = [], []
-            for _ in range(k):
-                # Simulation DA DOES take gamma argument (default 1.0)
-                # We can omit it to use default or pass it safely if we want
-                # Removing explicit kwarg ensures compat if da.__call__ signature changes
-                gx, g = da(X_base) 
-                GX_list.append(gx)
-                G_list.append(g)
-                
-            GX_raw = np.vstack(GX_list)
-            G = np.vstack(G_list)
-            
-            # 3. Replicate Baseline Data
-            X_raw = np.tile(X_base, (k, 1))
-            y = np.tile(y_base, (k, 1))
-            
-            # 4. Transforms
-            X = self.apply_transform(X_raw)
-            GX = self.apply_transform(GX_raw)
-            
-            # 5. Test Data
-            X_test_raw, _ = sem(N=int(self.test_fraction * self.n_samples), intervention=True)
-            X_test = self.apply_transform(X_test_raw)
-            estimand = X_test @ sem.solution
-            
-            return X, y, GX, G, X_test, estimand
+            # generator: interventional test set
+            X_train_raw, y_train = sem(N=self.n_samples)
+            X_test_raw, _ = sem(
+                N=int(self.test_fraction * self.n_samples), intervention=True
+            )
+
+        X_test = self.apply_transform(X_test_raw)
+        return (X_train_raw, self.apply_transform(X_train_raw), y_train,
+                X_test, X_test @ sem.solution)
+
+    def generate_data(self, experiment_index: int, n_folds_param):
+        """m distinct augmentations of the same fixed train set."""
+        m = int(n_folds_param)
+        da = self.das[experiment_index]
+        X_raw, X, y, X_test, estimand = self._base_data(experiment_index)
+
+        GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)))
+
+        return SweepData(
+            # transform is row-wise: transform(tile(.)) == tile(transform(.))
+            X=np.tile(X, (m, 1)),
+            y=np.tile(y, (m, 1)),
+            GX=self.apply_transform(np.vstack(GX_raws)),
+            G=np.vstack(Gs),
+            X_test=X_test,
+            estimand=estimand,
+            X_base=X,
+            y_base=y,
+        )
