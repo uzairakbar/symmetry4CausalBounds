@@ -21,6 +21,9 @@ from src.experiments.configs import (
     PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
     SCATTER_SE_CROSSHAIRS,
 )
+from src.experiments.utils.constants import (
+    SUBDIR_QUERY, SUBDIR_SWEEP, SUBDIR_PERF,
+)
 
 # QueryEval scalar fields recorded at every (method, step, experiment)
 METRIC_FIELDS: Tuple[str, ...] = (
@@ -443,9 +446,9 @@ class ExperimentOrchestrator(ABC):
         for param in sweep_spec.param:
             x_values, results, statuses = self.sweep_record(param)
 
-            save(x_values, f'{param}_values', self.name, 'pkl')
-            save(results, f'{param}_results', self.name, 'pkl')
-            save(statuses, f'{param}_statuses', self.name, 'pkl')
+            save(x_values, f'{param}_values', self.name, 'pkl', subdir=SUBDIR_SWEEP)
+            save(results, f'{param}_results', self.name, 'pkl', subdir=SUBDIR_SWEEP)
+            save(statuses, f'{param}_statuses', self.name, 'pkl', subdir=SUBDIR_SWEEP)
 
             for metric in sweep_spec.metric:
                 metric_spec = METRIC_SPECS[metric]
@@ -510,7 +513,7 @@ class ExperimentOrchestrator(ABC):
                 'n_experiments': n_experiments,
             }
 
-        save(record, 'perf', self.name, 'pkl')
+        save(record, 'perf', self.name, 'pkl', subdir=SUBDIR_PERF)
         create_perf_plot(record, overlay_metrics=overlay, experiment=self.name)
 
     def _run_scatter(self, scatter_spec):
@@ -565,8 +568,8 @@ class ExperimentOrchestrator(ABC):
         # Create angle values for plotting (x-axis)
         angles = np.linspace(0, 2*np.pi, self.kwargs['sweep_samples'], endpoint=False)
         
-        save(angles, 'treatment_values', self.name, 'pkl')
-        save(results, 'outcome_values', self.name, 'pkl')
+        save(angles, 'treatment_values', self.name, 'pkl', subdir=SUBDIR_QUERY)
+        save(results, 'outcome_values', self.name, 'pkl', subdir=SUBDIR_QUERY)
         
         create_query_sweep_plot(
             angles, results,

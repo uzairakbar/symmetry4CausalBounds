@@ -13,6 +13,7 @@ from .constants import (
     FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
     RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
     POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE, PANEL_CONFIGS,
+    SUBDIR_QUERY, SUBDIR_SWEEP, SUBDIR_SCATTER, SUBDIR_PERF,
 )
 from .data_operations import bootstrap, save
 
@@ -71,9 +72,20 @@ def create_sweep_plot(
     threshold, Thm. 1 threshold).
     """
     try:
+        # x can be MEASURED rather than a designed grid (trS plots the observed
+        # rho tr(S)/k), so it is not guaranteed ascending. matplotlib draws
+        # segments in array order, so an out-of-order x makes the line double
+        # back on itself and read as jitter. Reorder (x, y) pairs together; a
+        # no-op for the sweeps whose grid is already ascending.
+        x_values = np.asarray(x_values, dtype=float)
+        order = np.argsort(x_values, kind='stable')
+        if not np.array_equal(order, np.arange(len(x_values))):
+            x_values = x_values[order]
+            y_results = {k: np.asarray(v)[order] for k, v in y_results.items()}
+
         if bootstrapped:
             y_results = bootstrap(y_results)
-        
+
         legend_items = [item for item in (legend_items or []) if item in y_results]
         
         plt.rcParams.update(RC_PARAMS)
@@ -187,7 +199,8 @@ def create_sweep_plot(
         
         if savefig:
             fname = fname or ''.join(c for c in xlabel if c.isalnum())
-            save(fig, f'{fname}_sweep', experiment, format, dpi=PLOT_DPI)
+            save(fig, f'{fname}_sweep', experiment, format,
+                 subdir=SUBDIR_SWEEP, dpi=PLOT_DPI)
 
     except Exception as e:
         # Fallback so one plot failure doesn't kill the whole experiment batch
@@ -314,7 +327,7 @@ def create_query_sweep_plot(
     
     if savefig:
         fname = ''.join(c for c in xlabel if c.isalnum()) + '_sweep'
-        save(fig, fname, experiment, format, dpi=PLOT_DPI)
+        save(fig, fname, experiment, format, subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
 
 
 
@@ -458,7 +471,8 @@ def create_panel_plot(
         fontsize=FS_TICK + 2, frameon=False, borderpad=-0.3, borderaxespad=0, labelspacing=0.25)
     
     fig.align_ylabels(axes[:, 0])
-    save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
+    save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT,
+         subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
 
 
 
@@ -579,7 +593,8 @@ def create_scatter_plot(
         plt.show()
 
         if savefig:
-            save(fig, fname or 'scatter', experiment, format, dpi=PLOT_DPI)
+            save(fig, fname or 'scatter', experiment, format,
+                 subdir=SUBDIR_SCATTER, dpi=PLOT_DPI)
 
     except Exception as e:
         from loguru import logger
@@ -706,7 +721,7 @@ def create_perf_plot(
         plt.show()
 
         if savefig:
-            save(fig, fname, experiment, format, dpi=PLOT_DPI)
+            save(fig, fname, experiment, format, subdir=SUBDIR_PERF, dpi=PLOT_DPI)
 
     except Exception as e:
         from loguru import logger

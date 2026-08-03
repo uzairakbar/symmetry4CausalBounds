@@ -108,23 +108,27 @@ def save(
     fname: str,
     experiment: ExperimentType,
     format: PlotFormat | Literal['pkl', 'json', 'tex'],
+    subdir: Optional[str] = None,
     **kwargs
 ):
     """
     Save object to file with appropriate serialization.
-    
+
     Args:
         obj: Object to save (figure, dict, array, etc.)
         fname: Filename without extension
         experiment: Experiment name for organizing artifacts
         format: File format ('pkl', 'json', 'tex', or plot format)
+        subdir: experiment-type folder ('query'/'sweep'/'scatter'/'perf'),
+            so one run's output does not pile into a single directory
         **kwargs: Additional arguments for format-specific saving
     """
     save_path = f'{ARTIFACTS_DIRECTORY}/{experiment}'
-    
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    
+    if subdir:
+        save_path = f'{save_path}/{subdir}'
+
+    os.makedirs(save_path, exist_ok=True)
+
     full_path = f'{save_path}/{fname}.{format}'
     
     try:

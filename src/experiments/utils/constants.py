@@ -13,6 +13,12 @@ PLOT_FORMAT: Literal['png', 'pdf', 'ps', 'eps', 'svg'] = 'pdf'
 # Directories
 ARTIFACTS_DIRECTORY: str = 'artifacts'
 
+# One subfolder per experiment type, so artifacts/<dataset>/ stays navigable
+SUBDIR_QUERY: str = 'query'
+SUBDIR_SWEEP: str = 'sweep'
+SUBDIR_SCATTER: str = 'scatter'
+SUBDIR_PERF: str = 'perf'
+
 # Plotting style
 RC_PARAMS: Dict[str, str | int | bool] = {
     'text.usetex': True,
