@@ -4,6 +4,7 @@ Updated to use simplified fit_model signature and OPTIMIZED LOOP ORDER.
 """
 import time
 import enlighten
+from functools import partial
 import numpy as np
 from loguru import logger
 from abc import ABC, abstractmethod
@@ -401,7 +402,8 @@ class ExperimentOrchestrator(ABC):
 
     @abstractmethod
     def build_methods(self, gamma: float, epsilon: float,
-                      epsilon_iv: Optional[float] = None) -> Dict[str, Any]:
+                      epsilon_iv: Optional[float] = None,
+                      n_jobs: Optional[int] = None) -> Dict[str, Any]:
         """Build methods at explicit budgets (per-experiment ParamPolicy)."""
         pass
 
@@ -489,7 +491,9 @@ class ExperimentOrchestrator(ABC):
         methods = {k: v for k, v in self.methods.items() if k != 'ATE'}
         runner = self.get_sweep_runner_cls('m')(
             methods=methods,
-            method_factory=self.build_methods,
+            # the runner kwarg alone does NOT reach the models: build_methods
+            # reads the orchestrator's toggles. Force it on the factory too.
+            method_factory=partial(self.build_methods, n_jobs=1),
             param_grid_override=[1],
             **{**self._get_clean_kwargs(), 'n_jobs': 1}
         )
