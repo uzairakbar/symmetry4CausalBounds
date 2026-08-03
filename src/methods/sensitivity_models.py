@@ -24,13 +24,23 @@ class SolveStatus(IntEnum):
     FAILURE = 2         # numerical breakdown: no answer produced
 
 
-def _solve_chunk(model, chunk):
-    """Worker: one model copy, one chunk. Builds its DPP cache once, not per query."""
-    return [model._solve_single(x) for x in chunk]
+def _solve_chunk(view, chunk):
+    """Worker: one model view, one chunk. Per-chunk setup runs once, not per query."""
+    view._begin_chunk()
+    return [view._solve_single(payload) for payload in chunk]
 
 
-class PartialR2(SA):
-    """Bounded-confounding PI (Asm. 2). SOCP with QR compression."""
+class BoundedSA(SA):
+    """
+    Contract every PI method honours: per-query status, chunk-parallel solve,
+    pad-then-clip finalisation.
+
+    Subclasses supply four hooks:
+        _prepare(X, gamma) -> per-query payloads, or None if globally infeasible
+        _solve_single(payload) -> (lower, upper, SolveStatus)
+        _worker_view()  -> what crosses the process boundary (default: self)
+        _begin_chunk()  -> per-chunk setup, run INSIDE the worker
+    """
 
     def __init__(
         self,
@@ -49,6 +59,92 @@ class PartialR2(SA):
         self.calibrate = calibrate
         self.clipy = clipy
         self.n_jobs = n_jobs
+        self.query_status = None    # per-query SolveStatus, set on every predict
+        self.y_min = -np.inf
+        self.y_max = np.inf
+
+        super().__init__(gamma)
+
+    # ------------------------------------------------------------- predict
+
+    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
+        gamma = self.gamma if gamma is None else gamma
+        if epsilon is not None:
+            self.epsilon = epsilon      # constraint RHS and padding both read it
+        return self._finalize(self._raw_bounds(X, gamma))
+
+    def _raw_bounds(self, X, gamma):
+        """Unpadded, unclipped [lower, upper] per query; sets `query_status`."""
+        payloads = self._prepare(X, gamma)
+        if payloads is None:            # the whole constraint set is empty
+            self.query_status = np.full(len(X), SolveStatus.INFEASIBLE, dtype=int)
+            return np.full((len(X), 2), np.nan)
+
+        view = self._worker_view()
+        if self.n_jobs == 1:
+            # Never route a single query through here as a shortcut when
+            # n_jobs > 1: a parent-side solve leaves an unpicklable
+            # DefaultSolution on the Problem and kills every later dispatch.
+            view._begin_chunk()
+            solved = [view._solve_single(p) for p in payloads]
+        else:
+            # Chunk, not per query: the DPP cache is per worker, so fine-grained
+            # tasks re-canonicalize every query (measured ~2x slower).
+            # Split INDICES, not the payload list: CopSens payloads are ragged
+            # and np.array_split would raise on them.
+            n_chunks = effective_n_jobs(self.n_jobs)      # resolves -1
+            chunks = [c for c in np.array_split(np.arange(len(payloads)), n_chunks)
+                      if len(c)]
+            # loky sets inner threads to cpu_count//n_jobs, which a submit-script
+            # OMP_NUM_THREADS overrides. Pin it.
+            with parallel_config(backend='loky', n_jobs=self.n_jobs,
+                                 inner_max_num_threads=1):
+                out = Parallel()(
+                    delayed(_solve_chunk)(view, [payloads[i] for i in c])
+                    for c in chunks
+                )
+            solved = [q for c in out for q in c]
+
+        solved = np.asarray(solved, dtype=float)
+        self.query_status = solved[:, 2].astype(int)
+        return solved[:, :2]
+
+    def _finalize(self, bounds):
+        """eps-padding (Thm. 3.A) then clipping to observable y limits."""
+        if self.pad:
+            bounds = bounds + np.array([-self.epsilon, self.epsilon])
+        if self.clipy:
+            bounds = np.clip(bounds, self.y_min, self.y_max)
+        return bounds
+
+    # ---------------------------------------------------------------- hooks
+
+    def _worker_view(self):
+        """What gets pickled to the workers. Override to strip unpicklable state."""
+        return self
+
+    def _begin_chunk(self):
+        """Per-chunk setup, inside the worker. Override to amortise a JIT/cache."""
+
+    def _prepare(self, X, gamma):
+        raise NotImplementedError
+
+    def _solve_single(self, payload):
+        raise NotImplementedError
+
+
+class PartialR2(BoundedSA):
+    """Bounded-confounding PI (Asm. 2). SOCP with QR compression."""
+
+    def __init__(
+        self,
+        gamma=None,
+        epsilon=0.0,
+        pad=False,
+        calibrate=False,
+        clipy=True,
+        n_jobs=1,
+    ):
         self._supports_closed_form = True
 
         # CVX state
@@ -62,12 +158,10 @@ class PartialR2(SA):
         self.R_constraint = None
         self.h_erm = None
         self.N_samples = 0
-        self.query_status = None    # per-query SolveStatus, set on every predict
         self.sigma_sq = 1.0     # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
-        self.y_min = -np.inf
-        self.y_max = np.inf
 
-        super().__init__(gamma)
+        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad,
+                         calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
 
     # ------------------------------------------------------------------ fit
 
@@ -135,14 +229,8 @@ class PartialR2(SA):
 
     # ------------------------------------------------------------- predict
 
-    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
-        gamma = self.gamma if gamma is None else gamma
-        if epsilon is not None:
-            self.epsilon = epsilon      # constraint RHS and padding both read it
-        return self._finalize(self._raw_bounds(X, gamma))
-
     def _raw_bounds(self, X, gamma):
-        """Unpadded, unclipped [lower, upper] per query; sets `query_status`."""
+        """Closed-form shortcut, else the generic chunked solve."""
         if CLOSED_FORM_SOLUTION and self._supports_closed_form:
             radius = self.scale * np.sqrt(gamma)
             mahalanobis_sq = np.maximum(0, np.sum((X @ self.invSigmaX) * X, axis=1))
@@ -151,36 +239,12 @@ class PartialR2(SA):
             self.query_status = np.full(len(X), SolveStatus.OK, dtype=int)
             return np.column_stack([centers - margins, centers + margins])
 
+        return super()._raw_bounds(X, gamma)
+
+    def _prepare(self, X, gamma):
+        """One DPP parameter set for the whole batch; queries are the rows of X."""
         self._set_solver_parameters(gamma)
-
-        if self.n_jobs == 1:
-            # Never route a single query through here as a shortcut when
-            # n_jobs > 1: a parent-side solve leaves an unpicklable
-            # DefaultSolution on the Problem and kills every later dispatch.
-            solved = [self._solve_single(x) for x in X]
-        else:
-            # Chunk, not per query: the DPP cache is per worker, so fine-grained
-            # tasks re-canonicalize every query (measured ~2x slower).
-            n_chunks = effective_n_jobs(self.n_jobs)      # resolves -1
-            chunks = [c for c in np.array_split(X, n_chunks) if len(c)]
-            # loky sets inner threads to cpu_count//n_jobs, which a submit-script
-            # OMP_NUM_THREADS overrides. Pin it.
-            with parallel_config(backend='loky', n_jobs=self.n_jobs,
-                                 inner_max_num_threads=1):
-                out = Parallel()(delayed(_solve_chunk)(self, c) for c in chunks)
-            solved = [q for c in out for q in c]
-
-        solved = np.asarray(solved, dtype=float)
-        self.query_status = solved[:, 2].astype(int)
-        return solved[:, :2]
-
-    def _finalize(self, bounds):
-        """eps-padding (Thm. 3.A) then clipping to observable y limits."""
-        if self.pad:
-            bounds = bounds + np.array([-self.epsilon, self.epsilon])
-        if self.clipy:
-            bounds = np.clip(bounds, self.y_min, self.y_max)
-        return bounds
+        return list(X)
 
     def _solve_single(self, x):
         """(lower, upper, status); bounds are NaN on any non-OK status."""
