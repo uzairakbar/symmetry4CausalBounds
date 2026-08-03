@@ -241,9 +241,12 @@ class InvarianceConstrainedPartialR2(PartialR2):
 class InstrumentalVariablePartialR2(PartialR2):
     """PI + leaky IV constraint (Asm. 3). Null/empty Z falls back to baseline PI."""
 
-    def __init__(self, gamma=None, gamma_z=0.0, rho=1.0, **kwargs):
+    def __init__(self, gamma=None, gamma_z=0.0, rho=1.0, iv_epsilon=None, **kwargs):
         self.gamma_z = gamma_z
         self.rho = rho
+        # opt-in sharper IV budget; overrides ONLY the constraint threshold, never
+        # the +/-eps padding, which Thm. 3.A needs pointwise (see TO-DO item 2)
+        self.iv_epsilon = iv_epsilon
         super().__init__(gamma=gamma, **kwargs)
         self.Z_projector_R = None
         self.y_residual_base = None
@@ -256,7 +259,8 @@ class InstrumentalVariablePartialR2(PartialR2):
         """sqrt of the budget on Var(E[Y - h|Z]); Appendix A: eps + s*sqrt(gamma_z)."""
         # calibrated: s is the *pre*-DA sigma = sqrt(sigma_sq / rho); else 1
         s = float(np.sqrt(self.sigma_sq / self.rho)) if self.calibrate else 1.0
-        return self.epsilon + s * np.sqrt(self.gamma_z)
+        epsilon = self.epsilon if self.iv_epsilon is None else self.iv_epsilon
+        return epsilon + s * np.sqrt(self.gamma_z)
 
     def _precompute_matrices(self, X, y, Z=None, **kwargs):
         self._has_iv = Z is not None and np.size(Z) > 0
@@ -361,13 +365,15 @@ class IntersectedPartialR2(PartialR2):
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     """Baseline PI_IV (null instrument) intersected with DA+PI_IV."""
 
-    def __init__(self, gamma_z=0.0, **kwargs):
+    def __init__(self, gamma_z=0.0, iv_epsilon=None, **kwargs):
         self.gamma_z = gamma_z
+        self.iv_epsilon = iv_epsilon
         super().__init__(**kwargs)
 
     def _branch(self, pad, rho=1.0):
         return InstrumentalVariablePartialR2(
             gamma=self.gamma, gamma_z=self.gamma_z, rho=rho, epsilon=self.epsilon,
+            iv_epsilon=self.iv_epsilon,
             pad=pad, calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
         )
 
