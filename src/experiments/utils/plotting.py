@@ -143,10 +143,23 @@ def create_sweep_plot(
             if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
                 plt.fill_between(x_values, low, high, color=color, alpha=0.2)
         
-        # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds)
-        for x in vlines:
-            if np.isfinite(x):
-                plt.axvline(x, color='0.4', linestyle=':', linewidth=1.0, zorder=0)
+        # # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds)
+        # for x in vlines:
+        #     if np.isfinite(x):
+        #         plt.axvline(x, color='0.4', linestyle=':', linewidth=1.0, zorder=0)
+        
+        # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds).
+        # gamma sweeps append the Thm. 1 ratio last (generic_runner.py).
+        x_lo, x_hi = float(np.min(x_values)), float(np.max(x_values))
+        for i, x in enumerate(vlines):
+            if not (np.isfinite(x) and x_lo <= x <= x_hi):
+                continue
+            plt.axvline(x, color='0.4', linestyle=':', linewidth=1.0, zorder=0)
+            if i > 0:                # the appended Thm. 1 threshold
+                plt.text(x, 0.5, r'$\epsilon$-validity (Thm. 1)',
+                        transform=plt.gca().get_xaxis_transform(),
+                        rotation=90, va='center', ha='right',
+                        fontsize=FS_TICK * 0.75, color='0.4')
 
         # Formatting
         plt.xlabel(xlabel, fontsize=FS_LABEL)
@@ -605,9 +618,10 @@ def create_scatter_plot(
 
 # 4-way reliability split, in STATUS_CATEGORIES order
 PERF_CATEGORY_LABELS: Tuple[str, ...] = (
-    'solver failure', 'infeasible', 'covers', 'non-covering',
+    'failure', 'infeasible', 'covered', 'not-covered',
 )
-PERF_CATEGORY_COLORS: Tuple[str, ...] = ('#8c1d1d', '#d99b32', '#2f6f4e', '#9db9cf')
+# blue, orange, green, red
+PERF_CATEGORY_COLORS: Tuple[str, ...] = ('#C44E52', '#DD8452', '#55A467', '#4C72B0')
 
 
 def create_perf_plot(
@@ -660,7 +674,7 @@ def create_perf_plot(
             bottom += rates[:, index]
             bar_handles.append(container)
 
-        ax.set_ylabel(r'outcome (\%)', fontsize=FS_LABEL)
+        ax.set_ylabel(r'test samples (\%)', fontsize=FS_LABEL)
         ax.set_ylim(0, 100)
         ax.tick_params(axis='y', labelsize=FS_TICK)
         ax.legend(

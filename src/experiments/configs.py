@@ -112,7 +112,7 @@ PARAM_SPECS: Dict[str, ParamSpec] = {
         include_ate=False, data_constant=True,
     ),
     'epsilon': ParamSpec(
-        xlabel=r'$\epsilon / \epsilon^\star$', grid_fn=_RATIO_GRID, vlines=(1.0,),
+        xlabel=r'$\varepsilon / \varepsilon^\star$', grid_fn=_RATIO_GRID, vlines=(1.0,),
         include_ate=False, data_constant=True,
     ),
     'trS': ParamSpec(
