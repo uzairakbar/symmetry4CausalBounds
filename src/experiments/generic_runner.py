@@ -64,6 +64,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         da_factory: Callable,
         poly_transform: Optional[Callable] = None,
         epsilon_true: Optional[float] = None,
+        method_factory: Optional[Callable] = None,
+        default_gamma: float = 1.0,
+        default_epsilon: float = 2**-8,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -75,16 +78,26 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
+        # The IV budget is oracle-derived, so methods can only be built once the
+        # oracle exists. gamma/epsilon stay at the yaml defaults here (PLAN 7:
+        # the query sweep never auto-sets them).
+        if method_factory is not None:
+            self.methods = method_factory(
+                gamma=default_gamma,
+                epsilon=default_epsilon,
+                epsilon_iv=self.epsilon_iv,
+            )
+
         # Load and transform data
         X_raw, y = self.sem(N=self.n_samples)
         GX_raw, G = self.da(X_raw)
-        
+
         # Store raw data
         self.X_raw = X_raw
         self.GX_raw = GX_raw
         self.y = y
         self.G = G
-        
+
         # Apply polynomial transformation if provided
         if self.poly:
             self.X = self.poly.fit_transform(X_raw)
@@ -92,7 +105,16 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         else:
             self.X = X_raw
             self.GX = GX_raw
-    
+
+    @property
+    def epsilon_iv(self) -> float:
+        """Oracle IV budget, off the knife edge (same guard as PI_INV)."""
+        budget = getattr(self.oracle, 'eps_iv_star', None)
+        if budget is None or not np.isfinite(budget):
+            logger.warning('eps_iv_star unavailable; IV budget falls back to EPS_TOL.')
+            budget = 0.0
+        return float(budget) + EPS_TOL
+
     @property
     def _features(self) -> Optional[Callable]:
         return self.poly.fit_transform if self.poly else None

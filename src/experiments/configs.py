@@ -83,16 +83,6 @@ ROBUSTNESS_EPSILON_TRUE: float = 2**-3
 # SE crosshairs on scatter plots (needs n_experiments >= 2)
 SCATTER_SE_CROSSHAIRS: bool = True
 
-# IV constraint threshold (Thm. 3.B).
-#   'paper' -- the submitted additive bound eps + sigma sqrt(gamma_z). DEFAULT:
-#              the experiments must back the theory as written.
-#   'sharp' -- the exact gamma_z* = 0 budget ||E[W# | Z]|| = eps_iv_star. Only
-#              valid while gamma_z == 0 (cross-term vanishes identically);
-#              guarded, and never default while the paper states the additive
-#              bound alone.
-IV_THRESHOLD_MODES: Tuple[str, ...] = ('paper', 'sharp')
-IV_THRESHOLD_DEFAULT: str = 'paper'
-
 # budget-ratio grid: centred on 1, i.e. on the oracle value
 _RATIO_GRID = lambda dataset, n: np.geomspace(2**-2, 2**2, num=n)
 
@@ -296,9 +286,7 @@ class MethodRegistry:
         calibrate: bool = False,
         pad: bool = False,
         clipy: bool = True,
-        iv_threshold: str = IV_THRESHOLD_DEFAULT,
-        iv_epsilon: Optional[float] = None,
-        gamma_z: float = 0.0,
+        epsilon_iv: Optional[float] = None,
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -313,35 +301,15 @@ class MethodRegistry:
             calibrate: Scale budgets by the noise level sigma (paper)
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range
-            iv_threshold: 'paper' (submitted additive bound) or 'sharp'
-                (exact gamma_z = 0 budget); 'sharp' needs `iv_epsilon`
-            iv_epsilon: oracle `eps_iv_star` + EPS_TOL, used by 'sharp' only.
-                Reaches the IV constraint ONLY -- padding keeps the pointwise
-                eps that Thm. 3.A requires.
-            gamma_z: leaky-IV budget; 'sharp' is only valid at 0
+            epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
+                + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
+                pointwise eps that Thm. 3.A requires.
 
         Returns:
             Dictionary mapping method names to builder functions
         """
-        if iv_threshold not in IV_THRESHOLD_MODES:
-            raise ValueError(
-                f'Unknown iv_threshold {iv_threshold!r}; expected {list(IV_THRESHOLD_MODES)}.'
-            )
-
-        sharp = iv_threshold == 'sharp'
-        if sharp and gamma_z != 0.0:
-            # cross-term returns; the exact budget would need the r assumption
-            logger.warning(
-                f'iv_threshold=sharp is only valid at gamma_z=0 (got {gamma_z}); '
-                'falling back to the paper bound.'
-            )
-            sharp = False
-        if sharp and iv_epsilon is None:
-            logger.warning('iv_threshold=sharp without eps_iv_star; using the paper bound.')
-            sharp = False
-
         common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy)
-        iv_common = dict(common, iv_epsilon=iv_epsilon if sharp else None)
+        iv_common = dict(common, epsilon_iv=epsilon_iv)
 
         all_builders = {
             'ATE': lambda: None,  # ATE computed analytically
@@ -350,8 +318,8 @@ class MethodRegistry:
             'DA+IV': lambda: IV(),
             'PI_INV': lambda: InvPartialR2(gamma=gamma, pad=False, **common),
             'PI': lambda: PartialR2(gamma=gamma, pad=False, **common),
-            # baseline PI_IV has a null instrument: it reduces to PI, so the
-            # sharper threshold is inert there and is deliberately not passed
+            # baseline PI_IV has a null instrument, so it reduces to PI and
+            # never reads the IV budget
             'PI_IV': lambda: IVPartialR2(gamma=gamma, pad=False, **common),
             'DA+PI': lambda: PartialR2(gamma=gamma, pad=pad, **common),
             'DA+PI_IV': lambda: IVPartialR2(gamma=gamma, pad=pad, **iv_common),
@@ -381,7 +349,7 @@ DATASET_KEYS: Dict[str, set] = {
                        'methods', 'augmentation'},
 }
 
-TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy', 'iv_threshold'}
+TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy'}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: Dict[str, set] = {

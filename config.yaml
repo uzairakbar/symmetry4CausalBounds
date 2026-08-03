@@ -3,12 +3,9 @@ defaults:
     calibrate: false    # scale budgets by noise sigma (paper); false = raw gamma
     pad: false          # eps-pad DA+ intervals (Thm. 3)
     clipy: true         # clip intervals to observed outcome range
-    # IV constraint threshold (Thm. 3.B). 'paper' = the submitted additive
-    # bound and the default: experiments must back the theory as written.
-    # 'sharp' = the exact gamma_z=0 budget ||E[W#|Z]||, valid here because
-    # T is independent of (U, xi) by construction. Do not default-on until
-    # Appendix A documents the gamma_z*=0 case.
-    iv_threshold: sharp
+# The IV budget is not a toggle: it is the oracle ||E[W#|Z-tilde]||
+# (`eps_iv_star`), exact at gamma_z = 0, which is how every experiment here
+# runs. See oracle.eps_iv_star.
 
 # `experiment:` selects what to run. Omitted n_samples/n_experiments/
 # sweep_samples fall back to DatasetDefaults, omitted `methods` to the full

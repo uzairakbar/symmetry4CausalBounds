@@ -26,20 +26,32 @@ RC_PARAMS: Dict[str, str | int | bool] = {
     'ytick.color': 'black',
 }
 
-# Method display names
+from typing import Dict
+
+# LaTeX building blocks
+PI  = r'\operatorname{p}\!\textnormal{\i}'
+IV  = r'\textnormal{\i}\!\operatorname{v}'
+INV = r'\textnormal{\i}\!\operatorname{nv}'
+
+# method display names
 TEX_MAPPER: Dict[str, str] = {
-    'Data': r'Data',
-    'ATE': r'$\operatorname{ate}$',
-    'ERM': r'$\operatorname{erm}$',
-    'DA+ERM': r'$\tilde{\operatorname{erm}}$',
-    'DA+IV': r'$\tilde{\operatorname{iv}}$',
-    'PI_INV': r'$\operatorname{pi}+\operatorname{inv}$',
-    'PI': r'$\operatorname{pi}$',
-    'PI_IV': r'$\operatorname{pi}+\operatorname{iv}$',
-    'DA+PI': r'$\tilde{\operatorname{pi}}$',
-    'DA+PI_IV': r'$\tilde{\operatorname{pi}}+\tilde{\operatorname{iv}}$',
-    'PI&DA+PI': r'$\operatorname{pi}\cap\tilde{\operatorname{pi}}$',
-    'PI&DA+PI_IV': r'$\operatorname{pi}\cap(\tilde{\operatorname{pi}}+\tilde{\operatorname{iv}})$',
+    # targets
+    'Data':     r'$\mathrm{data}$',
+    'ATE':      r'$\operatorname{ate}$',
+    # estimators
+    'ERM':      r'$\operatorname{erm}$',
+    'DA+ERM':   r'$\tilde{\operatorname{erm}}$',
+    # instrumental variable
+    'DA+IV':    fr'$\tilde{{{IV}}}$',
+    'PI_IV':    fr'${PI}+{IV}$',
+    # sensitivity models
+    'PI':       fr'${PI}$',
+    'PI_INV':   fr'${PI}+{INV}$',
+    'DA+PI':    fr'$\tilde{{{PI}}}$',
+    'DA+PI_IV': fr'$\tilde{{{PI}}}+\tilde{{{IV}}}$',
+    # combinations
+    'PI&DA+PI':     fr'${PI}\cap\tilde{{{PI}}}$',
+    'PI&DA+PI_IV':  fr'${PI}\cap(\tilde{{{PI}}}+\tilde{{{IV}}})$',
 }
 
 # Color mapping for methods

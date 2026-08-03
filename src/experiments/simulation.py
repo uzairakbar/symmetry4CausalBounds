@@ -8,9 +8,7 @@ from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.sem.simulation import LinearSimulationSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
-from src.experiments.configs import (
-    MethodRegistry, SIMULATION_CONFIG, IV_THRESHOLD_DEFAULT,
-)
+from src.experiments.configs import MethodRegistry, SIMULATION_CONFIG
 
 EXPERIMENT_NAME = 'simulation'
 
@@ -38,7 +36,6 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             calibrate=kwargs.get('calibrate', False),
             pad=kwargs.get('pad', False),
             clipy=kwargs.get('clipy', True),
-            iv_threshold=kwargs.get('iv_threshold', IV_THRESHOLD_DEFAULT),
         )
         toggles = self.toggles
 
@@ -84,16 +81,19 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     sem_factory=lambda: sem,  # Return same instance
                     da_factory=da_factory_from_sem,
                     poly_transform=None,
+                    method_factory=self.build_methods,
+                    default_gamma=SIMULATION_CONFIG.gamma,
+                    default_epsilon=SIMULATION_CONFIG.epsilon,
                     **kwargs
                 )
 
         return SimulationQuerySweep
 
-    def build_methods(self, gamma: float, epsilon: float, iv_epsilon=None):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None):
         """Methods at explicit (per-experiment) budgets."""
         return MethodRegistry.build_methods(
             self.kwargs['methods'], gamma=gamma, epsilon=epsilon,
-            iv_epsilon=iv_epsilon, **self.toggles
+            epsilon_iv=epsilon_iv, **self.toggles
         )
 
     def get_sweep_runner_cls(self, param: str) -> Type:

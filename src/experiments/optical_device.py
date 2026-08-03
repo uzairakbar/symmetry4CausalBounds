@@ -10,9 +10,7 @@ from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.sem.optical_device import OpticalDeviceSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
-from src.experiments.configs import (
-    MethodRegistry, OPTICAL_CONFIG, IV_THRESHOLD_DEFAULT,
-)
+from src.experiments.configs import MethodRegistry, OPTICAL_CONFIG
 
 EXPERIMENT_NAME = 'optical_device'
 
@@ -44,7 +42,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             calibrate=kwargs.get('calibrate', False),
             pad=kwargs.get('pad', False),
             clipy=kwargs.get('clipy', True),
-            iv_threshold=kwargs.get('iv_threshold', IV_THRESHOLD_DEFAULT),
         )
         toggles = self.toggles
 
@@ -87,17 +84,20 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     da_factory=self._da_factory,
                     poly_transform=self._poly_factory(),
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
+                    method_factory=self.build_methods,
+                    default_gamma=OPTICAL_CONFIG.gamma,
+                    default_epsilon=OPTICAL_CONFIG.epsilon,
                     **kwargs
                 )
 
         return OpticalQuerySweep
     
 
-    def build_methods(self, gamma: float, epsilon: float, iv_epsilon=None):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None):
         """Methods at explicit (per-experiment) budgets."""
         return MethodRegistry.build_methods(
             self.kwargs['methods'], gamma=gamma, epsilon=epsilon,
-            iv_epsilon=iv_epsilon, **self.toggles
+            epsilon_iv=epsilon_iv, **self.toggles
         )
 
     def get_sweep_runner_cls(self, param: str) -> Type:

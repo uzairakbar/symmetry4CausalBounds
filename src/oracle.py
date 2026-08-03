@@ -29,12 +29,10 @@ class OracleParameters:
     bias_sq: float
     sigma_sq: float
     rho: Optional[float]
-    # Thm. 3.B diagnostics: how much invariance error survives conditioning on
-    # the augmented design, then projection onto the instrument.
-    # Contraction chain: eps_iv_star <= eps_rms <= epsilon_star.
-    eps_rms: Optional[float] = None
-    eta_hat: Optional[float] = None
+    # IV budget (Thm. 3.B, exact at gamma_z* = 0) and its byproducts
     eps_iv_star: Optional[float] = None
+    eps_rms: Optional[float] = None
+    eta: Optional[float] = None
 
 
 @contextmanager
@@ -166,7 +164,7 @@ def calibrate_da_epsilon(
 # Thm. 3.B diagnostics
 # =============================================================================
 
-def iv_diagnostics(
+def eps_iv_star(
     sem,
     da,
     X: Optional[NDArray] = None,
@@ -174,49 +172,44 @@ def iv_diagnostics(
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> tuple:
     """
-    (eps_rms, eta_hat, eps_iv_star) -- how conservative Thm. 3.B's additive
-    budget is on this (SEM, DA) pair.
+    The IV budget: || E-hat[W# | Z-tilde] || / sqrt(N).
 
-        W          invariance error, the signal `invariance_error` measures
-        W#         what conditioning on the augmented design cannot explain
-        eps_rms    ||W#||
-        eps_iv_star ||E-hat[W# | G]||, the part the instrument actually sees
-        eta_hat    eps_iv_star / eps_rms
+    Exact expansion of C.3 Part (B) at gamma_z* = 0. Every experiment here uses
+    T as the instrument with T independent of (U, xi) by construction, so
+    E[U + xi | Z-tilde] = 0, the Minkowski cross-term vanishes identically, and
+    this IS the budget h# requires -- no correlation (r) assumption anywhere.
 
-    When gamma_z* = 0 -- every experiment here, since T is independent of
-    (U, xi) by construction -- the cross-term in the exact expansion vanishes
-    identically and eps_iv_star IS the budget the IV constraint needs, with no
-    assumption on the U-xi correlation r.
-
-    W is taken over the DA components not assumed exactly invariant (same
-    convention as `invariance_error`, so the chain is comparable), while the
-    design and instrument come from a full augmentation pass -- what the method
-    is actually fit on.
+        w    = f(Phi(X)) - f(Phi(GX))
+        W#   = w - OLS fit of w on Phi(GX)
+        eps_iv_star = RMS of the projection of W# onto span(G)
 
     Returns:
-        (eps_rms, eta_hat, eps_iv_star); zeros when the DA is exactly invariant
+        (eps_iv_star, eps_rms, eta) -- eps_rms = RMS(W#) and eta =
+        eps_iv_star / eps_rms are free byproducts, logged for the record.
     """
     features = features or _identity
 
     with preserve_rng():
         if X is None:
             X, _ = sem(N=n_samples)
-        residual_w = (sem.f(features(X)) - sem.f(features(da.perturb(X)))).flatten()
         GX, G = da(X)
         Phi = features(GX)
+        w = (sem.f(features(X)) - sem.f(Phi)).flatten()
 
     G = np.asarray(G).reshape(len(G), -1)
 
-    # W#: residual of W after conditioning on the augmented design
-    W_sharp = residual_w - Phi @ np.linalg.lstsq(Phi, residual_w, rcond=None)[0]
+    # W#: what the augmented design cannot explain. The -f(Phi(GX)) term is
+    # exactly linear in Phi(GX), so OLS absorbs it and this is the part of
+    # f(Phi(X)) unreachable from the augmented data.
+    W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
     eps_rms = float(np.sqrt(np.mean(W_sharp ** 2)))
 
-    # E-hat[W# | G]: project onto span(G), exactly as the IV constraint does
+    # project onto span(G): same QR geometry as the IV constraint itself
     Q, _ = np.linalg.qr(G)
-    eps_iv_star = float(np.sqrt(np.mean((Q @ (Q.T @ W_sharp)) ** 2)))
+    budget = float(np.sqrt(np.mean((Q @ (Q.T @ W_sharp)) ** 2)))
 
-    eta_hat = float(eps_iv_star / eps_rms) if eps_rms > 0.0 else 0.0
-    return eps_rms, eta_hat, eps_iv_star
+    eta = float(budget / eps_rms) if eps_rms > 0.0 else 0.0
+    return budget, eps_rms, eta
 
 
 # =============================================================================
@@ -292,7 +285,7 @@ def compute_oracle_parameters(
         with preserve_rng():
             X, y = sem(N=n_samples)
 
-    eps_rms, eta_hat, eps_iv_star = iv_diagnostics(
+    iv_budget, eps_rms, eta = eps_iv_star(
         sem, da, X=X, features=features, n_samples=n_samples
     )
 
@@ -303,7 +296,7 @@ def compute_oracle_parameters(
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
         rho=_noise_ratio(sem, da, X, y, features, n_samples),
+        eps_iv_star=iv_budget,
         eps_rms=eps_rms,
-        eta_hat=eta_hat,
-        eps_iv_star=eps_iv_star,
+        eta=eta,
     )

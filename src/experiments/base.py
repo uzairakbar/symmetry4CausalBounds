@@ -246,13 +246,8 @@ class ParamSweepRunner(BaseExperimentRunner):
             return float(fallback)
         return float(value)
 
-    def fit_iv_epsilon(self, experiment_index: int) -> Optional[float]:
-        """
-        Exact gamma_z = 0 IV budget for this experiment (TO-DO item 4).
-
-        Only consumed when iv_threshold='sharp'; the registry ignores it
-        otherwise, so the paper bound stays the default everywhere.
-        """
+    def fit_epsilon_iv(self, experiment_index: int) -> Optional[float]:
+        """IV budget for this experiment: oracle eps_iv_star, off the knife edge."""
         eps_iv_star = getattr(self.get_oracle(experiment_index), 'eps_iv_star', None)
         if eps_iv_star is None or not np.isfinite(eps_iv_star):
             return None
@@ -265,7 +260,7 @@ class ParamSweepRunner(BaseExperimentRunner):
         builders = (
             self.method_factory(
                 gamma=gamma, epsilon=epsilon,
-                iv_epsilon=self.fit_iv_epsilon(experiment_index),
+                epsilon_iv=self.fit_epsilon_iv(experiment_index),
             )
             if self.method_factory else self.methods
         )
@@ -397,7 +392,7 @@ class ExperimentOrchestrator(ABC):
 
     @abstractmethod
     def build_methods(self, gamma: float, epsilon: float,
-                      iv_epsilon: Optional[float] = None) -> Dict[str, Any]:
+                      epsilon_iv: Optional[float] = None) -> Dict[str, Any]:
         """Build methods at explicit budgets (per-experiment ParamPolicy)."""
         pass
 

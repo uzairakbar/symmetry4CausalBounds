@@ -241,12 +241,14 @@ class InvarianceConstrainedPartialR2(PartialR2):
 class InstrumentalVariablePartialR2(PartialR2):
     """PI + leaky IV constraint (Asm. 3). Null/empty Z falls back to baseline PI."""
 
-    def __init__(self, gamma=None, gamma_z=0.0, rho=1.0, iv_epsilon=None, **kwargs):
+    def __init__(self, gamma=None, gamma_z=0.0, rho=1.0, epsilon_iv=None, **kwargs):
         self.gamma_z = gamma_z
         self.rho = rho
-        # opt-in sharper IV budget; overrides ONLY the constraint threshold, never
-        # the +/-eps padding, which Thm. 3.A needs pointwise (see TO-DO item 2)
-        self.iv_epsilon = iv_epsilon
+        # epsilon_iv: the IV budget ||E[W#|Z-tilde]|| (oracle `eps_iv_star`).
+        # Distinct from `epsilon`, whose only role in this class is the +/-eps
+        # padding: padding validity is pointwise (Thm. 3.A Jensen step), the IV
+        # budget is a projection norm. One attribute per role, one consumer each.
+        self.epsilon_iv = epsilon_iv
         super().__init__(gamma=gamma, **kwargs)
         self.Z_projector_R = None
         self.y_residual_base = None
@@ -254,18 +256,29 @@ class InstrumentalVariablePartialR2(PartialR2):
         self._has_iv = False
         self._supports_closed_form = False
 
+        if gamma_z != 0.0:
+            logger.warning(
+                f'gamma_z={gamma_z} != 0: the IV budget is exact only at '
+                'gamma_z = 0, where the cross-term vanishes. The additive '
+                's*sqrt(gamma_z) top-up is a heuristic.'
+            )
+
     @property
     def iv_bound(self):
-        """sqrt of the budget on Var(E[Y - h|Z]); Appendix A: eps + s*sqrt(gamma_z)."""
+        """sqrt of the budget on Var(E[Y - h|Z]) = ||E[W#|Z-tilde]||."""
         # calibrated: s is the *pre*-DA sigma = sqrt(sigma_sq / rho); else 1
         s = float(np.sqrt(self.sigma_sq / self.rho)) if self.calibrate else 1.0
-        epsilon = self.epsilon if self.iv_epsilon is None else self.iv_epsilon
-        return epsilon + s * np.sqrt(self.gamma_z)
+        return self.epsilon_iv + s * np.sqrt(self.gamma_z)
 
     def _precompute_matrices(self, X, y, Z=None, **kwargs):
         self._has_iv = Z is not None and np.size(Z) > 0
         if not self._has_iv:
             return
+        if self.epsilon_iv is None:
+            raise ValueError(
+                'epsilon_iv is required when an instrument is supplied; '
+                'pass the oracle `eps_iv_star` (+ EPS_TOL).'
+            )
 
         Z = Z.reshape(len(Z), -1)
         Q_matrix, _ = np.linalg.qr(Z)
@@ -365,15 +378,15 @@ class IntersectedPartialR2(PartialR2):
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     """Baseline PI_IV (null instrument) intersected with DA+PI_IV."""
 
-    def __init__(self, gamma_z=0.0, iv_epsilon=None, **kwargs):
+    def __init__(self, gamma_z=0.0, epsilon_iv=None, **kwargs):
         self.gamma_z = gamma_z
-        self.iv_epsilon = iv_epsilon
+        self.epsilon_iv = epsilon_iv
         super().__init__(**kwargs)
 
     def _branch(self, pad, rho=1.0):
         return InstrumentalVariablePartialR2(
             gamma=self.gamma, gamma_z=self.gamma_z, rho=rho, epsilon=self.epsilon,
-            iv_epsilon=self.iv_epsilon,
+            epsilon_iv=self.epsilon_iv,
             pad=pad, calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
         )
 
