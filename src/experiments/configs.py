@@ -151,6 +151,9 @@ class MetricSpec:
     ylabel: str
     yscale: Literal['linear', 'log', 'asinh'] = 'linear'
     perf_only: bool = False
+    # ATE is the truth: zero width, unit coverage. Plotting it on those axes
+    # only drags the limits out and squashes the range the methods live in.
+    include_ate: bool = True
 
 
 METRIC_SPECS: Dict[str, MetricSpec] = {
@@ -158,8 +161,8 @@ METRIC_SPECS: Dict[str, MetricSpec] = {
         'approximation_error', r'average $\underline{E}_{{\bm{x}}}$', 'asinh'),
     'worst_error': MetricSpec(
         'worst_error', r'average $\overline{E}_{{\bm{x}}}$', 'asinh'),
-    'width': MetricSpec('interval_width', r'average interval width'),
-    'coverage': MetricSpec('coverage', r'coverage rate'),
+    'width': MetricSpec('interval_width', r'average interval width', include_ate=False),
+    'coverage': MetricSpec('coverage', r'coverage rate', include_ate=False),
     'wall_clock': MetricSpec('wall_clock', r'seconds per query', 'log', perf_only=True),
     'seed_var': MetricSpec('seed_var', r'SD across seeds', perf_only=True),
 }

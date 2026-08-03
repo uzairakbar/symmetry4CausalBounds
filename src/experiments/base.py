@@ -432,7 +432,9 @@ class ExperimentOrchestrator(ABC):
                 metric_spec = METRIC_SPECS[metric]
                 create_sweep_plot(
                     x_values,
-                    {name: record[metric_spec.key] for name, record in results.items()},
+                    {name: record[metric_spec.key]
+                     for name, record in results.items()
+                     if metric_spec.include_ate or name != 'ATE'},
                     experiment=self.name,
                     fname=f'{param}_{metric}',
                     xlabel=PARAM_SPECS[param].xlabel,
@@ -458,8 +460,11 @@ class ExperimentOrchestrator(ABC):
 
             for metric_x, metric_y in scatter_spec.metric:
                 spec_x, spec_y = METRIC_SPECS[metric_x], METRIC_SPECS[metric_y]
+                # a degenerate ATE on either axis pins a corner and squashes the rest
+                keep = spec_x.include_ate and spec_y.include_ate
                 create_scatter_plot(
-                    results, x_values,
+                    {n: r for n, r in results.items() if keep or n != 'ATE'},
+                    x_values,
                     metric_x=spec_x.key, metric_y=spec_y.key,
                     xlabel=spec_x.ylabel, ylabel=spec_y.ylabel,
                     param_label=PARAM_SPECS[param].xlabel,

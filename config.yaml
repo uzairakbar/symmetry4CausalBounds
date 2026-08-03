@@ -56,9 +56,9 @@ optical_device:
             # informativeness = (trS, worst_error)
             param:  [gamma, epsilon, trS, n, m]
             metric: [approx_error, worst_error, width, coverage]
-        # scatter:
-        #     param:  [n, m]
-        #     metric: [[width, coverage], [approx_error, width]]
+        scatter:
+            param:  [n, m]
+            metric: [[width, coverage], [approx_error, width]]
         # perf:
         #     metric: [wall_clock, seed_var]
 

@@ -872,7 +872,7 @@ def create_scatter_plot(
         sizes = np.linspace(28, 150, max(n_steps, 1))[ranks]
 
         handles, labels = [], []
-        for method_name, record in results.items():
+        for order, (method_name, record) in enumerate(results.items()):
             if metric_x not in record or metric_y not in record:
                 continue
 
@@ -900,12 +900,17 @@ def create_scatter_plot(
                 edgecolors='black', linewidths=0.4, zorder=2
             )
 
-            # the parameter value is only readable from the annotations
-            for x, y, value in zip(mx, my, param_values):
+            # Label the endpoints only: bubble size already encodes the ordering,
+            # and consecutive steps often land close enough that per-point labels
+            # overlap into an illegible pile.
+            # stagger by method so labels stack instead of overprinting where
+            # several methods land on the same point
+            for index in ({0, n_steps - 1} if n_steps else set()):
+                x, y, value = mx[index], my[index], param_values[index]
                 if np.isfinite(x) and np.isfinite(y):
                     plt.annotate(
                         f'{value:g}', (x, y), textcoords='offset points',
-                        xytext=(5, 4), fontsize=FS_TICK * 0.65, color=color
+                        xytext=(6, 5 + 9 * order), fontsize=FS_TICK * 0.7, color=color
                     )
 
             handles.append(plt.Line2D(
