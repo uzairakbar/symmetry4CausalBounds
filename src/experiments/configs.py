@@ -40,6 +40,10 @@ class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
     gamma: float = 2**-2
     epsilon: float = 2**-2
+    # Query plot ONLY: the query sweep keeps an explicit eps rather than the
+    # oracle eps*, so the panel/radial figures stay under manual control.
+    # Nothing else reads this -- sweeps/scatter/perf all use eps*.
+    query_epsilon: float = 2**-2
     epsilon_true: Optional[float] = None    # DA misspecification target; None = as-is
     test_fraction: float = 0.1
     dataset_index: int = 8
@@ -77,8 +81,12 @@ DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
 EPS_TOL: float = 2**-8
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
-# true invariance error, so that eps/eps* is a meaningful ratio axis
-ROBUSTNESS_EPSILON_TRUE: float = 2**-3
+# true invariance error, so that eps/eps* is a meaningful ratio axis.
+# MUST clear the optical eps* floor: the strength knob drives only the gaussian
+# noise, so permutations hold eps* at ~0.239 even at strength 0. 0.5 sits at
+# strength ~0.87 there (2.1x the floor) and ~0.084 on simulation, whose floor
+# is 0. Below the floor, calibrate_da_epsilon clamps and the sweep goes flat.
+ROBUSTNESS_EPSILON_TRUE: float = 2**-1
 
 # SE crosshairs on scatter plots (needs n_experiments >= 2)
 SCATTER_SE_CROSSHAIRS: bool = True
@@ -297,7 +305,8 @@ class MethodRegistry:
         Args:
             method_names: List of method names to build
             gamma: Confounding budget gamma (Asm. 2)
-            epsilon: Invariance error epsilon (§3.1, Thm. 3.A)
+            epsilon: Invariance error epsilon = ||W|| over the full
+                augmentation (§3.1, Thm. 3.A); oracle `epsilon_star`
             calibrate: Scale budgets by the noise level sigma (paper)
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range

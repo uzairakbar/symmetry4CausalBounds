@@ -18,6 +18,7 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 CALIBRATION_SAMPLES: int = 2048
 STRENGTH_BRACKET: tuple = (0.0, 1e3)
 STRENGTH_TOLERANCE: float = 1e-9
+STRENGTH_DOUBLINGS: int = 20     # bracket expansions before declaring the target unreachable
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,9 @@ class OracleParameters:
     eps_iv_star: Optional[float] = None
     eps_rms: Optional[float] = None
     eta: Optional[float] = None
+    # SHELVED: eps* under the perturb convention (exactly-invariant components
+    # excluded). Recorded, never consumed -- lets the padding choice be revisited.
+    epsilon_star_pointwise: Optional[float] = None
 
 
 @contextmanager
@@ -86,6 +90,56 @@ def gamma_star(sem, calibrate: bool = False, strategy: GammaStarStrategy = DEFAU
 # epsilon*
 # =============================================================================
 
+def _invariance_signal(
+    sem,
+    da,
+    X: Optional[NDArray] = None,
+    features: Optional[Callable] = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+    **augment_kwargs,
+) -> tuple:
+    """
+    (w, Phi, G) for ONE augmentation draw, where w = h_*(X) - h_*(X~) is the
+    paper's W (C.3) over the FULL augmentation.
+
+    Sole definition of W: both `epsilon_star` (Thm. 3.A, needs ||W||) and
+    `eps_iv_star` (Thm. 3.B, needs the residual W# = W - E[W|X~]) build on it,
+    so the two can never drift apart.
+    """
+    features = features or _identity
+
+    with preserve_rng():
+        if X is None:
+            X, _ = sem(N=n_samples)
+        GX, G = da(X, **augment_kwargs)
+        Phi = features(GX)
+        w = (sem.f(features(X)) - sem.f(Phi)).flatten()
+
+    return w, Phi, np.asarray(G).reshape(len(G), -1)
+
+
+def epsilon_star(
+    sem,
+    da,
+    X: Optional[NDArray] = None,
+    features: Optional[Callable] = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+    **augment_kwargs,
+) -> float:
+    """
+    eps* = || W || = sqrt( E[ (h_*(X) - h_*(X~))^2 ] ) over the FULL augmentation.
+
+    This is the paper's ε (C.3: |W| <= ε a.s.), relaxed from the pointwise sup
+    to RMS. Two properties that make it the right budget:
+      - Thm. 3.A padding needs ||E[W|X~]||, and ||W||^2 = ||E[W|X~]||^2 + ||W#||^2
+        by orthogonality, so ||W|| dominates it.
+      - it equals the PI_INV constraint evaluated at h_* exactly, since
+        (Phi(GX) - Phi(X)) h_* = -w. So eps* + EPS_TOL admits h_* by construction.
+    """
+    w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
+    return float(np.sqrt(np.mean(w ** 2)))
+
+
 def invariance_error(
     sem,
     da,
@@ -94,8 +148,13 @@ def invariance_error(
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
-    eps* = sqrt( E[ (h_*(X) - h_*(X~))^2 ] ), over the DA components that are
-    not assumed exactly invariant.
+    SHELVED -- not wired into the pipeline; kept for comparison and recorded on
+    `OracleParameters.epsilon_star_pointwise`.
+
+    Same functional as `epsilon_star` but over `da.perturb`, i.e. only the DA
+    components not assumed exactly invariant. Retained so the padding decision
+    (RMS on the full augmentation vs this) can be revisited once the
+    epsilon/epsilon* sweep results are in.
     """
     features = features or _identity
 
@@ -118,7 +177,7 @@ def calibrate_da_epsilon(
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
-    Inverse of `invariance_error`: set the DA strength knob achieving
+    Inverse of `epsilon_star`: set the DA strength knob achieving
     `epsilon_target`. Returns the achieved eps*.
     """
     if epsilon_target < 0.0:
@@ -136,15 +195,30 @@ def calibrate_da_epsilon(
 
     def error(strength: float) -> float:
         da.strength = strength
-        return invariance_error(sem, da, X=X, features=features) - epsilon_target
+        return epsilon_star(sem, da, X=X, features=features) - epsilon_target
 
     low, high = STRENGTH_BRACKET
     if error(low) >= 0.0:
         da.strength = low
-        logger.warning(f'eps* floor exceeds target {epsilon_target}; strength set to {low}.')
+        logger.warning(
+            f'eps* floor {epsilon_star(sem, da, X=X, features=features):.6g} exceeds '
+            f'target {epsilon_target:.6g}; strength clamped to {low}. The sweep '
+            'will not vary the DA -- raise the target above the floor.'
+        )
     else:
-        while error(high) < 0.0:
+        # eps* saturates in strength, so a target above the reachable ceiling
+        # would send the bracket to ~1e6 and "converge" on a wrong value
+        for _ in range(STRENGTH_DOUBLINGS):
+            if error(high) >= 0.0:
+                break
             high *= 2.0
+        else:
+            da.strength = high
+            achieved = epsilon_star(sem, da, X=X, features=features)
+            raise ValueError(
+                f'eps* target {epsilon_target:.6g} is above the reachable ceiling '
+                f'(~{achieved:.6g} at strength {high:.6g}); it saturates in strength.'
+            )
         for _ in range(200):
             mid = 0.5 * (low + high)
             if error(mid) < 0.0:
@@ -155,7 +229,7 @@ def calibrate_da_epsilon(
                 break
         da.strength = 0.5 * (low + high)
 
-    achieved = invariance_error(sem, da, X=X, features=features)
+    achieved = epsilon_star(sem, da, X=X, features=features)
     logger.info(f'DA strength {da.strength:.6g} -> eps* {achieved:.6g} (target {epsilon_target:.6g}).')
     return achieved
 
@@ -187,16 +261,7 @@ def eps_iv_star(
         (eps_iv_star, eps_rms, eta) -- eps_rms = RMS(W#) and eta =
         eps_iv_star / eps_rms are free byproducts, logged for the record.
     """
-    features = features or _identity
-
-    with preserve_rng():
-        if X is None:
-            X, _ = sem(N=n_samples)
-        GX, G = da(X)
-        Phi = features(GX)
-        w = (sem.f(features(X)) - sem.f(Phi)).flatten()
-
-    G = np.asarray(G).reshape(len(G), -1)
+    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples)
 
     # W#: what the augmented design cannot explain. The -f(Phi(GX)) term is
     # exactly linear in Phi(GX), so OLS absorbs it and this is the part of
@@ -291,7 +356,7 @@ def compute_oracle_parameters(
 
     return OracleParameters(
         gamma_star=gamma_star(sem, calibrate=calibrate, strategy=strategy),
-        epsilon_star=invariance_error(sem, da, X=X, features=features),
+        epsilon_star=epsilon_star(sem, da, X=X, features=features),
         gamma_z_star=gamma_z_star(sem, da, X=X, features=features, calibrate=calibrate),
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
@@ -299,4 +364,5 @@ def compute_oracle_parameters(
         eps_iv_star=iv_budget,
         eps_rms=eps_rms,
         eta=eta,
+        epsilon_star_pointwise=invariance_error(sem, da, X=X, features=features),
     )

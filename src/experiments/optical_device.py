@@ -86,7 +86,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     method_factory=self.build_methods,
                     default_gamma=OPTICAL_CONFIG.gamma,
-                    default_epsilon=OPTICAL_CONFIG.epsilon,
+                    default_epsilon=OPTICAL_CONFIG.query_epsilon,
                     **kwargs
                 )
 

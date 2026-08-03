@@ -14,7 +14,7 @@ from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k, rho_hat
 from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE
 from src.oracle import (
-    calibrate_da_epsilon, compute_oracle_parameters, invariance_error,
+    calibrate_da_epsilon, compute_oracle_parameters, epsilon_star,
     thm1_gamma_min, preserve_rng,
 )
 
@@ -368,11 +368,15 @@ class ExpansionStrategy(GenericParamSweep):
             rho_hat(data.X, data.GX, data.y) * trace_S_over_k(data.X, data.GX)
         )
 
-        # the knob IS the invariance-error driver, so eps* is stale by now
+        # The knob IS the invariance-error driver, so a setup-time eps* is
+        # stale. Pass the same augment kwargs: sim's `scale` is call-time and
+        # does NOT persist on the DA, so omitting them would silently measure
+        # eps* at scale=1.0 for every step.
         X_raw = self._base_data(experiment_index)[0]
-        self._step_epsilon[experiment_index] = invariance_error(
+        self._step_epsilon[experiment_index] = epsilon_star(
             self.sems[experiment_index], self.das[experiment_index],
-            X=X_raw, features=self._features
+            X=X_raw, features=self._features,
+            **self.augment_kwargs_fn(param)
         ) + EPS_TOL
 
         return data

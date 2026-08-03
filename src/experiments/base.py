@@ -239,7 +239,10 @@ class ParamSweepRunner(BaseExperimentRunner):
                             self.default_gamma, 'gamma*')
 
     def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
-        """Assumed invariance error; just large enough, off the knife edge."""
+        """
+        Assumed invariance error: oracle eps* = ||W|| over the full augmentation,
+        just large enough to admit h_* in PI_INV, off the knife edge.
+        """
         return self._finite(self.get_oracle(experiment_index).epsilon_star,
                             self.default_epsilon, 'eps*') + EPS_TOL
 
