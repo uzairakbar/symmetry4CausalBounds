@@ -157,6 +157,30 @@ def calibrate_da_epsilon(
 
 
 # =============================================================================
+# Thm. 1 threshold
+# =============================================================================
+
+def thm1_gamma_min(oracle: 'OracleParameters', calibrate: bool = False) -> float:
+    """
+    Smallest gamma at which the DA+PI set still contains h_* (Thm. 1), i.e. the
+    budget the augmentation buys back. Below gamma* by an amount set by rho.
+
+    calibrated:   sqrt(gamma_min) = max(0, sqrt(gamma*) - (rho - 1)/sqrt(rho))
+    uncalibrated: gamma_min       = max(0, bias^2 - sigma^2 (rho - 1))
+    """
+    rho = oracle.rho
+    if rho is None or not np.isfinite(rho):
+        logger.warning('rho unavailable; Thm. 1 threshold falls back to gamma*.')
+        return float(oracle.gamma_star)
+
+    if calibrate:
+        slack = (rho - 1.0) / np.sqrt(rho)
+        return float(max(0.0, np.sqrt(oracle.gamma_star) - slack) ** 2)
+
+    return float(max(0.0, oracle.bias_sq - oracle.sigma_sq * (rho - 1.0)))
+
+
+# =============================================================================
 # gamma_z*
 # =============================================================================
 
@@ -172,13 +196,15 @@ def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> Opt
 # entry point
 # =============================================================================
 
-def _noise_ratio(sem, da, X, y, features) -> Optional[float]:
+def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) -> Optional[float]:
     """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1)."""
     sigma_sq = sem.sigma_sq
     if sigma_sq <= 0.0:
         return None
 
     with preserve_rng():
+        if y is None:       # X given without outcomes: rho needs its own draw
+            X, y = sem(N=n_samples)
         GX, _ = da(X)
         Phi = features(GX)
         residuals = y.flatten() - Phi @ OLS().fit(Phi, y).solution.flatten()
@@ -209,5 +235,5 @@ def compute_oracle_parameters(
         gamma_z_star=gamma_z_star(sem, da, X=X, features=features, calibrate=calibrate),
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
-        rho=_noise_ratio(sem, da, X, y, features) if y is not None else None,
+        rho=_noise_ratio(sem, da, X, y, features, n_samples),
     )

@@ -17,8 +17,10 @@ __all__ = [
     'ARTIFACTS_DIRECTORY',
     
     # Metrics
-    'estimation_error', 'approximation_error', 
-    'worst_error', 'interval_width', 'trace_S_over_k',
+    'estimation_error', 'approximation_error',
+    'worst_error', 'interval_width', 'coverage',
+    'trace_S_over_k', 'rho_hat',
+    'QueryEval', 'evaluate_queries', 'STATUS_CATEGORIES',
     
     # Plotting
     'create_param_sweep_plot', 'create_query_sweep_plot',

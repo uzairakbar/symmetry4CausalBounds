@@ -2,8 +2,18 @@
 Error metrics for evaluating causal estimation methods.
 """
 import numpy as np
+from dataclasses import dataclass
 from numpy.typing import NDArray
+
+from src.methods.sensitivity_models import SolveStatus
 from .constants import DEFAULT_NORMALIZE_ERROR
+
+
+def _as_interval(estimate: NDArray) -> NDArray:
+    """Point estimates become degenerate intervals."""
+    if estimate.shape[-1] == 1:
+        return np.repeat(estimate, 2, axis=1)
+    return estimate
 
 
 def _compute_squared_norm(x: NDArray) -> float:
@@ -60,9 +70,7 @@ def approximation_error(
     assert estimate.shape[0] == estimand.shape[0], \
         f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
     
-    # Convert point estimates to intervals
-    if estimate.shape[-1] == 1:
-        estimate = np.repeat(estimate, 2, axis=1)
+    estimate = _as_interval(estimate)
     
     lower_bound = estimate[:, 0]
     upper_bound = estimate[:, 1]
@@ -111,9 +119,7 @@ def worst_error(
     assert estimate.shape[0] == estimand.shape[0], \
         f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
     
-    # Convert point estimates to intervals
-    if estimate.shape[-1] == 1:
-        estimate = np.repeat(estimate, 2, axis=1)
+    estimate = _as_interval(estimate)
     
     difference = estimate - estimand
     squared_errors = difference**2
@@ -147,9 +153,7 @@ def interval_width(
     assert estimate.shape[0] == estimand.shape[0], \
         f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
     
-    # Convert point estimates to intervals
-    if estimate.shape[-1] == 1:
-        estimate = np.repeat(estimate, 2, axis=1)
+    estimate = _as_interval(estimate)
     
     widths = estimate[:, 1] - estimate[:, 0]
     width = np.nanmean(widths)
@@ -161,6 +165,131 @@ def interval_width(
         width = width / (width + np.std(estimand))
     
     return width
+
+
+def coverage(
+    estimand: NDArray,
+    estimate: NDArray,
+    normalize: bool = DEFAULT_NORMALIZE_ERROR,
+) -> float:
+    """
+    Coverage rate: mean 1{lower <= truth <= upper}.
+
+    NaN bounds (solver failure / infeasible / empty intersection) count as
+    NOT covered, so this stays consistent with the 4-way perf split.
+    Point estimators give a degenerate interval, hence coverage ~ 0.
+
+    Args:
+        estimand: Ground truth target f or f(x)
+        estimate: Interval estimates [lower, upper] or point estimates
+        normalize: Unused; kept for a uniform metric signature
+
+    Returns:
+        Fraction of queries whose interval contains the truth
+    """
+    assert estimate.shape[0] == estimand.shape[0], \
+        f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
+
+    estimate = _as_interval(estimate)
+    estimand_flat = estimand.squeeze()
+
+    covered = (estimand_flat >= estimate[:, 0]) & (estimand_flat <= estimate[:, 1])
+    return float(np.mean(np.where(np.isnan(estimate).any(axis=1), False, covered)))
+
+
+def rho_hat(X: NDArray, GX: NDArray, y: NDArray) -> float:
+    """
+    Information-loss factor rho = sigma-tilde^2 / sigma^2 measured on a sample:
+    MSE of OLS on GX over MSE of OLS on X. >= 1 by the DPI.
+
+    Args:
+        X: Original data in the feature space the methods use
+        GX: Augmented data in the same space
+        y: Outcomes
+
+    Returns:
+        rho_hat, or NaN if the baseline MSE vanishes
+    """
+    def mse(A):
+        residuals = y.flatten() - A @ np.linalg.lstsq(A, y.flatten(), rcond=None)[0]
+        return float(np.mean(residuals ** 2))
+
+    denominator = mse(X)
+    if denominator <= 0.0:
+        return np.nan
+    return mse(GX) / denominator
+
+
+# =============================================================================
+# PER-(METHOD, STEP, EXPERIMENT) RECORD
+# =============================================================================
+
+# status_counts layout; precedence is first match wins
+STATUS_CATEGORIES = ('solver_failure', 'infeasible',
+                     'feasible_and_covers', 'feasible_and_noncovering')
+
+
+@dataclass
+class QueryEval:
+    """All metrics for one fit+predict, computed in a single pass."""
+    approximation_error: float
+    worst_error: float
+    interval_width: float
+    coverage: float
+    wall_clock: float               # predict seconds per query
+    status_counts: NDArray          # counts over STATUS_CATEGORIES, sums to n
+
+
+def evaluate_queries(
+    estimand: NDArray,
+    estimate: NDArray,
+    statuses: NDArray = None,
+    elapsed: float = 0.0,
+) -> QueryEval:
+    """
+    Build the full record for one (method, step, experiment).
+
+    Args:
+        estimand: Ground truth f(x) per query
+        estimate: Interval estimates [lower, upper] or point estimates
+        statuses: Per-query SolveStatus ints; None means all-OK (point estimators)
+        elapsed: Wall-clock seconds for the whole predict call
+
+    Returns:
+        QueryEval
+    """
+    interval = _as_interval(estimate)
+    n_queries = len(interval)
+
+    if statuses is None:
+        statuses = np.full(n_queries, SolveStatus.OK, dtype=int)
+    statuses = np.asarray(statuses, dtype=int)
+
+    estimand_flat = estimand.squeeze()
+    covered = (
+        (estimand_flat >= interval[:, 0]) & (estimand_flat <= interval[:, 1])
+        & ~np.isnan(interval).any(axis=1)
+    )
+
+    # mutually exclusive, ordered: failure -> infeasible -> covers -> non-covering
+    failure = statuses == SolveStatus.FAILURE
+    infeasible = ~failure & (statuses == SolveStatus.INFEASIBLE)
+    feasible = ~failure & ~infeasible
+    counts = np.array([
+        failure.sum(),
+        infeasible.sum(),
+        (feasible & covered).sum(),
+        (feasible & ~covered).sum(),
+    ], dtype=int)
+
+    return QueryEval(
+        approximation_error=approximation_error(estimand, estimate),
+        worst_error=worst_error(estimand, estimate),
+        interval_width=interval_width(estimand, estimate),
+        coverage=coverage(estimand, estimate),
+        wall_clock=elapsed / max(n_queries, 1),
+        status_counts=counts,
+    )
 
 
 def trace_S_over_k(X: NDArray, GX: NDArray) -> float:

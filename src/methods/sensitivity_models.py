@@ -6,6 +6,7 @@ calibrate (paper's sigma-scaled budgets), clipy (clip to observed y range).
 """
 import numpy as np
 import cvxpy as cp
+from enum import IntEnum
 from loguru import logger
 from joblib import Parallel, delayed
 
@@ -14,6 +15,13 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 
 # Global flag: use closed form analytic solutions where possible (standard PI)
 CLOSED_FORM_SOLUTION: bool = False
+
+
+class SolveStatus(IntEnum):
+    """Per-query outcome. Ordered: a pair takes the worse of its two sides."""
+    OK = 0
+    INFEASIBLE = 1      # solver proved the constraint set empty: data rejects the budget
+    FAILURE = 2         # numerical breakdown: no answer produced
 
 
 class PartialR2(SA):
@@ -49,6 +57,7 @@ class PartialR2(SA):
         self.R_constraint = None
         self.h_erm = None
         self.N_samples = 0
+        self.query_status = None    # per-query SolveStatus, set on every predict
         self.sigma_sq = 1.0     # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
         self.y_min = -np.inf
         self.y_max = np.inf
@@ -121,30 +130,34 @@ class PartialR2(SA):
 
     # ------------------------------------------------------------- predict
 
-    def _predict(self, X, gamma=None, **kwargs):
+    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
         gamma = self.gamma if gamma is None else gamma
+        if epsilon is not None:
+            self.epsilon = epsilon      # constraint RHS and padding both read it
         return self._finalize(self._raw_bounds(X, gamma))
 
     def _raw_bounds(self, X, gamma):
-        """Unpadded, unclipped [lower, upper] per query."""
+        """Unpadded, unclipped [lower, upper] per query; sets `query_status`."""
         if CLOSED_FORM_SOLUTION and self._supports_closed_form:
             radius = self.scale * np.sqrt(gamma)
             mahalanobis_sq = np.maximum(0, np.sum((X @ self.invSigmaX) * X, axis=1))
             margins = radius * np.sqrt(mahalanobis_sq)
             centers = X @ self.h_erm
+            self.query_status = np.full(len(X), SolveStatus.OK, dtype=int)
             return np.column_stack([centers - margins, centers + margins])
 
         self._set_solver_parameters(gamma)
 
         if self.n_jobs == 1:
-            bounds = np.zeros((len(X), 2))
-            for i, x in enumerate(X):
-                bounds[i] = self._solve_single(x)
+            solved = [self._solve_single(x) for x in X]
         else:
-            bounds = np.array(Parallel(n_jobs=self.n_jobs)(
+            solved = Parallel(n_jobs=self.n_jobs)(
                 delayed(self._solve_single)(x) for x in X
-            ))
-        return bounds
+            )
+
+        solved = np.asarray(solved, dtype=float)
+        self.query_status = solved[:, 2].astype(int)
+        return solved[:, :2]
 
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
@@ -155,6 +168,7 @@ class PartialR2(SA):
         return bounds
 
     def _solve_single(self, x):
+        """(lower, upper, status); bounds are NaN on any non-OK status."""
         norm_x = np.linalg.norm(x)
         if norm_x < 1e-9:
             self.x_param.value = np.zeros_like(x)
@@ -164,22 +178,23 @@ class PartialR2(SA):
             scale = norm_x
 
         def solve_prob(prob):
-            try:
-                prob.solve(solver=cp.CLARABEL, warm_start=True, verbose=False)
-            except Exception:
-                pass
-
-            if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+            status = None
+            for solver in (cp.CLARABEL, cp.ECOS):
                 try:
-                    prob.solve(solver=cp.ECOS, warm_start=True, verbose=False)
+                    prob.solve(solver=solver, warm_start=True, verbose=False)
+                    status = prob.status
                 except Exception:
-                    return np.nan
+                    status = None
+                if status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                    return prob.value * scale, SolveStatus.OK
 
-            if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                return np.nan
-            return prob.value * scale
+            if status in (cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE):
+                return np.nan, SolveStatus.INFEASIBLE
+            return np.nan, SolveStatus.FAILURE
 
-        return solve_prob(self.min_problem), solve_prob(self.max_problem)
+        lower, status_lo = solve_prob(self.min_problem)
+        upper, status_hi = solve_prob(self.max_problem)
+        return lower, upper, max(status_lo, status_hi)
 
 
 class InvarianceConstrainedPartialR2(PartialR2):
@@ -190,6 +205,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
             raise ValueError("epsilon required")
         super().__init__(gamma=gamma, epsilon=epsilon, **kwargs)
         self.R_diff = None
+        self.eps_param = None
         self._supports_closed_form = False
 
     def _precompute_matrices(self, X, y, GX=None, **kwargs):
@@ -208,12 +224,18 @@ class InvarianceConstrainedPartialR2(PartialR2):
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
-        threshold = np.sqrt(self.N_samples * self.epsilon ** 2)
 
+        # Parameter, not constant: epsilon is swept at predict time (robustness)
+        self.eps_param = cp.Parameter(nonneg=True)
         constraints.append(
-            cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2) <= threshold
+            cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2)
+            <= np.sqrt(self.N_samples) * self.eps_param
         )
         return constraints
+
+    def _set_solver_parameters(self, gamma):
+        super()._set_solver_parameters(gamma)
+        self.eps_param.value = float(self.epsilon)
 
 
 class InstrumentalVariablePartialR2(PartialR2):
@@ -311,12 +333,18 @@ class IntersectedPartialR2(PartialR2):
         """Information-loss factor sigma-tilde^2 / sigma^2 (>= 1 by DPI)."""
         return self.augmented.sigma_sq / self.baseline.sigma_sq
 
-    def _predict(self, X, gamma=None, **kwargs):
-        lower_base, upper_base = self.baseline.predict(X, gamma=gamma, **kwargs).T
-        lower_da, upper_da = self.augmented.predict(X, gamma=gamma, **kwargs).T
+    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
+        if epsilon is not None:
+            self.epsilon = epsilon
+        branch_kwargs = dict(gamma=gamma, epsilon=epsilon, **kwargs)
+        lower_base, upper_base = self.baseline.predict(X, **branch_kwargs).T
+        lower_da, upper_da = self.augmented.predict(X, **branch_kwargs).T
 
         lower = np.maximum(lower_base, lower_da)
         upper = np.minimum(upper_base, upper_da)
+
+        # a branch failure/infeasibility carries over to the intersection
+        status = np.maximum(self.baseline.query_status, self.augmented.query_status)
 
         # empty intersection: infeasible, same convention as the solver
         empty = lower > upper
@@ -324,7 +352,9 @@ class IntersectedPartialR2(PartialR2):
             logger.warning(f'Empty intersection at {empty.sum()}/{len(empty)} queries.')
             lower = np.where(empty, np.nan, lower)
             upper = np.where(empty, np.nan, upper)
+            status = np.where(empty, SolveStatus.INFEASIBLE, status)
 
+        self.query_status = status.astype(int)
         return np.column_stack([lower, upper])
 
 
