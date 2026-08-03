@@ -8,7 +8,7 @@ import numpy as np
 import cvxpy as cp
 from enum import IntEnum
 from loguru import logger
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, effective_n_jobs, parallel_config
 
 from src.methods.abstract import sensitivityAnalyzer as SA
 from src.methods.regression import LeastSquaresClosedForm as OLS
@@ -22,6 +22,11 @@ class SolveStatus(IntEnum):
     OK = 0
     INFEASIBLE = 1      # solver proved the constraint set empty: data rejects the budget
     FAILURE = 2         # numerical breakdown: no answer produced
+
+
+def _solve_chunk(model, chunk):
+    """Worker: one model copy, one chunk. Builds its DPP cache once, not per query."""
+    return [model._solve_single(x) for x in chunk]
 
 
 class PartialR2(SA):
@@ -149,11 +154,21 @@ class PartialR2(SA):
         self._set_solver_parameters(gamma)
 
         if self.n_jobs == 1:
+            # Never route a single query through here as a shortcut when
+            # n_jobs > 1: a parent-side solve leaves an unpicklable
+            # DefaultSolution on the Problem and kills every later dispatch.
             solved = [self._solve_single(x) for x in X]
         else:
-            solved = Parallel(n_jobs=self.n_jobs)(
-                delayed(self._solve_single)(x) for x in X
-            )
+            # Chunk, not per query: the DPP cache is per worker, so fine-grained
+            # tasks re-canonicalize every query (measured ~2x slower).
+            n_chunks = effective_n_jobs(self.n_jobs)      # resolves -1
+            chunks = [c for c in np.array_split(X, n_chunks) if len(c)]
+            # loky sets inner threads to cpu_count//n_jobs, which a submit-script
+            # OMP_NUM_THREADS overrides. Pin it.
+            with parallel_config(backend='loky', n_jobs=self.n_jobs,
+                                 inner_max_num_threads=1):
+                out = Parallel()(delayed(_solve_chunk)(self, c) for c in chunks)
+            solved = [q for c in out for q in c]
 
         solved = np.asarray(solved, dtype=float)
         self.query_status = solved[:, 2].astype(int)
@@ -187,6 +202,10 @@ class PartialR2(SA):
                     status = None
                 if status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
                     return prob.value * scale, SolveStatus.OK
+                if status == cp.INFEASIBLE:
+                    # a proof, not a failure; retrying costs 2-5x.
+                    # INFEASIBLE_INACCURATE still gets its ECOS second opinion.
+                    return np.nan, SolveStatus.INFEASIBLE
 
             if status in (cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE):
                 return np.nan, SolveStatus.INFEASIBLE

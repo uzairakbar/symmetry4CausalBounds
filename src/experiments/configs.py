@@ -295,6 +295,7 @@ class MethodRegistry:
         pad: bool = False,
         clipy: bool = True,
         epsilon_iv: Optional[float] = None,
+        n_jobs: int = 1,
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -313,11 +314,13 @@ class MethodRegistry:
             epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
                 + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
                 pointwise eps that Thm. 3.A requires.
+            n_jobs: query-solve workers; 1 = serial, -1 = all cores
 
         Returns:
             Dictionary mapping method names to builder functions
         """
-        common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy)
+        common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy,
+                      n_jobs=n_jobs)
         iv_common = dict(common, epsilon_iv=epsilon_iv)
 
         all_builders = {
@@ -358,7 +361,7 @@ DATASET_KEYS: Dict[str, set] = {
                        'methods', 'augmentation'},
 }
 
-TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy'}
+TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy', 'n_jobs'}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: Dict[str, set] = {
@@ -378,6 +381,15 @@ def resolve_dataset_block(name: str, block: Dict[str, Any]) -> Dict[str, Any]:
     missing = sorted(REQUIRED_KEYS[name] - set(block))
     if missing:
         raise ValueError(f'config.{name} is missing required key(s) {missing}.')
+
+    # catch it here, not minutes into a run inside np.array_split.
+    # bool is an int subclass; `n_jobs: true` must not silently mean 1.
+    n_jobs = block.get('n_jobs', 1)
+    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int) or n_jobs == 0:
+        raise ValueError(
+            f'config.{name}.n_jobs must be a non-zero int '
+            f'(1 = serial, -1 = all cores); got {n_jobs!r}.'
+        )
 
     defaults = DATASET_DEFAULTS[name]
     for key in ('n_samples', 'n_experiments', 'sweep_samples'):

@@ -324,6 +324,9 @@ class ParamSweepRunner(BaseExperimentRunner):
                             estimate, query_status, elapsed = data.estimand, None, 0.0
                         else:
                             model = models[name]
+                            # query evaluation ONLY -- DA transform lives in
+                            # generate_data and fitting in build_models, both
+                            # outside this timer. Keep it that way.
                             start = time.perf_counter()
                             estimate = model.predict(
                                 data.X_test, **self.get_predict_kwargs(param, j)
@@ -479,18 +482,18 @@ class ExperimentOrchestrator(ABC):
         """
         n_experiments = self.kwargs['n_experiments']
 
-        if 'm' in self._sweep_cache:
-            _, results, statuses = self._sweep_cache['m']       # m=1 is step 0
-        else:
-            # ATE is the truth, not an estimator: no cost, no failure modes
-            methods = {k: v for k, v in self.methods.items() if k != 'ATE'}
-            runner = self.get_sweep_runner_cls('m')(
-                methods=methods,
-                method_factory=self.build_methods,
-                param_grid_override=[1],
-                **self._get_clean_kwargs()
-            )
-            _, results, statuses = runner.run('perf')
+        # Always serial, never the cached sweep: n_jobs speeds up only the SOCP
+        # methods, so a parallel record would compare harnesses, not methods
+        # (measured: the PI/ERM wall_clock ratio moves 9.4x with the knob).
+        # ATE is the truth, not an estimator: no cost, no failure modes.
+        methods = {k: v for k, v in self.methods.items() if k != 'ATE'}
+        runner = self.get_sweep_runner_cls('m')(
+            methods=methods,
+            method_factory=self.build_methods,
+            param_grid_override=[1],
+            **{**self._get_clean_kwargs(), 'n_jobs': 1}
+        )
+        _, results, statuses = runner.run('perf')
 
         results = {k: v for k, v in results.items() if k != 'ATE'}
         overlay = list(perf_spec.metric)
