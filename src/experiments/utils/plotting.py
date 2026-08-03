@@ -832,3 +832,110 @@ def create_panel_plot(
     
 #     fig.align_ylabels(axes[:, 0])
 #     save(fig, 'query_sweep_panel', experiment_name, PLOT_FORMAT, dpi=PLOT_DPI)
+
+def create_scatter_plot(
+    results: Dict[str, Dict[str, NDArray]],
+    param_values: NDArray,
+    metric_x: str,
+    metric_y: str,
+    xlabel: str = '',
+    ylabel: str = '',
+    param_label: str = '',
+    savefig: bool = True,
+    format: str = PLOT_FORMAT,
+    legend_loc: str | Tuple[float, float] = 'best',
+    hilight_ours: bool = DEFAULT_HILIGHT_OURS,
+    experiment: str = 'simulation',
+    fname: Optional[str] = None,
+    crosshairs: bool = True,
+):
+    """
+    Trade-off scatter: one point per (method, sweep step) at the mean of two
+    metrics, sized by the rank of the sweep parameter and annotated with its
+    value. Crosshairs are +/- 1 SE across experiments.
+
+    Args:
+        results: method -> metric field -> (n_steps, n_experiments)
+        param_values: the sweep grid, one entry per step
+        metric_x, metric_y: metric FIELD names to place on each axis
+        crosshairs: draw SE bars (caller gates on n_experiments >= 2)
+    """
+    try:
+        plt.rcParams.update(RC_PARAMS)
+        sns.set_palette('deep')
+        colors = sns.color_palette()
+        fig = plt.figure()
+
+        n_steps = len(param_values)
+        # bubble area by rank, so a log-spaced grid still reads evenly
+        ranks = np.argsort(np.argsort(np.asarray(param_values, dtype=float)))
+        sizes = np.linspace(28, 150, max(n_steps, 1))[ranks]
+
+        handles, labels = [], []
+        for method_name, record in results.items():
+            if metric_x not in record or metric_y not in record:
+                continue
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                mx = np.nanmean(record[metric_x], axis=1)
+                my = np.nanmean(record[metric_y], axis=1)
+                n_experiments = record[metric_x].shape[1]
+                sx = np.nanstd(record[metric_x], axis=1) / np.sqrt(n_experiments)
+                sy = np.nanstd(record[metric_y], axis=1) / np.sqrt(n_experiments)
+
+            if np.all(np.isnan(mx)) or np.all(np.isnan(my)):
+                continue
+
+            color = colors[COLOR_MAP[method_name]]
+
+            if crosshairs:
+                plt.errorbar(
+                    mx, my, xerr=sx, yerr=sy, fmt='none',
+                    ecolor=color, elinewidth=0.8, capsize=2, alpha=0.6, zorder=1
+                )
+
+            plt.scatter(
+                mx, my, s=sizes, color=color, alpha=ALPHA_MAP.get(method_name, 0.9),
+                edgecolors='black', linewidths=0.4, zorder=2
+            )
+
+            # the parameter value is only readable from the annotations
+            for x, y, value in zip(mx, my, param_values):
+                if np.isfinite(x) and np.isfinite(y):
+                    plt.annotate(
+                        f'{value:g}', (x, y), textcoords='offset points',
+                        xytext=(5, 4), fontsize=FS_TICK * 0.65, color=color
+                    )
+
+            handles.append(plt.Line2D(
+                [], [], marker='o', linestyle='none', color=color,
+                markeredgecolor='black', markeredgewidth=0.4
+            ))
+            labels.append(TEX_MAPPER.get(method_name, method_name))
+
+        plt.xlabel(xlabel, fontsize=FS_LABEL)
+        plt.ylabel(ylabel, fontsize=FS_LABEL)
+        plt.xticks(fontsize=FS_TICK)
+        plt.yticks(fontsize=FS_TICK)
+        if param_label:
+            plt.title(f'annotated by {param_label}', fontsize=FS_TICK)
+
+        if handles:
+            plt.legend(
+                handles=handles, labels=_apply_tex_highlighting(labels, hilight_ours),
+                fontsize=FS_TICK, loc=legend_loc, frameon=True,
+                edgecolor='black', fancybox=False
+            )
+
+        plt.tight_layout()
+        plt.show()
+
+        if savefig:
+            save(fig, fname or 'scatter', experiment, format, dpi=PLOT_DPI)
+
+    except Exception as e:
+        from loguru import logger
+        logger.error(f'Failed to plot scatter {fname}: {e}')
+        import traceback
+        logger.error(traceback.format_exc())

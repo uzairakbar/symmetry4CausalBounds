@@ -13,9 +13,12 @@ from dataclasses import dataclass
 from src.methods.abstract import pointEstimator as Regressor
 from src.experiments.utils import fit_model, set_seed, save
 from src.experiments.utils.metrics import evaluate_queries, STATUS_CATEGORIES
-from src.experiments.utils.plotting import create_sweep_plot, create_query_sweep_plot
+from src.experiments.utils.plotting import (
+    create_sweep_plot, create_scatter_plot, create_query_sweep_plot,
+)
 from src.experiments.configs import (
     METRIC_CONFIGS, PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
+    SCATTER_SE_CROSSHAIRS,
 )
 
 # QueryEval scalar fields recorded at every (method, step, experiment)
@@ -386,7 +389,7 @@ class ExperimentOrchestrator(ABC):
         if plan.sweep:
             self._run_sweeps(plan.sweep)
         if plan.scatter:
-            raise NotImplementedError('scatter plots land in P4.')
+            self._run_scatter(plan.scatter)
         if plan.perf:
             raise NotImplementedError('perf plot lands in P5.')
 
@@ -439,6 +442,31 @@ class ExperimentOrchestrator(ABC):
                     vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
                 )
 
+
+    def _run_scatter(self, scatter_spec):
+        """Trade-off scatters. Reuses the cached sweep records; no extra compute."""
+        n_experiments = self.kwargs['n_experiments']
+        crosshairs = SCATTER_SE_CROSSHAIRS and n_experiments >= 2
+        if SCATTER_SE_CROSSHAIRS and not crosshairs:
+            logger.warning(
+                f'n_experiments={n_experiments}: SE is undefined, '
+                'scatter crosshairs hidden.'
+            )
+
+        for param in scatter_spec.param:
+            x_values, results, _ = self.sweep_record(param)
+
+            for metric_x, metric_y in scatter_spec.metric:
+                spec_x, spec_y = METRIC_SPECS[metric_x], METRIC_SPECS[metric_y]
+                create_scatter_plot(
+                    results, x_values,
+                    metric_x=spec_x.key, metric_y=spec_y.key,
+                    xlabel=spec_x.ylabel, ylabel=spec_y.ylabel,
+                    param_label=PARAM_SPECS[param].xlabel,
+                    experiment=self.name,
+                    fname=f'scatter_{param}_{metric_x}_vs_{metric_y}',
+                    crosshairs=crosshairs,
+                )
 
     def _run_query_sweep(self):
         """Query sweep + panel. The panel is a query-space view, so it is

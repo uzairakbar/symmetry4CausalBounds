@@ -21,9 +21,6 @@ from src.oracle import (
 # per-experiment DA seed offset: common random numbers across a knob grid
 CRN_OFFSET: int = 10_000
 
-# robustness sweep: refuse a Thm. 1 threshold that collapses toward zero
-GAMMA_MIN_FLOOR: float = 0.05
-
 
 # =============================================================================
 # ORACLE MIXIN
@@ -278,8 +275,12 @@ class EpsilonRatioStrategy(GenericParamSweep):
     """
     Robustness: sweep the ASSUMED invariance budget, epsilon = r eps* + EPS_TOL.
 
-    gamma is pinned to the Thm. 1 threshold so the baseline is invalid while the
-    DA is exactly valid at r = 1: below 1 the safety net visibly fails.
+    gamma stays at gamma*_j, as everywhere outside the validity sweep, so the
+    baseline is valid and the plot isolates the effect of misstating epsilon.
+    (Pinning gamma to the Thm. 1 threshold instead would make the baseline
+    invalid by construction, leaving PI_INV infeasible throughout and the
+    intersections inheriting that invalidity -- see PLAN 7.)
+
     This is the ONLY sweep that recalibrates the DA (to ROBUSTNESS_EPSILON_TRUE),
     so that eps* > 0 makes the ratio axis meaningful.
     """
@@ -305,20 +306,6 @@ class EpsilonRatioStrategy(GenericParamSweep):
             )
             self.epsilon_true = None
         return super().prepare_pair(sem, da, features=features)
-
-    def fit_gamma(self, experiment_index: int) -> float:
-        """Thm. 1 threshold: the budget the augmentation buys back."""
-        oracle = self.get_oracle(experiment_index)
-        gamma_star = self._finite(oracle.gamma_star, self.default_gamma, 'gamma*')
-        gamma_min = thm1_gamma_min(oracle, calibrate=self.calibrate)
-
-        if not np.isfinite(gamma_min) or gamma_min < GAMMA_MIN_FLOOR * gamma_star:
-            logger.warning(
-                f'Thm. 1 gamma_min={gamma_min:.4g} below the floor; '
-                f'using {GAMMA_MIN_FLOOR:g} * gamma*.'
-            )
-            return GAMMA_MIN_FLOOR * gamma_star
-        return float(gamma_min)
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         return self._sweep_data(experiment_index)
