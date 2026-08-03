@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Optional, Literal
 
 from .constants import (
     DEFAULT_HILIGHT_OURS, POINT_ESTIMATES,
-    FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT,
+    FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT, PAGE_WIDTH,
     RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
     POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE, PANEL_CONFIGS,
     SUBDIR_QUERY, SUBDIR_SWEEP, SUBDIR_SCATTER, SUBDIR_PERF,
@@ -751,6 +751,9 @@ def create_digit_sweep_plot(
     experiment: str = 'do_mnist',
     fname: str = 'digit_sweep',
     ylabel: str = r'$h({\bm{x}})$',
+    ylim: Tuple[float, float] = (-0.05, 1.05),
+    legend_width: float = 0.24,
+    thumbnail_zoom: float = 0.7,
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
@@ -758,52 +761,49 @@ def create_digit_sweep_plot(
     """
     Query sweep over frozen digit exemplars, with the images under the axis.
 
-    The x-axis is categorical, so PI methods get one vertical band per exemplar
-    rather than a filled ribbon -- a ribbon across unrelated digits would imply an
-    interpolation that does not exist.
+    Same reading as the radial sweeps: bands for intervals, lines for point
+    estimates. The x-axis is an index over exemplars, so the connecting segments
+    carry no interpolation claim -- they are there to make ten bounds legible.
 
     Args:
-        exemplars: (n, 3, H, W) query images, in the SEM's tint parameterisation
+        exemplars: (n, 3, H, W) query images. Pass them at FULL resolution: the
+            SEM's `subsample` exists for the models, not for the figure.
         y_results: method name -> predictions, as the other query plots take them
         labels: the digit each exemplar shows
         experiment: experiment name, for file organisation
         fname: output file stem
         ylabel: y-axis label
+        ylim: y limits; the thumbnails hang off the lower one
+        legend_width: figure fraction reserved for the legend column
+        thumbnail_zoom: display pixels per image pixel
         savefig: whether to save the figure
         format: file format
         hilight_ours: whether to bold our methods in the legend
     """
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette('deep')
     colors = sns.color_palette()
 
-    x = np.arange(len(labels))
-    fig, ax = plt.subplots()
+    x = np.arange(len(labels), dtype=float)
+    fig, ax = plt.subplots(figsize=(PAGE_WIDTH, 3.2))
     handles, all_labels = [], []
 
-    # widest first, so a narrow interval is never hidden behind a wide one
-    def _width(item):
-        predictions = item[1]
-        if predictions.ndim != 3:
-            return -np.inf
-        widths = predictions[:, :, 1] - predictions[:, :, 0]
-        # an all-INFEASIBLE method has no width at all; sort it last, not NaN
-        return float(np.nanmean(widths)) if np.isfinite(widths).any() else -np.inf
-
-    for method_name, predictions in sorted(y_results.items(), key=_width, reverse=True):
+    for method_name, predictions in y_results.items():
         label = TEX_MAPPER.get(method_name, method_name)
-        all_labels.append(label)
         color = colors[COLOR_MAP[method_name]]
 
         if predictions.ndim == 3:                       # interval estimate
             lower = predictions[:, :, 0].mean(axis=1)
             upper = predictions[:, :, 1].mean(axis=1)
-            handle = ax.bar(x, upper - lower, bottom=lower, width=0.72,
-                            color=color, alpha=ALPHA_MAP.get(method_name, 0.2),
-                            edgecolor=color, linewidth=0.8)
-            # a NaN interval is an INFEASIBLE query, not a missing one: mark it
-            for xi in x[np.isnan(lower) | np.isnan(upper)]:
-                ax.plot(xi, 0.5, marker='x', color=color, markersize=7, mew=1.6)
+            # An all-NaN method is INFEASIBLE everywhere and draws nothing, so its
+            # legend entry is the only trace of it. Flagging that in the label
+            # overflows the legend column; the caller logs it instead.
+            handle = ax.fill_between(
+                x, lower, upper, color=color,
+                alpha=ALPHA_MAP.get(method_name, 0.2), zorder=-1,
+            )
         else:                                           # point estimate
             mean_prediction = predictions.mean(axis=1)
             handle = ax.plot(
@@ -811,34 +811,41 @@ def create_digit_sweep_plot(
                 color='black' if method_name == 'ATE' else color,
                 linestyle=(POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES
                            else PARTIAL_IDENTIFICATION_STYLE),
-                linewidth=2, marker='o', markersize=4, solid_capstyle='round',
+                linewidth=2, solid_capstyle='round',
+                zorder=1 if method_name == 'ATE' else 0,
             )[0]
+
         handles.append(handle)
+        all_labels.append(label)
 
     ax.set_ylabel(ylabel, fontsize=FS_LABEL)
-    ax.set_ylim(-0.02, 1.02)
-    ax.set_xlim(-0.6, len(labels) - 0.4)
+    ax.set_ylim(*ylim)
+    ax.set_xlim(x[0], x[-1])
     ax.set_xticks(x)
     ax.set_xticklabels([])                              # the thumbnails ARE the ticks
-    ax.tick_params(axis='y', labelsize=FS_TICK)
-    ax.legend(handles=handles,
-              labels=_apply_tex_highlighting(all_labels, hilight_ours),
-              fontsize=FS_TICK, loc='best', frameon=True,
-              edgecolor='black', fancybox=False)
+    ax.tick_params(labelsize=FS_TICK)
 
-    # thumbnails below the axis. The SEM background is exactly 0, so the ink mask
-    # doubles as the alpha channel and the digits sit on the page, not on a box.
-    images = np.asarray(exemplars)
-    for xi, image in zip(x, images):
-        rgb = np.transpose(image, (1, 2, 0))
-        alpha = np.clip(rgb[..., 0] + rgb[..., 2], 0.0, 1.0)
-        rgba = np.dstack([np.clip(rgb, 0.0, 1.0), alpha])
-        inset = ax.inset_axes([xi - 0.4, -0.20, 0.8, 0.16],
-                              transform=ax.transData, zorder=5)
-        inset.imshow(rgba, interpolation='nearest')
-        inset.axis('off')
+    # thumbnails below the axis. The SEM renders RGB = [t,0,1-t]*grey, so the
+    # background is exactly 0 and the ink mask doubles as the alpha channel --
+    # without it every digit sits in a black box.
+    for xi, image in zip(x, np.asarray(exemplars)):
+        rgb = np.clip(np.transpose(image, (1, 2, 0)), 0.0, 1.0)
+        rgba = np.dstack([rgb, np.clip(rgb.sum(-1), 0.0, 1.0)])
+        ax.add_artist(AnnotationBbox(
+            OffsetImage(rgba, zoom=thumbnail_zoom), (xi, ylim[0]),
+            frameon=False, box_alignment=(0.5, 1.15),
+            xycoords=('data', 'data'), annotation_clip=False,
+        ))
 
-    plt.tight_layout()
+    fig.subplots_adjust(bottom=0.26, right=1.0 - legend_width)
+
+    # single column to the right, unframed
+    ax.legend(
+        handles=handles, labels=_apply_tex_highlighting(all_labels, hilight_ours),
+        fontsize=FS_TICK - 2, ncol=1, loc='center left', bbox_to_anchor=(1.02, 0.5),
+        frameon=False, borderpad=0.4, handlelength=1.6, labelspacing=0.8,
+    )
+
     plt.show()
 
     if savefig:

@@ -113,8 +113,9 @@ class DoMNISTSEM(StructuralEquationModel):
 
     # ---------------------------------------------------------------- sampling
 
-    def _grey(self, idx) -> NDArray:
-        return self.images[idx][:, ::self.sub, ::self.sub] / 255.0
+    def _grey(self, idx, subsample: Optional[int] = None) -> NDArray:
+        step = self.sub if subsample is None else int(subsample)
+        return self.images[idx][:, ::step, ::step] / 255.0
 
     def _balanced(self, N, rng) -> NDArray:
         """P(f=1) = 1/2 exactly, whatever MNIST's own class balance is."""
@@ -199,12 +200,16 @@ class DoMNISTSEM(StructuralEquationModel):
     # ------------------------------------------------------------- exemplars
 
     def exemplars(self, seed: int = 420, digits: Sequence[int] = range(10),
-                  colors: str = 'alternating'):
+                  colors: str = 'alternating', subsample: Optional[int] = None):
         """One frozen sample per digit, for the query-sweep x-axis.
 
         colors='alternating': C = 0,1,0,1,... so the colour-driven ERM zig-zag reads
         against a flat h_*. That is OFF the SEM's colour law, so these are a
         VISUALISATION set only -- never use them to measure coverage.
+
+        `subsample` overrides the SEM's own. The draws (which digit, which tint) do
+        not depend on it, so `subsample=1` returns the SAME exemplars at full
+        resolution -- for the figure, while the models keep the subsampled ones.
         """
         rng = np.random.default_rng(seed)
         idx = np.array([int(rng.choice(np.flatnonzero(self.targets == d))) for d in digits])
@@ -216,4 +221,4 @@ class DoMNISTSEM(StructuralEquationModel):
             C = np.logical_xor(U > 0.5, _bern(self.eta, n, rng) > 0.5).astype(float)
         t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO)
                     + rng.normal(0, self.jitter, n), 0.0, 1.0)
-        return tint(self._grey(idx), t).astype(np.float32), self.targets[idx]
+        return tint(self._grey(idx, subsample), t).astype(np.float32), self.targets[idx]

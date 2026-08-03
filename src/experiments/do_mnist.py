@@ -65,6 +65,17 @@ def pi_subset(n_total: int, n_pi: int, seed: int) -> np.ndarray:
     return np.random.default_rng(seed).choice(n_total, min(n_pi, n_total), replace=False)
 
 
+def log_vacuous(bounds: Dict[str, np.ndarray]):
+    """An all-INFEASIBLE method draws nothing, so the figure shows only a legend
+    entry. Say so, or it reads as a plotting bug."""
+    for name, prediction in bounds.items():
+        prediction = np.asarray(prediction)
+        if prediction.ndim == 3 and not np.isfinite(prediction).any():
+            logger.warning(f'{name}: INFEASIBLE at every query -- it contributes a '
+                           'legend entry and no band. Check the floor/budget pair '
+                           'logged above.')
+
+
 def log_nesting(models: Dict[str, object], bounds: Dict[str, np.ndarray]):
     """R5: the SLSQP multi-start is non-convex, so PI_INV subset PI is not
     guaranteed. Logged, never raised -- a violation is information about the
@@ -123,6 +134,10 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         sem_test = self.sem_test_factory()
         self.exemplars_, self.digits_ = sem_test.exemplars(
             DOMNIST_CONFIG.exemplar_seed)
+        # same digits and tints at full resolution: `subsample` is a modelling
+        # choice, and the figure has no reason to inherit it
+        self.exemplar_images_, _ = sem_test.exemplars(
+            DOMNIST_CONFIG.exemplar_seed, subsample=1)
         return self.poly.fit_transform(self.exemplars_)
 
 
@@ -329,11 +344,12 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
     def _plot_query_sweep(self, runner, results):
         """x-axis is 10 digit exemplars, so thumbnails replace a numeric axis."""
         log_nesting(runner.methods, results)
+        log_vacuous(results)
         digits = list(runner.digits_)
 
         save(np.asarray(digits), 'treatment_values', self.name, 'pkl',
              subdir=SUBDIR_QUERY)
         save(results, 'outcome_values', self.name, 'pkl', subdir=SUBDIR_QUERY)
 
-        create_digit_sweep_plot(runner.exemplars_, results, labels=digits,
+        create_digit_sweep_plot(runner.exemplar_images_, results, labels=digits,
                                 experiment=self.name)

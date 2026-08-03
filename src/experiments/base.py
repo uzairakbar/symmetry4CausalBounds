@@ -531,6 +531,16 @@ class ExperimentOrchestrator(ABC):
                 'midpoint_sd': float(np.nanstd(per_experiment_width) / 2.0),
                 'n_experiments': n_experiments,
             }
+            # A method whose constraint set is empty returns before solving
+            # anything, so its wall_clock times the feasibility gate rather than a
+            # solve -- and comes out FASTEST on the plot. Say so.
+            infeasible_rate = record[name]['rates'][1]
+            if infeasible_rate > 0.99:
+                logger.warning(
+                    f'{name}: {infeasible_rate:.0%} infeasible, so its wall_clock '
+                    f'({record[name]["wall_clock"] * 1e3:.1f} ms/query) timed the '
+                    'feasibility gate, not a solve. Not comparable to the rest.'
+                )
 
         save(record, 'perf', self.name, 'pkl', subdir=SUBDIR_PERF)
         create_perf_plot(record, overlay_metrics=overlay, experiment=self.name)
