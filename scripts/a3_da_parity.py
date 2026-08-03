@@ -18,6 +18,11 @@ AUGMENTATION = 'translate > rotation > contrast > saturation > hue'
 SEED, N = 1234, 2048
 
 
+def _path(path):
+    """np.savez_compressed appends .npz, np.load does not. Normalise both ends."""
+    return path if path.endswith('.npz') else path + '.npz'
+
+
 def _images(root, n):
     """One SEM draw, from whichever repo we are running inside."""
     sys.path.insert(0, root)
@@ -35,8 +40,8 @@ def dump(path):
     X = _images(SOURCE, N)
     torch.manual_seed(SEED)
     GX, G = DoMNISTDA(AUGMENTATION)(X)
-    np.savez_compressed(path, X=X, GX=GX, G=G)
-    print(f'wrote {path}: GX {GX.shape} G {G.shape}')
+    np.savez_compressed(_path(path), X=X, GX=GX, G=G)
+    print(f'wrote {_path(path)}: GX {GX.shape} G {G.shape}')
 
 
 def check(path):
@@ -44,7 +49,7 @@ def check(path):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from src.data_augmentors.do_mnist import DoMNISTDA      # noqa: PLC0415
 
-    blob = np.load(path)
+    blob = np.load(_path(path))
     torch.manual_seed(SEED)
     GX, G = DoMNISTDA(AUGMENTATION)(blob['X'])
 

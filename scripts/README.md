@@ -24,11 +24,11 @@ under SOURCE's own `.venv`, then `--check` under `s4cb`.
 
 ```bash
 SRC=../doMNIST/symmetry4CausalBoundsDoMNIST
-$SRC/.venv/bin/python scripts/a1_a2_sem.py       --source /tmp/a2
+$SRC/.venv/bin/python scripts/a1_a2_sem.py       --source /tmp/a2.npz
 $SRC/.venv/bin/python scripts/a3_da_parity.py    --source /tmp/a3.npz
 $SRC/.venv/bin/python scripts/a4_copsens_parity.py --source /tmp/a4
 
-~/scratch/envs/s4cb/bin/python scripts/a1_a2_sem.py        --check /tmp/a2
+~/scratch/envs/s4cb/bin/python scripts/a1_a2_sem.py        --check /tmp/a2.npz
 ~/scratch/envs/s4cb/bin/python scripts/a3_da_parity.py     --check /tmp/a3.npz
 ~/scratch/envs/s4cb/bin/python scripts/a4_copsens_parity.py --check /tmp/a4
 ```

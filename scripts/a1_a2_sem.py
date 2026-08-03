@@ -17,6 +17,11 @@ SEED, N_PARITY, N_LAW = 11, 4096, 200_000
 FAIL = []
 
 
+def _path(path):
+    """np.savez_compressed appends .npz, np.load does not. Normalise both ends."""
+    return path if path.endswith('.npz') else path + '.npz'
+
+
 def check(name, ok, detail=''):
     print(f'[{"PASS" if ok else "FAIL"}] {name} {detail}')
     if not ok:
@@ -33,9 +38,9 @@ def dump(path):
     Xd, yd = sem.sample(N=N_PARITY, mode='do', seed=SEED)
     Xp, y_obs, y_do = sem.sample_paired(N_PARITY, seed=SEED)
     ex, digits = sem.exemplars(420, colors='alternating')
-    np.savez_compressed(path, X=X, y=y, Xd=Xd, yd=yd, Xp=Xp, y_obs=y_obs,
+    np.savez_compressed(_path(path), X=X, y=y, Xd=Xd, yd=yd, Xp=Xp, y_obs=y_obs,
                         y_do=y_do, ex=ex, digits=digits)
-    print(f'wrote {path}')
+    print(f'wrote {_path(path)}')
 
 
 def a1(sem):
@@ -76,7 +81,7 @@ def a1(sem):
 
 def a2(sem, path):
     """Bit-identical draws against SOURCE at the same seed."""
-    ref = np.load(path)
+    ref = np.load(_path(path))
     X, y = sem.sample(N=N_PARITY, seed=SEED)
     Xd, yd = sem.sample(N=N_PARITY, intervention=True, seed=SEED)
     Xp, y_obs, y_do = sem.sample_paired(N_PARITY, seed=SEED)
