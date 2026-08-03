@@ -944,3 +944,130 @@ def create_scatter_plot(
         logger.error(f'Failed to plot scatter {fname}: {e}')
         import traceback
         logger.error(traceback.format_exc())
+
+
+# 4-way reliability split, in STATUS_CATEGORIES order
+PERF_CATEGORY_LABELS: Tuple[str, ...] = (
+    'solver failure', 'infeasible', 'covers', 'non-covering',
+)
+PERF_CATEGORY_COLORS: Tuple[str, ...] = ('#8c1d1d', '#d99b32', '#2f6f4e', '#9db9cf')
+
+
+def create_perf_plot(
+    perf_record: Dict[str, Dict[str, object]],
+    overlay_metrics: Optional[List[str]] = None,
+    savefig: bool = True,
+    format: str = PLOT_FORMAT,
+    hilight_ours: bool = DEFAULT_HILIGHT_OURS,
+    experiment: str = 'simulation',
+    fname: str = 'perf',
+):
+    """
+    Per-method reliability and cost, one figure, two stacked panels.
+
+    Top: 100%-stacked bars, the 4-way per-query split (mutually exclusive, in
+    precedence order, summing to 100 by construction).
+    Bottom: cost and stability -- wall-clock per query (log) and the across-seed
+    SD of interval width, each on its own axis in its own units.
+
+    Overlaying both on the bars' percent axis was tried first and read as
+    clutter: it forced the SD to be rescaled, giving the left axis two
+    different meanings (PLAN 1).
+    """
+    overlay_metrics = list(overlay_metrics or [])
+    try:
+        plt.rcParams.update(RC_PARAMS)
+
+        methods = list(perf_record)
+        labels = [TEX_MAPPER.get(m, m) for m in methods]
+        positions = np.arange(len(methods))
+
+        if overlay_metrics:
+            fig, (ax, ax_cost) = plt.subplots(
+                2, 1, sharex=True, gridspec_kw={'height_ratios': [2.2, 1]}
+            )
+        else:
+            fig, ax = plt.subplots()
+            ax_cost = None
+
+        # ------------------------------------------------ reliability (top)
+        rates = np.array([perf_record[m]['rates'] for m in methods], dtype=float) * 100.0
+        bottom = np.zeros(len(methods))
+        bar_handles = []
+        for index, (category, color) in enumerate(
+            zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS)
+        ):
+            container = ax.bar(positions, rates[:, index], bottom=bottom,
+                               color=color, edgecolor='black', linewidth=0.4,
+                               width=0.7, zorder=2)
+            bottom += rates[:, index]
+            bar_handles.append(container)
+
+        ax.set_ylabel(r'outcome (\%)', fontsize=FS_LABEL)
+        ax.set_ylim(0, 100)
+        ax.tick_params(axis='y', labelsize=FS_TICK)
+        ax.legend(
+            handles=bar_handles, labels=list(PERF_CATEGORY_LABELS),
+            fontsize=FS_TICK * 0.75, loc='lower left', bbox_to_anchor=(0.0, 1.02),
+            ncol=4, frameon=True, edgecolor='black', fancybox=False,
+            handlelength=1.4, columnspacing=1.0,
+        )
+
+        # ------------------------------------------------- cost (bottom)
+        axis_for_labels = ax
+        if ax_cost is not None:
+            axis_for_labels = ax_cost
+            cost_handles = []
+
+            if 'wall_clock' in overlay_metrics:
+                seconds = np.array([perf_record[m]['wall_clock'] for m in methods],
+                                   dtype=float)
+                handle = ax_cost.plot(
+                    positions, seconds, marker='o', linestyle='-',
+                    color='#3b3b6d', markersize=5, label='wall clock / query'
+                )[0]
+                ax_cost.set_yscale('log')
+                ax_cost.set_ylabel('s / query', fontsize=FS_TICK)
+                ax_cost.tick_params(axis='y', labelsize=FS_TICK * 0.8)
+                cost_handles.append(handle)
+
+            if 'seed_var' in overlay_metrics:
+                seed_sd = np.array([perf_record[m]['seed_var'] for m in methods],
+                                   dtype=float)
+                twin = ax_cost.twinx()
+                handle = twin.plot(
+                    positions, seed_sd, marker='s', linestyle='--',
+                    color='black', markersize=4, label='width SD across seeds'
+                )[0]
+                twin.set_ylabel('width SD', fontsize=FS_TICK)
+                twin.tick_params(axis='y', labelsize=FS_TICK * 0.8)
+                cost_handles.append(handle)
+
+            if cost_handles:
+                ax_cost.legend(
+                    handles=cost_handles,
+                    labels=[h.get_label() for h in cost_handles],
+                    fontsize=FS_TICK * 0.7, loc='upper left', frameon=True,
+                    edgecolor='black', fancybox=False, handlelength=1.6,
+                    framealpha=0.92,
+                )
+
+        axis_for_labels.set_xticks(positions)
+        axis_for_labels.set_xticklabels(
+            _apply_tex_highlighting(labels, hilight_ours),
+            fontsize=FS_TICK, rotation=20, ha='right'
+        )
+
+        if ax_cost is not None:
+            fig.align_ylabels([ax, ax_cost])
+        fig.tight_layout()
+        plt.show()
+
+        if savefig:
+            save(fig, fname, experiment, format, dpi=PLOT_DPI)
+
+    except Exception as e:
+        from loguru import logger
+        logger.error(f'Failed to plot perf: {e}')
+        import traceback
+        logger.error(traceback.format_exc())

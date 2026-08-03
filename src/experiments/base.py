@@ -14,7 +14,8 @@ from src.methods.abstract import pointEstimator as Regressor
 from src.experiments.utils import fit_model, set_seed, save
 from src.experiments.utils.metrics import evaluate_queries, STATUS_CATEGORIES
 from src.experiments.utils.plotting import (
-    create_sweep_plot, create_scatter_plot, create_query_sweep_plot,
+    create_sweep_plot, create_scatter_plot, create_perf_plot,
+    create_query_sweep_plot,
 )
 from src.experiments.configs import (
     METRIC_CONFIGS, PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
@@ -193,12 +194,15 @@ class ParamSweepRunner(BaseExperimentRunner):
         self,
         method_factory: Optional[Callable] = None,
         experiment_name: str = 'simulation',
+        param_grid_override: Optional[Any] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
         # builds methods at experiment-specific budgets (ParamPolicy, PLAN 7)
         self.method_factory = method_factory
         self.experiment_name = experiment_name
+        # perf collapses the grid to a single default operating point
+        self.param_grid_override = param_grid_override
         self.setup_sems_and_das()
 
     @property
@@ -211,6 +215,8 @@ class ParamSweepRunner(BaseExperimentRunner):
         return not self.spec.data_constant
 
     def get_param_range(self) -> np.ndarray:
+        if self.param_grid_override is not None:
+            return np.asarray(self.param_grid_override)
         return self.spec.grid_fn(self.experiment_name, self.sweep_samples)
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:
@@ -391,7 +397,7 @@ class ExperimentOrchestrator(ABC):
         if plan.scatter:
             self._run_scatter(plan.scatter)
         if plan.perf:
-            raise NotImplementedError('perf plot lands in P5.')
+            self._run_perf(plan.perf)
 
     def _get_clean_kwargs(self) -> Dict[str, Any]:
         """Remove arguments that cause collision with explicit runner args."""
@@ -444,6 +450,55 @@ class ExperimentOrchestrator(ABC):
                     vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
                 )
 
+
+    def _run_perf(self, perf_spec):
+        """
+        Per-method reliability + cost, at the dataset defaults.
+
+        A degenerate 1-point m-sweep (m=1) gives exactly the default operating
+        point, so this reuses the sweep machinery rather than a second path.
+        """
+        n_experiments = self.kwargs['n_experiments']
+
+        if 'm' in self._sweep_cache:
+            _, results, statuses = self._sweep_cache['m']       # m=1 is step 0
+        else:
+            # ATE is the truth, not an estimator: no cost, no failure modes
+            methods = {k: v for k, v in self.methods.items() if k != 'ATE'}
+            runner = self.get_sweep_runner_cls('m')(
+                methods=methods,
+                method_factory=self.build_methods,
+                param_grid_override=[1],
+                **self._get_clean_kwargs()
+            )
+            _, results, statuses = runner.run('perf')
+
+        results = {k: v for k, v in results.items() if k != 'ATE'}
+        overlay = list(perf_spec.metric)
+        if 'seed_var' in overlay and n_experiments < 2:
+            logger.warning(
+                f'n_experiments={n_experiments}: seed SD is undefined, '
+                'dropping the seed_var series.'
+            )
+            overlay.remove('seed_var')
+
+        record = {}
+        for name, metrics in results.items():
+            counts = statuses[name][0]                  # first step = m=1
+            total = max(int(counts.sum()), 1)
+            per_experiment_width = metrics['interval_width'][0]
+            record[name] = {
+                'rates': counts.sum(axis=0) / total,    # 4-way split, sums to 1
+                'wall_clock': float(np.nanmean(metrics['wall_clock'][0])),
+                # SD across seeds of the per-experiment means (PLAN 3)
+                'seed_var': float(np.nanstd(per_experiment_width)),
+                'coverage_sd': float(np.nanstd(metrics['coverage'][0])),
+                'midpoint_sd': float(np.nanstd(per_experiment_width) / 2.0),
+                'n_experiments': n_experiments,
+            }
+
+        save(record, 'perf', self.name, 'pkl')
+        create_perf_plot(record, overlay_metrics=overlay, experiment=self.name)
 
     def _run_scatter(self, scatter_spec):
         """Trade-off scatters. Reuses the cached sweep records; no extra compute."""

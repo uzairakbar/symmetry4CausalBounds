@@ -59,8 +59,8 @@ optical_device:
         scatter:
             param:  [n, m]
             metric: [[width, coverage], [approx_error, width]]
-        # perf:
-        #     metric: [wall_clock, seed_var]
+        perf:
+            metric: [wall_clock, seed_var]
 
 # colored_mnist:
 #     seed: 42
