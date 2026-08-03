@@ -7,7 +7,7 @@ import enlighten
 import numpy as np
 from loguru import logger
 from abc import ABC, abstractmethod
-from typing import Dict, Callable, Optional, Any, List, Tuple, Type
+from typing import Dict, Callable, Optional, Any, Tuple, Type
 from dataclasses import dataclass
 
 from src.methods.abstract import pointEstimator as Regressor
@@ -18,7 +18,7 @@ from src.experiments.utils.plotting import (
     create_query_sweep_plot,
 )
 from src.experiments.configs import (
-    METRIC_CONFIGS, PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
+    PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
     SCATTER_SE_CROSSHAIRS,
 )
 

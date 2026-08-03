@@ -2,10 +2,9 @@
 Optical device experiment using generic runners.
 Dramatically reduced code duplication.
 """
-from typing import Type, List, Tuple, Dict
+from typing import Type, Dict
 import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
-from sklearn.model_selection import train_test_split
 
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.sem.optical_device import OpticalDeviceSEM as SEM

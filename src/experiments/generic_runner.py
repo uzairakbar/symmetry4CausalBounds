@@ -5,12 +5,12 @@ Eliminates duplication between simulation and optical device experiments.
 import numpy as np
 from loguru import logger
 from sklearn.model_selection import train_test_split
-from typing import Tuple, Callable, Optional, Any, Dict
+from typing import Callable, Optional, Dict
 
 from src.experiments.base import (
     QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
 )
-from src.experiments.utils import fit_model, radial_sweep_pcs
+from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k, rho_hat
 from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE
 from src.oracle import (

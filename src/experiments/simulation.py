@@ -2,7 +2,7 @@
 Simulation experiment using generic runners.
 Dramatically reduced code duplication.
 """
-from typing import Type, List, Tuple
+from typing import Type
 
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.sem.simulation import LinearSimulationSEM as SEM

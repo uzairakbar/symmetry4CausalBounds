@@ -74,4 +74,3 @@ hyperparameters:
     lr: 0.01            # learning rate for stochastic gradient descent
     batch: 256          # batch size
     epochs: 16          # number of epochs
-    n_jobs: -1           # number of queries to run in parallel
