@@ -4,6 +4,10 @@ defaults:
     pad: false          # eps-pad DA+ intervals (Thm. 3)
     clipy: true         # clip intervals to observed outcome range
 
+# `experiment:` selects what to run. Omitted n_samples/n_experiments/
+# sweep_samples fall back to DatasetDefaults, omitted `methods` to the full
+# registry (configs.py). sweep/scatter/perf are validated but not yet wired.
+
 # ---
 # simulation:
 #     seed: 42
@@ -22,10 +26,9 @@ defaults:
 #         - DA+PI_IV
 #         - PI&DA+PI
 #         - PI&DA+PI_IV
-#     sweep_mode: query
-#     metric: worst_error     # Options: approximation_error, worst_error, interval_width
 #     augmentation: translate
-#     plot_panel: true
+#     experiment:
+#         query: true                 # query sweep; panel ALWAYS generated
 
 optical_device:
     seed: 69
@@ -43,30 +46,27 @@ optical_device:
         - DA+PI_IV
         - PI&DA+PI
         - PI&DA+PI_IV
-    sweep_mode: query
-    metric: worst_error
     # augmentation: all
     augmentation: rotation > hflip > vflip > gaussian-noise
     # augmentation: rotation > hflip > vflip > random-permutation
-    plot_panel: true
+    experiment:
+        query: true                 # query sweep; panel ALWAYS generated
+        # sweep:
+        #     param:  [gamma, epsilon, trS, n, m]
+        #     metric: [approx_error, worst_error, width, coverage]
+        # scatter:
+        #     param:  [n, m]
+        #     metric: [[width, coverage], [approx_error, width]]
+        # perf:
+        #     metric: [wall_clock, seed_var]
 
 # colored_mnist:
 #     seed: 42
 #     num_seeds: 10
 #     n_samples: 60_000
-#     methods:
-#         - ATE
-#         - ERM
-#         - DA+ERM
-#         - DA+IV
-#         - PI_INV
-#         - PI
-#         - DA+PI
-#         - DA+PI_IV
-#     sweep_mode: query
-#     metric: approximation_error
 #     augmentation: jitter > translate
-#     plot_panel: true
+#     experiment:
+#         query: true
 
 hyperparameters:
     lr: 0.01            # learning rate for stochastic gradient descent

@@ -339,19 +339,16 @@ class ExperimentOrchestrator(ABC):
         """Filter gamma-dependent methods."""
         return self.registry.filter_gamma_methods(self.methods)
     
-    def run(self, sweep_mode: str, plot_panel: bool = False, panel_only: bool = False):
-        """
-        Run experiments based on sweep mode.
-        
-        Args:
-            sweep_mode: 'param' for parameter sweeps, 'query' for query sweeps
-            plot_panel: Whether to generate panel plots
-            panel_only: Only generate panel, skip standard plots
-        """
-        if sweep_mode == 'param':
-            self._run_param_sweeps()
-        else:
-            self._run_query_sweep(plot_panel, panel_only)
+    def run(self, plan):
+        """Run the experiment types the `experiment:` block asked for."""
+        if plan.query:
+            self._run_query_sweep()
+        if plan.sweep:
+            raise NotImplementedError('sweep plots land in P3.')
+        if plan.scatter:
+            raise NotImplementedError('scatter plots land in P4.')
+        if plan.perf:
+            raise NotImplementedError('perf plot lands in P5.')
     
     def _get_clean_kwargs(self) -> Dict[str, Any]:
         """Remove arguments that cause collision with explicit runner args."""
@@ -382,38 +379,27 @@ class ExperimentOrchestrator(ABC):
                 experiment=self.name, fname=param_name, **plot_config
             )
     
-    def _run_query_sweep(self, plot_panel: bool, panel_only: bool):
-        """Execute query sweep and generate visualizations."""
+    def _run_query_sweep(self):
+        """Query sweep + panel. The panel is a query-space view, so it is
+        always built here and never for param sweeps."""
         from src.experiments.utils import PanelBuilder
-        
+
         RunnerCls = self.get_query_runner_cls()
-        
+
         # Prepare kwargs
         run_kwargs = self._get_clean_kwargs()
         run_kwargs['n_experiments'] = 1
-        
+
         # Create runner ONCE - used for both panel and radial sweep
         runner = RunnerCls(methods=self.methods, **run_kwargs)
-        
-        # Generate panel plot if requested
-        panel_builder = None
-        if plot_panel or panel_only:
-            # Optical uses augmented geometry, simulation uses raw
-            use_augmented_geometry = 'optical' in self.name
-            panel_builder = PanelBuilder(runner, self.name, use_augmented_geometry)
-            panel_builder.build(self.kwargs['sweep_samples'])
-            
-            if panel_only:
-                return
-        
-        # Generate standard radial sweep plot using CACHED results from panel
-        if panel_builder is not None:
-            # Reuse results from panel builder
-            results = panel_builder.get_radial_results()
-        else:
-            # No panel, run fresh
-            _, results = runner.run("Radial Sweep")
-        
+
+        # Optical uses augmented geometry, simulation uses raw
+        panel_builder = PanelBuilder(runner, self.name, 'optical' in self.name)
+        panel_builder.build(self.kwargs['sweep_samples'])
+
+        # Radial sweep plot reuses the panel's cached results
+        results = panel_builder.get_radial_results()
+
         # Create angle values for plotting (x-axis)
         angles = np.linspace(0, 2*np.pi, self.kwargs['sweep_samples'], endpoint=False)
         

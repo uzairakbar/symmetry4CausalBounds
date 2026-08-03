@@ -3,8 +3,8 @@ Unified configuration management for experiments.
 All parameters defined here - no defaults in method classes.
 """
 import numpy as np
-from typing import Dict, Any, Literal, Callable, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, Literal, Callable, Optional, Tuple, List
+from dataclasses import dataclass, field
 
 from src.methods.regression import (
     LeastSquaresClosedForm as ERM,
@@ -57,6 +57,164 @@ class OpticalDeviceConfig:
 # Default configurations
 SIMULATION_CONFIG = SimulationConfig()
 OPTICAL_CONFIG = OpticalDeviceConfig()
+
+
+# =============================================================================
+# DATASET DEFAULTS (root-yaml fallbacks)
+# =============================================================================
+
+@dataclass(frozen=True)
+class DatasetDefaults:
+    """Filled in when the root yaml omits the key."""
+    n_samples: int
+    n_experiments: int
+    sweep_samples: int
+
+
+DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
+    'simulation': DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32),
+    'optical_device': DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
+}
+
+
+# =============================================================================
+# SWEEP PARAMETER / METRIC SPECS
+# =============================================================================
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """Axis + policy metadata for one sweepable parameter."""
+    xlabel: str
+    xscale: Literal['linear', 'log'] = 'log'
+    vlines: Tuple[float, ...] = ()      # reference values annotated on the x-axis
+    include_ate: bool = True            # ATE is flat, useless on budget-ratio axes
+    data_constant: bool = False         # False => data regenerated every step
+
+
+PARAM_SPECS: Dict[str, ParamSpec] = {
+    'gamma': ParamSpec(
+        xlabel=r'$\gamma / \gamma^\star$', vlines=(1.0,),
+        include_ate=False, data_constant=True,
+    ),
+    'epsilon': ParamSpec(
+        xlabel=r'$\epsilon / \epsilon^\star$', vlines=(1.0,),
+        include_ate=False, data_constant=True,
+    ),
+    'trS': ParamSpec(
+        xlabel=r'$\rho \operatorname{tr}(\mathcal{S})/k$',
+        xscale='linear', vlines=(1.0,),
+    ),
+    'n': ParamSpec(xlabel=r'$n$'),
+    'm': ParamSpec(xlabel=r'Augmentation Folds ($m$)'),
+}
+
+
+@dataclass(frozen=True)
+class MetricSpec:
+    """`key` names the QueryEval field / metrics.py function."""
+    key: str
+    ylabel: str
+    yscale: Literal['linear', 'log', 'asinh'] = 'linear'
+    perf_only: bool = False
+
+
+METRIC_SPECS: Dict[str, MetricSpec] = {
+    'approx_error': MetricSpec(
+        'approximation_error', r'average $\underline{E}_{{\bm{x}}}$', 'asinh'),
+    'worst_error': MetricSpec(
+        'worst_error', r'average $\overline{E}_{{\bm{x}}}$', 'asinh'),
+    'width': MetricSpec('interval_width', r'average interval width'),
+    'coverage': MetricSpec('coverage', r'coverage rate'),
+    'wall_clock': MetricSpec('wall_clock', r'seconds per query', 'log', perf_only=True),
+    'seed_var': MetricSpec('seed_var', r'SD across seeds', perf_only=True),
+}
+
+
+# =============================================================================
+# EXPERIMENT PLAN (root-yaml `experiment:` block)
+# =============================================================================
+
+@dataclass(frozen=True)
+class SweepSpec:
+    param: Tuple[str, ...]
+    metric: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ScatterSpec:
+    param: Tuple[str, ...]
+    metric: Tuple[Tuple[str, str], ...]     # (x-metric, y-metric) pairs
+
+
+@dataclass(frozen=True)
+class PerfSpec:
+    metric: Tuple[str, ...]                 # overlay series; bar always drawn
+
+
+@dataclass(frozen=True)
+class ExperimentPlan:
+    """Which experiment types to run. Panel is bound to `query`."""
+    query: bool = False
+    sweep: Optional[SweepSpec] = None
+    scatter: Optional[ScatterSpec] = None
+    perf: Optional[PerfSpec] = None
+
+
+def _reject_unknown(got, allowed, where: str):
+    unknown = sorted(set(got) - set(allowed))
+    if unknown:
+        raise ValueError(
+            f'Unknown key(s) {unknown} in {where}; expected {sorted(allowed)}.'
+        )
+
+
+def _check_values(values, allowed, where: str) -> tuple:
+    values = tuple(values)
+    _reject_unknown(values, allowed, where)
+    return values
+
+
+def parse_experiment_plan(block: Optional[Dict[str, Any]]) -> ExperimentPlan:
+    """Parse+validate the `experiment:` block. Unknown keys are a hard error."""
+    block = dict(block or {})
+    _reject_unknown(block, {'query', 'sweep', 'scatter', 'perf'}, 'experiment')
+
+    sweep_metrics = {k for k, v in METRIC_SPECS.items() if not v.perf_only}
+    perf_metrics = {k for k, v in METRIC_SPECS.items() if v.perf_only}
+
+    sweep = block.get('sweep')
+    if sweep is not None:
+        _reject_unknown(sweep, {'param', 'metric'}, 'experiment.sweep')
+        sweep = SweepSpec(
+            param=_check_values(sweep.get('param', ()), PARAM_SPECS, 'experiment.sweep.param'),
+            metric=_check_values(sweep.get('metric', ()), sweep_metrics, 'experiment.sweep.metric'),
+        )
+
+    scatter = block.get('scatter')
+    if scatter is not None:
+        _reject_unknown(scatter, {'param', 'metric'}, 'experiment.scatter')
+        pairs = []
+        for pair in scatter.get('metric', ()):
+            if len(pair) != 2:
+                raise ValueError(f'experiment.scatter.metric entries must be pairs, got {pair}.')
+            pairs.append(_check_values(pair, sweep_metrics, 'experiment.scatter.metric'))
+        scatter = ScatterSpec(
+            param=_check_values(scatter.get('param', ()), PARAM_SPECS, 'experiment.scatter.param'),
+            metric=tuple(pairs),
+        )
+
+    perf = block.get('perf')
+    if perf is not None:
+        # `param` is meaningless for perf (1-point sweep); accepted and ignored
+        _reject_unknown(perf, {'param', 'metric'}, 'experiment.perf')
+        perf = PerfSpec(
+            metric=_check_values(perf.get('metric', ()), perf_metrics, 'experiment.perf.metric')
+        )
+
+    return ExperimentPlan(
+        query=bool(block.get('query', False)),
+        sweep=sweep, scatter=scatter, perf=perf,
+    )
 
 
 # =============================================================================
@@ -174,6 +332,13 @@ ANNOTATE_POPULATION_PLOT: Dict[str, Dict[str, Any]] = {
 # METHOD REGISTRY
 # =============================================================================
 
+ALL_METHODS: Tuple[str, ...] = (
+    'ATE', 'ERM', 'DA+ERM', 'DA+IV',
+    'PI_INV', 'PI', 'PI_IV', 'DA+PI', 'DA+PI_IV',
+    'PI&DA+PI', 'PI&DA+PI_IV',
+)
+
+
 class MethodRegistry:
     """Registry for building method instances with proper configuration."""
 
@@ -219,6 +384,8 @@ class MethodRegistry:
             'PI&DA+PI_IV': lambda: IntIVPartialR2(gamma=gamma, pad=pad, **common),
         }
 
+        assert set(all_builders) == set(ALL_METHODS), 'ALL_METHODS out of sync.'
+
         return {
             name: all_builders[name]
             for name in method_names
@@ -237,3 +404,43 @@ class MethodRegistry:
             Dictionary with gamma-dependent methods only
         """
         return {k: v for k, v in methods.items() if 'ATE' not in k}
+
+# =============================================================================
+# ROOT-YAML DATASET BLOCK
+# =============================================================================
+
+# keys a dataset block may carry besides `experiment` and the global toggles
+DATASET_KEYS: Dict[str, set] = {
+    'simulation': {'seed', 'n_samples', 'n_experiments', 'sweep_samples',
+                   'methods', 'augmentation', 'kernel_dim'},
+    'optical_device': {'seed', 'n_samples', 'n_experiments', 'sweep_samples',
+                       'methods', 'augmentation'},
+}
+
+TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy'}
+
+# no sensible default: the run is not reproducible / constructible without them
+REQUIRED_KEYS: Dict[str, set] = {
+    'simulation': {'seed', 'kernel_dim'},
+    'optical_device': {'seed', 'augmentation'},
+}
+
+
+def resolve_dataset_block(name: str, block: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate a dataset block and fill omitted keys from `DatasetDefaults`."""
+    block = dict(block)
+    block.pop('experiment', None)
+
+    allowed = DATASET_KEYS[name] | TOGGLE_KEYS
+    _reject_unknown(block, allowed, f'config.{name}')
+
+    missing = sorted(REQUIRED_KEYS[name] - set(block))
+    if missing:
+        raise ValueError(f'config.{name} is missing required key(s) {missing}.')
+
+    defaults = DATASET_DEFAULTS[name]
+    for key in ('n_samples', 'n_experiments', 'sweep_samples'):
+        block.setdefault(key, getattr(defaults, key))
+    block.setdefault('methods', list(ALL_METHODS))
+
+    return block
