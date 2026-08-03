@@ -29,7 +29,9 @@ class SimulationConfig:
     """Configuration for simulation experiments."""
     gamma: float = 1.0
     epsilon: float = 2**-8
-    gamma_true: Optional[float] = None      # SEM confounding; None = fully confounded
+    # SEM confounding. None = fully confounded, which drives sigma^2 to the
+    # outcome-noise floor and rho to ~57: Prop. 2 can then never hold.
+    gamma_true: Optional[float] = 1.0
     test_fraction: float = 0.1
 
 
@@ -81,10 +83,25 @@ DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
 # SWEEP PARAMETER / METRIC SPECS
 # =============================================================================
 
+# keeps auto-set epsilon off the PI_INV feasibility knife edge (eps=0 forces h~0)
+EPS_TOL: float = 2**-8
+
+# the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
+# true invariance error, so that eps/eps* is a meaningful ratio axis
+ROBUSTNESS_EPSILON_TRUE: float = 2**-3
+
+# SE crosshairs on scatter plots (needs n_experiments >= 2)
+SCATTER_SE_CROSSHAIRS: bool = True
+
+# budget-ratio grid: centred on 1, i.e. on the oracle value
+_RATIO_GRID = lambda dataset, n: np.geomspace(2**-2, 2**2, num=n)
+
+
 @dataclass(frozen=True)
 class ParamSpec:
     """Axis + policy metadata for one sweepable parameter."""
     xlabel: str
+    grid_fn: Callable[[str, int], np.ndarray]
     xscale: Literal['linear', 'log'] = 'log'
     vlines: Tuple[float, ...] = ()      # reference values annotated on the x-axis
     include_ate: bool = True            # ATE is flat, useless on budget-ratio axes
@@ -93,19 +110,37 @@ class ParamSpec:
 
 PARAM_SPECS: Dict[str, ParamSpec] = {
     'gamma': ParamSpec(
-        xlabel=r'$\gamma / \gamma^\star$', vlines=(1.0,),
+        xlabel=r'$\gamma / \gamma^\star$', grid_fn=_RATIO_GRID, vlines=(1.0,),
         include_ate=False, data_constant=True,
     ),
     'epsilon': ParamSpec(
-        xlabel=r'$\epsilon / \epsilon^\star$', vlines=(1.0,),
+        xlabel=r'$\epsilon / \epsilon^\star$', grid_fn=_RATIO_GRID, vlines=(1.0,),
         include_ate=False, data_constant=True,
     ),
     'trS': ParamSpec(
+        # knob grid; the x-axis actually plotted is the MEASURED expansion
         xlabel=r'$\rho \operatorname{tr}(\mathcal{S})/k$',
+        # tuned to the informative range: past it both DAs saturate and the
+        # measured x moves by less than the across-seed SD (PLAN 5.3).
+        # Optical never reaches x < 1 -- its permutations symmetrise rather
+        # than inflate the covariance, so Prop. 2 never holds for it.
+        grid_fn=lambda dataset, n: (
+            np.logspace(-1.5, 1.0, num=n) if dataset == 'simulation'
+            else np.linspace(0.01, 0.3, num=n)
+        ),
         xscale='linear', vlines=(1.0,),
     ),
-    'n': ParamSpec(xlabel=r'$n$'),
-    'm': ParamSpec(xlabel=r'Augmentation Folds ($m$)'),
+    'n': ParamSpec(
+        xlabel=r'$n$',
+        grid_fn=lambda dataset, n: np.array(
+            [128, 256, 512, 1024] if dataset == 'simulation'
+            else [128, 256, 512, 1000]      # 1000 = optical pool max
+        ),
+    ),
+    'm': ParamSpec(
+        xlabel=r'Augmentation Folds ($m$)',
+        grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16, 32]),
+    ),
 }
 
 

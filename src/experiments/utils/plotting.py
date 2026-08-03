@@ -44,7 +44,7 @@ def _apply_tex_highlighting(labels: List[str], hilight_ours: bool) -> List[str]:
     return highlighted
 
 
-def create_param_sweep_plot(
+def create_sweep_plot(
     x_values: NDArray,
     y_results: Dict[str, NDArray],
     xlabel: str,
@@ -61,10 +61,14 @@ def create_param_sweep_plot(
     bootstrapped: bool = True,
     experiment: str = 'simulation',
     fname: Optional[str] = None,
+    vlines: Tuple[float, ...] = (),
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
     Aggressively robust to NaN/Inf values.
+
+    `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
+    threshold, Thm. 1 threshold).
     """
     try:
         if bootstrapped:
@@ -127,6 +131,11 @@ def create_param_sweep_plot(
             if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
                 plt.fill_between(x_values, low, high, color=color, alpha=0.2)
         
+        # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds)
+        for x in vlines:
+            if np.isfinite(x):
+                plt.axvline(x, color='0.4', linestyle=':', linewidth=1.0, zorder=0)
+
         # Formatting
         plt.xlabel(xlabel, fontsize=FS_LABEL)
         plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
@@ -183,7 +192,7 @@ def create_param_sweep_plot(
     except Exception as e:
         # Fallback so one plot failure doesn't kill the whole experiment batch
         from loguru import logger
-        logger.error(f"Failed to plot param sweep {xlabel}: {e}")
+        logger.error(f"Failed to plot sweep {fname or xlabel}: {e}")
         import traceback
         logger.error(traceback.format_exc())
 

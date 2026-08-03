@@ -23,7 +23,7 @@ __all__ = [
     'QueryEval', 'evaluate_queries', 'STATUS_CATEGORIES',
     
     # Plotting
-    'create_param_sweep_plot', 'create_query_sweep_plot',
+    'create_sweep_plot', 'create_query_sweep_plot',
     'create_panel_plot',
     
     # Data operations

@@ -7,20 +7,13 @@ from typing import Type, List, Tuple
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.sem.simulation import LinearSimulationSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.generic_runner import (
-    GenericQuerySweep,
-    GammaStarSweep,
-    TraceSSweep,
-    GammaSweep,
-    AugmentationFoldSweep,
-)
-from src.experiments.configs import (
-    MethodRegistry,
-    SIMULATION_CONFIG,
-    SWEEP_CONFIGS
-)
+from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
+from src.experiments.configs import MethodRegistry, SIMULATION_CONFIG
 
 EXPERIMENT_NAME = 'simulation'
+
+# m-sweep holds n fixed here (PLAN 5.5)
+FOLD_SWEEP_SAMPLES: int = 512
 
 
 # =============================================================================
@@ -39,11 +32,12 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             **kwargs: Other experiment parameters
         """
         self.kernel_dim = kernel_dim
-        toggles = dict(
+        self.toggles = dict(
             calibrate=kwargs.get('calibrate', False),
             pad=kwargs.get('pad', False),
             clipy=kwargs.get('clipy', True),
         )
+        toggles = self.toggles
 
         # Create registry with simulation-specific parameters
         class SimulationRegistry(MethodRegistry):
@@ -92,37 +86,30 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
         return SimulationQuerySweep
 
-    def get_param_sweeps(self) -> List[Tuple[Type, str]]:
-        """Return parameter sweeps to run."""
-        # Helper to create configured sweep classes
-        def make_sweep_cls(base_cls, sweep_name):
-            class ConfiguredSweep(base_cls):
-                def __init__(inner_self, **kwargs):
-                    super().__init__(
-                        sem_factory=self._sem_factory,
-                        da_factory=self._da_factory,  # Now expects SEM as argument
-                        poly_transform=None,
-                        test_fraction=SIMULATION_CONFIG.test_fraction,
-                        sweep_config=SWEEP_CONFIGS['simulation'][sweep_name],
-                        **kwargs
-                    )
-            return ConfiguredSweep
+    def build_methods(self, gamma: float, epsilon: float):
+        """Methods at explicit (per-experiment) budgets."""
+        return MethodRegistry.build_methods(
+            self.kwargs['methods'], gamma=gamma, epsilon=epsilon, **self.toggles
+        )
 
-        class ConfiguredGammaSweep(GammaSweep):
+    def get_sweep_runner_cls(self, param: str) -> Type:
+        """Configured strategy for one sweep parameter."""
+        outer, Strategy = self, STRATEGIES[param]
+
+        class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
+                extra = {}
+                if param == 'm':
+                    extra['n_samples_override'] = FOLD_SWEEP_SAMPLES
                 super().__init__(
-                    sem_factory=self._sem_factory,
-                    da_factory=self._da_factory,  # Now expects SEM as argument
+                    sem_factory=outer._sem_factory,
+                    da_factory=outer._da_factory,   # expects the SEM as argument
                     poly_transform=None,
                     test_fraction=SIMULATION_CONFIG.test_fraction,
-                    sweep_config=SWEEP_CONFIGS['simulation']['gamma'],
-                    use_train_test_split=False,
-                    **kwargs
+                    default_gamma=SIMULATION_CONFIG.gamma,
+                    default_epsilon=SIMULATION_CONFIG.epsilon,
+                    experiment_name=EXPERIMENT_NAME,
+                    **extra, **kwargs
                 )
 
-        return [
-            (make_sweep_cls(GammaStarSweep, 'gamma_star'), 'gamma_star'),
-            (ConfiguredGammaSweep, 'gamma'),
-            (make_sweep_cls(TraceSSweep, 'trS'), 'trS'),
-            (make_sweep_cls(AugmentationFoldSweep, 'folds'), 'folds'),
-        ]
+        return ConfiguredSweep

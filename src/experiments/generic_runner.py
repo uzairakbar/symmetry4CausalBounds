@@ -11,8 +11,18 @@ from src.experiments.base import (
     QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
 )
 from src.experiments.utils import fit_model, radial_sweep_pcs
-from src.experiments.utils.metrics import trace_S_over_k
-from src.oracle import calibrate_da_epsilon, compute_oracle_parameters
+from src.experiments.utils.metrics import trace_S_over_k, rho_hat
+from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE
+from src.oracle import (
+    calibrate_da_epsilon, compute_oracle_parameters, invariance_error,
+    thm1_gamma_min, preserve_rng,
+)
+
+# per-experiment DA seed offset: common random numbers across a knob grid
+CRN_OFFSET: int = 10_000
+
+# robustness sweep: refuse a Thm. 1 threshold that collapses toward zero
+GAMMA_MIN_FLOOR: float = 0.05
 
 
 # =============================================================================
@@ -114,12 +124,18 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         )
 
 
+
+
 # =============================================================================
-# GENERIC PARAMETER SWEEP RUNNERS
+# GENERIC PARAMETER SWEEP BASE
 # =============================================================================
 
 class GenericParamSweep(OracleMixin, ParamSweepRunner):
-    """Generic parameter sweep base class."""
+    """
+    Shared machinery for every sweep strategy: per-experiment SEM/DA/oracle,
+    the feature transform, and a base sample drawn ONCE per experiment so that
+    only the swept parameter varies.
+    """
 
     def __init__(
         self,
@@ -128,6 +144,8 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         poly_transform: Optional[Callable] = None,
         test_fraction: float = 0.1,
         epsilon_true: Optional[float] = None,
+        default_gamma: float = 1.0,
+        default_epsilon: float = 2**-8,
         **kwargs
     ):
         self.sem_factory = sem_factory
@@ -135,6 +153,9 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         self.poly = poly_transform
         self.test_fraction = test_fraction
         self.epsilon_true = epsilon_true
+        self.default_gamma = default_gamma
+        self.default_epsilon = default_epsilon
+        self._base = {}
         super().__init__(**kwargs)
 
     @property
@@ -161,255 +182,27 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             return self.poly.fit_transform(X)
         return X
 
-
-# =============================================================================
-# SPECIFIC SWEEP TYPES
-# =============================================================================
-
-class GammaStarSweep(GenericParamSweep):
-    """Sweep over the true confounding budget gamma*. Data changes every step."""
-
-    def __init__(self, sweep_config, **kwargs):
-        self.sweep_config = sweep_config
-        super().__init__(**kwargs)
-
     @property
-    def data_depends_on_param(self) -> bool:
-        return True  # gamma* changes data generation
+    def finite_pool(self) -> bool:
+        """Optical draws from a fixed pool and needs a train/test split."""
+        return 'OpticalDeviceSEM' in str(type(self.sems[0]))
 
-    def get_param_range(self) -> np.ndarray:
-        return self.sweep_config.range_fn(self.sweep_samples)
+    # ------------------------------------------------------- fixed base sample
 
-    def generate_data(self, experiment_index: int, gamma_star: float):
+    def _base_data(self, experiment_index: int, n_samples: Optional[int] = None):
+        """(X_train_raw, X_train, y_train, X_test, estimand), drawn once per j."""
+        key = (experiment_index, n_samples)
+        if key not in self._base:
+            self._base[key] = self._draw_base(experiment_index, n_samples)
+        return self._base[key]
+
+    def _draw_base(self, experiment_index: int, n_samples: Optional[int] = None):
         sem = self.sems[experiment_index]
-        da = self.das[experiment_index]
+        n_total = self.n_samples if n_samples is None else int(n_samples)
 
-        # Training data
-        X_raw, y = sem(N=self.n_samples, gamma=gamma_star)
-        GX_raw, G = da(X_raw, scale=1.0)
-
-        X = self.apply_transform(X_raw)
-        GX = self.apply_transform(GX_raw)
-        
-        # Test data (interventional)
-        test_size = int(self.test_fraction * self.n_samples)
-        X_test_raw, _ = sem(N=test_size, intervention=True)
-        X_test = self.apply_transform(X_test_raw)
-        
-        estimand = X_test @ sem.solution
-        
-        return X, y, GX, G, X_test, estimand
-
-
-class TraceSSweep(GenericParamSweep):
-    """
-    Sweep over DA scale.
-
-    The x-axis returned by run() is the measured tr(S)/k (Prop. 2), not the
-    input scale.
-    """
-
-    def __init__(self, sweep_config, **kwargs):
-        self.sweep_config = sweep_config
-        super().__init__(**kwargs)
-        self.strength_values = []
-
-    @property
-    def data_depends_on_param(self) -> bool:
-        return True  # scale changes G matrix, so re-fit is required
-
-    def get_param_range(self) -> np.ndarray:
-        return self.sweep_config.range_fn(self.sweep_samples)
-
-    def run(self, desc: str = "tr(S)/k Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
-        """Run sweep and return measured strength values as x-axis."""
-        self.strength_values = []
-        
-        # Run standard sweep logic
-        _, results = super().run(desc)
-        
-        # Process strength values collected during generation
-        # Shape: (n_experiments, n_steps) due to loop order in ParamSweepRunner
-        strength_array = np.array(self.strength_values).reshape(self.n_experiments, self.sweep_samples)
-        
-        # Use average strength across experiments for the x-axis
-        mean_strength = strength_array.mean(axis=0)
-        
-        return mean_strength, results
-
-    def generate_data(self, experiment_index: int, scale: float):
-        sem = self.sems[experiment_index]
-        da = self.das[experiment_index]
-
-        # Training data with augmentation scale
-        X_raw, y = sem(N=self.n_samples)
-        GX_raw, G = da(X_raw, scale=scale)
-
-        # Transform
-        X = self.apply_transform(X_raw)
-        GX = self.apply_transform(GX_raw)
-
-        # tr(S)/k in the feature space the methods use
-        self.strength_values.append(trace_S_over_k(X, GX))
-        
-        # Test data
-        test_size = int(self.test_fraction * self.n_samples)
-        X_test_raw, _ = sem(N=test_size, intervention=True)
-        X_test = self.apply_transform(X_test_raw)
-        
-        estimand = X_test @ sem.solution
-        
-        return X, y, GX, G, X_test, estimand
-
-
-class GammaSweep(GenericParamSweep):
-    """Sweep over gamma (sensitivity parameter). Data is CONSTANT."""
-    
-    def __init__(
-        self,
-        sweep_config,
-        use_train_test_split: bool = False,
-        **kwargs
-    ):
-        self.sweep_config = sweep_config
-        self.use_split = use_train_test_split
-        super().__init__(**kwargs)
-        
-    @property
-    def data_depends_on_param(self) -> bool:
-        return False  # Gamma only changes constraint RHS, not the data
-    
-    def get_param_range(self) -> np.ndarray:
-        return self.sweep_config.range_fn(self.sweep_samples)
-    
-    def get_predict_kwargs(self, gamma: float):
-        return {'gamma': gamma}
-    
-    def generate_data(self, experiment_index: int, gamma: float):
-        """Generate data. 'gamma' param is ignored for generation."""
-        sem = self.sems[experiment_index]
-        da = self.das[experiment_index]
-        
-        if self.use_split:
-            # Optical device: use train/test split
-            X_raw, y = sem(N=self.n_samples)
-            GX_raw, G = da(X_raw)
-            
-            X = self.apply_transform(X_raw)
-            GX = self.apply_transform(GX_raw)
-            
-            X_train, X_test, y_train, _, GX_train, _, G_train, _ = train_test_split(
-                X, y, GX, G,
-                test_size=self.test_fraction,
-                random_state=self.seed + experiment_index
-            )
-            
-            estimand = X_test @ sem.solution
-            return X_train, y_train, GX_train, G_train, X_test, estimand
-        
-        else:
-            # Simulation: use interventional test data
-            X_raw, y = sem(N=self.n_samples)
-            GX_raw, G = da(X_raw, scale=1.0)
-            
-            X = self.apply_transform(X_raw)
-            GX = self.apply_transform(GX_raw)
-            
-            test_size = int(self.test_fraction * self.n_samples)
-            X_test_raw, _ = sem(N=test_size, intervention=True)
-            X_test = self.apply_transform(X_test_raw)
-            
-            estimand = X_test @ sem.solution
-            
-            return X, y, GX, G, X_test, estimand
-
-
-class SampleSweep(GenericParamSweep):
-    """
-    Sweep over sample size N.
-    """
-    def __init__(self, sweep_config, **kwargs):
-        self.sweep_config = sweep_config
-        super().__init__(**kwargs)
-    
-    @property
-    def data_depends_on_param(self) -> bool:
-        return True # Data size changes, must refit
-    
-    def get_param_range(self) -> np.ndarray:
-        return self.sweep_config.range_fn(self.sweep_samples)
-    
-    def generate_data(self, experiment_index: int, n_samples_param):
-        """
-        Generate data with specific sample size N.
-        """
-        N = int(n_samples_param)
-        sem = self.sems[experiment_index]
-        da = self.das[experiment_index]
-        
-        # Training data
-        X_raw, y = sem(N=N)
-        GX_raw, G = da(X_raw)
-        
-        X = self.apply_transform(X_raw)
-        GX = self.apply_transform(GX_raw)
-        
-        # Test data (Keep test set large and constant for fair comparison if possible, 
-        # or scale with N. Here scaling with N via test_fraction)
-        test_size = max(50, int(self.test_fraction * N)) 
-        
-        if 'OpticalDeviceSEM' in str(type(sem)):
-            # Optical uses train/test split from finite pool
-            X_train, X_test, y_train, _, GX_train, _, G_train, _ = train_test_split(
-                X, y, GX, G,
-                test_size=self.test_fraction,
-                random_state=self.seed + experiment_index
-            )
-            # Recalculate estimand on specific test set
-            estimand = X_test @ sem.solution
-            return X_train, y_train, GX_train, G_train, X_test, estimand
-        else:
-            # Simulation uses fresh interventional generation
-            X_test_raw, _ = sem(N=test_size, intervention=True)
-            X_test = self.apply_transform(X_test_raw)
-            estimand = X_test @ sem.solution
-            return X, y, GX, G, X_test, estimand
-
-
-class AugmentationFoldSweep(GenericParamSweep):
-    """
-    Sweep over the number of augmentation folds m, at FIXED base data.
-
-    Base sample and train/test split are drawn ONCE per experiment, so m is the
-    only thing that varies: GX/G stack m distinct DA passes over the same train
-    X, and X/y are tiled to match. The augmented train set thus grows m-fold --
-    the one sanctioned departure from the paper's fixed-size convention, kept
-    deliberately to study the finite-n benefit of m.
-    """
-    def __init__(self, sweep_config, **kwargs):
-        self.sweep_config = sweep_config
-        self._base = {}
-        super().__init__(**kwargs)
-
-    @property
-    def data_depends_on_param(self) -> bool:
-        return True # Changing folds changes dataset size
-
-    def get_param_range(self) -> np.ndarray:
-        return self.sweep_config.range_fn(self.sweep_samples)
-
-    def _base_data(self, experiment_index: int):
-        """(X_train_raw, X_train, y_train, X_test, estimand); drawn once per experiment."""
-        if experiment_index not in self._base:
-            self._base[experiment_index] = self._draw_base(experiment_index)
-        return self._base[experiment_index]
-
-    def _draw_base(self, experiment_index: int):
-        sem = self.sems[experiment_index]
-
-        if 'OpticalDeviceSEM' in str(type(sem)):
-            # finite pool: split unique instances, test set then fixed across m
-            X_all, y_all = sem(N=self.n_samples)
+        if self.finite_pool:
+            # finite pool: split unique instances; test set fixed across steps
+            X_all, y_all = sem(N=n_total)
             X_train_raw, X_test_raw, y_train, _ = train_test_split(
                 X_all, y_all,
                 test_size=self.test_fraction,
@@ -417,20 +210,231 @@ class AugmentationFoldSweep(GenericParamSweep):
             )
         else:
             # generator: interventional test set
-            X_train_raw, y_train = sem(N=self.n_samples)
+            X_train_raw, y_train = sem(N=n_total)
             X_test_raw, _ = sem(
-                N=int(self.test_fraction * self.n_samples), intervention=True
+                N=int(self.test_fraction * n_total), intervention=True
             )
 
         X_test = self.apply_transform(X_test_raw)
         return (X_train_raw, self.apply_transform(X_train_raw), y_train,
                 X_test, X_test @ sem.solution)
 
-    def generate_data(self, experiment_index: int, n_folds_param):
-        """m distinct augmentations of the same fixed train set."""
-        m = int(n_folds_param)
-        da = self.das[experiment_index]
+    def _augment_once(self, experiment_index: int, X_raw, **augment_kwargs):
+        """One DA pass; common random numbers across a knob grid within an experiment."""
+        with preserve_rng():
+            np.random.seed(self.seed + CRN_OFFSET + experiment_index)
+            return self.das[experiment_index](X_raw, **augment_kwargs)
+
+    def _sweep_data(self, experiment_index: int, n_samples: Optional[int] = None,
+                    common_random: bool = False, **augment_kwargs) -> SweepData:
+        """Default single-fold SweepData on the fixed base sample."""
+        X_raw, X, y, X_test, estimand = self._base_data(experiment_index, n_samples)
+
+        if common_random:
+            GX_raw, G = self._augment_once(experiment_index, X_raw, **augment_kwargs)
+        else:
+            GX_raw, G = self.das[experiment_index](X_raw, **augment_kwargs)
+
+        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G,
+                         X_test=X_test, estimand=estimand)
+
+
+# =============================================================================
+# SWEEP STRATEGIES (one per PARAM_SPECS key)
+# =============================================================================
+
+class GammaRatioStrategy(GenericParamSweep):
+    """
+    Validity: sweep the ASSUMED budget as a ratio of the oracle, gamma = r gamma*.
+
+    x is the ratio, identical across experiments, so no sorting and no wiggle.
+    Data is constant, so models are fit once per experiment and only re-solved.
+    """
+
+    param_key = 'gamma'
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        return self._sweep_data(experiment_index)
+
+    def get_predict_kwargs(self, param, experiment_index: int):
+        return {'gamma': float(param) * self.fit_gamma(experiment_index)}
+
+    @property
+    def vlines(self):
+        """Also mark the Thm. 1 threshold, as a ratio of gamma* (PLAN 6)."""
+        ratios = []
+        for j in range(self.n_experiments):
+            oracle = self.get_oracle(j)
+            gamma_star = self._finite(oracle.gamma_star, self.default_gamma, 'gamma*')
+            if gamma_star > 0:
+                ratios.append(thm1_gamma_min(oracle, self.calibrate) / gamma_star)
+
+        if not ratios:
+            return self.spec.vlines
+        return tuple(self.spec.vlines) + (float(np.mean(ratios)),)
+
+
+class EpsilonRatioStrategy(GenericParamSweep):
+    """
+    Robustness: sweep the ASSUMED invariance budget, epsilon = r eps* + EPS_TOL.
+
+    gamma is pinned to the Thm. 1 threshold so the baseline is invalid while the
+    DA is exactly valid at r = 1: below 1 the safety net visibly fails.
+    This is the ONLY sweep that recalibrates the DA (to ROBUSTNESS_EPSILON_TRUE),
+    so that eps* > 0 makes the ratio axis meaningful.
+    """
+
+    param_key = 'epsilon'
+
+    def __init__(self, **kwargs):
+        # scoped to this sweep only; never leaks into trS/n/m/perf/scatter
+        kwargs['epsilon_true'] = ROBUSTNESS_EPSILON_TRUE
+        super().__init__(**kwargs)
+
+        if not self.pad:
+            logger.warning(
+                'Robustness sweep with pad=false: the DA+ validity claim needs '
+                'eps-padding (Thm. 3.A). Run under `pad: true`.'
+            )
+
+    def prepare_pair(self, sem, da, features=None):
+        if da.strength is None:
+            logger.warning(
+                f'{type(da).__name__} has no strength knob; robustness sweep '
+                'keeps the DA as configured (eps* may be 0).'
+            )
+            self.epsilon_true = None
+        return super().prepare_pair(sem, da, features=features)
+
+    def fit_gamma(self, experiment_index: int) -> float:
+        """Thm. 1 threshold: the budget the augmentation buys back."""
+        oracle = self.get_oracle(experiment_index)
+        gamma_star = self._finite(oracle.gamma_star, self.default_gamma, 'gamma*')
+        gamma_min = thm1_gamma_min(oracle, calibrate=self.calibrate)
+
+        if not np.isfinite(gamma_min) or gamma_min < GAMMA_MIN_FLOOR * gamma_star:
+            logger.warning(
+                f'Thm. 1 gamma_min={gamma_min:.4g} below the floor; '
+                f'using {GAMMA_MIN_FLOOR:g} * gamma*.'
+            )
+            return GAMMA_MIN_FLOOR * gamma_star
+        return float(gamma_min)
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        return self._sweep_data(experiment_index)
+
+    def get_predict_kwargs(self, param, experiment_index: int):
+        eps_star = self._finite(
+            self.get_oracle(experiment_index).epsilon_star,
+            self.default_epsilon, 'eps*'
+        )
+        return {'epsilon': float(param) * eps_star + EPS_TOL}
+
+
+class ExpansionStrategy(GenericParamSweep):
+    """
+    Informativeness: sweep the DA strength knob; the x-axis is the MEASURED
+    relative expansion rho * tr(S)/k (Prop. 2), post-poly, averaged over
+    experiments. Base data is fixed per experiment and the DA draws use common
+    random numbers, so the measured x moves monotonically with the knob.
+    """
+
+    param_key = 'trS'
+
+    def __init__(self, augment_kwargs_fn: Optional[Callable] = None, **kwargs):
+        # knob -> DA call kwargs; dataset-specific
+        self.augment_kwargs_fn = augment_kwargs_fn or (lambda s: {'scale': float(s)})
+        self._measured = {}
+        self._step_epsilon = {}
+        super().__init__(**kwargs)
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        data = self._sweep_data(
+            experiment_index, common_random=True,
+            **self.augment_kwargs_fn(param)
+        )
+
+        # measured expansion in the space the methods fit in
+        self._measured[(experiment_index, float(param))] = (
+            rho_hat(data.X, data.GX, data.y) * trace_S_over_k(data.X, data.GX)
+        )
+
+        # the knob IS the invariance-error driver, so eps* is stale by now
+        X_raw = self._base_data(experiment_index)[0]
+        self._step_epsilon[experiment_index] = invariance_error(
+            self.sems[experiment_index], self.das[experiment_index],
+            X=X_raw, features=self._features
+        ) + EPS_TOL
+
+        return data
+
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
+        return self._step_epsilon.get(
+            experiment_index, super().fit_epsilon(experiment_index, step_index)
+        )
+
+    def observed_x(self, param_values: np.ndarray) -> np.ndarray:
+        """Mean over experiments of the measured expansion."""
+        return np.array([
+            np.nanmean([
+                self._measured.get((j, float(s)), np.nan)
+                for j in range(self.n_experiments)
+            ])
+            for s in param_values
+        ])
+
+
+class SampleSizeStrategy(GenericParamSweep):
+    """
+    Sweep n. The base sample and the test set are drawn ONCE per experiment and
+    only the train side is subsampled, so the test set is identical across n.
+
+    Optical: n is the PRE-SPLIT total from the 1000-row pool, so the train set
+    is round(0.9 n) = {115, 230, 461, 900}. Simulation: the train set is exactly
+    n, taken from the (larger) default draw.
+    """
+
+    param_key = 'n'
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        n = int(param)
         X_raw, X, y, X_test, estimand = self._base_data(experiment_index)
+
+        # optical n counts pre-split rows; sim n is the train size itself
+        n_train = int(round((1.0 - self.test_fraction) * n)) if self.finite_pool else n
+        if n_train > len(X):
+            logger.warning(f'n={n} needs {n_train} train rows, only {len(X)} drawn.')
+            n_train = len(X)
+        X_raw, X, y = X_raw[:n_train], X[:n_train], y[:n_train]
+
+        GX_raw, G = self.das[experiment_index](X_raw)
+        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G,
+                         X_test=X_test, estimand=estimand)
+
+
+class FoldStrategy(GenericParamSweep):
+    """
+    Sweep the number of augmentation folds m, at FIXED base data.
+
+    GX/G stack m distinct DA passes over the same train X, and X/y are tiled to
+    match. The augmented train set thus grows m-fold -- the one sanctioned
+    departure from the paper's fixed-size convention, kept deliberately to study
+    the finite-n benefit of m. Baselines fit the untiled copy (exactly
+    equivalent, and avoids a QR on the m-fold matrix).
+    """
+
+    param_key = 'm'
+
+    def __init__(self, n_samples_override: Optional[int] = None, **kwargs):
+        self.n_samples_override = n_samples_override
+        super().__init__(**kwargs)
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        m = int(param)
+        da = self.das[experiment_index]
+        X_raw, X, y, X_test, estimand = self._base_data(
+            experiment_index, self.n_samples_override
+        )
 
         GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)))
 
@@ -445,3 +449,12 @@ class AugmentationFoldSweep(GenericParamSweep):
             X_base=X,
             y_base=y,
         )
+
+
+STRATEGIES: Dict[str, type] = {
+    'gamma': GammaRatioStrategy,
+    'epsilon': EpsilonRatioStrategy,
+    'trS': ExpansionStrategy,
+    'n': SampleSizeStrategy,
+    'm': FoldStrategy,
+}

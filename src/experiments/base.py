@@ -2,16 +2,26 @@
 Base classes for experiment orchestration with unified runner logic.
 Updated to use simplified fit_model signature and OPTIMIZED LOOP ORDER.
 """
+import time
 import enlighten
 import numpy as np
+from loguru import logger
 from abc import ABC, abstractmethod
 from typing import Dict, Callable, Optional, Any, List, Tuple, Type
 from dataclasses import dataclass
 
 from src.methods.abstract import pointEstimator as Regressor
 from src.experiments.utils import fit_model, set_seed, save
-from src.experiments.utils.plotting import create_param_sweep_plot, create_query_sweep_plot
-from src.experiments.configs import METRIC_CONFIGS, ANNOTATE_POPULATION_PLOT, ANNOTATE_SWEEP_PLOT
+from src.experiments.utils.metrics import evaluate_queries, STATUS_CATEGORIES
+from src.experiments.utils.plotting import create_sweep_plot, create_query_sweep_plot
+from src.experiments.configs import (
+    METRIC_CONFIGS, PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
+)
+
+# QueryEval scalar fields recorded at every (method, step, experiment)
+METRIC_FIELDS: Tuple[str, ...] = (
+    'approximation_error', 'worst_error', 'interval_width', 'coverage', 'wall_clock',
+)
 
 ModelBuilder = Callable[[], Regressor]
 MANAGER = enlighten.get_manager()
@@ -166,128 +176,163 @@ class QuerySweepRunner(BaseExperimentRunner):
 # =============================================================================
 
 class ParamSweepRunner(BaseExperimentRunner):
-    """Runner for parameter sweep experiments (computing metrics across parameter ranges)."""
-    
-    def __init__(self, metric: str = 'approximation_error', **kwargs):
+    """
+    Core sweep loop, shared by every param strategy.
+
+    Emits one full record per (method, step, experiment):
+        results[method][metric] -> (n_steps, n_experiments)
+        statuses[method]        -> (n_steps, n_experiments, 4)
+    """
+
+    param_key: str = None       # indexes PARAM_SPECS
+
+    def __init__(
+        self,
+        method_factory: Optional[Callable] = None,
+        experiment_name: str = 'simulation',
+        **kwargs
+    ):
         super().__init__(**kwargs)
-        self.metric_name = metric
-        
-        # Import metric function dynamically
-        from src.experiments.utils import metrics as metrics_module
-        try:
-            self.metric_fn = getattr(metrics_module, metric)
-        except AttributeError:
-            raise ValueError(f"Metric '{metric}' not found in metrics module")
-        
+        # builds methods at experiment-specific budgets (ParamPolicy, PLAN 7)
+        self.method_factory = method_factory
+        self.experiment_name = experiment_name
         self.setup_sems_and_das()
 
     @property
-    def data_depends_on_param(self) -> bool:
-        """
-        Optimization flag:
-        If False (e.g. Gamma sweep), we fit once and sweep params.
-        If True (e.g. Kappa/Alpha sweep), we must regenerate data and refit every step.
-        """
-        return True
+    def spec(self):
+        return PARAM_SPECS[self.param_key]
 
-    def run(self, desc: str = "Param Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
-        """
-        Run parameter sweep computing metrics.
-        OPTIMIZED: Inverted loop structure to maximize DPP cache reuse.
-        """
-        # FIX: Get actual params first to determine size
+    @property
+    def data_depends_on_param(self) -> bool:
+        """False => fit once per experiment and only re-solve (DPP cache)."""
+        return not self.spec.data_constant
+
+    def get_param_range(self) -> np.ndarray:
+        return self.spec.grid_fn(self.experiment_name, self.sweep_samples)
+
+    def observed_x(self, param_values: np.ndarray) -> np.ndarray:
+        """x-axis actually plotted; strategies with a measured x override."""
+        return param_values
+
+    @property
+    def vlines(self) -> Tuple[float, ...]:
+        """Reference x positions; strategies may add measured thresholds."""
+        return self.spec.vlines
+
+    # ------------------------------------------------------ per-experiment policy
+
+    def fit_gamma(self, experiment_index: int) -> float:
+        """Budget baked into the built methods (PLAN 7); gamma* by default."""
+        return self._finite(self.get_oracle(experiment_index).gamma_star,
+                            self.default_gamma, 'gamma*')
+
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
+        """Assumed invariance error; just large enough, off the knife edge."""
+        return self._finite(self.get_oracle(experiment_index).epsilon_star,
+                            self.default_epsilon, 'eps*') + EPS_TOL
+
+    def _finite(self, value, fallback, name: str) -> float:
+        if value is None or not np.isfinite(value):
+            logger.warning(f'{name} not computable; falling back to yaml default.')
+            return float(fallback)
+        return float(value)
+
+    def build_models(self, experiment_index: int, step_index: int, data) -> Dict[str, Any]:
+        """Fresh, fitted models at this experiment's budgets."""
+        gamma = self.fit_gamma(experiment_index)
+        epsilon = self.fit_epsilon(experiment_index, step_index)
+        builders = (self.method_factory(gamma=gamma, epsilon=epsilon)
+                    if self.method_factory else self.methods)
+
+        models = {}
+        for name in self.methods:
+            if name == 'ATE':
+                continue
+            model = builders[name]()
+            fit_model(
+                model=model,
+                method_name=name,
+                hyperparameters=self.hyperparameters,
+                da=self.get_da(experiment_index),
+                **data.fit_arrays
+            )
+            models[name] = model
+        return models
+
+    # ------------------------------------------------------------------ loop
+
+    def run(self, desc: str = "Param Sweep") -> Tuple[np.ndarray, Dict, Dict]:
+        """Sweep the parameter, recording every metric at every step."""
         param_values = self.get_param_range()
         n_steps = len(param_values)
-        
+        shape = (n_steps, self.n_experiments)
+
         results = {
-            name: np.zeros((n_steps, self.n_experiments))
+            name: {metric: np.full(shape, np.nan) for metric in METRIC_FIELDS}
             for name in self.methods
         }
-        
-        # Iterate Experiments Outer Loop (Allows reusing fitted models)
+        statuses = {
+            name: np.zeros(shape + (len(STATUS_CATEGORIES),), dtype=int)
+            for name in self.methods
+        }
+
         with MANAGER.counter(total=self.n_experiments * n_steps, desc=desc, unit='runs') as pbar:
             for j in range(self.n_experiments):
-                
-                # OPTIMIZATION:
-                # If data does NOT depend on the parameter (e.g., Gamma Sweep),
-                # we generate data and fit the models ONCE per experiment.
-                cached_models = {}
-                cached_data = None
-                
+
+                # data-constant sweeps (gamma, epsilon) fit ONCE per experiment
+                cached_data, cached_models = None, None
                 if not self.data_depends_on_param:
-                    # Generate data once using the first param value (dummy)
-                    cached_data = SweepData.coerce(
-                        self.generate_data(j, param_values[0])
-                    )
+                    cached_data = SweepData.coerce(self.generate_data(j, param_values[0]))
+                    cached_models = self.build_models(j, 0, cached_data)
 
-                    # Fit all models once
-                    for name, builder in self.methods.items():
-                        if name == 'ATE': continue
-                        model = builder()
-                        fit_model(
-                            model=model,
-                            method_name=name,
-                            hyperparameters=self.hyperparameters,
-                            da=self.get_da(j),
-                            **cached_data.fit_arrays
-                        )
-                        cached_models[name] = model
-
-                # Iterate Parameters Inner Loop
                 for i, param in enumerate(param_values):
-
                     if self.data_depends_on_param:
-                        # Full regeneration for data-dependent sweeps
                         data = SweepData.coerce(self.generate_data(j, param))
+                        models = self.build_models(j, i, data)
                     else:
-                        # Reuse data for Gamma sweeps
-                        data = cached_data
-                    X_test, estimand = data.X_test, data.estimand
+                        data, models = cached_data, cached_models
 
-                    for name, builder in self.methods.items():
+                    for name in self.methods:
                         if name == 'ATE':
-                            estimate = estimand
+                            estimate, query_status, elapsed = data.estimand, None, 0.0
                         else:
-                            # Use cached model or fit new one
-                            if self.data_depends_on_param:
-                                model = builder()
-                                fit_model(
-                                    model=model,
-                                    method_name=name,
-                                    hyperparameters=self.hyperparameters,
-                                    da=self.get_da(j),
-                                    **data.fit_arrays
-                                )
-                            else:
-                                model = cached_models[name]
-                            
-                            # Predict (DPP makes this fast if model is cached)
-                            estimate = model.predict(X_test, **self.get_predict_kwargs(param))
-                        
-                        results[name][i, j] = self.metric_fn(estimand, estimate)
-                    
+                            model = models[name]
+                            start = time.perf_counter()
+                            estimate = model.predict(
+                                data.X_test, **self.get_predict_kwargs(param, j)
+                            )
+                            elapsed = time.perf_counter() - start
+                            query_status = getattr(model, 'query_status', None)
+
+                        record = evaluate_queries(
+                            data.estimand, estimate, query_status, elapsed
+                        )
+                        for metric in METRIC_FIELDS:
+                            results[name][metric][i, j] = getattr(record, metric)
+                        statuses[name][i, j] = record.status_counts
+
                     pbar.update()
-        
-        return param_values, results
-    
+
+        return self.observed_x(param_values), results, statuses
+
     @abstractmethod
     def setup_sems_and_das(self):
         """Setup SEMs and data augmentors for all experiments."""
         pass
-    
+
     @abstractmethod
     def get_da(self, experiment_index: int):
         """Get data augmentor for specific experiment."""
         pass
-    
-    def get_predict_kwargs(self, param) -> Dict[str, Any]:
-        """Get additional kwargs for model.predict(). Override if needed."""
-        return {}
-    
+
     @abstractmethod
-    def get_param_range(self) -> np.ndarray:
-        """Get parameter values to sweep over."""
+    def get_oracle(self, experiment_index: int):
+        """Get oracle parameters for specific experiment."""
         pass
+
+    def get_predict_kwargs(self, param, experiment_index: int) -> Dict[str, Any]:
+        """Additional kwargs for model.predict(). Override to sweep a budget."""
+        return {}
     
     @abstractmethod
     def generate_data(self, experiment_index: int, param) -> 'SweepData':
@@ -311,74 +356,90 @@ class ExperimentOrchestrator(ABC):
         self.name = experiment_name
         self.registry = method_registry
         self.kwargs = kwargs
-        self.metric = kwargs.get('metric', 'approximation_error')
-        self.ylabel = METRIC_CONFIGS[self.metric]['ylabel']
-    
+        self._sweep_cache = {}      # (param) -> (x, results, statuses), reused by scatter
+        self._sweep_vlines = {}     # (param) -> measured reference x positions
+
     @abstractmethod
     def get_query_runner_cls(self) -> Type[QuerySweepRunner]:
         """Return the QuerySweepRunner class for this experiment."""
         pass
-    
+
     @abstractmethod
-    def get_param_sweeps(self) -> List[Tuple[Type[ParamSweepRunner], str]]:
-        """
-        Return list of parameter sweeps to run.
-        
-        Returns:
-            List of (RunnerClass, parameter_name) tuples
-        """
+    def get_sweep_runner_cls(self, param: str) -> Type[ParamSweepRunner]:
+        """Return the configured strategy class for one sweep parameter."""
         pass
-    
+
+    @abstractmethod
+    def build_methods(self, gamma: float, epsilon: float) -> Dict[str, Any]:
+        """Build methods at explicit budgets (per-experiment ParamPolicy)."""
+        pass
+
     @property
     def methods(self):
         """Build methods for this experiment."""
         return self.registry.build_methods(self.kwargs['methods'])
-    
-    @property
-    def gamma_only_methods(self):
-        """Filter gamma-dependent methods."""
-        return self.registry.filter_gamma_methods(self.methods)
-    
+
     def run(self, plan):
         """Run the experiment types the `experiment:` block asked for."""
         if plan.query:
             self._run_query_sweep()
         if plan.sweep:
-            raise NotImplementedError('sweep plots land in P3.')
+            self._run_sweeps(plan.sweep)
         if plan.scatter:
             raise NotImplementedError('scatter plots land in P4.')
         if plan.perf:
             raise NotImplementedError('perf plot lands in P5.')
-    
+
     def _get_clean_kwargs(self) -> Dict[str, Any]:
         """Remove arguments that cause collision with explicit runner args."""
         clean_kwargs = self.kwargs.copy()
         clean_kwargs.pop('methods', None)
         return clean_kwargs
-    
-    def _run_param_sweeps(self):
-        """Execute all parameter sweeps."""
-        clean_kwargs = self._get_clean_kwargs()
-        
-        for RunnerCls, param_name in self.get_param_sweeps():
-            # gamma* sweeps need all methods (including ATE), others use gamma-dependent only
-            methods = self.methods if param_name == 'gamma_star' else self.gamma_only_methods
-            
-            runner = RunnerCls(methods=methods, **clean_kwargs)
-            param_values, metric_results = runner.run(f"{param_name.title()} Sweep")
-            
-            # Save results
-            save(param_values, f'{param_name}_values', self.name, 'pkl')
-            save(metric_results, f'{param_name}_{self.metric}', self.name, 'pkl')
-            
-            # Plot
-            plot_config = ANNOTATE_POPULATION_PLOT.get(param_name, {}).copy()
-            plot_config['ylabel'] = self.ylabel
-            create_param_sweep_plot(
-                param_values, metric_results,
-                experiment=self.name, fname=param_name, **plot_config
-            )
-    
+
+    def sweep_record(self, param: str):
+        """Run (or reuse) one param sweep. Cached so scatter shares the compute."""
+        if param in self._sweep_cache:
+            return self._sweep_cache[param]
+
+        spec = PARAM_SPECS[param]
+        methods = self.methods
+        if not spec.include_ate:
+            methods = {k: v for k, v in methods.items() if k != 'ATE'}
+
+        runner = self.get_sweep_runner_cls(param)(
+            methods=methods,
+            method_factory=self.build_methods,
+            **self._get_clean_kwargs()
+        )
+        record = runner.run(f'{param} sweep')
+        self._sweep_cache[param] = record
+        self._sweep_vlines[param] = runner.vlines
+        return record
+
+    def _run_sweeps(self, sweep_spec):
+        """One figure per (param, metric); one pkl per param."""
+        for param in sweep_spec.param:
+            x_values, results, statuses = self.sweep_record(param)
+
+            save(x_values, f'{param}_values', self.name, 'pkl')
+            save(results, f'{param}_results', self.name, 'pkl')
+            save(statuses, f'{param}_statuses', self.name, 'pkl')
+
+            for metric in sweep_spec.metric:
+                metric_spec = METRIC_SPECS[metric]
+                create_sweep_plot(
+                    x_values,
+                    {name: record[metric_spec.key] for name, record in results.items()},
+                    experiment=self.name,
+                    fname=f'{param}_{metric}',
+                    xlabel=PARAM_SPECS[param].xlabel,
+                    ylabel=metric_spec.ylabel,
+                    xscale=PARAM_SPECS[param].xscale,
+                    yscale=metric_spec.yscale,
+                    vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
+                )
+
+
     def _run_query_sweep(self):
         """Query sweep + panel. The panel is a query-space view, so it is
         always built here and never for param sweeps."""
