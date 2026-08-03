@@ -18,6 +18,11 @@ from src.methods.sensitivity_models import (
     IntersectedPartialR2 as IntPartialR2,
     IntersectedInstrumentalVariablePartialR2 as IntIVPartialR2,
 )
+from src.methods.copsens import (
+    CopSensPI,
+    RecentredInvCopSens,
+    IVConstrainedCopSens as IVCopSens,
+)
 
 
 # =============================================================================
@@ -50,9 +55,41 @@ class OpticalDeviceConfig:
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 
 
+@dataclass(frozen=True)
+class DoMNISTConfig:
+    """do-MNIST constants. Everything a run should never have to restate."""
+    # SEM (see src/sem/do_mnist.py). Every derived quantity is a round number:
+    # bias = beta(1/2-eta) = 0.10, h* in {0.2, 0.8}, h_erm cells {.1,.3,.7,.9},
+    # ATE contrast 0.6, attainable [0.1, 0.9].
+    alpha: float = 0.0
+    beta: float = 0.4
+    eta: float = 0.25
+    subsample: int = 2                  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
+    exemplar_seed: int = 420            # digit exemplars, frozen across replicates
+    # CopSens. n_anchors is SOURCE's EFFECTIVE value: CopSensPI's own default is
+    # 256, but every published do-MNIST number was measured at 128.
+    link: Literal['probit', 'gaussian'] = 'probit'
+    n_anchors: int = 128
+    n_anchors_c: int = 48               # coarse set, for the feasibility constraint
+    n_constraint_inv: int = 192
+    n_constraint_iv: int = 384
+    mu_clip: bool = True                # clip mu_y to `attainable`; see §2.5
+    jax_grad: bool = True               # analytic gradients for the SLSQP hot path
+    # tr(S)/k needs a truncated spectrum at d=588; see metrics.trace_S_over_k
+    spectrum_keep: float = 0.999
+    test_fraction: float = 0.1
+
+    @property
+    def attainable(self) -> Tuple[float, float]:
+        """Range h_erm can occupy. mu_y outside it is impossible."""
+        lo = (1 - self.beta) * self.alpha + self.beta * self.eta
+        return float(lo), float(1.0 - lo)
+
+
 # Default configurations
 SIMULATION_CONFIG = SimulationConfig()
 OPTICAL_CONFIG = OpticalDeviceConfig()
+DOMNIST_CONFIG = DoMNISTConfig()
 
 
 # =============================================================================
@@ -70,6 +107,8 @@ class DatasetDefaults:
 DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
     'simulation': DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32),
     'optical_device': DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
+    # sweep_samples = the 10 digit exemplars on the query x-axis
+    'do_mnist': DatasetDefaults(n_samples=1_200_000, n_experiments=1, sweep_samples=10),
 }
 
 
@@ -282,6 +321,60 @@ ALL_METHODS: Tuple[str, ...] = (
     'PI&DA+PI', 'PI&DA+PI_IV',
 )
 
+# the copsens backend defines a strict subset: no 2SLS, no baseline-IV, no
+# intersections (Cor. 1 needs two comparable balls, which CopSens does not give)
+COPSENS_METHODS: Tuple[str, ...] = (
+    'ATE', 'ERM', 'DA+ERM', 'PI_INV', 'PI', 'DA+PI', 'DA+PI_IV',
+)
+
+
+def _copsens_builders(method_names, gamma, epsilon, epsilon_iv, calibrate, pad,
+                      clipy, n_jobs, outcome_models, n_components):
+    """CopSens backend. Every method takes a PREFIT outcome net, so only the PI
+    machinery differs between them."""
+    config = DOMNIST_CONFIG
+    common = dict(n_components=n_components, link=config.link, calibrate=calibrate,
+                  clipy=clipy, n_jobs=n_jobs, n_anchors=config.n_anchors,
+                  n_anchors_c=config.n_anchors_c, jax_grad=config.jax_grad,
+                  mu_clip=config.attainable if config.mu_clip else None)
+
+    def net(key):
+        if outcome_models is None:
+            raise ValueError(
+                'copsens methods need the prefit outcome nets. '
+                '`ExperimentOrchestrator.methods` names them only -- the runner '
+                'must rebuild via method_factory(..., outcome_models=...) once the '
+                'nets exist.')
+        return outcome_models[key]
+
+    all_builders = {
+        'ATE': lambda: None,                        # computed via sem.f
+        'ERM': lambda: net('X'),                    # the prefit net, not a fresh one
+        'DA+ERM': lambda: net('GX'),
+        'PI': lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=False,
+                                outcome_model=net('X'), **common),
+        'DA+PI': lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=pad,
+                                   outcome_model=net('GX'), **common),
+        # recentred on the post-DA measure: from an X-centred ball PI_INV is empty
+        # at any reasonable eps (see RecentredInvCopSens)
+        'PI_INV': lambda: RecentredInvCopSens(
+            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net('GX'),
+            n_constraint=config.n_constraint_inv, **common),
+        'DA+PI_IV': lambda: IVCopSens(
+            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad,
+            outcome_model=net('GX'), n_constraint=config.n_constraint_iv, **common),
+    }
+    assert set(all_builders) == set(COPSENS_METHODS), 'COPSENS_METHODS out of sync.'
+
+    # a HARD error, not a silent filter: quietly dropping 4 of 11 requested methods
+    # is how a run comes back missing columns with nothing in the log
+    unknown = sorted(set(method_names) - set(all_builders))
+    if unknown:
+        raise ValueError(
+            f'the copsens backend does not define {unknown}; '
+            f'valid: {sorted(all_builders)}.')
+    return {name: all_builders[name] for name in method_names}
+
 
 class MethodRegistry:
     """Registry for building method instances with proper configuration."""
@@ -296,6 +389,9 @@ class MethodRegistry:
         clipy: bool = True,
         epsilon_iv: Optional[float] = None,
         n_jobs: int = 1,
+        backend: Literal['partial_r2', 'copsens'] = 'partial_r2',
+        outcome_models: Optional[Dict[str, Any]] = None,
+        n_components: int = 32,
     ) -> Dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -315,10 +411,20 @@ class MethodRegistry:
                 + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
                 pointwise eps that Thm. 3.A requires.
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
+            backend: which PI machinery. 'copsens' swaps in the latent-factor
+                model (do-MNIST); its gamma is NOT comparable to partial-r2's.
+            outcome_models: {'X': net, 'GX': net}, prefit. copsens only.
+            n_components: latent dimension. copsens only.
 
         Returns:
             Dictionary mapping method names to builder functions
         """
+        if backend == 'copsens':
+            return _copsens_builders(
+                method_names, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv,
+                calibrate=calibrate, pad=pad, clipy=clipy, n_jobs=n_jobs,
+                outcome_models=outcome_models, n_components=n_components)
+
         common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy,
                       n_jobs=n_jobs)
         iv_common = dict(common, epsilon_iv=epsilon_iv)
@@ -359,6 +465,9 @@ DATASET_KEYS: Dict[str, set] = {
                    'methods', 'augmentation', 'kernel_dim'},
     'optical_device': {'seed', 'n_samples', 'n_experiments', 'sweep_samples',
                        'methods', 'augmentation'},
+    'do_mnist': {'seed', 'n_samples', 'n_experiments', 'sweep_samples', 'methods',
+                 'augmentation', 'gamma', 'epsilon', 'n_pi', 'n_queries',
+                 'n_components', 'net'},
 }
 
 TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy', 'n_jobs'}
@@ -367,6 +476,10 @@ TOGGLE_KEYS: set = {'calibrate', 'pad', 'clipy', 'n_jobs'}
 REQUIRED_KEYS: Dict[str, set] = {
     'simulation': {'seed', 'kernel_dim'},
     'optical_device': {'seed', 'augmentation'},
+    # `methods` is required HERE and nowhere else: the fallback below is all 11 of
+    # ALL_METHODS, and the copsens backend defines only 7. Omitting it would be a
+    # hard error mid-run rather than a config error up front.
+    'do_mnist': {'seed', 'augmentation', 'gamma', 'epsilon', 'methods'},
 }
 
 

@@ -140,7 +140,7 @@ class QuerySweepRunner(BaseExperimentRunner):
         with MANAGER.counter(total=len(self.methods), desc=desc, unit='methods') as pbar:
             for name, builder in self.methods.items():
                 if name == 'ATE':
-                    predictions = queries @ context.sem.solution
+                    predictions = context.sem.f(queries)
                 else:
                     model = builder()
                     
@@ -260,6 +260,11 @@ class ParamSweepRunner(BaseExperimentRunner):
             return None
         return float(eps_iv_star) + EPS_TOL
 
+    def method_kwargs(self, experiment_index: int) -> Dict[str, Any]:
+        """Extra builder kwargs. Override when methods need per-experiment state
+        the budgets do not carry (e.g. prefit outcome models)."""
+        return {}
+
     def build_models(self, experiment_index: int, step_index: int, data) -> Dict[str, Any]:
         """Fresh, fitted models at this experiment's budgets."""
         gamma = self.fit_gamma(experiment_index)
@@ -268,6 +273,7 @@ class ParamSweepRunner(BaseExperimentRunner):
             self.method_factory(
                 gamma=gamma, epsilon=epsilon,
                 epsilon_iv=self.fit_epsilon_iv(experiment_index),
+                **self.method_kwargs(experiment_index),
             )
             if self.method_factory else self.methods
         )
@@ -382,7 +388,10 @@ class ParamSweepRunner(BaseExperimentRunner):
 
 class ExperimentOrchestrator(ABC):
     """Orchestrates experiment execution: Setup -> Run -> Save -> Plot."""
-    
+
+    # PC panel + radial sweep. False => the query runner supplies its own x-axis.
+    build_panel: bool = True
+
     def __init__(self, experiment_name: str, method_registry, **kwargs):
         self.name = experiment_name
         self.registry = method_registry
@@ -559,28 +568,31 @@ class ExperimentOrchestrator(ABC):
         always built here and never for param sweeps."""
         from src.experiments.utils import PanelBuilder
 
-        RunnerCls = self.get_query_runner_cls()
-
-        # Prepare kwargs
-        run_kwargs = self._get_clean_kwargs()
-        run_kwargs['n_experiments'] = 1
-
         # Create runner ONCE - used for both panel and radial sweep
-        runner = RunnerCls(methods=self.methods, **run_kwargs)
+        runner = self.get_query_runner_cls()(
+            methods=self.methods,
+            **{**self._get_clean_kwargs(), 'n_experiments': 1}
+        )
 
-        # Optical uses augmented geometry, simulation uses raw
-        panel_builder = PanelBuilder(runner, self.name, 'optical' in self.name)
-        panel_builder.build(self.kwargs['sweep_samples'])
+        if self.build_panel:
+            # Optical uses augmented geometry, simulation uses raw
+            panel_builder = PanelBuilder(runner, self.name, 'optical' in self.name)
+            panel_builder.build(self.kwargs['sweep_samples'])
+            # Radial sweep plot reuses the panel's cached results
+            results = panel_builder.get_radial_results()
+        else:
+            _, results = runner.run('Query Sweep')
 
-        # Radial sweep plot reuses the panel's cached results
-        results = panel_builder.get_radial_results()
+        self._plot_query_sweep(runner, results)
 
-        # Create angle values for plotting (x-axis)
+    def _plot_query_sweep(self, runner, results):
+        """Save + plot the query sweep. Panel experiments plot the radial angle;
+        override when the queries are not a PC sweep."""
         angles = np.linspace(0, 2*np.pi, self.kwargs['sweep_samples'], endpoint=False)
-        
+
         save(angles, 'treatment_values', self.name, 'pkl', subdir=SUBDIR_QUERY)
         save(results, 'outcome_values', self.name, 'pkl', subdir=SUBDIR_QUERY)
-        
+
         create_query_sweep_plot(
             angles, results,
             **ANNOTATE_SWEEP_PLOT['pc12'],

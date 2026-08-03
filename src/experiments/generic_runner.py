@@ -89,22 +89,21 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             )
 
         # Load and transform data
-        X_raw, y = self.sem(N=self.n_samples)
-        GX_raw, G = self.da(X_raw)
-
-        # Store raw data
-        self.X_raw = X_raw
-        self.GX_raw = GX_raw
-        self.y = y
-        self.G = G
+        self.X_raw, self.GX_raw, self.y, self.G = self._load_data()
 
         # Apply polynomial transformation if provided
         if self.poly:
-            self.X = self.poly.fit_transform(X_raw)
-            self.GX = self.poly.fit_transform(GX_raw)
+            self.X = self.poly.fit_transform(self.X_raw)
+            self.GX = self.poly.fit_transform(self.GX_raw)
         else:
-            self.X = X_raw
-            self.GX = GX_raw
+            self.X = self.X_raw
+            self.GX = self.GX_raw
+
+    def _load_data(self):
+        """(X_raw, GX_raw, y, G). Override when the draw needs its own protocol."""
+        X_raw, y = self.sem(N=self.n_samples)
+        GX_raw, G = self.da(X_raw)
+        return X_raw, GX_raw, y, G
 
     @property
     def epsilon_iv(self) -> float:
@@ -236,7 +235,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
 
         X_test = self.apply_transform(X_test_raw)
         return (X_train_raw, self.apply_transform(X_train_raw), y_train,
-                X_test, X_test @ sem.solution)
+                X_test, sem.f(X_test))
 
     def _augment_once(self, experiment_index: int, X_raw, **augment_kwargs):
         """One DA pass; common random numbers across a knob grid within an experiment."""

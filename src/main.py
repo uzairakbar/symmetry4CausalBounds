@@ -13,11 +13,13 @@ from src.experiments.utils import set_seed
 from src.experiments.configs import parse_experiment_plan, resolve_dataset_block
 from src.experiments.simulation import SimulationOrchestrator
 from src.experiments.optical_device import OpticalOrchestrator
+from src.experiments.do_mnist import DoMNISTOrchestrator
 
 
 ORCHESTRATORS = {
     'simulation': SimulationOrchestrator,
     'optical_device': OpticalOrchestrator,
+    'do_mnist': DoMNISTOrchestrator,
 }
 
 

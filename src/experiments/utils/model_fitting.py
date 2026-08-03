@@ -41,6 +41,12 @@ def fit_model(
         # ATE is computed analytically, no fitting required
         return
 
+    # A prefit model was trained once on the FULL draw and handed to every variant.
+    # Refitting it here would train it on whatever subset this step passes and break
+    # the matched ERM/DA-ERM pairing the coupling depends on.
+    if getattr(model, 'prefit_', False):
+        return
+
     # Prepare fit kwargs with hyperparameters
     fit_kwargs = {**(hyperparameters or {}), **kwargs}
 

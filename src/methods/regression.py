@@ -134,11 +134,13 @@ class GradientDescentERM(pointEstimator):
             for i in range(0, len(X), 8192):                  # CNN activations are big
                 xb = torch.tensor(X[i:i + 8192], dtype=torch.float, device=dev)
                 out.append(self.f(xb).cpu().numpy().ravel())
-        return np.concatenate(out)
+        # (n, 1), like every other pointEstimator: metrics._as_interval reads a bare
+        # (n,) as an interval and silently mis-scores the method
+        return np.concatenate(out)[:, None]
 
     def predict_mean(self, X):
-        """CopSens outcome-model protocol."""
-        return self._predict(np.asarray(X).reshape(len(X), -1))
+        """CopSens outcome-model protocol; mu_y is a flat (n,)."""
+        return self._predict(np.asarray(X).reshape(len(X), -1)).ravel()
 
     # -- state round-trip: `self.f` only exists after _fit, so caching needs this --
 

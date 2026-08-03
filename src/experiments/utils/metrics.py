@@ -292,7 +292,7 @@ def evaluate_queries(
     )
 
 
-def trace_S_over_k(X: NDArray, GX: NDArray) -> float:
+def trace_S_over_k(X: NDArray, GX: NDArray, keep: float = 1.0) -> float:
     """
     Augmentation strength as tr(S)/k (Prop. 2), where S = Sigma_GX^-1 Sigma_X
     is the variance-shift operator. Sharpening iff tr(S)/k <= 1/rho.
@@ -300,6 +300,12 @@ def trace_S_over_k(X: NDArray, GX: NDArray) -> float:
     Args:
         X: Original data in the feature space the methods use
         GX: Augmented data in the same space
+        keep: Fraction of Sigma_GX's variance retained before inverting. 1.0 (the
+            default) inverts the whole spectrum, which is right at the low d the
+            linear experiments use. In a HIGH-dimensional feature space the
+            near-null eigendirections of Sigma_GX are noise and 1/w blows them up:
+            at d=588, n=60k two IDENTICALLY distributed samples score ~10 instead
+            of 1. Pass 0.999 there.
 
     Returns:
         tr(S)/k, in (0, 1] for variance-inflating DA.
@@ -312,8 +318,20 @@ def trace_S_over_k(X: NDArray, GX: NDArray) -> float:
     Sigma_GX = GX.T @ GX / len(GX)
 
     try:
-        # pseudo-inverse for stability against rank-deficient feature spaces
-        S = np.linalg.pinv(Sigma_GX) @ Sigma_X
-        return float(np.trace(S) / k)
+        if keep >= 1.0:
+            # pseudo-inverse for stability against rank-deficient feature spaces
+            S = np.linalg.pinv(Sigma_GX) @ Sigma_X
+            return float(np.trace(S) / k)
+
+        w, V = np.linalg.eigh(Sigma_GX)
+        order = np.argsort(w)[::-1]
+        w, V = w[order], V[:, order]
+        positive = w > max(w.max(), 1e-30) * 1e-10
+        w, V = w[positive], V[:, positive]
+        rank = int(np.searchsorted(np.cumsum(w) / w.sum(), keep) + 1)
+        w, V = w[:rank], V[:, :rank]
+
+        whiten = V / np.sqrt(w)
+        return float(np.trace(whiten.T @ Sigma_X @ whiten) / max(len(w), 1))
     except Exception:
         return np.nan

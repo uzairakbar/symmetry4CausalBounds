@@ -121,7 +121,7 @@ class PanelBuilder:
         results = {}
         for name in self.runner.methods.keys():
             if name == 'ATE':
-                predictions = transformed_points @ self.runner.sem.solution
+                predictions = self.runner.sem.f(transformed_points)
             else:
                 model = self.fitted_models[name]
                 predictions = model.predict(transformed_points)
@@ -133,7 +133,7 @@ class PanelBuilder:
                 results[name] = predictions.reshape(len(transformed_points), 1)
         
         # Compute ground truth
-        ground_truth = transformed_points @ self.runner.sem.solution
+        ground_truth = self.runner.sem.f(transformed_points)
         
         return results, ground_truth
     
