@@ -41,12 +41,31 @@ class OracleParameters:
 
 @contextmanager
 def preserve_rng():
-    """Oracle draws must not shift the global stream the experiments use."""
-    state = np.random.get_state()
+    """Oracle draws must not shift the global streams the experiments use.
+
+    numpy AND torch: the image DAs draw from torch, so restoring numpy alone lets
+    an oracle call change the experiment's augmentation realisation -- same seed,
+    different GX, depending only on whether the oracle ran.
+    """
+    numpy_state = np.random.get_state()
+    torch_state = cuda_state = None
+    try:
+        import torch
+        torch_state = torch.random.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_state = torch.cuda.get_rng_state_all()
+    except ImportError:
+        pass
+
     try:
         yield
     finally:
-        np.random.set_state(state)
+        np.random.set_state(numpy_state)
+        if torch_state is not None:
+            import torch
+            torch.random.set_rng_state(torch_state)
+            if cuda_state is not None:
+                torch.cuda.set_rng_state_all(cuda_state)
 
 
 def _identity(X: NDArray) -> NDArray:
