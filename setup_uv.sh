@@ -31,4 +31,4 @@ uv venv --python 3.10
 # Install dependencies
 # ------------------------------------------------------------
 
-uv pip install .
+uv pip install . ".[speed]"
