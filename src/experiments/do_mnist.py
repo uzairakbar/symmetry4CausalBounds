@@ -76,17 +76,41 @@ def log_vacuous(bounds: Dict[str, np.ndarray]):
                            'logged above.')
 
 
+#: (constrained method, the UNCONSTRAINED model on the same ball). PI_INV is paired
+#: with DA+PI, not PI: `RecentredInvCopSens` fits the post-DA measure, so DA+PI is
+#: its parent and PI is a different ball entirely.
+NESTED_IN = {
+    'PI_INV': 'DA+PI',
+    'DA+PI_IV': 'DA+PI',
+    'PI&DA+PI': 'DA+PI',
+    'PI&DA+PI_IV': 'DA+PI',
+}
+
+
 def log_nesting(models: Dict[str, object], bounds: Dict[str, np.ndarray]):
-    """R5: the SLSQP multi-start is non-convex, so PI_INV subset PI is not
+    """R5: the SLSQP multi-start is non-convex, so `constrained subset parent` is not
     guaranteed. Logged, never raised -- a violation is information about the
-    optimiser, not a reason to discard the run."""
-    if not {'PI', 'PI_INV'} <= set(bounds):
-        return
-    width = {k: bounds[k][..., 1] - bounds[k][..., 0] for k in ('PI', 'PI_INV')}
-    violations = int(np.nansum(width['PI_INV'] > width['PI'] + 1e-9))
-    if violations:
-        logger.warning(f'PI_INV wider than PI at {violations}/{len(width["PI"])} '
-                       'queries: the non-convex multi-start missed an optimum.')
+    optimiser, not a reason to discard the run.
+
+    Adding a constraint can only shrink the feasible set, so a constrained method
+    must never come out WIDER than its parent. Coming out much narrower while the
+    constraint is inactive is the other tell, and it is the one that under-covers.
+    """
+    for name, parent in NESTED_IN.items():
+        if not {name, parent} <= set(bounds):
+            continue
+        child = np.asarray(bounds[name])
+        base = np.asarray(bounds[parent])
+        if child.ndim != 3 or base.ndim != 3:
+            continue
+        width_child = child[..., 1] - child[..., 0]
+        width_parent = base[..., 1] - base[..., 0]
+        violations = int(np.nansum(width_child > width_parent + 1e-9))
+        if violations:
+            logger.warning(
+                f'{name} wider than its parent {parent} at {violations}/'
+                f'{width_parent.size} queries: the non-convex multi-start missed an '
+                'optimum.')
 
 
 # =============================================================================

@@ -12,7 +12,7 @@ from src.experiments.base import (
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k, rho_hat
-from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE
+from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP
 from src.oracle import (
     calibrate_da_epsilon, compute_oracle_parameters, epsilon_star,
     thm1_gamma_min, preserve_rng,
@@ -362,9 +362,16 @@ class ExpansionStrategy(GenericParamSweep):
             **self.augment_kwargs_fn(param)
         )
 
-        # measured expansion in the space the methods fit in
-        self._measured[(experiment_index, float(param))] = (
-            rho_hat(data.X, data.GX, data.y) * trace_S_over_k(data.X, data.GX)
+        # measured expansion in the space the methods fit in. The spectrum is
+        # TRUNCATED: this axis is exactly where Sigma_GX goes ill-conditioned, so
+        # the raw pinv reads ~23% high at the top of the grid (see SPECTRUM_KEEP).
+        rho = rho_hat(data.X, data.GX, data.y)
+        trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
+        self._measured[(experiment_index, float(param))] = rho * trace_S
+        logger.info(
+            f'trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} '
+            f'(untruncated {trace_S_over_k(data.X, data.GX):.5f}) '
+            f'x {rho * trace_S:.5f}'
         )
 
         # The knob IS the invariance-error driver, so a setup-time eps* is

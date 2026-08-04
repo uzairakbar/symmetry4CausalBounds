@@ -33,7 +33,17 @@ defaults:
 #         # - PI&DA+PI_IV
 #     augmentation: translate
 #     experiment:
-#         query: true                 # query sweep; panel ALWAYS generated
+#         # query: true                 # query sweep; panel ALWAYS generated
+#         sweep:
+#             # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
+#             # informativeness = (trS, worst_error)
+#             param:  [gamma, epsilon, trS, n, m]
+#             metric: [approx_error, worst_error, width, coverage]
+#         scatter:
+#             param:  [n, m]
+#             metric: [[width, coverage], [approx_error, width]]
+#         perf:
+#             metric: [wall_clock, seed_var]
 
 do_mnist:
     seed: 42
@@ -47,13 +57,13 @@ do_mnist:
     sweep_samples: 10               # digit exemplars on the query x-axis
     n_components: 32                # latent dimension of the CopSens factor model
     net: domnist-fast
-    gamma: 0.1                      # EXPLICIT. CopSens's budget is a ball in a 32-d
+    gamma: 0.067                      # EXPLICIT. CopSens's budget is a ball in a 32-d
                                     # LATENT index space, not partial-r2's Lemma-2 ball
                                     # in function space -- the two are NOT comparable,
                                     # so oracle gamma* is recorded but never consumed.
                                     # Re-select with a population-coverage sweep before
                                     # comparing the two models.
-    epsilon: 0.05                   # T-invariance defect of h*: a MODELLING ASSUMPTION,
+    epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
                                     # not estimable. The true value is 0 for this
                                     # augmentation (+-10 deg cannot turn a 2 into a 5,
                                     # and colour never causes Y); this is finite-sample
@@ -67,13 +77,15 @@ do_mnist:
                                     # deciding -- do NOT add tolerance to hide it.
     augmentation: translate > rotation > contrast > saturation > hue
     methods:                        # REQUIRED: the copsens backend defines only these
-        - ATE                       # 7, and the fallback is all 11 of ALL_METHODS
+        - ATE                       # 9, and the fallback is all 11 of ALL_METHODS
         - ERM
         - DA+ERM
         - PI
         - DA+PI
         - PI_INV
         - DA+PI_IV
+        - PI&DA+PI
+        - PI&DA+PI_IV
     calibrate: true                 # budgets scaled by sigma-hat^2 = E[mu(1-mu)]
     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
                                     # bit-identical to n_jobs=1.

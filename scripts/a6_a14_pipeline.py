@@ -126,6 +126,61 @@ def a7_query_status(sem, nets, X, GX, y, G, Q):
           and bool(np.isnan(bounds).all()))
 
 
+def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
+    """A21: each branch must get the right NET and be fit on the right BALL.
+
+    Both halves are needed. Giving PI_INV the X net instead of the GX net moves an
+    inactive constraint's bounds ~7.7%; and a mis-routed `fit(X, ...)` that lets
+    `GX=GX` fall into **kwargs silently fits the DA branch on the baseline ball.
+    Neither raises; both quietly change every number.
+    """
+    from src.methods.copsens import IntersectedCopSens, IntersectedIVCopSens
+
+    common = dict(gamma=0.1, n_components=32, calibrate=True, clipy=True,
+                  mu_clip=DOMNIST_CONFIG.attainable, n_anchors=DOMNIST_CONFIG.n_anchors)
+    models = {
+        'PI&DA+PI': IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets,
+                                       **common).fit(X, y, GX=GX, G=G),
+        'PI&DA+PI_IV': IntersectedIVCopSens(epsilon=0.1, epsilon_iv=0.1, pad=False,
+                                            outcome_models=nets,
+                                            **common).fit(X, y, GX=GX, G=G),
+    }
+
+    for name, model in models.items():
+        check(f'A21 {name}: baseline gets the X net',
+              model.baseline.outcome_ is nets['X'])
+        check(f'A21 {name}: DA branch gets the GX net',
+              model.augmented.outcome_ is nets['GX'])
+        # the ball each branch was fit on, read off the latent model's own mean
+        check(f'A21 {name}: baseline fit on the X ball',
+              np.allclose(model.baseline.latent_.mean_, X.mean(axis=0), atol=1e-5))
+        check(f'A21 {name}: DA branch fit on the GX ball',
+              np.allclose(model.augmented.latent_.mean_, GX.mean(axis=0), atol=1e-5))
+        # padding reaches the DA branch only (Cor. 1)
+        check(f'A21 {name}: pad is DA-only', not model.baseline.pad)
+
+    # Cor. 1: the intersection can never be wider than either branch
+    for name, model in models.items():
+        bounds = model.predict(Q)
+        widths = {}
+        for label, branch in (('baseline', model.baseline), ('DA', model.augmented)):
+            b = branch.predict(Q)
+            widths[label] = np.nanmean(b[:, 1] - b[:, 0])
+        intersection = np.nanmean(bounds[:, 1] - bounds[:, 0])
+        check(f'A21 {name}: width <= min(branches)',
+              intersection <= min(widths.values()) + 1e-9,
+              f'{intersection:.5f} vs {min(widths.values()):.5f}')
+
+    # IVConstrainedCopSens must refuse Z=None rather than instrument on X
+    from src.methods.copsens import IVConstrainedCopSens
+    try:
+        IVConstrainedCopSens(epsilon_iv=0.1, outcome_model=nets['GX'],
+                             **common).fit(GX, y, Z=None)
+        check('A21 IVConstrainedCopSens refuses Z=None', False, 'instrumented on X')
+    except ValueError:
+        check('A21 IVConstrainedCopSens refuses Z=None', True)
+
+
 def a8_jax_equals_fd(nets, X, GX, y, G, Q):
     common = dict(n_components=32, calibrate=True, clipy=True, n_jobs=1,
                   mu_clip=DOMNIST_CONFIG.attainable, n_anchors=DOMNIST_CONFIG.n_anchors)
@@ -228,12 +283,20 @@ def a11_config_strictness():
 
     # the copsens backend must reject a method it does not define, not drop it
     from src.experiments.configs import MethodRegistry
+    # `DA+IV` is 2SLS -- one of the two names copsens genuinely does not define.
+    # (`PI&DA+PI` used to be the probe here; the backend defines it now.)
     try:
-        MethodRegistry.build_methods(['PI', 'PI&DA+PI'], gamma=0.1, epsilon=0.05,
+        MethodRegistry.build_methods(['PI', 'DA+IV'], gamma=0.1, epsilon=0.05,
                                      backend='copsens', outcome_models={'X': None})
         check('A11 copsens rejects an undefined method', False, 'filtered silently')
     except ValueError:
         check('A11 copsens rejects an undefined method', True)
+
+    for name in ('PI&DA+PI', 'PI&DA+PI_IV'):
+        built = MethodRegistry.build_methods([name], gamma=0.1, epsilon=0.05,
+                                             epsilon_iv=0.05, backend='copsens',
+                                             outcome_models={'X': None, 'GX': None})
+        check(f'A11 copsens now defines {name}', name in built)
 
     try:
         MethodRegistry.build_methods(['PI'], gamma=0.1, epsilon=0.05,
@@ -287,6 +350,7 @@ if __name__ == '__main__':
     a14_memory(sem)
     a13_cost_profile(sem, nets, X, GX, y, G, Q)
     a7_query_status(sem, nets, X, GX, y, G, Q)
+    a21_intersection_wiring(sem, nets, X, GX, y, G, Q)
     a8_jax_equals_fd(nets, X, GX, y, G, Q)
 
     if full:

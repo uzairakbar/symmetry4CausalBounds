@@ -399,7 +399,41 @@ class InstrumentalVariablePartialR2(PartialR2):
             self.iv_threshold_param.value = np.sqrt(self.N_samples) * self.iv_bound
 
 
-class IntersectedPartialR2(PartialR2):
+class IntersectionMixin:
+    """
+    Cor. 1 at the INTERVAL level: max of the lowers, min of the uppers, worse status.
+
+    Backend-agnostic -- it touches nothing but `self.baseline` / `self.augmented`,
+    so the two balls need not share a parameterisation. Validity is a membership
+    fact about h_*(x), not a geometric one.
+    """
+
+    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
+        if epsilon is not None:
+            self.epsilon = epsilon
+        branch_kwargs = dict(gamma=gamma, epsilon=epsilon, **kwargs)
+        lower_base, upper_base = self.baseline.predict(X, **branch_kwargs).T
+        lower_da, upper_da = self.augmented.predict(X, **branch_kwargs).T
+
+        lower = np.maximum(lower_base, lower_da)
+        upper = np.minimum(upper_base, upper_da)
+
+        # a branch failure/infeasibility carries over to the intersection
+        status = np.maximum(self.baseline.query_status, self.augmented.query_status)
+
+        # empty intersection: infeasible, same convention as the solver
+        empty = lower > upper
+        if empty.any():
+            logger.warning(f'Empty intersection at {empty.sum()}/{len(empty)} queries.')
+            lower = np.where(empty, np.nan, lower)
+            upper = np.where(empty, np.nan, upper)
+            status = np.where(empty, SolveStatus.INFEASIBLE, status)
+
+        self.query_status = status.astype(int)
+        return np.column_stack([lower, upper])
+
+
+class IntersectedPartialR2(IntersectionMixin, PartialR2):
     """Baseline PI intersected with DA+PI (Cor. 1). Padding hits the DA branch only."""
 
     def __init__(self, **kwargs):
@@ -432,30 +466,6 @@ class IntersectedPartialR2(PartialR2):
     def rho(self):
         """Information-loss factor sigma-tilde^2 / sigma^2 (>= 1 by DPI)."""
         return self.augmented.sigma_sq / self.baseline.sigma_sq
-
-    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
-        if epsilon is not None:
-            self.epsilon = epsilon
-        branch_kwargs = dict(gamma=gamma, epsilon=epsilon, **kwargs)
-        lower_base, upper_base = self.baseline.predict(X, **branch_kwargs).T
-        lower_da, upper_da = self.augmented.predict(X, **branch_kwargs).T
-
-        lower = np.maximum(lower_base, lower_da)
-        upper = np.minimum(upper_base, upper_da)
-
-        # a branch failure/infeasibility carries over to the intersection
-        status = np.maximum(self.baseline.query_status, self.augmented.query_status)
-
-        # empty intersection: infeasible, same convention as the solver
-        empty = lower > upper
-        if empty.any():
-            logger.warning(f'Empty intersection at {empty.sum()}/{len(empty)} queries.')
-            lower = np.where(empty, np.nan, lower)
-            upper = np.where(empty, np.nan, upper)
-            status = np.where(empty, SolveStatus.INFEASIBLE, status)
-
-        self.query_status = status.astype(int)
-        return np.column_stack([lower, upper])
 
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):

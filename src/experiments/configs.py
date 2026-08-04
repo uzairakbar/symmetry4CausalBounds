@@ -22,6 +22,8 @@ from src.methods.copsens import (
     CopSensPI,
     RecentredInvCopSens,
     IVConstrainedCopSens as IVCopSens,
+    IntersectedCopSens as IntCopSens,
+    IntersectedIVCopSens as IntIVCopSens,
 )
 
 
@@ -65,18 +67,16 @@ class DoMNISTConfig:
     beta: float = 0.4
     eta: float = 0.25
     subsample: int = 2                  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
-    exemplar_seed: int = 420            # digit exemplars, frozen across replicates
+    exemplar_seed: int = 0            # digit exemplars, frozen across replicates
     # CopSens. n_anchors is SOURCE's EFFECTIVE value: CopSensPI's own default is
     # 256, but every published do-MNIST number was measured at 128.
     link: Literal['probit', 'gaussian'] = 'probit'
     n_anchors: int = 128
     n_anchors_c: int = 48               # coarse set, for the feasibility constraint
-    n_constraint_inv: int = 192
-    n_constraint_iv: int = 384
+    n_constraint_inv: int = 256 #192
+    n_constraint_iv: int = 256 #384
     mu_clip: bool = True                # clip mu_y to `attainable`; see §2.5
     jax_grad: bool = True               # analytic gradients for the SLSQP hot path
-    # tr(S)/k needs a truncated spectrum at d=588; see metrics.trace_S_over_k
-    spectrum_keep: float = 0.999
     test_fraction: float = 0.1
 
     @property
@@ -129,6 +129,13 @@ ROBUSTNESS_EPSILON_TRUE: float = 2**-1
 
 # SE crosshairs on scatter plots (needs n_experiments >= 2)
 SCATTER_SE_CROSSHAIRS: bool = True
+
+# Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
+# The near-null eigendirections of Sigma_GX are noise and 1/w blows them up, so the
+# untruncated estimate is inflated exactly where the DA is strongest. Measured on the
+# simulation trS sweep: at the top of the knob grid tr(S)/k reads 0.22889 untruncated
+# vs 0.17706 here -- a 23% error, at the end of the axis the sweep is about.
+SPECTRUM_KEEP: float = 0.999
 
 # budget-ratio grid: centred on 1, i.e. on the oracle value
 _RATIO_GRID = lambda dataset, n: np.geomspace(2**-2, 2**2, num=n)
@@ -321,10 +328,12 @@ ALL_METHODS: Tuple[str, ...] = (
     'PI&DA+PI', 'PI&DA+PI_IV',
 )
 
-# the copsens backend defines a strict subset: no 2SLS, no baseline-IV, no
-# intersections (Cor. 1 needs two comparable balls, which CopSens does not give)
+# the copsens backend defines a strict subset: no 2SLS and no baseline-IV. It DOES
+# define the intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
+# membership fact, not a claim that the two balls share a parameterisation.
 COPSENS_METHODS: Tuple[str, ...] = (
     'ATE', 'ERM', 'DA+ERM', 'PI_INV', 'PI', 'DA+PI', 'DA+PI_IV',
+    'PI&DA+PI', 'PI&DA+PI_IV',
 )
 
 
@@ -363,6 +372,15 @@ def _copsens_builders(method_names, gamma, epsilon, epsilon_iv, calibrate, pad,
         'DA+PI_IV': lambda: IVCopSens(
             gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad,
             outcome_model=net('GX'), n_constraint=config.n_constraint_iv, **common),
+        # `pad` reaches the DA branch only, so pad=false gives H_pi n H_pi~ (Thm. 1
+        # under exact invariance) and pad=true gives H_pi n (H_pi~ +- eps) (Cor. 1)
+        'PI&DA+PI': lambda: IntCopSens(
+            gamma=gamma, epsilon=epsilon, pad=pad,
+            outcome_models={'X': net('X'), 'GX': net('GX')}, **common),
+        'PI&DA+PI_IV': lambda: IntIVCopSens(
+            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad,
+            outcome_models={'X': net('X'), 'GX': net('GX')},
+            n_constraint=config.n_constraint_iv, **common),
     }
     assert set(all_builders) == set(COPSENS_METHODS), 'COPSENS_METHODS out of sync.'
 

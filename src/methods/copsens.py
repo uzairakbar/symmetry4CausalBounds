@@ -22,7 +22,7 @@ from scipy.stats import norm
 from scipy.optimize import NonlinearConstraint, minimize
 from sklearn.decomposition import FactorAnalysis
 
-from src.methods.sensitivity_models import BoundedSA, SolveStatus
+from src.methods.sensitivity_models import BoundedSA, IntersectionMixin, SolveStatus
 
 EPS = 1e-9
 CLIP = 1e-6
@@ -463,7 +463,16 @@ class IVConstrainedCopSens(CopSensPI):
         super().__init__(gamma=gamma, **kwargs)
 
     def _precompute(self, X, y, Z=None, **kwargs):
-        Z = X if Z is None else Z
+        if Z is None:
+            # NOT the partial-r2 semantics. IVPartialR2 treats Z=None as "no
+            # instrument" and drops the constraint entirely; the old default here
+            # was `Z = X`, i.e. instrument on the treatment, which keeps a live and
+            # possibly infeasible constraint. Refuse rather than silently differ.
+            raise ValueError(
+                'IVConstrainedCopSens needs an instrument. Z=None would instrument '
+                'on X, which is a live constraint, not the no-op that the '
+                'partial-r2 backend gives you. For a baseline branch use a plain '
+                'CopSensPI.')
         idx = self.rng_.choice(len(X), size=min(self.n_constraint, len(X)),
                                replace=False)
         self.cX_ = self.latent_.transform(X[idx])
@@ -481,3 +490,87 @@ class IVConstrainedCopSens(CopSensPI):
 
     def _budget(self):
         return self.epsilon_iv ** 2
+
+
+# ------------------------------------------------------------------ intersections
+
+class IntersectedCopSens(IntersectionMixin, CopSensPI):
+    """
+    Baseline PI intersected with DA+PI (Cor. 1). Padding hits the DA branch only.
+
+    `_fit` is overridden entirely, so none of CopSensPI's own fit state (latent_,
+    anchors_, outcome_) is ever built here -- each branch owns its own. Exactly how
+    IntersectedPartialR2 relates to PartialR2.
+
+    Cor. 1 needs h_*(x) to lie in BOTH intervals, which is a membership fact; it does
+    not need the two balls to share a parameterisation. They do not here: each branch
+    fits its own FactorAnalysis, so different Sigma, different sigma-hat^2, different
+    net. Validity survives that; Prop. 4 sharpness does not, so this is the
+    conservative inclusion of Remark 1, not a sharpness claim.
+    """
+
+    def __init__(self, outcome_models=None, **kwargs):
+        if outcome_models is None or not {'X', 'GX'} <= set(outcome_models):
+            raise ValueError(
+                'IntersectedCopSens needs the prefit outcome nets {"X": .., "GX": ..}: '
+                'the baseline branch fits on X with the X net, the DA branch on GX '
+                f'with the GX net. Got {sorted(outcome_models or {})}.')
+        self.outcome_models = outcome_models
+        # outcome_model=None is safe: our _fit never reaches CopSensPI._fit's check
+        super().__init__(outcome_model=None, **kwargs)
+        self.baseline = self.augmented = None
+
+    def _branch_kwargs(self, key, pad):
+        """Everything a sibling CopSensPI needs. One place, so a new knob on
+        CopSensPI cannot silently stop reaching the branches."""
+        return dict(gamma=self.gamma, epsilon=self.epsilon, pad=pad,
+                    calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
+                    n_components=self.n_components, link=self.link_name,
+                    n_anchors=self.n_anchors, n_anchors_c=self.n_anchors_c,
+                    mu_clip=self.mu_clip, jax_grad=self.jax_grad, seed=self.seed,
+                    outcome_model=self.outcome_models[key])
+
+    def _fit_branches(self, X, y, GX, G):
+        self.baseline = CopSensPI(**self._branch_kwargs('X', pad=False)).fit(X, y)
+        self.augmented = CopSensPI(**self._branch_kwargs('GX', pad=self.pad)).fit(GX, y)
+
+    def _fit(self, X, y, GX=None, G=None, **kwargs):
+        if GX is None:
+            raise ValueError('GX (augmented treatment) required')
+        GX = np.asarray(GX).reshape(len(GX), -1)
+        self._fit_branches(X, y, GX, G)
+
+        self.sigma2_ = self.baseline.sigma2_
+        self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
+        logger.info(f'{type(self).__name__}: sigma2 ratio (GX/X) '
+                    f'{self.sigma2_ratio:.4f} -- the DA ball is '
+                    f'{np.sqrt(self.sigma2_ratio):.4f}x the baseline radius')
+        return self
+
+    @property
+    def sigma2_ratio(self):
+        """sigma-hat^2(GX) / sigma-hat^2(X): the SQUARED ratio of the two ball radii
+        under `calibrate`. NOT the paper's rho -- CopSens's sigma-hat^2 is
+        E[mu(1-mu)] on the latent index scale, not a min-MSE, so it does not inherit
+        the DPI bound rho >= 1."""
+        return self.augmented.sigma2_ / self.baseline.sigma2_
+
+
+class IntersectedIVCopSens(IntersectedCopSens):
+    """Baseline PI (null instrument) intersected with DA+PI_IV."""
+
+    def __init__(self, epsilon_iv=None, n_constraint=384, **kwargs):
+        if epsilon_iv is None:
+            raise ValueError('epsilon_iv required')
+        self.epsilon_iv, self.n_constraint = epsilon_iv, n_constraint
+        super().__init__(**kwargs)
+
+    def _fit_branches(self, X, y, GX, G):
+        # The baseline carries no instrument, so it is a PLAIN CopSensPI, built
+        # explicitly. Do NOT reach for IVConstrainedCopSens(...).fit(Z=None) for
+        # symmetry with the partial-r2 backend: there Z=None drops the constraint,
+        # here it would instrument on X. That path now raises.
+        self.baseline = CopSensPI(**self._branch_kwargs('X', pad=False)).fit(X, y)
+        self.augmented = IVConstrainedCopSens(
+            epsilon_iv=self.epsilon_iv, n_constraint=self.n_constraint,
+            **self._branch_kwargs('GX', pad=self.pad)).fit(GX, y, Z=G)
