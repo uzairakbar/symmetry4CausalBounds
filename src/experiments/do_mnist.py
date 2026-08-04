@@ -123,12 +123,14 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 
     def __init__(self, method_factory=None, sem_test_factory=None, n_pi=60_000,
                  default_gamma=0.1, default_epsilon=0.05, **kwargs):
-        # GenericQuerySweep takes these as LOCALS and never stores them, unlike
-        # GenericParamSweep. Keep our own copies.
-        self.default_gamma, self.default_epsilon = default_gamma, default_epsilon
         self.sem_test_factory, self.n_pi = sem_test_factory, n_pi
         self.nets = None
-        super().__init__(method_factory=None, **kwargs)      # suppress the early build
+        # FORWARD the budgets: GenericQuerySweep stores them (its IV floor guard
+        # needs default_gamma). Setting them here instead would be silently
+        # overwritten by super's own defaults -- gamma 0.1 -> 1.0, which is a
+        # vacuous ball and flat bounds on every method.
+        super().__init__(method_factory=None, default_gamma=default_gamma,
+                         default_epsilon=default_epsilon, **kwargs)
 
         if method_factory is not None:
             self.methods = method_factory(

@@ -80,7 +80,11 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
+        # stored, not local: the IV floor guard needs the ball these are used with.
+        # Subclasses must FORWARD their budgets here rather than assigning before
+        # super().__init__, or these defaults silently overwrite them.
         self.default_gamma = default_gamma
+        self.default_epsilon = default_epsilon
 
         # Data FIRST, methods second. The IV budget is oracle-derived AND
         # floor-guarded, and the floor is a property of (GX, G, gamma), so it does

@@ -365,6 +365,55 @@ def a6_perf_fairness():
           'partial(self.build_methods, n_jobs=1)' in source)
 
 
+def a26_budget_wiring():
+    """The config's gamma/epsilon must reach the BUILT models.
+
+    A runner that assigns its budgets before `super().__init__()` has them
+    silently overwritten by the base class's own defaults. That is invisible in
+    every unit check -- the models build, fit and solve fine, they just do it on
+    the wrong ball: measured, gamma 0.1 -> 1.0 gives flat vacuous bounds on
+    every method, baseline PI included.
+    """
+    from munch import munchify
+    from src.experiments.configs import resolve_dataset_block
+
+    gamma, epsilon = 0.1, 0.051
+    block = resolve_dataset_block('do_mnist', dict(
+        seed=42, n_experiments=1, sweep_samples=10, n_components=32,
+        net='domnist-fast', gamma=gamma, epsilon=epsilon, calibrate=True, n_jobs=8,
+        augmentation='translate > rotation > contrast > saturation > hue',
+        methods=['PI', 'DA+PI', 'PI_INV'], n_samples=20_000, n_pi=2_000,
+        n_queries=16, experiment={'query': True}))
+
+    set_seed(42)
+    orchestrator = DoMNISTOrchestrator(**block, hyperparameters=munchify(dict(
+        lr=0.01, batch=256, epochs=1, optimizer='adam', betas=(0.7, 0.9),
+        onecycle=True, loss='mse')))
+    runner = orchestrator.get_query_runner_cls()(
+        methods=orchestrator.methods,
+        **{k: v for k, v in orchestrator.kwargs.items()
+           if k not in ('methods', 'n_queries')})
+
+    check('A26 runner keeps the config gamma', runner.default_gamma == gamma,
+          f'{runner.default_gamma}')
+    check('A26 runner keeps the config epsilon', runner.default_epsilon == epsilon,
+          f'{runner.default_epsilon}')
+    for name in ('PI', 'DA+PI', 'PI_INV'):
+        built = runner.methods[name]()
+        check(f'A26 {name} is built on the config gamma', built.gamma == gamma,
+              f'{built.gamma}')
+
+    # and the bounds are not vacuous: a too-large ball pins every query to the
+    # clip range, so the spread across queries collapses
+    bounds = runner.methods['PI']().fit(
+        X=runner.X, y=runner.y).predict(runner.get_sweep_values())
+    widths = bounds[:, 1] - bounds[:, 0]
+    check('A26 PI bounds are not vacuous', float(np.max(widths)) < 0.99,
+          f'max width {np.max(widths):.4f}')
+    check('A26 PI bounds vary across queries', float(np.ptp(widths)) > 1e-6,
+          f'ptp {np.ptp(widths):.6f}')
+
+
 if __name__ == '__main__':
     # A9 gates the ESTIMAND, so it only means anything at the production draw
     # count -- at the small fixture the net memorises and it fails for that reason
@@ -374,6 +423,7 @@ if __name__ == '__main__':
     a11_config_strictness()
     a12_training_recipe()
     a6_perf_fairness()
+    a26_budget_wiring()
 
     sem, nets, X, GX, y, G, Q = fixture()
     a14_memory(sem)
