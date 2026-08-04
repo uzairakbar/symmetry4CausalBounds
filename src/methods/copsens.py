@@ -507,6 +507,12 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
     fits its own FactorAnalysis, so different Sigma, different sigma-hat^2, different
     net. Validity survives that; Prop. 4 sharpness does not, so this is the
     conservative inclusion of Remark 1, not a sharpness claim.
+
+    COST: the branches are re-fits, so a run carrying PI, DA+PI and both
+    intersections pays for the same FactorAnalysis three times over (~30 s each at
+    n_pi = 60k) and solves every query twice per intersection. That redundancy is
+    inherited from IntersectedPartialR2 deliberately -- sharing fitted branches
+    across methods would couple their lifetimes to the runner's build order.
     """
 
     def __init__(self, outcome_models=None, **kwargs):

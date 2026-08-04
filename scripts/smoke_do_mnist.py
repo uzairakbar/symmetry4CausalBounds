@@ -17,15 +17,29 @@ from src.experiments.do_mnist import DoMNISTOrchestrator        # noqa: E402
 SMALL = dict(n_samples=60_000, n_pi=6_000, n_queries=32)
 FULL = dict(n_samples=1_200_000, n_pi=60_000, n_queries=512)
 
+# Self-contained, so the gate does not depend on which dataset block happens to be
+# uncommented in config.yaml. A `do_mnist:` block, if present, overrides these.
+BLOCK = dict(
+    seed=42, n_experiments=1, sweep_samples=10, n_components=32, net='domnist-fast',
+    gamma=0.067, epsilon=0.1, calibrate=True, n_jobs=-1,
+    augmentation='translate > rotation > contrast > saturation > hue',
+    methods=['ATE', 'ERM', 'DA+ERM', 'PI', 'DA+PI', 'PI_INV', 'DA+PI_IV',
+             'PI&DA+PI', 'PI&DA+PI_IV'],
+    experiment={'query': True, 'perf': {'metric': ['wall_clock']}},
+)
+HYPERPARAMETERS = dict(lr=0.01, batch=256, epochs=1, optimizer='adam',
+                       betas=(0.7, 0.9), onecycle=True, loss='mse')
+
 
 def main(full: bool):
     import yaml
     with open('config.yaml') as fh:
-        config = yaml.safe_load(fh)
+        config = yaml.safe_load(fh) or {}
 
     defaults = config.pop('defaults', {}) or {}
-    hyperparameters = config.pop('hyperparameters', {}) or {}
-    block = {**defaults, **config['do_mnist'], **(FULL if full else SMALL)}
+    hyperparameters = config.pop('hyperparameters', {}) or HYPERPARAMETERS
+    block = {**defaults, **BLOCK, **(config.get('do_mnist') or {}),
+             **(FULL if full else SMALL)}
 
     plan = parse_experiment_plan(block.get('experiment'))
     block = resolve_dataset_block('do_mnist', block)

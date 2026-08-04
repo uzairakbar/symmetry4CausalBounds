@@ -14,85 +14,85 @@ defaults:
 # registry (configs.py). sweep/scatter/perf are validated but not yet wired.
 
 # # ---
-# simulation:
-#     seed: 42
-#     n_samples: 2_048
-#     kernel_dim: 0                   # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
-#     n_experiments: 8
-#     sweep_samples: 32
-#     methods:
-#         - ATE
-#         - ERM
-#         - DA+ERM
-#         - DA+IV
-#         - PI_INV
-#         - PI
-#         - DA+PI
-#         - DA+PI_IV
-#         # - PI&DA+PI
-#         # - PI&DA+PI_IV
-#     augmentation: translate
-#     experiment:
-#         # query: true                 # query sweep; panel ALWAYS generated
-#         sweep:
-#             # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
-#             # informativeness = (trS, worst_error)
-#             param:  [gamma, epsilon, trS, n, m]
-#             metric: [approx_error, worst_error, width, coverage]
-#         scatter:
-#             param:  [n, m]
-#             metric: [[width, coverage], [approx_error, width]]
-#         perf:
-#             metric: [wall_clock, seed_var]
-
-do_mnist:
+simulation:
     seed: 42
-    n_experiments: 1                # 1 replicate => no error bars; perf drops seed_var
-    n_samples: 1_200_000            # SEM draws, NOT distinct images (60k images x ~20
-                                    # fresh (U,C,S) draws). 60k memorises.
-    n_pi: 60_000                    # subset the latent model + constraints are fit on;
-                                    # the nets still see the full draw
-    n_queries: 512                  # interventional evaluation set, drawn from the
-                                    # HELD-OUT images
-    sweep_samples: 10               # digit exemplars on the query x-axis
-    n_components: 32                # latent dimension of the CopSens factor model
-    net: domnist-fast
-    gamma: 0.067                      # EXPLICIT. CopSens's budget is a ball in a 32-d
-                                    # LATENT index space, not partial-r2's Lemma-2 ball
-                                    # in function space -- the two are NOT comparable,
-                                    # so oracle gamma* is recorded but never consumed.
-                                    # Re-select with a population-coverage sweep before
-                                    # comparing the two models.
-    epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
-                                    # not estimable. The true value is 0 for this
-                                    # augmentation (+-10 deg cannot turn a 2 into a 5,
-                                    # and colour never causes Y); this is finite-sample
-                                    # slack. eps=0 makes the IV budget exactly 0.
-                                    # WARNING: PI_INV is a knife edge. Measured at
-                                    # n_pi=8k, this gives floor 0.003415 > eps^2 0.0025,
-                                    # so PI_INV comes back honestly all-INFEASIBLE
-                                    # (SOURCE does the same at these settings). It needs
-                                    # eps >= 0.059 there. Re-read the floor/budget pair
-                                    # logged per experiment at the real n_pi before
-                                    # deciding -- do NOT add tolerance to hide it.
-    augmentation: translate > rotation > contrast > saturation > hue
-    methods:                        # REQUIRED: the copsens backend defines only these
-        - ATE                       # 9, and the fallback is all 11 of ALL_METHODS
-        - ERM
-        - DA+ERM
+    n_samples: 2_048
+    kernel_dim: 0                   # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
+    n_experiments: 8
+    sweep_samples: 32
+    methods:
+        # - ATE
+        # - ERM
+        # - DA+ERM
+        # - DA+IV
+        - PI_INV
         - PI
         - DA+PI
-        - PI_INV
         - DA+PI_IV
         - PI&DA+PI
         - PI&DA+PI_IV
-    calibrate: true                 # budgets scaled by sigma-hat^2 = E[mu(1-mu)]
-    n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
-                                    # bit-identical to n_jobs=1.
+    augmentation: translate
     experiment:
-        query: true                 # digit-exemplar sweep; the PC panel is off here
+        # query: true                 # query sweep; panel ALWAYS generated
+        sweep:
+            # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
+            # informativeness = (trS, worst_error)
+            param:  [gamma, epsilon, trS, n, m]
+            metric: [approx_error, worst_error, width, coverage]
+        scatter:
+            param:  [n, m]
+            metric: [[width, coverage], [approx_error, width]]
         perf:
-            metric: [wall_clock]    # seed_var needs n_experiments >= 2
+            metric: [wall_clock, seed_var]
+
+# do_mnist:
+#     seed: 42
+#     n_experiments: 1                # 1 replicate => no error bars; perf drops seed_var
+#     n_samples: 1_200_000            # SEM draws, NOT distinct images (60k images x ~20
+#                                     # fresh (U,C,S) draws). 60k memorises.
+#     n_pi: 60_000                    # subset the latent model + constraints are fit on;
+#                                     # the nets still see the full draw
+#     n_queries: 512                  # interventional evaluation set, drawn from the
+#                                     # HELD-OUT images
+#     sweep_samples: 10               # digit exemplars on the query x-axis
+#     n_components: 32                # latent dimension of the CopSens factor model
+#     net: domnist-fast
+#     gamma: 0.067                      # EXPLICIT. CopSens's budget is a ball in a 32-d
+#                                     # LATENT index space, not partial-r2's Lemma-2 ball
+#                                     # in function space -- the two are NOT comparable,
+#                                     # so oracle gamma* is recorded but never consumed.
+#                                     # Re-select with a population-coverage sweep before
+#                                     # comparing the two models.
+#     epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
+#                                     # not estimable. The true value is 0 for this
+#                                     # augmentation (+-10 deg cannot turn a 2 into a 5,
+#                                     # and colour never causes Y); this is finite-sample
+#                                     # slack. eps=0 makes the IV budget exactly 0.
+#                                     # WARNING: PI_INV is a knife edge. Measured at
+#                                     # n_pi=8k, this gives floor 0.003415 > eps^2 0.0025,
+#                                     # so PI_INV comes back honestly all-INFEASIBLE
+#                                     # (SOURCE does the same at these settings). It needs
+#                                     # eps >= 0.059 there. Re-read the floor/budget pair
+#                                     # logged per experiment at the real n_pi before
+#                                     # deciding -- do NOT add tolerance to hide it.
+#     augmentation: translate > rotation > contrast > saturation > hue
+#     methods:                        # REQUIRED: the copsens backend defines only these
+#         - ATE                       # 9, and the fallback is all 11 of ALL_METHODS
+#         - ERM
+#         - DA+ERM
+#         - PI
+#         - DA+PI
+#         - PI_INV
+#         - DA+PI_IV
+#         - PI&DA+PI
+#         - PI&DA+PI_IV
+#     calibrate: true                 # budgets scaled by sigma-hat^2 = E[mu(1-mu)]
+#     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
+#                                     # bit-identical to n_jobs=1.
+#     experiment:
+#         query: true                 # digit-exemplar sweep; the PC panel is off here
+#         perf:
+#             metric: [wall_clock]    # seed_var needs n_experiments >= 2
 
 # optical_device:
 #     seed: 69

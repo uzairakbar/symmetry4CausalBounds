@@ -171,6 +171,35 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
               intersection <= min(widths.values()) + 1e-9,
               f'{intersection:.5f} vs {min(widths.values()):.5f}')
 
+    # an infeasible branch must take the whole intersection down, with its status
+    starved = IntersectedIVCopSens(epsilon=0.1, epsilon_iv=1e-9, pad=False,
+                                   outcome_models=nets,
+                                   **common).fit(X, y, GX=GX, G=G)
+    bounds = starved.predict(Q)
+    check('A21 starved IV branch => intersection all-NaN', bool(np.isnan(bounds).all()))
+    check('A21 starved IV branch => all INFEASIBLE',
+          bool((starved.query_status == SolveStatus.INFEASIBLE).all()))
+    check('A21 the other branch still solved',
+          bool(np.isfinite(starved.baseline.predict(Q)).all()))
+
+    # parallelism must not perturb an intersection either
+    serial = IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets,
+                                **{**common, 'n_jobs': 1}).fit(X, y, GX=GX, G=G)
+    parallel = IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets,
+                                  **{**common, 'n_jobs': 8}).fit(X, y, GX=GX, G=G)
+    check('A21 intersection n_jobs 1 == 8',
+          np.array_equal(serial.predict(Q), parallel.predict(Q), equal_nan=True))
+
+    # pad=False is H_pi n H_pi~; pad=True is H_pi n (H_pi~ +- eps), so it can only widen
+    padded = IntersectedCopSens(epsilon=0.1, pad=True, outcome_models=nets,
+                                **common).fit(X, y, GX=GX, G=G)
+    width_padded = np.nanmean(np.diff(padded.predict(Q), axis=1))
+    width_plain = np.nanmean(np.diff(serial.predict(Q), axis=1))
+    check('A21 pad widens the intersection', width_padded >= width_plain - 1e-12,
+          f'{width_plain:.5f} -> {width_padded:.5f}')
+    check('A21 pad=True leaves the baseline branch unpadded',
+          not padded.baseline.pad and padded.augmented.pad)
+
     # IVConstrainedCopSens must refuse Z=None rather than instrument on X
     from src.methods.copsens import IVConstrainedCopSens
     try:

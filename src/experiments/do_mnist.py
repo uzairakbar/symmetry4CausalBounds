@@ -87,7 +87,7 @@ NESTED_IN = {
 }
 
 
-def log_nesting(models: Dict[str, object], bounds: Dict[str, np.ndarray]):
+def log_nesting(bounds: Dict[str, np.ndarray]):
     """R5: the SLSQP multi-start is non-convex, so `constrained subset parent` is not
     guaranteed. Logged, never raised -- a violation is information about the
     optimiser, not a reason to discard the run.
@@ -367,7 +367,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
 
     def _plot_query_sweep(self, runner, results):
         """x-axis is 10 digit exemplars, so thumbnails replace a numeric axis."""
-        log_nesting(runner.methods, results)
+        log_nesting(results)
         log_vacuous(results)
         digits = list(runner.digits_)
 
