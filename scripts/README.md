@@ -26,9 +26,21 @@ under SOURCE's own `.venv`, then `--check` under `s4cb`.
 
 `select_domnist_budgets.py` picks `gamma`, `epsilon` and `epsilon_iv` by POPULATION
 coverage and writes `artifacts/domnist-budget_report.json`. Run it once, read the
-report, hand-copy the constants into `config.yaml` — the pipeline never calls it.
+report, hand-copy `config_patch` into `config.yaml` — the pipeline never calls it.
 do-MNIST needs it because `sem.solution` raises: `h_*` is a frozen CNN and is not in
 the CopSens candidate class, so no oracle quantity certifies membership.
+
+Three sequential legs at one target coverage `X` (`--target-coverage`, or
+`do_mnist.target_coverage`; 0.95 or 0.99):
+
+1. lowest `gamma` with coverage ≥ `X` on `PI` — **fixed, never re-selected**
+2. lowest `epsilon_iv` with coverage ≥ `X` on `DA+PI_IV`, at that `gamma`
+3. lowest `epsilon` with coverage ≥ `X` on `PI_INV`, at that `gamma`
+
+One `gamma` for every method, because that is how the pipeline consumes it.
+`DA+PI_IV` and `PI_INV` are subsets of `DA+PI`, so if `DA+PI` misses `X` at the
+selected `gamma`, no budget can reach it — the leg is marked
+`target_reachable: false` and reports the lowest budget attaining the ceiling.
 
 ```bash
 python scripts/select_domnist_budgets.py            # 1.2M draws, 10k eval, hours

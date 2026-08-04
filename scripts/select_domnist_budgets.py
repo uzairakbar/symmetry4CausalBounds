@@ -5,6 +5,17 @@ epsilon and epsilon_iv actually hold coverage at this (pad, calibrate, n_pi, net
 which the oracle cannot: do-MNIST's h_* is a frozen CNN, `sem.solution` raises, so no
 oracle quantity certifies membership on the copsens backend.
 
+Three sequential legs at ONE target coverage X, each fixing its knob for good:
+
+    1. lowest gamma      with coverage >= X on PI          -> FIXED, never re-selected
+    2. lowest epsilon_iv with coverage >= X on DA+PI_IV    (at that gamma)
+    3. lowest epsilon    with coverage >= X on PI_INV      (at that gamma)
+
+gamma is fixed by leg 1 because the pipeline consumes ONE gamma for every method; a
+per-method gamma would report a tuple no experiment can use. DA+PI_IV and PI_INV are
+subsets of DA+PI, so if DA+PI misses X at that gamma no budget can reach it -- the
+report says so and marks the leg `target_reachable: false` rather than pretending.
+
     python scripts/select_domnist_budgets.py            # population: 1.2M draws, 10k eval
     python scripts/select_domnist_budgets.py --smoke    # minutes, for gates
 
@@ -209,83 +220,56 @@ def main(args):
     logger.info(f'leg 1: gamma = {gamma:.6g} at coverage '
                 f'{gamma_sel["record"].coverage:.4f}')
 
-    # ----------------------------------------------------- the ceiling both legs share
-    # PI_INV and DA+PI_IV are recentred on the DA ball, so neither can out-cover DA+PI.
+    # ------------------------------------ DA+PI at that SAME gamma: the shared ceiling
+    # Reference only. gamma is FIXED by leg 1 and never re-selected: the pipeline
+    # consumes one gamma for every method, so a per-method gamma would report a tuple
+    # no experiment can use.
     da_pi = fitted('DA+PI', gamma=gamma)
     da_pi_record = probe(da_pi, X_eval, estimand)
     ceiling = da_pi_record.coverage
-    effective = min(target, ceiling)
-    warnings, gamma_for_da_pi = [], None
+    warnings = []
     if ceiling < target:
-        # Selecting against a ceiling the parent cannot clear returns the INERT
-        # budget by construction -- only a dead constraint reproduces DA+PI exactly.
-        # gamma was chosen on PI per the directive, so report the gamma DA+PI would
-        # need rather than quietly shipping a dead column.
-        logger.warning(f'DA+PI covers {ceiling:.4f} < target {target}: legs 2 and 3 '
-                       'can only reach the ceiling, i.e. the inert budget.')
-        lift = min_knob_for_coverage(
-            lambda g: probe(da_pi, X_eval, estimand, gamma=g),
-            gamma, GAMMA_BRACKET[1], target=target, max_iter=args.max_iter,
-            tol=args.tol)
-        gamma_for_da_pi = lift['value'] if lift['reached'] else None
+        # DA+PI_IV and PI_INV are subsets of DA+PI, so neither can out-cover it. The
+        # target is then unattainable at this gamma -- a finding about the fixture,
+        # reported as such. Legs 2/3 fall back to the ceiling so the report still
+        # carries a usable number, flagged `target_reachable: false`.
+        logger.warning(f'DA+PI covers {ceiling:.4f} < target {target} at gamma '
+                       f'{gamma:.6g}: no epsilon_iv or epsilon can reach the target, '
+                       'since both constraints only shrink DA+PI.')
         warnings.append(
-            f'DA+PI coverage {ceiling:.4f} < target {target} at the PI-selected gamma '
-            f'{gamma:.6g}. Legs 2/3 selected against the ceiling. DA+PI reaches the '
-            f'target at gamma ' + (f'{gamma_for_da_pi:.6g}.' if gamma_for_da_pi
-                                   else f'no gamma <= {GAMMA_BRACKET[1]}.'))
+            f'target {target} is UNATTAINABLE for DA+PI_IV and PI_INV at gamma '
+            f'{gamma:.6g}: DA+PI itself covers {ceiling:.4f} and both methods are '
+            'subsets of it. Legs 2/3 report the lowest budget reaching that ceiling '
+            f'({ceiling:.4f}) instead, marked target_reachable=false. Raise the '
+            'target-coverage input or revisit the fixture; do NOT re-select gamma '
+            'per method.')
+    aim = min(target, ceiling)
 
-    def budget_leg(name, attr, label, at_gamma, aim):
-        model = fitted(name, gamma=at_gamma)
-        floor = model.constraint_floor(model._radius(at_gamma))
+    def budget_leg(name, attr, label):
+        model = fitted(name, gamma=gamma)
+        floor = model.constraint_floor(model._radius(gamma))
         lo = float(np.sqrt(max(floor, 0.0)) * FLOOR_MARGIN)
         hi = float(np.sqrt(max(floor, 1e-12) * BUDGET_R_HI))
-        logger.info(f'{label}: gamma {at_gamma:.6g}, floor {floor:.6g} (squared) '
-                    f'-> bracket [{lo:.6g}, {hi:.6g}], aim {aim:.4f}')
+        logger.info(f'{label}: floor {floor:.6g} (squared) -> bracket '
+                    f'[{lo:.6g}, {hi:.6g}], aim {aim:.4f}')
 
         def evaluate(value):
             setattr(model, attr, float(value))
-            return probe(model, X_eval, estimand, gamma=at_gamma)
+            return probe(model, X_eval, estimand)
 
         selected = min_knob_for_coverage(evaluate, lo, hi, target=aim,
                                          max_iter=args.max_iter, tol=args.tol)
+        selected['reached'] = selected['reached'] and ceiling >= target
         setattr(model, attr, selected['value'])
         return selected, floor
 
     logger.info('leg 2/3: epsilon_iv on DA+PI_IV')
-    iv_sel, iv_floor = budget_leg('DA+PI_IV', 'epsilon_iv', 'leg 2', gamma, effective)
+    iv_sel, iv_floor = budget_leg('DA+PI_IV', 'epsilon_iv', 'leg 2')
 
     logger.info('leg 3/3: epsilon on PI_INV')
-    inv_sel, inv_floor = budget_leg('PI_INV', 'epsilon', 'leg 3', gamma, effective)
+    inv_sel, inv_floor = budget_leg('PI_INV', 'epsilon', 'leg 3')
 
     epsilon, epsilon_iv = inv_sel['value'], iv_sel['value']
-
-    # ------------------------------------------- the legs the directive actually wants
-    # "minimum epsilon_iv achieving the target on DA+PI_IV" has no answer at a gamma
-    # where DA+PI itself cannot reach it. Re-run both legs where they ARE answerable
-    # and report alongside, so the user picks rather than the script deciding.
-    lifted = None
-    if gamma_for_da_pi is not None:
-        logger.info(f'legs 2/3 again at gamma {gamma_for_da_pi:.6g}, where DA+PI '
-                    'clears the target')
-        lift_iv, lift_iv_floor = budget_leg('DA+PI_IV', 'epsilon_iv', 'leg 2b',
-                                            gamma_for_da_pi, target)
-        lift_inv, lift_inv_floor = budget_leg('PI_INV', 'epsilon', 'leg 3b',
-                                              gamma_for_da_pi, target)
-        da_pi_lift = probe(da_pi, X_eval, estimand, gamma=gamma_for_da_pi)
-        lifted = {
-            'gamma': gamma_for_da_pi,
-            'DA+PI': {'coverage': da_pi_lift.coverage,
-                      'mean_width': da_pi_lift.interval_width},
-            'epsilon_iv': leg_report(lift_iv, floor=lift_iv_floor,
-                                     reference_width=da_pi_lift.interval_width,
-                                     ceiling=da_pi_lift.coverage),
-            'epsilon': leg_report(lift_inv, floor=lift_inv_floor,
-                                  reference_width=da_pi_lift.interval_width,
-                                  ceiling=da_pi_lift.coverage),
-            'config_patch': {'gamma': gamma_for_da_pi,
-                             'epsilon': lift_inv['value'],
-                             'epsilon_iv': lift_iv['value']},
-        }
 
     # ------------------------------------- intersections: NOT bounded by the legs above
     # PI & DA+PI_IV can be empty when neither branch is, so marginal selection on
@@ -303,11 +287,6 @@ def main(args):
         flag_inert(f'{label} = {selected["value"]:.6g}',
                    selected['record'].interval_width, da_pi_record.interval_width)
 
-    if lifted is not None:              # the lifted legs need the same check
-        for label in ('epsilon_iv', 'epsilon'):
-            flag_inert(f'{label} = {lifted[label]["value"]:.6g}',
-                       lifted[label]['mean_width'],
-                       lifted['DA+PI']['mean_width'], ' at the lifted gamma')
 
     intersections = {}
     for name in ('PI&DA+PI', 'PI&DA+PI_IV'):
@@ -374,11 +353,9 @@ def main(args):
         'reference': {
             'PI': {'coverage': gamma_sel['record'].coverage,
                    'mean_width': gamma_sel['record'].interval_width},
+            # at the SAME fixed gamma; the ceiling legs 2/3 inherit
             'DA+PI': {'coverage': da_pi_record.coverage,
                       'mean_width': da_pi_record.interval_width},
-            # what DA+PI would need to lift the ceiling legs 2/3 inherit; null when
-            # the ceiling already clears the target
-            'gamma_for_DA_PI_at_target': gamma_for_da_pi,
         },
         'selected': {
             'gamma': leg_report(gamma_sel),
@@ -390,10 +367,9 @@ def main(args):
                                   ceiling=ceiling, target_reachable=ceiling >= target),
         },
         'intersections_at_selected': intersections,
-        # the directive's answer: gamma from baseline PI, budgets against whatever
-        # ceiling that gamma leaves. Prefer `selected_at_lifted_gamma` when present.
+        # THE deliverable: one gamma, fixed by leg 1, and the two budgets selected
+        # against it. Paste verbatim into config.yaml::do_mnist.
         'config_patch': {'gamma': gamma, 'epsilon': epsilon, 'epsilon_iv': epsilon_iv},
-        'selected_at_lifted_gamma': lifted,
         'warnings': warnings,
     }
 
