@@ -16,9 +16,29 @@ under SOURCE's own `.venv`, then `--check` under `s4cb`.
 | A6-A8, A11-A14 | `a6_a14_pipeline.py` | perf fairness, status, JAX≡FD, config, recipe, cost, memory |
 | A9 | `a6_a14_pipeline.py --full` | the estimand is the CAUSAL one (needs 1.2M draws) |
 | A10 | `a10_partial_r2_regression.py` | `PartialR2` unchanged by the `BoundedSA` hoist |
+| A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
+| A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
+
+## Budget selection
+
+`select_domnist_budgets.py` picks `gamma`, `epsilon` and `epsilon_iv` by POPULATION
+coverage and writes `artifacts/domnist-budget_report.json`. Run it once, read the
+report, hand-copy the constants into `config.yaml` — the pipeline never calls it.
+do-MNIST needs it because `sem.solution` raises: `h_*` is a frozen CNN and is not in
+the CopSens candidate class, so no oracle quantity certifies membership.
+
+```bash
+python scripts/select_domnist_budgets.py            # 1.2M draws, 10k eval, hours
+python scripts/select_domnist_budgets.py --smoke    # 60k / 6k / 2k, minutes
+python scripts/a24_budget_selection.py artifacts/domnist-budget_report_smoke.json
+```
+
+Budgets are conditional on every setting the report records (`pad`, `calibrate`,
+`n_pi`, `net`, ...). Change one and they are stale. Read `warnings[]` first: it flags
+an inert budget and a `DA+PI` ceiling below target.
 
 ## Two-stage gates
 

@@ -195,6 +195,7 @@ class CopSensPI(BoundedSA):
         # clipy clips to what the DATA says, not to [0, 1]
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
 
+        self._floor_cache = {}          # keyed on radius; a refit invalidates it
         self._precompute(X, y, **kwargs)
         return self
 
@@ -252,7 +253,19 @@ class CopSensPI(BoundedSA):
     def constraint_floor(self, radius, n_starts=FLOOR_STARTS):
         """min over the ball of the extra constraint: the lower limit any budget must
         clear. Solved with the SAME backend as the bounds -- it GATES their NaN
-        return, so a different optimiser here invites disagreement."""
+        return, so a different optimiser here invites disagreement.
+
+        Cached on radius: it depends on the ball and the fitted latent model, never
+        on the budget, but `_prepare` asks for it on EVERY predict. Budget sweeps
+        (scripts/select_domnist_budgets.py) would otherwise pay 6 SLSQP solves a probe.
+        """
+        key = (float(radius), int(n_starts))
+        cached = getattr(self, '_floor_cache', None)
+        if cached is None:
+            cached = self._floor_cache = {}
+        if key in cached:
+            return cached[key]
+
         _, con_vg = _build_terms(self, radius)
         cache = _Cached(con_vg) if con_vg is not None else None
         fun = cache.val if cache is not None else (lambda v: self._con_v(v, radius))
@@ -269,6 +282,7 @@ class CopSensPI(BoundedSA):
                               options={'maxiter': MAXITER, 'ftol': FTOL})
             if result.success and result.x @ result.x <= 1 + 1e-6:
                 best = min(best, float(result.fun))
+        cached[key] = best
         return best
 
     def _starts(self, mu_q, n_extra=N_EXTRA_STARTS):
