@@ -20,8 +20,9 @@ from src.experiments.utils.plotting import (
 )
 from src.experiments.configs import (
     PARAM_SPECS, METRIC_SPECS, EPS_TOL, ANNOTATE_SWEEP_PLOT,
-    SCATTER_SE_CROSSHAIRS,
+    SCATTER_SE_CROSSHAIRS, FLOOR_GUARD_R,
 )
+from src.methods.sensitivity_models import constraint_floor
 from src.experiments.utils.constants import (
     SUBDIR_QUERY, SUBDIR_SWEEP, SUBDIR_PERF,
 )
@@ -239,13 +240,18 @@ class ParamSweepRunner(BaseExperimentRunner):
         return self._finite(self.get_oracle(experiment_index).gamma_star,
                             self.default_gamma, 'gamma*')
 
-    def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0,
+                    data=None) -> float:
         """
         Assumed invariance error: oracle eps* = ||W|| over the full augmentation,
         just large enough to admit h_* in PI_INV, off the knife edge.
+
+        Floor-guarded (see `_floor_guard`): the oracle quantity is the budget, but
+        never below what the constraint can actually attain on this ball.
         """
-        return self._finite(self.get_oracle(experiment_index).epsilon_star,
-                            self.default_epsilon, 'eps*') + EPS_TOL
+        budget = self._finite(self.get_oracle(experiment_index).epsilon_star,
+                              self.default_epsilon, 'eps*') + EPS_TOL
+        return self._floor_guard(budget, data, 'inv', experiment_index, 'epsilon')
 
     def _finite(self, value, fallback, name: str) -> float:
         if value is None or not np.isfinite(value):
@@ -253,12 +259,61 @@ class ParamSweepRunner(BaseExperimentRunner):
             return float(fallback)
         return float(value)
 
-    def fit_epsilon_iv(self, experiment_index: int) -> Optional[float]:
-        """IV budget for this experiment: oracle eps_iv_star, off the knife edge."""
+    def _floor_guard(self, budget, data, kind: str, experiment_index: int,
+                     label: str) -> float:
+        """Rescue a budget that is INFEASIBLE, and only such a budget.
+
+        A budget under the constraint's own attainable floor is not a tighter
+        bound, it is NO bound: `_prepare` returns all-INFEASIBLE and the method
+        drops out of the sweep entirely. Measured on the simulation trS grid, the
+        oracle IV budget (EPS_TOL, 0.0039) is below the floor at 5 of 12 steps.
+
+        The trigger is `budget^2 < floor`, i.e. actual infeasibility -- NOT
+        `budget^2 < FLOOR_GUARD_R * floor`. Those differ: a budget in
+        `[sqrt(floor), sqrt(r*floor))` is feasible and doing its job, and an
+        unconditional lower bound would loosen it for nothing. Measured: on
+        optical at n=200 the INV floor is 0.0189 against an oracle eps of 0.2477,
+        already feasible, and the unconditional form moved it to 0.4123.
+
+        Once a budget IS infeasible the oracle value carries no information about
+        where to put it, so it goes to `sqrt(FLOOR_GUARD_R * floor)` -- far enough
+        off the knife edge to cover (`configs.py` has the calibration).
+        """
+        if data is None:
+            return budget
+        design = getattr(data, 'X' if kind == 'inv' else 'GX', None)
+        extra = ({'GX': getattr(data, 'GX', None)} if kind == 'inv'
+                 else {'Z': getattr(data, 'G', None)})
+        if design is None or next(iter(extra.values())) is None:
+            return budget
+        try:
+            floor = constraint_floor(
+                design, data.y, self.fit_gamma(experiment_index), kind=kind,
+                calibrate=self.calibrate, **extra)
+        except Exception as error:              # never let a diagnostic break a run
+            logger.warning(f'{label}: constraint floor unavailable ({error}); '
+                           'budget left at the oracle value.')
+            return budget
+
+        if budget ** 2 >= floor:            # feasible: leave it exactly as it was
+            return budget
+
+        guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
+        logger.info(
+            f'{label}: oracle {budget:.6g} is INFEASIBLE (budget^2 {budget**2:.4g} '
+            f'< floor {floor:.4g}); raising to {guarded:.6g} = sqrt({FLOOR_GUARD_R} '
+            f'* floor). Every query would have come back INFEASIBLE.')
+        return guarded
+
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0,
+                       data=None) -> Optional[float]:
+        """IV budget for this experiment: oracle eps_iv_star, off the knife edge,
+        floor-guarded exactly as `fit_epsilon` is."""
         eps_iv_star = getattr(self.get_oracle(experiment_index), 'eps_iv_star', None)
         if eps_iv_star is None or not np.isfinite(eps_iv_star):
             return None
-        return float(eps_iv_star) + EPS_TOL
+        return self._floor_guard(float(eps_iv_star) + EPS_TOL, data, 'iv',
+                                 experiment_index, 'epsilon_iv')
 
     def method_kwargs(self, experiment_index: int) -> Dict[str, Any]:
         """Extra builder kwargs. Override when methods need per-experiment state
@@ -268,11 +323,11 @@ class ParamSweepRunner(BaseExperimentRunner):
     def build_models(self, experiment_index: int, step_index: int, data) -> Dict[str, Any]:
         """Fresh, fitted models at this experiment's budgets."""
         gamma = self.fit_gamma(experiment_index)
-        epsilon = self.fit_epsilon(experiment_index, step_index)
+        epsilon = self.fit_epsilon(experiment_index, step_index, data)
         builders = (
             self.method_factory(
                 gamma=gamma, epsilon=epsilon,
-                epsilon_iv=self.fit_epsilon_iv(experiment_index),
+                epsilon_iv=self.fit_epsilon_iv(experiment_index, step_index, data),
                 **self.method_kwargs(experiment_index),
             )
             if self.method_factory else self.methods

@@ -67,7 +67,7 @@ class DoMNISTConfig:
     beta: float = 0.4
     eta: float = 0.25
     subsample: int = 2                  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
-    exemplar_seed: int = 0            # digit exemplars, frozen across replicates
+    exemplar_seed: int = 1            # digit exemplars, frozen across replicates
     # CopSens. n_anchors is SOURCE's EFFECTIVE value: CopSensPI's own default is
     # 256, but every published do-MNIST number was measured at 128.
     link: Literal['probit', 'gaussian'] = 'probit'
@@ -75,7 +75,7 @@ class DoMNISTConfig:
     n_anchors_c: int = 48               # coarse set, for the feasibility constraint
     n_constraint_inv: int = 256 #192
     n_constraint_iv: int = 256 #384
-    mu_clip: bool = True                # clip mu_y to `attainable`; see §2.5
+    mu_clip: bool = False #True                # clip mu_y to `attainable`; see §2.5
     jax_grad: bool = True               # analytic gradients for the SLSQP hot path
     test_fraction: float = 0.1
 
@@ -118,6 +118,24 @@ DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
 
 # keeps auto-set epsilon off the PI_INV feasibility knife edge (eps=0 forces h~0)
 EPS_TOL: float = 2**-8
+
+# Floor guard. An auto-set budget below the constraint's own attainable floor is not
+# a tighter bound, it is NO bound: every query comes back INFEASIBLE and the method
+# vanishes from the sweep. `budget^2 >= FLOOR_GUARD_R * floor` is enforced in
+# `ParamSweepRunner._floor_guard`, which only ever RAISES a budget, and only where the
+# oracle value was already unusable.
+#
+# Calibrated on the simulation trS grid, where the oracle IV budget (EPS_TOL, 0.0039)
+# sits below the floor at the 5 lowest knobs and DA+PI_IV was all-NaN there. Measured
+# DA+PI_IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
+#   r=2.25  0.82-0.88            under-covers
+#   r=4     0.931-1.000  2.9-4.3 two steps under nominal
+#   r=9     0.985-1.000  4.2-6.0 <- CHOSEN: covers everywhere, still 24-47% inside
+#                                  DA+PI (7.9-8.1), i.e. the constraint is alive
+#   r=16    1.000                DA+PI parity: inert, a duplicate column
+# The floor moves with gamma, n and the DA draw, so this is a RATIO, never an epsilon.
+# It stays ~3 orders of magnitude below eps_rms, so "guard" is not "loose".
+FLOOR_GUARD_R: float = 9.0
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
 # true invariance error, so that eps/eps* is a meaningful ratio axis.

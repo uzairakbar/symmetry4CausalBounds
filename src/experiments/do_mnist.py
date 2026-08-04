@@ -196,13 +196,15 @@ class DoMNISTMixin:
         used as-is and gamma_star is recorded unconsumed."""
         return self.default_gamma
 
-    def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0,
+                    data=None) -> float:
         """A MODELLING ASSUMPTION, not estimable. The oracle eps* here measures the
         TARGET NET's approximation error, not h_*'s invariance defect -- which is 0
         for these ops, since none of them can change E[Y|do(x)]."""
         return self.default_epsilon
 
-    def fit_epsilon_iv(self, experiment_index: int) -> Optional[float]:
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0,
+                       data=None) -> Optional[float]:
         """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either."""
         return self.default_epsilon
 

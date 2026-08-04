@@ -18,6 +18,7 @@ under SOURCE's own `.venv`, then `--check` under `s4cb`.
 | A10 | `a10_partial_r2_regression.py` | `PartialR2` unchanged by the `BoundedSA` hoist |
 | A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
 | A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
+| A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.

@@ -12,7 +12,9 @@ from src.experiments.base import (
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k, rho_hat
-from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP
+from src.experiments.configs import (EPS_TOL, ROBUSTNESS_EPSILON_TRUE,
+                                    SPECTRUM_KEEP, FLOOR_GUARD_R)
+from src.methods.sensitivity_models import constraint_floor
 from src.oracle import (
     calibrate_da_epsilon, compute_oracle_parameters, epsilon_star,
     thm1_gamma_min, preserve_rng,
@@ -78,17 +80,13 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
-        # The IV budget is oracle-derived, so methods can only be built once the
-        # oracle exists. gamma/epsilon stay at the yaml defaults here (PLAN 7:
-        # the query sweep never auto-sets them).
-        if method_factory is not None:
-            self.methods = method_factory(
-                gamma=default_gamma,
-                epsilon=default_epsilon,
-                epsilon_iv=self.epsilon_iv,
-            )
+        self.default_gamma = default_gamma
 
-        # Load and transform data
+        # Data FIRST, methods second. The IV budget is oracle-derived AND
+        # floor-guarded, and the floor is a property of (GX, G, gamma), so it does
+        # not exist until the draw does. Building methods first would silently skip
+        # the guard. (`DoMNISTQuerySweep` passes method_factory=None and rebuilds
+        # after its nets exist; that still works.)
         self.X_raw, self.GX_raw, self.y, self.G = self._load_data()
 
         # Apply polynomial transformation if provided
@@ -99,6 +97,15 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             self.X = self.X_raw
             self.GX = self.GX_raw
 
+        # gamma/epsilon stay at the yaml defaults here (PLAN 7: the query sweep
+        # never auto-sets them).
+        if method_factory is not None:
+            self.methods = method_factory(
+                gamma=default_gamma,
+                epsilon=default_epsilon,
+                epsilon_iv=self.epsilon_iv,
+            )
+
     def _load_data(self):
         """(X_raw, GX_raw, y, G). Override when the draw needs its own protocol."""
         X_raw, y = self.sem(N=self.n_samples)
@@ -107,12 +114,30 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv(self) -> float:
-        """Oracle IV budget, off the knife edge (same guard as PI_INV)."""
+        """Oracle IV budget, off the knife edge (same guard as PI_INV), then raised
+        to the constraint's own floor if it lands under it (`FLOOR_GUARD_R`)."""
         budget = getattr(self.oracle, 'eps_iv_star', None)
         if budget is None or not np.isfinite(budget):
             logger.warning('eps_iv_star unavailable; IV budget falls back to EPS_TOL.')
             budget = 0.0
-        return float(budget) + EPS_TOL
+        budget = float(budget) + EPS_TOL
+
+        if getattr(self, 'G', None) is None or np.size(self.G) == 0:
+            return budget
+        try:
+            floor = constraint_floor(self.GX, self.y, self.default_gamma, kind='iv',
+                                     Z=self.G, calibrate=self.calibrate)
+        except Exception as error:
+            logger.warning(f'epsilon_iv: constraint floor unavailable ({error}).')
+            return budget
+
+        if budget ** 2 >= floor:            # feasible: leave it exactly as it was
+            return budget
+
+        guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
+        logger.info(f'epsilon_iv: oracle {budget:.6g} is INFEASIBLE (floor '
+                    f'{floor:.4g}); raising to {guarded:.6g}.')
+        return guarded
 
     @property
     def _features(self) -> Optional[Callable]:
@@ -387,10 +412,14 @@ class ExpansionStrategy(GenericParamSweep):
 
         return data
 
-    def fit_epsilon(self, experiment_index: int, step_index: int = 0) -> float:
-        return self._step_epsilon.get(
-            experiment_index, super().fit_epsilon(experiment_index, step_index)
-        )
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0,
+                    data=None) -> float:
+        per_step = self._step_epsilon.get(experiment_index)
+        if per_step is None:
+            return super().fit_epsilon(experiment_index, step_index, data)
+        # the knob drives eps*, but it can still land under the floor -- guard it
+        # exactly as the base does, or this sweep alone bypasses the guard
+        return self._floor_guard(per_step, data, 'inv', experiment_index, 'epsilon')
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:
         """Mean over experiments of the measured expansion."""

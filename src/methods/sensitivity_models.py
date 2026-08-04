@@ -280,6 +280,119 @@ class PartialR2(BoundedSA):
         return lower, upper, max(status_lo, status_hi)
 
 
+def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
+    """min ||B u - c|| subject to ||u|| <= delta. Exact.
+
+    The least-squares trust-region subproblem. Unconstrained solution first; if it
+    is outside the ball, the optimum sits ON the boundary at the unique lambda >= 0
+    solving ||u(lambda)|| = delta, and ||u(lambda)|| is strictly decreasing in
+    lambda, so a bisection lands on it to machine precision.
+    """
+    U, s, Vt = np.linalg.svd(B, full_matrices=False)
+    Utc = U.T @ c
+
+    nonzero = s > max(s.max(initial=0.0), 1.0) * 1e-14
+    coefficients = np.zeros_like(s)
+    coefficients[nonzero] = Utc[nonzero] / s[nonzero]
+    if np.linalg.norm(coefficients) <= delta:            # interior
+        return float(np.linalg.norm(B @ (Vt.T @ coefficients) - c))
+
+    def norm_at(lam):
+        return float(np.linalg.norm(s * Utc / (s ** 2 + lam)))
+
+    lo, hi = 0.0, 1.0
+    while norm_at(hi) > delta:                           # bracket the root
+        hi *= 2.0
+        if hi > 1e18:
+            break
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        if norm_at(mid) > delta:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < tol * max(hi, 1.0):
+            break
+    u = Vt.T @ (s * Utc / (s ** 2 + 0.5 * (lo + hi)))
+    return float(np.linalg.norm(B @ u - c))
+
+
+def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False):
+    """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
+
+    Returned SQUARED, matching `CopSensPI._budget()` (`copsens.py:428,491`), so the
+    smallest admissible budget is `sqrt(floor)` on BOTH backends even though the
+    partial-r2 constraint is natively a norm. A budget below it makes every query
+    INFEASIBLE -- that is what this exists to prevent.
+
+    Closed form, not a solve: the ball is Euclidean in `R(h - h_erm)` and the
+    constraint is a distance, so this is a least-squares trust-region subproblem.
+    Cost is one triangular solve plus one SVD at M <= 54.
+
+    Args:
+        design: the matrix the METHOD fits on -- X for `inv`, GX for `iv`
+        y: outcomes, paired with `design`
+        gamma: the ball this budget will be used with
+        kind: 'inv' (PI_INV) or 'iv' (DA+PI_IV)
+        GX: augmented design, required for `inv`
+        Z: instrument, required for `iv`
+        calibrate: scale the radius by sigma-hat, as the fitted model does
+
+    Returns:
+        floor in squared budget units
+    """
+    design = np.asarray(design)
+    N, M = design.shape
+
+    h_erm = OLS().fit(design, y).solution.flatten()
+    residuals = np.asarray(y).flatten() - design @ h_erm
+    scale = float(np.sqrt(np.mean(residuals ** 2))) if calibrate else 1.0
+    delta = np.sqrt(N) * scale * np.sqrt(max(float(gamma), 0.0))
+
+    if kind == 'inv':
+        if GX is None:
+            raise ValueError("constraint_floor(kind='inv') needs GX")
+        A, b = inv_constraint_terms(design, np.asarray(GX))
+    elif kind == 'iv':
+        if Z is None:
+            raise ValueError("constraint_floor(kind='iv') needs Z")
+        A, b = iv_constraint_terms(design, y, np.asarray(Z))
+    else:
+        raise ValueError(f'unknown constraint kind {kind!r}')
+
+    # u = R(h - h_erm) turns the ball into ||u|| <= delta
+    _, R = np.linalg.qr(design)
+    B = np.linalg.lstsq(R.T, A.T, rcond=None)[0].T
+    smallest = _trust_region_min(B, b - A @ h_erm, delta)
+    return float((smallest / np.sqrt(N)) ** 2)
+
+
+def _jittered(A, M):
+    """Stack the jitter block the SOCP needs to stay strictly feasible."""
+    jitter_strength = 1e-6 * np.mean(np.abs(A))
+    if jitter_strength < 1e-9:
+        jitter_strength = 1e-6
+    return np.vstack([A, np.sqrt(jitter_strength) * np.eye(M)])
+
+
+def inv_constraint_terms(X, GX):
+    """(A, b) with the INV constraint as || A h - b || <= sqrt(N) eps. b = 0."""
+    # || (GX - X) h ||: QR compress (N x M -> M x M), then jitter
+    _, R = np.linalg.qr(GX - X)
+    A = _jittered(R, X.shape[1])
+    return A, np.zeros(len(A))
+
+
+def iv_constraint_terms(X, y, Z):
+    """(A, b) with the IV constraint as || A h - b || <= sqrt(N) eps_iv."""
+    Q_matrix, _ = np.linalg.qr(Z.reshape(len(Z), -1))
+    Z_proj = Q_matrix.T @ X
+    y_proj = Q_matrix.T @ y.flatten()
+
+    M = X.shape[1]
+    return _jittered(Z_proj, M), np.concatenate([y_proj, np.zeros(M)])
+
+
 class InvarianceConstrainedPartialR2(PartialR2):
     """PI + explicit invariance-error constraint (§3.1): E_inv(h) <= epsilon^2."""
 
@@ -294,16 +407,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
     def _precompute_matrices(self, X, y, GX=None, **kwargs):
         if GX is None:
             GX = X
-
-        # || (GX - X) h ||: QR compress (N x M -> M x M), then jitter
-        _, R = np.linalg.qr(GX - X)
-
-        M = X.shape[1]
-        jitter_strength = 1e-6 * np.mean(np.abs(R))
-        if jitter_strength < 1e-9:
-            jitter_strength = 1e-6
-
-        self.R_diff = np.vstack([R, np.sqrt(jitter_strength) * np.eye(M)])
+        self.R_diff, _ = inv_constraint_terms(X, GX)
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
@@ -363,21 +467,7 @@ class InstrumentalVariablePartialR2(PartialR2):
                 'pass the oracle `eps_iv_star` (+ EPS_TOL).'
             )
 
-        Z = Z.reshape(len(Z), -1)
-        Q_matrix, _ = np.linalg.qr(Z)
-
-        Z_proj = Q_matrix.T @ X
-        y_proj = Q_matrix.T @ y.flatten()
-
-        M = X.shape[1]
-        jitter_strength = 1e-6 * np.mean(np.abs(Z_proj))
-        if jitter_strength < 1e-9:
-            jitter_strength = 1e-6
-
-        jitter_matrix = np.sqrt(jitter_strength) * np.eye(M)
-
-        self.Z_projector_R = np.vstack([Z_proj, jitter_matrix])
-        self.y_residual_base = np.concatenate([y_proj, np.zeros(M)])
+        self.Z_projector_R, self.y_residual_base = iv_constraint_terms(X, y, Z)
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
