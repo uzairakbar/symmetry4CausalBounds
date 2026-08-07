@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from loguru import logger
 from numpy.typing import NDArray
 from typing import Dict, List, Tuple, Optional, Literal
 
@@ -13,9 +14,150 @@ from .constants import (
     FS_TICK, FS_LABEL, PLOT_DPI, PLOT_FORMAT, PAGE_WIDTH,
     RC_PARAMS, TEX_MAPPER, COLOR_MAP, ALPHA_MAP,
     POINT_ESTIMATE_STYLE, PARTIAL_IDENTIFICATION_STYLE, PANEL_CONFIGS,
+    PLOT_CONFIGS,
     SUBDIR_QUERY, SUBDIR_SWEEP, SUBDIR_SCATTER, SUBDIR_PERF,
 )
 from .data_operations import bootstrap, save
+
+PlotScale = Literal['linear', 'log', 'symlog', 'asinh']
+
+# clip the top tail of the pooled means. Errors/widths: small is the signal, large is
+# the runaway. A symmetric floor crops the TIGHTEST method, which is the result.
+CLIP_PERCENTILE: float = 98.0
+# asinh knee, as a fraction of the upper limit. PANEL_CONFIGS' own ylim/linear_width.
+LINEAR_WIDTH_RATIO: float = 40.0
+# promote linear -> log past this dynamic range. Fires on nothing today; a guard.
+LOG_PROMOTE_RATIO: float = 100.0
+
+
+def _plot_config(experiment: str, fname: Optional[str]) -> Dict[str, object]:
+    """PLOT_CONFIGS['*'] under PLOT_CONFIGS[experiment], key by key."""
+    if not fname:
+        return {}
+    return {**PLOT_CONFIGS.get('*', {}).get(fname, {}),
+            **PLOT_CONFIGS.get(experiment, {}).get(fname, {})}
+
+
+def _finite(*arrays) -> NDArray:
+    """Pool the finite values. Empty is a valid answer; every caller handles it."""
+    if not arrays:
+        return np.array([], dtype=float)
+    values = np.concatenate([np.asarray(a, dtype=float).ravel() for a in arrays])
+    return values[np.isfinite(values)]
+
+
+def _limits(series: List[NDArray]) -> Optional[Tuple[float, float]]:
+    """
+    Clip the top tail of the pooled means, then guarantee no series goes blank.
+
+    Point estimates only -- CI bands and SE crosshairs are deliberately excluded and
+    left to clip against the frame.
+    """
+    pooled = _finite(*series)
+    if not len(pooled):
+        return None
+
+    lo, hi = float(pooled.min()), float(np.percentile(pooled, CLIP_PERCENTILE))
+    # a series may lose points, it can never vanish
+    for values in series:
+        finite = _finite(values)
+        if len(finite):
+            hi = max(hi, float(np.median(finite)))
+    # flat: no range to set, let matplotlib expand around it
+    return (lo, hi) if hi > lo else None
+
+
+def _scale_kwargs(scale: str, cfg: Dict[str, object],
+                  upper: Optional[float] = None) -> Dict[str, float]:
+    """asinh/symlog knee. Defaults to `upper / 40` -- at 1.0 an asinh axis over data
+    at ~1e-3 is asinh in name and linear in fact."""
+    if scale not in ('asinh', 'symlog'):
+        return {}
+
+    key = 'linear_width' if scale == 'asinh' else 'linthresh'
+    default = 1.0 if scale == 'asinh' else 0.1
+    knee = cfg.get(key)
+    if knee is None and upper is not None and np.isfinite(upper) and upper > 0:
+        knee = upper / LINEAR_WIDTH_RATIO
+    return {key: float(knee) if knee and knee > 0 else default}
+
+
+def _resolve_scale(scale: PlotScale, values: NDArray, cfg: Dict[str, object],
+                   axis: str, limits: Optional[Tuple[float, float]] = None,
+                   promote: bool = True) -> Tuple[PlotScale, Dict[str, float]]:
+    """cfg > the caller's spec > auto-promote, then one safety clamp over the winner."""
+    scale = cfg.get(f'{axis}scale', scale)
+    finite = _finite(values)
+
+    if promote and scale == 'linear' and len(finite) and np.all(finite > 0):
+        lo, hi = np.percentile(finite, [0.5, 99.5])
+        if lo > 0 and hi / lo >= LOG_PROMOTE_RATIO:
+            scale = 'log'
+
+    # never crash, never blank: a hand-set log over signed data becomes asinh, which
+    # still shows every point, rather than linear, which flattens it
+    if scale == 'log' and len(finite) and np.any(finite <= 0):
+        logger.warning(f'{axis}scale=log with non-positive data; using asinh.')
+        scale = 'asinh'
+    elif scale == 'log' and not len(finite):
+        scale = 'linear'
+
+    if scale not in ('asinh', 'symlog'):
+        for key in ('linear_width', 'linthresh'):
+            if key in cfg:
+                logger.warning(f'{key} ignored: {axis}scale is {scale!r}.')
+
+    return scale, _scale_kwargs(scale, cfg, limits[1] if limits else None)
+
+
+def _pad(axis, lo: float, hi: float, frac: float = 0.05) -> Tuple[float, float]:
+    """Pad in the axis's own transformed space -- one expression for every scale."""
+    transform = axis.get_transform()
+    try:
+        t_lo, t_hi = transform.transform([lo, hi])
+        if not (np.isfinite(t_lo) and np.isfinite(t_hi)) or t_hi <= t_lo:
+            return lo, hi
+        margin = frac * (t_hi - t_lo)
+        padded = transform.inverted().transform([t_lo - margin, t_hi + margin])
+    except (ValueError, FloatingPointError):
+        return lo, hi
+    return tuple(padded) if np.all(np.isfinite(padded)) else (lo, hi)
+
+
+def _apply_cfg_limits(limits: Optional[Tuple[float, float]],
+                      cfg_limits, where: str) -> Optional[Tuple[float, float]]:
+    """Element-wise override; None on either end keeps the computed edge."""
+    if cfg_limits is None:
+        return limits
+    lo, hi = cfg_limits
+    if limits is not None:
+        lo = limits[0] if lo is None else lo
+        hi = limits[1] if hi is None else hi
+    if lo is None or hi is None:
+        return limits
+    if lo >= hi:
+        raise ValueError(f'{where}: lo must be < hi, got {(lo, hi)}.')
+    return float(lo), float(hi)
+
+
+def _rescale(ax, cfg: Dict[str, object], x_series: List[NDArray],
+             y_series: List[NDArray], xscale: PlotScale, yscale: PlotScale,
+             pad_x: bool = True, promote_x: bool = True):
+    """Limits -> cfg -> scale -> pad -> set. Limits never depend on the scale."""
+    x_limits = _apply_cfg_limits(_limits(x_series), cfg.get('xlim'), 'xlim')
+    y_limits = _apply_cfg_limits(_limits(y_series), cfg.get('ylim'), 'ylim')
+
+    xscale, x_kwargs = _resolve_scale(
+        xscale, _finite(*x_series), cfg, 'x', x_limits, promote=promote_x)
+    yscale, y_kwargs = _resolve_scale(
+        yscale, _finite(*y_series), cfg, 'y', y_limits)
+    ax.set_xscale(xscale, **x_kwargs)
+    ax.set_yscale(yscale, **y_kwargs)
+
+    if x_limits:
+        ax.set_xlim(_pad(ax.xaxis, *x_limits) if pad_x else x_limits)
+    if y_limits:
+        ax.set_ylim(_pad(ax.yaxis, *y_limits))
 
 
 def _get_method_color(method_name: str) -> str:
@@ -50,8 +192,8 @@ def create_sweep_plot(
     y_results: Dict[str, NDArray],
     xlabel: str,
     ylabel: str = 'nCER',
-    xscale: Literal['linear', 'log'] = 'linear',
-    yscale: Literal['linear', 'log'] = 'linear',
+    xscale: PlotScale = 'linear',
+    yscale: PlotScale = 'linear',
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     legend_items: Optional[List[str]] = None,
@@ -70,8 +212,16 @@ def create_sweep_plot(
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold, Thm. 1 threshold).
+
+    Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
+    the mean lines -- see _rescale.
     """
     try:
+        # derived HERE, not inside `if savefig`, so the config id and the filename
+        # cannot drift apart
+        fname = fname or ''.join(c for c in xlabel if c.isalnum())
+        cfg = _plot_config(experiment, fname)
+
         # x can be MEASURED rather than a designed grid (trS plots the observed
         # rho tr(S)/k), so it is not guaranteed ascending. matplotlib draws
         # segments in array order, so an out-of-order x makes the line double
@@ -93,10 +243,10 @@ def create_sweep_plot(
         colors = sns.color_palette()
         fig = plt.figure()
         
-        # Track global min/max for scaling
-        global_min = np.inf
-        global_max = -np.inf
-        
+        # the mean lines, which alone decide the limits: the CI band is contextual
+        # and is left to clip against the frame
+        all_means = []
+
         all_labels = []
         plot_handles = []
         
@@ -114,11 +264,7 @@ def create_sweep_plot(
             if np.all(np.isnan(mean_error)):
                 continue
 
-            # Update global bounds based on valid data only
-            valid_indices = ~np.isnan(mean_error)
-            if np.any(valid_indices):
-                global_min = min(global_min, np.min(mean_error[valid_indices]))
-                global_max = max(global_max, np.max(mean_error[valid_indices]))
+            all_means.append(mean_error)
 
             # Labeling
             label = TEX_MAPPER.get(method_name, method_name)
@@ -143,14 +289,23 @@ def create_sweep_plot(
             if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
                 plt.fill_between(x_values, low, high, color=color, alpha=0.2)
         
-        # # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds)
-        # for x in vlines:
-        #     if np.isfinite(x):
-        #         plt.axvline(x, color='0.4', linestyle=':', linewidth=1.0, zorder=0)
-        
+        # Formatting
+        plt.xlabel(xlabel, fontsize=FS_LABEL)
+        plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
+        plt.yticks(fontsize=FS_TICK, color=y_color)
+        plt.xticks(fontsize=FS_TICK)
+
+        # x keeps its exact [min, max]; padding it would visibly widen every sweep.
+        # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
+        # (trS opts out to linear on purpose), not a default to be second-guessed.
+        _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale,
+                 pad_x=False, promote_x=False)
+
         # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds).
         # gamma sweeps append the Thm. 1 ratio last (generic_runner.py).
-        x_lo, x_hi = float(np.min(x_values)), float(np.max(x_values))
+        # AFTER _rescale: gated on the resolved xlim, so a narrowing override cannot
+        # leave the label anchored off-frame. zorder=0 keeps these behind the data.
+        x_lo, x_hi = plt.gca().get_xlim()
         for i, x in enumerate(vlines):
             if not (np.isfinite(x) and x_lo <= x <= x_hi):
                 continue
@@ -161,30 +316,11 @@ def create_sweep_plot(
                         rotation=90, va='center', ha='right',
                         fontsize=FS_TICK * 0.75, color='0.4')
 
-        # Formatting
-        plt.xlabel(xlabel, fontsize=FS_LABEL)
-        plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
-        plt.yticks(fontsize=FS_TICK, color=y_color)
-        plt.xticks(fontsize=FS_TICK)
-        
-        # Robust Limits
-        if len(x_values) > 0:
-             plt.xlim([min(x_values), max(x_values)])
-        
-        # # SAFE Y-LIM CALCULATION
-        # if np.isfinite(global_min) and np.isfinite(global_max):
-        #     if global_max > global_min:
-        #         padding = 0.05 * (global_max - global_min)
-        #         # plt.ylim([global_min - padding, global_max + padding])
-        #         plt.ylim([None, global_max + padding])
-        #     else:
-        #         # Flat line case
-        #         plt.ylim([global_min - 0.1, global_max + 0.1])
-        
-        plt.xscale(xscale)
-        plt.yscale(yscale)
-        
         # Legend
+        if cfg.get('legend') is False:
+            hide_legend = True
+        if isinstance(cfg.get('legend'), (str, tuple)):
+            legend_loc = cfg['legend']
         if not hide_legend and plot_handles:
             # Reconstruct legend based on what actually plotted
             final_handles = []
@@ -211,13 +347,11 @@ def create_sweep_plot(
         plt.show()
         
         if savefig:
-            fname = fname or ''.join(c for c in xlabel if c.isalnum())
             save(fig, f'{fname}_sweep', experiment, format,
                  subdir=SUBDIR_SWEEP, dpi=PLOT_DPI)
 
     except Exception as e:
         # Fallback so one plot failure doesn't kill the whole experiment batch
-        from loguru import logger
         logger.error(f"Failed to plot sweep {fname or xlabel}: {e}")
         import traceback
         logger.error(traceback.format_exc())
@@ -466,12 +600,8 @@ def create_panel_plot(
         ax = axes[row_idx, 0] # Applied via sharey
         
         if 'scale' in cfg:
-            s_type = cfg['scale']
-            s_kwargs = {}
-            if s_type == 'asinh': s_kwargs['linear_width'] = cfg.get('linear_width', 1.0)
-            if s_type == 'symlog': s_kwargs['linthresh'] = cfg.get('linthresh', 0.1)
-            ax.set_yscale(s_type, **s_kwargs)
-            
+            ax.set_yscale(cfg['scale'], **_scale_kwargs(cfg['scale'], cfg))
+
         if 'ylim' in cfg:
             ax.set_ylim(cfg['ylim'])
 
@@ -510,6 +640,8 @@ def create_scatter_plot(
     xlabel: str = '',
     ylabel: str = '',
     param_label: str = '',
+    xscale: PlotScale = 'linear',
+    yscale: PlotScale = 'linear',
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     legend_loc: str | Tuple[float, float] = 'best',
@@ -528,13 +660,20 @@ def create_scatter_plot(
         param_values: the sweep grid, one entry per step
         metric_x, metric_y: metric FIELD names to place on each axis
         crosshairs: draw SE bars (caller gates on n_experiments >= 2)
+
+    Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
+    the mean points -- the SE crosshairs are excluded and clip.
     """
     try:
+        fname = fname or 'scatter'          # config id == filename; see create_sweep_plot
+        cfg = _plot_config(experiment, fname)
+
         plt.rcParams.update(RC_PARAMS)
         sns.set_palette('deep')
         colors = sns.color_palette()
         fig = plt.figure()
 
+        x_means, y_means = [], []
         n_steps = len(param_values)
         # bubble area by rank, so a log-spaced grid still reads evenly
         ranks = np.argsort(np.argsort(np.asarray(param_values, dtype=float)))
@@ -556,6 +695,8 @@ def create_scatter_plot(
             if np.all(np.isnan(mx)) or np.all(np.isnan(my)):
                 continue
 
+            x_means.append(mx)
+            y_means.append(my)
             color = colors[COLOR_MAP[method_name]]
 
             if crosshairs:
@@ -595,7 +736,11 @@ def create_scatter_plot(
         if param_label:
             plt.title(f'annotated by {param_label}', fontsize=FS_TICK)
 
-        if handles:
+        _rescale(plt.gca(), cfg, x_means, y_means, xscale, yscale)
+
+        if isinstance(cfg.get('legend'), (str, tuple)):
+            legend_loc = cfg['legend']
+        if handles and cfg.get('legend') is not False:
             plt.legend(
                 handles=handles, labels=_apply_tex_highlighting(labels, hilight_ours),
                 fontsize=FS_TICK, loc=legend_loc, frameon=True,
@@ -606,11 +751,10 @@ def create_scatter_plot(
         plt.show()
 
         if savefig:
-            save(fig, fname or 'scatter', experiment, format,
+            save(fig, fname, experiment, format,
                  subdir=SUBDIR_SCATTER, dpi=PLOT_DPI)
 
     except Exception as e:
-        from loguru import logger
         logger.error(f'Failed to plot scatter {fname}: {e}')
         import traceback
         logger.error(traceback.format_exc())
@@ -634,12 +778,14 @@ def create_perf_plot(
     fname: str = 'perf',
 ):
     """
-    Per-method reliability and cost, one figure, two stacked panels.
+    Per-method reliability and cost.
 
-    Top: 100%-stacked bars, the 4-way per-query split (mutually exclusive, in
-    precedence order, summing to 100 by construction).
+    Top (`bars`): 100%-stacked bars, the 4-way per-query split (mutually exclusive,
+    in precedence order, summing to 100 by construction). Retired by default --
+    PLOT_CONFIGS['*']['perf']['bars']; the split is still written to perf.pkl.
     Bottom: cost and stability -- wall-clock per query (log) and the across-seed
-    SD of interval width, each on its own axis in its own units.
+    SD of interval width, each on its own axis in its own units. With `bars` off
+    this is the whole figure, both series intact.
 
     Overlaying both on the bars' percent axis was tried first and read as
     clutter: it forced the SD to be rescaled, giving the left axis two
@@ -647,42 +793,53 @@ def create_perf_plot(
     """
     overlay_metrics = list(overlay_metrics or [])
     try:
+        cfg = _plot_config(experiment, fname)
+        bars = bool(cfg.get('bars', True))
+
         plt.rcParams.update(RC_PARAMS)
 
         methods = list(perf_record)
         labels = [TEX_MAPPER.get(m, m) for m in methods]
         positions = np.arange(len(methods))
 
-        if overlay_metrics:
+        if bars and overlay_metrics:
             fig, (ax, ax_cost) = plt.subplots(
                 2, 1, sharex=True, gridspec_kw={'height_ratios': [2.2, 1]}
             )
-        else:
+        elif bars:
             fig, ax = plt.subplots()
             ax_cost = None
+        elif overlay_metrics:
+            fig, ax_cost = plt.subplots()        # the cost panel, promoted
+            ax = None
+        else:
+            logger.warning('perf: bars off and no overlay metrics; nothing to draw.')
+            return
 
         # ------------------------------------------------ reliability (top)
-        rates = np.array([perf_record[m]['rates'] for m in methods], dtype=float) * 100.0
-        bottom = np.zeros(len(methods))
-        bar_handles = []
-        for index, (category, color) in enumerate(
-            zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS)
-        ):
-            container = ax.bar(positions, rates[:, index], bottom=bottom,
-                               color=color, edgecolor='black', linewidth=0.4,
-                               width=0.7, zorder=2)
-            bottom += rates[:, index]
-            bar_handles.append(container)
+        if ax is not None:
+            rates = np.array([perf_record[m]['rates'] for m in methods], dtype=float) * 100.0
+            bottom = np.zeros(len(methods))
+            bar_handles = []
+            for index, (category, color) in enumerate(
+                zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS)
+            ):
+                container = ax.bar(positions, rates[:, index], bottom=bottom,
+                                   color=color, edgecolor='black', linewidth=0.4,
+                                   width=0.7, zorder=2)
+                bottom += rates[:, index]
+                bar_handles.append(container)
 
-        ax.set_ylabel(r'test samples (\%)', fontsize=FS_LABEL)
-        ax.set_ylim(0, 100)
-        ax.tick_params(axis='y', labelsize=FS_TICK)
-        ax.legend(
-            handles=bar_handles, labels=list(PERF_CATEGORY_LABELS),
-            fontsize=FS_TICK * 0.75, loc='lower left', bbox_to_anchor=(0.0, 1.02),
-            ncol=4, frameon=True, edgecolor='black', fancybox=False,
-            handlelength=1.4, columnspacing=1.0,
-        )
+            ax.set_ylabel(r'test samples (\%)', fontsize=FS_LABEL)
+            ax.set_ylim(0, 100)
+            ax.tick_params(axis='y', labelsize=FS_TICK)
+            if cfg.get('legend') is not False:
+                ax.legend(
+                    handles=bar_handles, labels=list(PERF_CATEGORY_LABELS),
+                    fontsize=FS_TICK * 0.75, loc='lower left', bbox_to_anchor=(0.0, 1.02),
+                    ncol=4, frameon=True, edgecolor='black', fancybox=False,
+                    handlelength=1.4, columnspacing=1.0,
+                )
 
         # ------------------------------------------------- cost (bottom)
         axis_for_labels = ax
@@ -697,7 +854,18 @@ def create_perf_plot(
                     positions, seconds, marker='o', linestyle='-',
                     color='#3b3b6d', markersize=5, label='wall clock / query'
                 )[0]
-                ax_cost.set_yscale('log')
+                # x is categorical, so only the cost axis is overridable here.
+                # No top-tail clip: on a per-method cost line the slowest method IS
+                # the result, not a runaway to be cropped.
+                finite = _finite(seconds)
+                limits = ((float(finite.min()), float(finite.max()))
+                          if len(finite) and finite.min() < finite.max() else None)
+                limits = _apply_cfg_limits(limits, cfg.get('ylim'), 'ylim')
+                scale, kwargs = _resolve_scale(
+                    'log', seconds, cfg, 'y', limits, promote=False)
+                ax_cost.set_yscale(scale, **kwargs)
+                if limits:
+                    ax_cost.set_ylim(_pad(ax_cost.yaxis, *limits))
                 ax_cost.set_ylabel('s / query', fontsize=FS_TICK)
                 ax_cost.tick_params(axis='y', labelsize=FS_TICK * 0.8)
                 cost_handles.append(handle)
@@ -714,11 +882,14 @@ def create_perf_plot(
                 twin.tick_params(axis='y', labelsize=FS_TICK * 0.8)
                 cost_handles.append(handle)
 
-            if cost_handles:
+            if cost_handles and cfg.get('legend') is not False:
                 ax_cost.legend(
                     handles=cost_handles,
                     labels=[h.get_label() for h in cost_handles],
-                    fontsize=FS_TICK * 0.7, loc='upper left', frameon=True,
+                    fontsize=FS_TICK * 0.7,
+                    loc=cfg['legend'] if isinstance(cfg.get('legend'), (str, tuple))
+                        else 'upper left',
+                    frameon=True,
                     edgecolor='black', fancybox=False, handlelength=1.6,
                     framealpha=0.92,
                 )
@@ -729,7 +900,7 @@ def create_perf_plot(
             fontsize=FS_TICK, rotation=20, ha='right'
         )
 
-        if ax_cost is not None:
+        if ax is not None and ax_cost is not None:
             fig.align_ylabels([ax, ax_cost])
         fig.tight_layout()
         plt.show()
@@ -738,7 +909,6 @@ def create_perf_plot(
             save(fig, fname, experiment, format, subdir=SUBDIR_PERF, dpi=PLOT_DPI)
 
     except Exception as e:
-        from loguru import logger
         logger.error(f'Failed to plot perf: {e}')
         import traceback
         logger.error(traceback.format_exc())

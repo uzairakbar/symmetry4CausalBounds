@@ -623,6 +623,9 @@ class ExperimentOrchestrator(ABC):
                     metric_x=spec_x.key, metric_y=spec_y.key,
                     xlabel=spec_x.ylabel, ylabel=spec_y.ylabel,
                     param_label=PARAM_SPECS[param].xlabel,
+                    # METRIC_SPECS stays the single home of per-metric scale policy,
+                    # as the sweep already treats it
+                    xscale=spec_x.yscale, yscale=spec_y.yscale,
                     experiment=self.name,
                     fname=f'scatter_{param}_{metric_x}_vs_{metric_y}',
                     crosshairs=crosshairs,

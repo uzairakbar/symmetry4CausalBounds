@@ -6,6 +6,7 @@ import json
 import pickle
 import random
 import typing
+import warnings
 import torch
 import numpy as np
 from loguru import logger
@@ -39,20 +40,29 @@ def set_seed(seed: int = 42):
     logger.info(f'Random seed set as {seed}.')
 
 
+# Bootstrap draws its own stream: off the global one the band moved run to run, and
+# the sweep limits/linear_width are derived FROM it.
+BOOTSTRAP_SEED: int = 0
+
+
 def bootstrap(
     data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
-    n_samples: int = 1000
+    n_samples: int = 1000,
+    seed: int = BOOTSTRAP_SEED,
 ) -> Dict:
     """
     Generate bootstrap samples from data.
-    
+
     Args:
         data: Dictionary of arrays or nested dictionary
         n_samples: Number of bootstrap samples to generate
-        
+        seed: resample stream; fixed so the CI band is reproducible
+
     Returns:
         Bootstrapped data with same structure as input
     """
+    rng = np.random.default_rng(seed)
+
     def _bootstrap_single_dict(data_dict: Dict[str, NDArray], n_bootstrap: int = n_samples):
         """Bootstrap a single level dictionary."""
         # Ensure 2D arrays
@@ -60,28 +70,34 @@ def bootstrap(
             key: value.copy().reshape(1, -1) if len(value.shape) == 1 else value.copy()
             for key, value in data_dict.items()
         }
-        
+
         def _bootstrap_sample(array: NDArray, n_boot: Optional[int] = None) -> NDArray:
             """Generate one bootstrap sample."""
             if len(array.shape) == 1:
                 array = array.reshape(1, -1)
             if n_boot is None:
                 n_boot = array.shape[-1]
-            
+
             n_rows, n_cols = array.shape
-            indices = np.random.randint(0, n_cols, (n_rows, n_boot))
+            indices = rng.integers(0, n_cols, (n_rows, n_boot))
             return np.take_along_axis(array, indices, axis=1)
-        
+
         # Generate bootstrap samples
         bootstrapped = {
             model: np.zeros((data_dict[model].shape[0], n_samples))
             for model in data_dict
         }
-        
+
+        # nanmean, not mean: one NaN replicate in a resample used to NaN the whole
+        # bootstrap draw, so a method with a finite mean at a step was drawn as a gap.
+        # An all-NaN step still comes back NaN -- that one is honest.
         for model in data_dict:
             for i in range(n_samples):
-                bootstrapped[model][:, i] = _bootstrap_sample(data_dict[model]).mean(axis=1)
-        
+                with warnings.catch_warnings():
+                    warnings.filterwarnings('ignore')
+                    bootstrapped[model][:, i] = np.nanmean(
+                        _bootstrap_sample(data_dict[model]), axis=1)
+
         return bootstrapped
     
     # Check if top-level keys are method names (single row) or experiment names (nested)

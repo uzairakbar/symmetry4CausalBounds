@@ -1,7 +1,7 @@
 """
 Centralized constants for experiments.
 """
-from typing import Dict, Literal, List
+from typing import Any, Dict, Literal, List
 
 # Plot formatting
 FS_TICK: int = 15
@@ -134,3 +134,33 @@ PANEL_CONFIGS = {
         3: {'ylim': (-2.625, 3.375)}
     }
 }
+
+
+# Per-plot rescale/clip overrides for the sweep/scatter/perf figures. Keyed
+# experiment -> plot id, where the id is the `fname` base.py already builds:
+# '<param>_<metric>' (base.py:533), 'scatter_<param>_<mx>_vs_<my>' (base.py:627),
+# 'perf' (base.py:601). No '_sweep' suffix on the id -- plotting.py appends that when
+# writing the file, so 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
+# '*' applies to every experiment; a named entry wins key by key.
+#   xlim/ylim      (lo, hi); None on either end keeps the automatic edge
+#   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not
+#                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
+#   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
+#   legend         False hides it, True is automatic, a str is a matplotlib loc
+#   bars           perf only; False retires the stacked reliability bars
+_PLOT_KEYS: set = {'xlim', 'ylim', 'xscale', 'yscale',
+                   'linear_width', 'linthresh', 'legend'}
+_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {'xlim', 'xscale'}) | {'bars'}   # categorical x
+
+PLOT_CONFIGS: Dict[str, Dict[str, Dict[str, Any]]] = {
+    '*': {
+        'perf': {'bars': False},                # stacked reliability bars retired
+    },
+}
+
+for _exp, _plots in PLOT_CONFIGS.items():       # a typo must not be a silent no-op
+    for _id, _cfg in _plots.items():
+        _bad = set(_cfg) - (_PLOT_KEYS_PERF if _id == 'perf' else _PLOT_KEYS)
+        if _bad:
+            raise ValueError(
+                f'PLOT_CONFIGS[{_exp!r}][{_id!r}]: unknown key(s) {sorted(_bad)}.')
