@@ -156,7 +156,7 @@ SCATTER_SE_CROSSHAIRS: bool = True
 SPECTRUM_KEEP: float = 0.999
 
 # budget-ratio grid: centred on 1, i.e. on the oracle value
-_RATIO_GRID = lambda dataset, n: np.geomspace(2**-2, 2**2, num=n)
+_RATIO_GRID = lambda dataset, n: np.geomspace(2**-3, 2**3, num=n)
 
 
 @dataclass(frozen=True)

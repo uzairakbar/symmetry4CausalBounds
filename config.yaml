@@ -1,9 +1,9 @@
 # global toggles, overridable per experiment
 defaults:
-    calibrate: false    # scale budgets by noise sigma (paper); false = raw gamma
-    pad: false          # eps-pad DA+ intervals (Thm. 3)
+    calibrate: true    # scale budgets by noise sigma (paper); false = raw gamma
+    pad: true          # eps-pad DA+ intervals (Thm. 3)
     clipy: true         # clip intervals to observed outcome range
-    n_jobs: 16          # query-solve workers. 1 = serial, -1 = all cores.
+    n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budget is not a toggle: it is the oracle ||E[W#|Z-tilde]||
 # (`eps_iv_star`), exact at gamma_z = 0, which is how every experiment here
@@ -33,12 +33,12 @@ simulation:
         - PI&DA+PI_IV
     augmentation: translate
     experiment:
-        # query: true                 # query sweep; panel ALWAYS generated
+        query: true                 # query sweep; panel ALWAYS generated
         sweep:
             # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
             # informativeness = (trS, worst_error)
-            param:  [gamma, epsilon, trS, n, m]
-            metric: [approx_error, worst_error, width, coverage]
+            param:  [epsilon, gamma, trS, n, m]
+            metric: [coverage, approx_error, worst_error, width]
         scatter:
             param:  [n, m]
             metric: [[width, coverage], [approx_error, width]]
@@ -47,7 +47,7 @@ simulation:
 
 # do_mnist:
 #     seed: 42
-#     n_experiments: 1                # 1 replicate => no error bars; perf drops seed_var
+#     n_experiments: 4                # 1 replicate => no error bars; perf drops seed_var
 #     n_samples: 1_200_000            # SEM draws, NOT distinct images (60k images x ~20
 #                                     # fresh (U,C,S) draws). 60k memorises.
 #     n_pi: 60_000                    # subset the latent model + constraints are fit on;
@@ -57,7 +57,7 @@ simulation:
 #     sweep_samples: 10               # digit exemplars on the query x-axis
 #     n_components: 32                # latent dimension of the CopSens factor model
 #     net: domnist-fast
-#     gamma: 0.067                      # EXPLICIT. CopSens's budget is a ball in a 32-d
+#     gamma: 0.1                      # EXPLICIT. CopSens's budget is a ball in a 32-d
 #                                     # LATENT index space, not partial-r2's Lemma-2 ball
 #                                     # in function space -- the two are NOT comparable,
 #                                     # so oracle gamma* is recorded but never consumed.
@@ -77,9 +77,9 @@ simulation:
 #                                     # deciding -- do NOT add tolerance to hide it.
 #     augmentation: translate > rotation > contrast > saturation > hue
 #     methods:                        # REQUIRED: the copsens backend defines only these
-#         - ATE                       # 9, and the fallback is all 11 of ALL_METHODS
-#         - ERM
-#         - DA+ERM
+#         # - ATE                       # 9, and the fallback is all 11 of ALL_METHODS
+#         # - ERM
+#         # - DA+ERM
 #         - PI
 #         - DA+PI
 #         - PI_INV
@@ -90,41 +90,41 @@ simulation:
 #     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
 #                                     # bit-identical to n_jobs=1.
 #     experiment:
-#         query: true                 # digit-exemplar sweep; the PC panel is off here
+#         # query: true                 # digit-exemplar sweep; the PC panel is off here
 #         perf:
-#             metric: [wall_clock]    # seed_var needs n_experiments >= 2
+#             metric: [wall_clock, seed_var]    # seed_var needs n_experiments >= 2
 
-# optical_device:
-#     seed: 69
-#     n_samples: 1_000
-#     n_experiments: 8
-#     sweep_samples: 32
-#     methods:
-#         # - ATE
-#         # - ERM
-#         # - DA+ERM
-#         # - DA+IV
-#         - PI_INV
-#         - PI
-#         - DA+PI
-#         - DA+PI_IV
-#         - PI&DA+PI
-#         - PI&DA+PI_IV
-#     # augmentation: all
-#     augmentation: rotation > hflip > vflip > gaussian-noise
-#     # augmentation: rotation > hflip > vflip > random-permutation
-#     experiment:
-#         # query: true                 # query sweep; panel ALWAYS generated
-#         sweep:
-#             # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
-#             # informativeness = (trS, worst_error)
-#             param:  [gamma, epsilon, trS, n, m]
-#             metric: [approx_error, worst_error, width, coverage]
-#         scatter:
-#             param:  [n, m]
-#             metric: [[width, coverage], [approx_error, width]]
-#         perf:
-#             metric: [wall_clock, seed_var]
+optical_device:
+    seed: 69
+    n_samples: 1_000
+    n_experiments: 8
+    sweep_samples: 32
+    methods:
+        # - ATE
+        # - ERM
+        # - DA+ERM
+        # - DA+IV
+        - PI_INV
+        - PI
+        - DA+PI
+        - DA+PI_IV
+        - PI&DA+PI
+        - PI&DA+PI_IV
+    # augmentation: all
+    augmentation: rotation > gaussian-noise # rotation > gaussian
+    # augmentation: rotation > hflip > vflip > random-permutation
+    experiment:
+        query: true                 # query sweep; panel ALWAYS generated
+        sweep:
+            # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
+            # informativeness = (trS, worst_error)
+            param:  [epsilon, gamma, trS, n, m]
+            metric: [coverage, approx_error, worst_error, width]
+        scatter:
+            param:  [n, m]
+            metric: [[width, coverage], [approx_error, width]]
+        perf:
+            metric: [wall_clock, seed_var]
 
 # colored_mnist:
 #     seed: 42
