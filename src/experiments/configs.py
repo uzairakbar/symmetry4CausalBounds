@@ -331,7 +331,7 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
         'xscale': 'linear',
     },
     'pc12': {
-        'xlabel': r'$\theta$',
+        'xlabel': r'$\vartheta$',
         'xscale': 'linear',
     },
 }
