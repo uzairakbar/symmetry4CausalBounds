@@ -31,12 +31,12 @@ TEX_MAPPER: Dict[str, str] = {
     'Data': r'Data',
     'ATE': r'$\operatorname{ate}$',
     'ERM': r'$\operatorname{erm}$',
-    'DA+ERM': r'$\operatorname{da}+\operatorname{erm}$',
-    'DA+IV': r'$\operatorname{da}+\operatorname{iv}$',
-    'PI_INV': r'$\operatorname{pi}_{\operatorname{inv}}$',
-    'PI': r'$\operatorname{pi}$',
-    'DA+PI': r'$\operatorname{da}+\operatorname{pi}$',
-    'DA+PI_IV': r'$\operatorname{da}+\operatorname{pi}_{\operatorname{iv}}$',
+    'DA+ERM': r'$\mkern7mu\widetilde{\mkern-7mu\operatorname{erm}\mkern-7mu}\mkern7mu$',
+    'DA+IV': r'$\widetilde{\textnormal{\i}\!\operatorname{v}}$',
+    'PI_INV': r'${\operatorname{p}\!\textnormal{\i}}+{\textnormal{\i}\!\operatorname{nv}}$',
+    'PI': r'$\operatorname{p}\!\textnormal{\i}$',
+    'DA+PI': r'$\widetilde{\operatorname{p}\!\textnormal{\i}}$',
+    'DA+PI_IV': r'$\widetilde{\operatorname{p}\!\textnormal{\i}}+\widetilde{\textnormal{\i}\!\operatorname{v}}$',
 }
 
 # Color mapping for methods
@@ -105,5 +105,6 @@ PANEL_CONFIGS = {
         1: {'scale': 'asinh', 'ylim': (0, 10.01), 'linear_width': 0.25, 'linthresh': 2.0},
         2: {'scale': 'linear', 'ylim': (0, 0.01), 'linear_width': 1.0, 'linthresh': 2.0},
         3: {'ylim': (-2.625, 3.375)}
+        # 3: {'ylim': (-3.75, 4.75)}
     }
 }

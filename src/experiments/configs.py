@@ -42,27 +42,27 @@ class SimulationConfig:
     test_fraction: float = 0.1
 
 
-# @dataclass(frozen=True)
-# class OpticalDeviceConfig:
-#     """Configuration for optical device experiments."""
-#     gamma: float = 2**-1
-#     gamma0: float = 2**-1
-#     delta: float = 2**-7
-#     epsilon: float = 2**-3
-#     test_fraction: float = 0.1
-#     dataset_index: int = 9
-#     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
-    gamma: float = 0.32
-    gamma0: float = 1.0 + 0.2
-    delta: float = 2**-7.5
-    epsilon: float = 2**-4.5
+    gamma: float = 2**-1
+    gamma0: float = 2**-1
+    delta: float = 2**-7
+    epsilon: float = 2**-3
     test_fraction: float = 0.1
-    # dataset_index: int = 3
     dataset_index: int = 9
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
+# @dataclass(frozen=True)
+# class OpticalDeviceConfig:
+#     """Configuration for optical device experiments."""
+#     gamma: float = 0.32
+#     gamma0: float = 1.0 + 0.2
+#     delta: float = 2**-7.5
+#     epsilon: float = 2**-4.5
+#     test_fraction: float = 0.1
+#     # dataset_index: int = 3
+#     dataset_index: int = 8
+#     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
 
 
 # Default configurations
@@ -78,12 +78,12 @@ MetricName = Literal['approximation_error', 'worst_error', 'interval_width']
 
 METRIC_CONFIGS: Dict[MetricName, Dict[str, Any]] = {
     'approximation_error': {
-        'ylabel': r'average $E_{\mathrm{approx}}^{\operatorname{do}({\bm{x}})}$',
+        'ylabel': r'average $E^-_{\bm{x}}$',
         'yscale': 'asinh',
         'normalize': False
     },
     'worst_error': {
-        'ylabel': r'average $E_{\mathrm{worst}}^{\operatorname{do}({\bm{x}})}$',
+        'ylabel': r'average $E^+_{\bm{x}}$',
         'normalize': False
     },
     'interval_width': {
@@ -169,7 +169,7 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
         'xscale': 'linear',
     },
     'pc12': {
-        'xlabel': r'$\theta$',
+        'xlabel': r'$\vartheta$',
         'xscale': 'linear',
     },
 }
