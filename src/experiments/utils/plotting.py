@@ -488,10 +488,10 @@ def create_panel_plot(
     
     column_titles = [
         r'principal direction 1' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_1$',
-        r'radial sweep' + '\n' + r'${\bm{x}} := s_1\sin(\theta){\bm{\nu}}_1 + s_2 \cos(\theta){\bm{\nu}}_2$',
+        r'radial sweep' + '\n' + r'${\bm{x}} := s_1\sin(\vartheta){\bm{\nu}}_1 + s_2 \cos(\vartheta){\bm{\nu}}_2$',
         r'principal direction 2' + '\n' + r'${\bm{x}} := t\cdot {\bm{\nu}}_2$',
     ]
-    x_labels = [r'$t$', r'$\theta$', r'$t$']
+    x_labels = [r'$t$', r'$\vartheta$', r'$t$']
     
     # 1. Share the y axis for each row
     fig, axes = plt.subplots(
@@ -577,7 +577,7 @@ def create_panel_plot(
                 ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
         
         if col_idx == 0:
-            ax_worst.set_ylabel(r'$\overline{E}_{\bm{x}}$', fontsize=FS_LABEL)
+            ax_worst.set_ylabel(r'$E^+_{\bm{x}}$', fontsize=FS_LABEL)
         ax_worst.set_title(column_titles[col_idx], fontsize=FS_LABEL, pad=8)
         ax_worst.tick_params(labelsize=FS_TICK)
         

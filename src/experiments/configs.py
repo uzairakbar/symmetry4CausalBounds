@@ -220,9 +220,9 @@ class MetricSpec:
 
 METRIC_SPECS: Dict[str, MetricSpec] = {
     'approx_error': MetricSpec(
-        'approximation_error', r'average $\underline{E}_{{\bm{x}}}$', 'asinh'),
+        'approximation_error', r'average $E^-_{{\bm{x}}}$', 'asinh'),
     'worst_error': MetricSpec(
-        'worst_error', r'average $\overline{E}_{{\bm{x}}}$', 'asinh'),
+        'worst_error', r'average $E^+_{{\bm{x}}}$', 'asinh'),
     'width': MetricSpec('interval_width', r'average interval width', include_ate=False),
     'coverage': MetricSpec('coverage', r'coverage rate', include_ate=False),
     'wall_clock': MetricSpec('wall_clock', r'seconds per query', 'log', perf_only=True),

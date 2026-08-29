@@ -35,8 +35,9 @@ RC_PARAMS: Dict[str, str | int | bool] = {
 from typing import Dict
 
 # LaTeX building blocks
-PI  = r'\operatorname{p}\!\textnormal{\i}'
+ERM  = r'\operatorname{erm}'
 IV  = r'\textnormal{\i}\!\operatorname{v}'
+PI  = r'\operatorname{p}\!\textnormal{\i}'
 INV = r'\textnormal{\i}\!\operatorname{nv}'
 
 # method display names
@@ -45,19 +46,19 @@ TEX_MAPPER: Dict[str, str] = {
     'Data':     r'$\mathrm{data}$',
     'ATE':      r'$\operatorname{ate}$',
     # estimators
-    'ERM':      r'$\operatorname{erm}$',
-    'DA+ERM':   r'$\tilde{\operatorname{erm}}$',
+    'ERM':      fr'${ERM}$',
+    'DA+ERM':   fr'$\mkern7mu\widetilde{{\mkern-7mu{{{ERM}}}\mkern-7mu}}\mkern7mu$',
     # instrumental variable
-    'DA+IV':    fr'$\tilde{{{IV}}}$',
+    'DA+IV':    fr'$\widetilde{{{IV}}}$',
     'PI_IV':    fr'${PI}+{IV}$',
     # sensitivity models
     'PI':       fr'${PI}$',
     'PI_INV':   fr'${PI}+{INV}$',
-    'DA+PI':    fr'$\tilde{{{PI}}}$',
-    'DA+PI_IV': fr'$\tilde{{{PI}}}+\tilde{{{IV}}}$',
+    'DA+PI':    fr'$\widetilde{{{PI}}}$',
+    'DA+PI_IV': fr'$\widetilde{{{PI}}}+\widetilde{{{IV}}}$',
     # combinations
-    'PI&DA+PI':     fr'${PI}\cap\tilde{{{PI}}}$',
-    'PI&DA+PI_IV':  fr'${PI}\cap(\tilde{{{PI}}}+\tilde{{{IV}}})$',
+    'PI&DA+PI':     fr'${PI}\cap\widetilde{{{PI}}}$',
+    'PI&DA+PI_IV':  fr'${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}})$',
 }
 
 # Color mapping for methods
