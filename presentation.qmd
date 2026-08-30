@@ -1,8 +1,8 @@
 ---
 title: Symmetry-Constrained Causal Partial Identification
 # TODO-for-user: replace arXiv:TBD with the real link once it exists
-subtitle: |
-  <span style="float: right;">arXiv:TBD</span>
+# subtitle: |
+#   <span style="float: right;">arXiv:TBD</span>
 format:
   metropolis-beamer-revealjs:
     theme: style.scss

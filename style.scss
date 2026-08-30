@@ -2,6 +2,9 @@
 
 $primary-color: #0c2344;
 
+/* fit all five authors on one line of the title slide */
+$authors-block-gap: 0em;
+
 /* Fix blurry images */
 img {
 image-rendering: -webkit-optimize-contrast;
