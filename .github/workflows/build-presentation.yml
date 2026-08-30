@@ -1,0 +1,62 @@
+name: Build and Deploy Presentation
+
+on:
+  push:
+    branches:
+      - presentation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout presentation branch
+        uses: actions/checkout@v4
+        with:
+          ref: presentation
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render presentation
+        run: quarto render presentation.qmd
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy rendered deck into gh-pages static folder
+        run: |
+          mkdir -p gh-pages-repo/static
+          cp presentation.html gh-pages-repo/static/presentation.html
+
+      - name: Commit and push to gh-pages
+        run: |
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add static/presentation.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update presentation"
+            git push
+          fi
+
+      - name: Trigger website deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy.yml',
+              ref: 'gh-pages'
+            })
