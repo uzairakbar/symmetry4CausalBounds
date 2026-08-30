@@ -171,9 +171,9 @@
 <image id="source-168" x="0" y="0" width="327" height="327" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUcAAAFHCAIAAAC9Kxk8AAAABmJLR0QA/wD/AP+gvaeTAAAD9klEQVR4nO3cMY6OURiG4XeYhoxorMB+dBKJ2kK0NiEaK1CITmkPEgvQKQjCsIGZRl75frfrWsCTk5PcOd2ZAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOD/dXb0AU7U5dEHWPdjaediY+T7xgjXuXH0AYBlqoYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXU+A/8alv/gb/dGHm2MfJ6Y2SWbuZ8Y4TreKuhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNb5wvdqHpZ3nGyNvNkZebYzMzIONkbsbIzPzaWknxlsNNaqGGlVDjaqhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqDk7+gAn6sXSzq2NkUcbIx83Rmbm3sbI542RmbmztBPjrYYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUqBpq/Ad+tftLO+83Rm5ujPzaGJmZxxsjLzdGxqN0DdcCNaqGGlVDjaqhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqPFz8N/1ZGPk4cbI042RmXm3MXK5MTIztzdGvm6MnBRvNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VDjP3AOsPUf+MXGyJeNkZPirYYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUnB99APhz344+wGnyVkONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUqBpq/BzMP+zn0Qc4Td5qqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VCjaqhRNdSoGmpUDTWqhhpVQ42qocZ/4BzgzdEHaPNWQ42qoUbVUKNqqFE11KgaalQNNaqGGlVDjaqhRtVQo2qoUTXUqBpqVA01qoYaVUONqqFG1VCjaqhRNdSoGmp+AwxeG7uf3clSAAAAAElFTkSuQmCC"/>
 </defs>
 <g clip-path="url(#clip-0)">
-<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M 0.828125 204.679688 L 485.121094 204.679688 L 485.121094 -24.914062 L 0.828125 -24.914062 Z M 0.828125 204.679688 "/>
+
 </g>
-<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M 61.363281 144.984375 L 368.890625 144.984375 L 368.890625 2.640625 L 61.363281 2.640625 Z M 61.363281 144.984375 "/>
+
 <g clip-path="url(#clip-1)">
 <path fill-rule="nonzero" fill="rgb(29.803467%, 44.7052%, 69.018555%)" fill-opacity="0.2" d="M 61.363281 77.230469 L 61.363281 136.164062 L 95.53125 130.222656 L 129.703125 137.554688 L 163.871094 135.296875 L 198.042969 136.742188 L 232.210938 94.890625 L 266.382812 120.546875 L 300.550781 93.0625 L 334.71875 96.886719 L 368.890625 93.835938 L 368.890625 9.929688 L 334.71875 18.171875 L 300.550781 9.667969 L 266.382812 11.082031 L 232.210938 9.75 L 198.042969 48.066406 L 163.871094 20.929688 L 129.703125 55.3125 L 95.53125 44.59375 Z M 61.363281 77.230469 "/>
 </g>
@@ -290,7 +290,7 @@
 <g mask="url(#mask-9)">
 <use xlink:href="#source-168" transform="matrix(0.0597895, 0, 0, 0.0597895, 359.124702, 147.895242)"/>
 </g>
-<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="0.8" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke="rgb(0%, 0%, 0%)" stroke-opacity="0.8" stroke-miterlimit="10" d="M 382.033685 62.81768 L 467.630901 62.81768 L 467.630901 199.837514 L 382.033685 199.837514 Z M 382.033685 62.81768 " transform="matrix(0.996491, 0, 0, -0.996491, 0.826316, 204.679298)"/>
+
 <path fill="none" stroke-width="2" stroke-linecap="butt" stroke-linejoin="round" stroke="rgb(0%, 0%, 0%)" stroke-opacity="1" stroke-dasharray="10 2" stroke-miterlimit="10" d="M 387.23161 190.088463 L 408.031154 190.088463 " transform="matrix(0.996491, 0, 0, -0.996491, 0.826316, 204.679298)"/>
 <g fill="rgb(0%, 0%, 0%)" fill-opacity="1">
 <use xlink:href="#glyph-4-0" x="417.790333" y="19.791125"/>
