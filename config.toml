@@ -1,0 +1,20 @@
+base_url = "https://uzairakbar.com/symmetry4CausalBounds"
+compile_sass = true
+build_search_index = false
+generate_feeds = false
+minify_html = true
+generate_sitemap = true
+generate_robots_txt = true
+
+[markdown]
+bottom_footnotes = true
+highlighting.light_theme = "github-light"
+highlighting.dark_theme = "github-dark"
+smart_punctuation = true
+
+[extra]
+favicon = true
+large_card = true
+footer_text = "This website is built using [Zola](https://www.getzola.org) and the [Academic Paper](http://github.com/aterenin/academic-paper/) theme, which is [designed to last](https://jeffhuang.com/designed_to_last/)."
+server_side_katex = true
+# NOTE: google analytics is wired via `head_includes` in content/_index.md front-matter (page-level), not here
