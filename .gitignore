@@ -1,0 +1,17 @@
+# Quarto output
+*.html
+*_files/
+.quarto/
+
+# OS / editor junk
+.DS_Store
+._*
+*~
+.vscode/
+.idea/
+*.swp
+
+# temp
+*.tmp
+*.bak
+*.log

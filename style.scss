@@ -1,0 +1,125 @@
+/*-- scss:defaults --*/
+
+$primary-color: #0c2344;
+
+/* Fix blurry images */
+img {
+image-rendering: -webkit-optimize-contrast;
+image-rendering: crisp-edges;
+-ms-interpolation-mode: nearest-neighbor;
+}
+
+/* Ensure SVGs render sharply */
+svg {
+shape-rendering: geometricPrecision;
+}
+
+/* Fix text rendering */
+.reveal {
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
+}
+
+.highlight { background: #f5e347; }
+
+/* MOBILE RESPONSIVE FIXES */
+@media screen and (max-width: 768px) {
+  .reveal {
+    /* Reduce header title size on mobile */
+    div.reveal-header {
+      padding: 0.3em 0;
+      margin: 0;
+
+      .header-title h2 {
+        font-size: 1.2em !important;
+        line-height: 1.2;
+        padding: 0.3em 0.5em;
+      }
+    }
+
+    /* Adjust slide padding to account for smaller header */
+    div.slides section:not(.title-slide):not(#title-slide):not(.stack) {
+      padding-top: 1em;
+      margin-top: 0.8em;
+    }
+
+    /* Reduce overall font sizes on mobile */
+    font-size: 24px;
+
+    h1 { font-size: 1.8em !important; }
+    h2 { font-size: 1.4em !important; }
+    h3 { font-size: 1.2em !important; }
+  }
+}
+
+/* Extra small devices (phones in portrait) */
+@media screen and (max-width: 480px) {
+  .reveal {
+    font-size: 20px;
+
+    div.reveal-header .header-title h2 {
+      font-size: 1em !important;
+      padding: 0.2em 0.3em;
+    }
+  }
+}
+
+/* LANDSCAPE MODE - Critical for phones in landscape */
+@media screen and (max-height: 500px) and (orientation: landscape) {
+  .reveal {
+    font-size: 18px;
+
+    /* Make header extremely compact in landscape */
+    div.reveal-header {
+      padding: 0.1em 0;
+      margin: 0;
+
+      .header-title {
+        padding-left: 20px !important;
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+
+        h2 {
+          font-size: 0.8em !important;
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+        }
+      }
+    }
+
+    /* Minimal slide padding in landscape */
+    div.slides section:not(.title-slide):not(#title-slide):not(.stack) {
+      padding-top: 0.5em;
+      margin-top: 0.5em;
+      padding-bottom: 1em;
+    }
+
+    /* Compact content in landscape */
+    h1 { font-size: 1.5em !important; margin-bottom: 0.3em; }
+    h2 { font-size: 1.2em !important; margin-bottom: 0.3em; }
+    h3 { font-size: 1em !important; margin-bottom: 0.2em; }
+
+    p, li { margin-bottom: 0.3em; }
+
+    .fragment { margin-bottom: 0.3em; }
+  }
+}
+
+/* Very short landscape (e.g., phone landscape with browser chrome) */
+@media screen and (max-height: 400px) and (orientation: landscape) {
+  .reveal {
+    font-size: 16px;
+
+    div.reveal-header {
+      .header-title h2 {
+        font-size: 0.7em !important;
+      }
+    }
+
+    div.slides section:not(.title-slide):not(#title-slide):not(.stack) {
+      padding-top: 0.3em;
+      margin-top: 0.3em;
+    }
+  }
+}
