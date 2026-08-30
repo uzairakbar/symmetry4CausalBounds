@@ -1,0 +1,69 @@
+---
+title: Symmetry-Constrained Causal Partial Identification
+# TODO-for-user: replace arXiv:TBD with the real link once it exists
+subtitle: |
+  <span style="float: right;">arXiv:TBD</span>
+format:
+  metropolis-beamer-revealjs:
+    theme: style.scss
+    embed-resources: true
+    controls: true
+    controls-layout: bottom-right
+    navigation-mode: linear
+    html-math-method: mathjax
+    include-in-header:
+      - file: "macros.jax"
+      - text: |
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+          <link rel="icon" type="image/x-icon" href="https://uzairakbar.github.io/symmetry4CausalBounds/favicon.ico">
+          <link rel="icon" type="image/svg+xml" href="https://uzairakbar.github.io/symmetry4CausalBounds/favicon.svg">
+          <link rel="icon" type="image/png" sizes="96x96" href="https://uzairakbar.github.io/symmetry4CausalBounds/favicon-96x96.png">
+slide-number: "c"
+author:
+  - name: Uzair Akbar
+    affiliations: Georgia Tech
+    orcid: 0009-0001-7826-3578
+  - name: Zulfiqar Zaidi
+    affiliations: Georgia Tech
+    orcid: 0000-0002-6053-6259
+  - name: Niki Kilbertus
+    affiliations: TU Munich
+    orcid: 0000-0001-8718-4305
+  - name: Krikamol Muandet
+    affiliations: CISPA
+    orcid: 0000-0002-4182-5282
+  - name: Bo Dai
+    affiliations: Georgia Tech
+    orcid: 0009-0002-8070-574X
+date: last-modified
+bibliography: references.bib
+---
+
+
+
+# Motivation
+
+## Causal bounds are often vacuous
+
+For observational data of treatment $X$ and outcome $Y$ generated as
+$$
+Y = \hstar(X) + U + \xi ,
+\qquad
+\E{U} = \E{\xi} = 0 ,
+$$
+hidden confounding $U$ makes $\hstar$ generally unidentifiable.
+
+::: {.incremental}
+- *Partial identification (PI)*: bound the causal effect over all DGPs consistent with the data and assumptions $\Ppi$, i.e. the identified set $\Hpi := \set{ h^q_{\star} : q \in \Qpi }$.
+- [Problem:]{.highlight} PI bounds are often too wide to inform decisions.
+:::
+
+::: {.fragment}
+> Can **known data symmetries** $\sT$ — invariances $\hstar(\tau \vx) = \hstar(\vx)$, with $\sT \indep U$ by design — be repurposed as constraints that **provably sharpen** PI bounds, e.g. via post-DA data $(\tX, Y)$?
+:::
+
+# Symmetry-Constrained Bounds
+
+## TODO
+
+<!-- content goes here -->

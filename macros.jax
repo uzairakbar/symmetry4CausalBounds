@@ -1,0 +1,39 @@
+<script>
+window.MathJax = {
+  tex: {
+    macros: {
+      red: ["\\textcolor[RGB]{196,78,82}{#1}", 1],
+      blue: ["\\textcolor[RGB]{76,114,176}{#1}", 1],
+      green: ["\\textcolor[RGB]{85,168,104}{#1}", 1],
+      hstar: "\\textcolor[RGB]{196,78,82}{h_{\\star}}",
+      E: ["\\mathbb{E}\\left[ #1 \\right]", 1],
+      Var: "\\operatorname{Var}",
+      Cov: "\\operatorname{Cov}",
+      tr: ["\\operatorname{tr}\\left( #1 \\right)", 1],
+      R: "\\mathbb{R}",
+      vx: "\\boldsymbol{x}",
+      tX: "\\widetilde{X}",
+      sT: "\\textcolor[RGB]{85,168,104}{\\mathcal{T}}",
+      sH: "\\mathcal{H}",
+      sQ: "\\mathcal{Q}",
+      sP: "\\mathcal{P}",
+      Hpi: "\\mathcal{H}_{\\mathrm{pi}}",
+      HpiDA: "\\mathcal{H}_{\\widetilde{\\mathrm{pi}}}",
+      Qpi: "\\mathcal{Q}_{\\mathrm{pi}}",
+      Ppi: "\\mathcal{P}_{\\mathrm{pi}}",
+      Rerm: "R_{\\mathrm{erm}}",
+      Einv: "E_{\\mathrm{inv}}",
+      shift: "\\mathcal{S}",
+      varShift: "\\mathcal{K}",
+      meanShift: "\\delta",
+      eps: "\\varepsilon",
+      doo: ["\\operatorname{do}\\left( #1 \\right)", 1],
+      given: "\\,\\middle\\vert\\,",
+      indep: "\\perp\\!\\!\\!\\perp",
+      nindep: "\\not\\!\\perp\\!\\!\\!\\perp",
+      sqNorm: ["\\left\\| #1 \\right\\|^2", 1],
+      set: ["\\left\\{ #1 \\right\\}", 1]
+    }
+  }
+};
+</script>
