@@ -29,6 +29,9 @@ favicon = true
 <style>
 .figrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 1.75rem; margin: 1.5rem 0; }
 .figrow > figure { flex: 1 1 300px; margin: 0; }
+.figrow > figure > div { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; }
+.figrow > figure > img { align-self: center; }
+img[src$="simulation-query-sweep.svg"], img[src$="optical-query-sweep.svg"] { max-width: 86%; }
 </style>
 
 **TLDR**: We introduce known *data symmetries*—invariance of the causal effect under certain data transformations—as a new, underutilized source of constraints for causal *partial identification (PI)*. Enforced *explicitly* via an invariance-error constraint, or *implicitly* by simple data-augmentation pre-processing, symmetry constraints provably sharpen PI bounds under two canonical PI models—in population and in finite samples.
@@ -42,8 +45,8 @@ Causal effects are generally not identifiable from observational data alone: hid
 <div class="figrow">
 <figure>
 <div>
-<img class="dark-invert" loading="lazy" src="sem-graph.svg" alt="SEM with hidden confounding" style="max-height:160px">
-<img class="dark-invert" loading="lazy" src="intervention-graph.svg" alt="do(x) intervention" style="max-height:160px">
+<img class="dark-invert" loading="lazy" src="sem-graph.svg" alt="SEM with hidden confounding" style="max-height:190px">
+<img class="dark-invert" loading="lazy" src="intervention-graph.svg" alt="do(x) intervention" style="max-height:190px">
 </div>
 <figcaption><b>Figure 1:</b> The observational SEM with hidden confounding (left) and the intervention of interest (right).</figcaption>
 </figure>
@@ -63,13 +66,13 @@ Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of th
 <div class="figrow">
 <figure>
 <div>
-<img class="dark-invert" loading="lazy" src="da-graph.svg" alt="data augmentation graph" style="max-height:160px">
-<img class="dark-invert" loading="lazy" src="transformation-intervention-graph.svg" alt="soft intervention graph" style="max-height:160px">
+<img class="dark-invert" loading="lazy" src="da-graph.svg" alt="data augmentation graph" style="max-height:190px">
+<img class="dark-invert" loading="lazy" src="transformation-intervention-graph.svg" alt="soft intervention graph" style="max-height:190px">
 </div>
 <figcaption><b>Figure 3:</b> Data augmentation (left) acts on the treatment like a soft intervention (right).</figcaption>
 </figure>
 <figure>
-<img class="dark-invert" loading="lazy" src="table-point-vs-partial.svg" alt="point vs partial identification under DA" style="max-height:180px">
+<img class="dark-invert" loading="lazy" src="table-point-vs-partial.svg" alt="point vs partial identification under DA" style="max-height:210px">
 <figcaption><b>Table 1:</b> Point vs. <i>partial</i> identification under DA.</figcaption>
 </figure>
 </div>
@@ -77,19 +80,19 @@ Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of th
 <figure>
 <div>
 <figure>
-<img class="dark-invert" loading="lazy" src="inv-pi.svg" alt="invariance-constrained identified set" style="max-height:170px">
+<img class="dark-invert" loading="lazy" src="inv-pi.svg" alt="invariance-constrained identified set" style="max-height:200px">
 <figcaption>(a) <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}+\textnormal{\i}\mathrm{nv}}$</code></figcaption>
 </figure>
 <figure>
-<img class="dark-invert" loading="lazy" src="da-pi.svg" alt="post-DA identified set" style="max-height:170px">
+<img class="dark-invert" loading="lazy" src="da-pi.svg" alt="post-DA identified set" style="max-height:200px">
 <figcaption>(b) <code>$\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}}$</code></figcaption>
 </figure>
 <figure>
-<img class="dark-invert" loading="lazy" src="da-iv-pi.svg" alt="post-DA IV identified set" style="max-height:170px">
+<img class="dark-invert" loading="lazy" src="da-iv-pi.svg" alt="post-DA IV identified set" style="max-height:200px">
 <figcaption>(c) <code>$\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}+\widetilde{\textnormal{\i}\mathrm{v}}}$</code></figcaption>
 </figure>
 <figure>
-<img class="dark-invert" loading="lazy" src="pi-da-pi-intersection.svg" alt="intersection of identified sets" style="max-height:170px">
+<img class="dark-invert" loading="lazy" src="pi-da-pi-intersection.svg" alt="intersection of identified sets" style="max-height:200px">
 <figcaption>(d) <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}}(\boldsymbol{x}) \cap (\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}}(\boldsymbol{x}) \pm \varepsilon)$</code></figcaption>
 </figure>
 </div>
