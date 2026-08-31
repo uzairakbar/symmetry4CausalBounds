@@ -126,3 +126,21 @@ shape-rendering: geometricPrecision;
     }
   }
 }
+
+/*-- scss:rules --*/
+
+/* title slide: all authors on one line, names never wrapping */
+.reveal .quarto-title-authors {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  column-gap: 1.1em;
+}
+.reveal .quarto-title-author {
+  padding: 0 !important;
+  width: auto !important;
+  font-size: 0.8em;
+}
+.reveal .quarto-title-author-name {
+  white-space: nowrap;
+}
