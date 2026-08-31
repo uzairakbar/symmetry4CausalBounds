@@ -26,37 +26,75 @@ favicon = true
 # head_includes = '<script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-XXXXXXXXXX");</script>'
 +++
 
+<style>
+.figrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 1.75rem; margin: 1.5rem 0; }
+.figrow > figure { flex: 1 1 300px; margin: 0; }
+</style>
+
 **TLDR**: We introduce known *data symmetries*—invariance of the causal effect under certain data transformations—as a new, underutilized source of constraints for causal *partial identification (PI)*. Enforced *explicitly* via an invariance-error constraint, or *implicitly* by simple data-augmentation pre-processing, symmetry constraints provably sharpen PI bounds under two canonical PI models—in population and in finite samples.
 
 ---
 
 # Partial Identification
 
-Causal effects are generally not identifiable from observational data alone: hidden confounding leaves a whole set of data-generating processes consistent with what we observe. *Partial identification (PI)* responds by bounding the causal effect over the identified set `$\mathcal{H}_{\mathrm{pi}} := \{ h^q_{\star} : q \in \mathcal{Q}_{\mathrm{pi}} \}$`, encoding assumptions `$\mathcal{P}_{\mathrm{pi}}$` as constraints of an optimization problem. In practice, however, PI bounds are often too wide to inform decisions.
+Causal effects are generally not identifiable from observational data alone: hidden confounding leaves a whole set of data-generating processes consistent with what we observe. *Partial identification (PI)* responds by bounding the causal effect over the identified set `$\mathcal{H}_{\mathrm{p\imath}} := \{ h^q_{\star} : q \in \mathcal{Q}_{\mathrm{p\imath}} \}$`, encoding assumptions `$\mathcal{P}_{\mathrm{p\imath}}$` as constraints of an optimization problem. In practice, however, PI bounds are often too wide to inform decisions.
 
-{% figure(src=["sem-graph.svg", "intervention-graph.svg"], alt=["SEM with hidden confounding", "do(x) intervention"], dark_invert=[true, true]) %}
-**Figure 1:** The observational SEM with hidden confounding (left) and the intervention of interest (right).
-{% end %}
-
-{% figure(src=["pi-x.svg", "pi-metrics.svg"], alt=["PI interval at a query point", "identified set with PI metrics"], dark_invert=[true, true]) %}
-**Figure 2:** The PI interval at a query point (left) and the identified-set geometry behind common PI metrics (right).
-{% end %}
+<div class="figrow">
+<figure>
+<div>
+<img class="dark-invert" loading="lazy" src="sem-graph.svg" alt="SEM with hidden confounding" style="max-height:160px">
+<img class="dark-invert" loading="lazy" src="intervention-graph.svg" alt="do(x) intervention" style="max-height:160px">
+</div>
+<figcaption><b>Figure 1:</b> The observational SEM with hidden confounding (left) and the intervention of interest (right).</figcaption>
+</figure>
+<figure>
+<div>
+<img class="dark-invert" loading="lazy" src="pi-x.svg" alt="PI interval at a query point" style="max-height:200px">
+<img class="dark-invert" loading="lazy" src="pi-metrics.svg" alt="identified set with PI metrics" style="max-height:200px">
+</div>
+<figcaption><b>Figure 2:</b> The PI interval at a query point (left) and the identified-set geometry behind common PI metrics (right).</figcaption>
+</figure>
+</div>
 
 # Symmetry Constraints
 
 Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of the data under which the causal effect is invariant by design, `$h_{\star}(\tau \boldsymbol{x}) = h_{\star}(\boldsymbol{x})$` for all `$\tau \in \mathcal{T}$`. We show how to exploit them for PI—*explicitly*, by constraining candidate models to have small invariance error, or *implicitly*, by augmenting the data before running an off-the-shelf PI method. Both routes provably sharpen the resulting bounds.
 
-{% figure(src=["da-graph.svg", "transformation-intervention-graph.svg"], alt=["data augmentation graph", "soft intervention graph"], dark_invert=[true, true]) %}
-**Figure 3:** Data augmentation (left) acts on the treatment like a soft intervention (right).
-{% end %}
+<div class="figrow">
+<figure>
+<div>
+<img class="dark-invert" loading="lazy" src="da-graph.svg" alt="data augmentation graph" style="max-height:160px">
+<img class="dark-invert" loading="lazy" src="transformation-intervention-graph.svg" alt="soft intervention graph" style="max-height:160px">
+</div>
+<figcaption><b>Figure 3:</b> Data augmentation (left) acts on the treatment like a soft intervention (right).</figcaption>
+</figure>
+<figure>
+<img class="dark-invert" loading="lazy" src="table-point-vs-partial.svg" alt="point vs partial identification under DA" style="max-height:180px">
+<figcaption><b>Table 1:</b> Point vs. <i>partial</i> identification under DA.</figcaption>
+</figure>
+</div>
 
-{% figure(src=["inv-pi.png", "da-pi.svg", "da-iv-pi.svg", "pi-da-pi-intersection.png"], alt=["invariance-constrained identified set", "post-DA identified set", "post-DA IV identified set", "intersection of identified sets"], dark_invert=[true, true, true, true]) %}
-**Figure 4:** Identified sets under symmetry constraints: the explicit invariance constraint, the post-DA set, the post-DA IV set, and the robust intersection with the baseline.
-{% end %}
-
-{% figure(src=["table-point-vs-partial.svg"], alt=["point vs partial identification under DA"], dark_invert=[true]) %}
-**Table 1:** Point vs. *partial* identification under DA.
-{% end %}
+<figure>
+<div>
+<figure>
+<img class="dark-invert" loading="lazy" src="inv-pi.png" alt="invariance-constrained identified set" style="max-height:170px">
+<figcaption>(a) <code>$\mathcal{H}_{\mathrm{p\imath}+\mathrm{\imath nv}}$</code></figcaption>
+</figure>
+<figure>
+<img class="dark-invert" loading="lazy" src="da-pi.svg" alt="post-DA identified set" style="max-height:170px">
+<figcaption>(b) <code>$\mathcal{H}_{\widetilde{\mathrm{p\imath}}}$</code></figcaption>
+</figure>
+<figure>
+<img class="dark-invert" loading="lazy" src="da-iv-pi.svg" alt="post-DA IV identified set" style="max-height:170px">
+<figcaption>(c) <code>$\mathcal{H}_{\widetilde{\mathrm{p\imath}}+\widetilde{\mathrm{\imath v}}}$</code></figcaption>
+</figure>
+<figure>
+<img class="dark-invert" loading="lazy" src="pi-da-pi-intersection.png" alt="intersection of identified sets" style="max-height:170px">
+<figcaption>(d) <code>$\mathcal{H}_{\mathrm{p\imath}}(\boldsymbol{x}) \cap (\mathcal{H}_{\widetilde{\mathrm{p\imath}}}(\boldsymbol{x}) \pm \varepsilon)$</code></figcaption>
+</figure>
+</div>
+<figcaption><b>Figure 4:</b> Identified sets under symmetry constraints: <i>(a)</i> explicit invariance constraints prune the baseline set; <i>(b)</i> DA pre-processing yields a sharper, better-centered set; <i>(c)</i> IV constraints enforce symmetry; <i>(d)</i> intersecting with the baseline set stays robust under arbitrary DA.</figcaption>
+</figure>
 
 # Experimental Results
 
