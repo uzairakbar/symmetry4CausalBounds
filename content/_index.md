@@ -37,7 +37,7 @@ favicon = true
 
 # Partial Identification
 
-Causal effects are generally not identifiable from observational data alone: hidden confounding leaves a whole set of data-generating processes consistent with what we observe. *Partial identification (PI)* responds by bounding the causal effect over the identified set `$\mathcal{H}_{\mathrm{p\imath}} := \{ h^q_{\star} : q \in \mathcal{Q}_{\mathrm{p\imath}} \}$`, encoding assumptions `$\mathcal{P}_{\mathrm{p\imath}}$` as constraints of an optimization problem. In practice, however, PI bounds are often too wide to inform decisions.
+Causal effects are generally not identifiable from observational data alone: hidden confounding leaves a whole set of data-generating processes consistent with what we observe. *Partial identification (PI)* responds by bounding the causal effect over the identified set `$\mathcal{H}_{\mathrm{p}\textnormal{\i}} := \{ h^q_{\star} : q \in \mathcal{Q}_{\mathrm{p}\textnormal{\i}} \}$`, encoding assumptions `$\mathcal{P}_{\mathrm{p}\textnormal{\i}}$` as constraints of an optimization problem. In practice, however, PI bounds are often too wide to inform decisions.
 
 <div class="figrow">
 <figure>
@@ -77,20 +77,20 @@ Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of th
 <figure>
 <div>
 <figure>
-<img class="dark-invert" loading="lazy" src="inv-pi.png" alt="invariance-constrained identified set" style="max-height:170px">
-<figcaption>(a) <code>$\mathcal{H}_{\mathrm{p\imath}+\mathrm{\imath nv}}$</code></figcaption>
+<img class="dark-invert" loading="lazy" src="inv-pi.svg" alt="invariance-constrained identified set" style="max-height:170px">
+<figcaption>(a) <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}+\textnormal{\i}\mathrm{nv}}$</code></figcaption>
 </figure>
 <figure>
 <img class="dark-invert" loading="lazy" src="da-pi.svg" alt="post-DA identified set" style="max-height:170px">
-<figcaption>(b) <code>$\mathcal{H}_{\widetilde{\mathrm{p\imath}}}$</code></figcaption>
+<figcaption>(b) <code>$\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}}$</code></figcaption>
 </figure>
 <figure>
 <img class="dark-invert" loading="lazy" src="da-iv-pi.svg" alt="post-DA IV identified set" style="max-height:170px">
-<figcaption>(c) <code>$\mathcal{H}_{\widetilde{\mathrm{p\imath}}+\widetilde{\mathrm{\imath v}}}$</code></figcaption>
+<figcaption>(c) <code>$\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}+\widetilde{\textnormal{\i}\mathrm{v}}}$</code></figcaption>
 </figure>
 <figure>
-<img class="dark-invert" loading="lazy" src="pi-da-pi-intersection.png" alt="intersection of identified sets" style="max-height:170px">
-<figcaption>(d) <code>$\mathcal{H}_{\mathrm{p\imath}}(\boldsymbol{x}) \cap (\mathcal{H}_{\widetilde{\mathrm{p\imath}}}(\boldsymbol{x}) \pm \varepsilon)$</code></figcaption>
+<img class="dark-invert" loading="lazy" src="pi-da-pi-intersection.svg" alt="intersection of identified sets" style="max-height:170px">
+<figcaption>(d) <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}}(\boldsymbol{x}) \cap (\mathcal{H}_{\widetilde{\mathrm{p}\textnormal{\i}}}(\boldsymbol{x}) \pm \varepsilon)$</code></figcaption>
 </figure>
 </div>
 <figcaption><b>Figure 4:</b> Identified sets under symmetry constraints: <i>(a)</i> explicit invariance constraints prune the baseline set; <i>(b)</i> DA pre-processing yields a sharper, better-centered set; <i>(c)</i> IV constraints enforce symmetry; <i>(d)</i> intersecting with the baseline set stays robust under arbitrary DA.</figcaption>
