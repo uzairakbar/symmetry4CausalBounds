@@ -1,4 +1,15 @@
 # Symmetry-Constrained Causal Partial Identification
+> Implementation for *"Symmetry-Constrained Causal Partial Identification"* (Preprint 2026).
+<p align="center">
+    <img src="https://uzairakbar.github.io/symmetry4CausalBounds/card.png"
+    alt="Symmetry for Causal Bounds"
+    width="33%">
+</p>
+<p align="center">
+  <a href="https://arxiv.org/abs/#"><img src="https://img.shields.io/badge/arXiv-2510.25128-B31B1B.svg?logo" alt="arXiv Manuscript"></a>
+  <a href="https://uzairakbar.github.io/symmetry4CausalBounds"><img src="https://img.shields.io/badge/WEB-page-0eb077.svg" alt="Project Webpage"></a>
+  <a href="https://colab.research.google.com/github/uzairakbar/symmetry4CausalBounds/blob/colab/s4cb.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Google Colab"></a>
+</p>
 
 ## Setup
 ### Dependencies
