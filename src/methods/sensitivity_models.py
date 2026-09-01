@@ -254,7 +254,11 @@ class PartialR2(BoundedSA):
             status = None
             for solver in (cp.CLARABEL, cp.ECOS):
                 try:
-                    prob.solve(solver=solver, warm_start=True, verbose=False)
+                    # warm_start=False: queries must be independent (A5). The old
+                    # flag was inert -- CLARABEL ignored warm starts before
+                    # cvxpy 1.6 -- but now a solve inherits state from the
+                    # previous one, so chunking would change bounds at ~1e-13.
+                    prob.solve(solver=solver, warm_start=False, verbose=False)
                     status = prob.status
                 except Exception:
                     status = None
