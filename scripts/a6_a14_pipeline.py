@@ -150,7 +150,7 @@ def a7_query_status(sem, nets, X, GX, y, G, Q):
 def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     """A21: each branch must get the right NET and be fit on the right BALL.
 
-    Both halves are needed. Giving PI_INV the X net instead of the GX net moves an
+    Both halves are needed. Giving PI+INV the X net instead of the GX net moves an
     inactive constraint's bounds ~7.7%; and a mis-routed `fit(X, ...)` that lets
     `GX=GX` fall into **kwargs silently fits the DA branch on the baseline ball.
     Neither raises; both quietly change every number.
@@ -167,7 +167,7 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     )
     models = {
         "PI&DA+PI": IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets, **common).fit(X, y, GX=GX, G=G),
-        "PI&DA+PI_IV": IntersectedIVCopSens(epsilon=0.1, epsilon_iv=0.1, pad=False, outcome_models=nets, **common).fit(
+        "PI&DA+PI+IV": IntersectedIVCopSens(epsilon=0.1, epsilon_iv=0.1, pad=False, outcome_models=nets, **common).fit(
             X, y, GX=GX, G=G
         ),
     }
@@ -252,7 +252,7 @@ def a8_jax_equals_fd(nets, X, GX, y, G, Q):
     for name, build in (
         ("PI", lambda jg: CopSensPI(gamma=0.1, outcome_model=nets["X"], jax_grad=jg, **common).fit(X, y)),
         (
-            "DA+PI_IV",
+            "DA+PI+IV",
             lambda jg: IVConstrainedCopSens(
                 gamma=0.1, epsilon_iv=0.12, outcome_model=nets["GX"], jax_grad=jg, **common
             ).fit(GX, y, Z=G),
@@ -366,7 +366,7 @@ def a11_config_strictness():
     except ValueError:
         check("A11 copsens rejects an undefined method", True)
 
-    for name in ("PI&DA+PI", "PI&DA+PI_IV"):
+    for name in ("PI&DA+PI", "PI&DA+PI+IV"):
         built = MethodRegistry.build_methods(
             [name], gamma=0.1, epsilon=0.05, epsilon_iv=0.05, backend="copsens", outcome_models={"X": None, "GX": None}
         )
@@ -446,7 +446,7 @@ def a26_budget_wiring():
             calibrate=True,
             n_jobs=8,
             augmentation="translate > rotation > contrast > saturation > hue",
-            methods=["PI", "DA+PI", "PI_INV"],
+            methods=["PI", "DA+PI", "PI+INV"],
             n_samples=20_000,
             n_pi=2_000,
             n_queries=16,
@@ -468,7 +468,7 @@ def a26_budget_wiring():
 
     check("A26 runner keeps the config gamma", runner.default_gamma == gamma, f"{runner.default_gamma}")
     check("A26 runner keeps the config epsilon", runner.default_epsilon == epsilon, f"{runner.default_epsilon}")
-    for name in ("PI", "DA+PI", "PI_INV"):
+    for name in ("PI", "DA+PI", "PI+INV"):
         built = runner.methods[name]()
         check(f"A26 {name} is built on the config gamma", built.gamma == gamma, f"{built.gamma}")
 

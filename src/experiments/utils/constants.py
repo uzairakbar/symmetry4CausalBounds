@@ -50,15 +50,15 @@ TEX_MAPPER: dict[str, str] = {
     "DA+ERM": rf"$\mkern7mu\widetilde{{\mkern-7mu{{{ERM}}}\mkern-7mu}}\mkern7mu$",
     # instrumental variable
     "DA+IV": rf"$\widetilde{{{IV}}}$",
-    "PI_IV": rf"${PI}+{IV}$",
+    "PI+IV": rf"${PI}+{IV}$",
     # sensitivity models
     "PI": rf"${PI}$",
-    "PI_INV": rf"${PI}+{INV}$",
+    "PI+INV": rf"${PI}+{INV}$",
     "DA+PI": rf"$\widetilde{{{PI}}}$",
-    "DA+PI_IV": rf"$\widetilde{{{PI}}}+\widetilde{{{IV}}}$",
+    "DA+PI+IV": rf"$\widetilde{{{PI}}}+\widetilde{{{IV}}}$",
     # combinations
     "PI&DA+PI": rf"${PI}\cap\widetilde{{{PI}}}$",
-    "PI&DA+PI_IV": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}})$",
+    "PI&DA+PI+IV": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}})$",
 }
 
 # Color mapping for methods
@@ -67,13 +67,13 @@ COLOR_MAP: dict[str, int] = {
     "ERM": 0,
     "DA+ERM": 3,
     "DA+IV": 2,
-    "PI_INV": 7,
+    "PI+INV": 7,
     "PI": 0,
-    "PI_IV": 1,
+    "PI+IV": 1,
     "DA+PI": 3,
-    "DA+PI_IV": 2,
+    "DA+PI+IV": 2,
     "PI&DA+PI": 4,
-    "PI&DA+PI_IV": 6,
+    "PI&DA+PI+IV": 6,
 }
 
 # Alpha (transparency) mapping for methods
@@ -84,13 +84,13 @@ ALPHA_MAP: dict[str, float] = {
     "DA+ERM": 1.0,
     "DA+IV": 1.0,
     # Partial identification methods (transparent)
-    "PI_INV": 0.8,
+    "PI+INV": 0.8,
     "PI": 0.2,
-    "PI_IV": 0.2,
+    "PI+IV": 0.2,
     "DA+PI": 0.2,
-    "DA+PI_IV": 0.4,
+    "DA+PI+IV": 0.4,
     "PI&DA+PI": 0.4,
-    "PI&DA+PI_IV": 0.4,
+    "PI&DA+PI+IV": 0.4,
 }
 
 # Visual style configuration

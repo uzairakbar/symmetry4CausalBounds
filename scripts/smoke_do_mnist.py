@@ -34,7 +34,7 @@ BLOCK = dict(
     calibrate=True,
     n_jobs=-1,
     augmentation="translate > rotation > contrast > saturation > hue",
-    methods=["ATE", "ERM", "DA+ERM", "PI", "DA+PI", "PI_INV", "DA+PI_IV", "PI&DA+PI", "PI&DA+PI_IV"],
+    methods=["ATE", "ERM", "DA+ERM", "PI", "DA+PI", "PI+INV", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"],
     experiment={"query": True, "perf": {"metric": ["wall_clock"]}},
 )
 HYPERPARAMETERS = dict(lr=0.01, batch=256, epochs=1, optimizer="adam", betas=(0.7, 0.9), onecycle=True, loss="mse")

@@ -25,7 +25,7 @@ from src.experiments.utils.metrics import (
 )
 
 N_STEPS = 12
-METHODS = ["PI", "DA+PI", "DA+PI_IV"]
+METHODS = ["PI", "DA+PI", "DA+PI+IV"]
 
 
 def main():
@@ -128,8 +128,8 @@ def main():
     print("\n--- is the IV budget constant across the sweep? ---")
     print(f"  eps_iv range: {eps_ivs.min():.9f} .. {eps_ivs.max():.9f}  (spread {np.ptp(eps_ivs):.3g})")
     w_da = np.array([r[5]["DA+PI"] for r in rows])
-    w_iv = np.array([r[5]["DA+PI_IV"] for r in rows])
-    print(f"  max|width(DA+PI_IV) - width(DA+PI)| = {np.nanmax(np.abs(w_iv - w_da)):.3g}")
+    w_iv = np.array([r[5]["DA+PI+IV"] for r in rows])
+    print(f"  max|width(DA+PI+IV) - width(DA+PI)| = {np.nanmax(np.abs(w_iv - w_da)):.3g}")
 
     print("\n--- does the trace truncation change the axis? ---")
     rel = np.abs(trs_trunc - trs_full) / np.maximum(np.abs(trs_full), 1e-12)

@@ -6,6 +6,9 @@ and the exact arrays rather than the seed that produced them.
 
     <source-venv>/bin/python scripts/a4_copsens_parity.py --source /tmp/a4
     <s4cb>/bin/python       scripts/a4_copsens_parity.py --check  /tmp/a4
+
+Method keys here stay SOURCE-spelled (underscores) on purpose: check() indexes
+SOURCE's npz via blob[f'b_{name}'], so renamed keys would break the lookup.
 """
 
 import argparse

@@ -74,10 +74,10 @@ def main():
         "DA+PI": lambda nj: CopSensPI(outcome_model=nets["GX"], n_jobs=nj, **common).fit(GX, y),
         # eps large enough to clear the floor, so this exercises a FEASIBLE
         # constrained solve rather than the all-INFEASIBLE gate
-        "PI_INV": lambda nj: RecentredInvCopSens(outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **common).fit(
+        "PI+INV": lambda nj: RecentredInvCopSens(outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **common).fit(
             X, y, GX=GX
         ),
-        "DA+PI_IV": lambda nj: IVConstrainedCopSens(outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common).fit(
+        "DA+PI+IV": lambda nj: IVConstrainedCopSens(outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common).fit(
             GX, y, Z=G
         ),
     }

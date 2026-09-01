@@ -25,12 +25,12 @@ simulation:
         # - ERM
         # - DA+ERM
         # - DA+IV
-        - PI_INV
+        - PI+INV
         - PI
         - DA+PI
-        - DA+PI_IV
+        - DA+PI+IV
         - PI&DA+PI
-        - PI&DA+PI_IV
+        - PI&DA+PI+IV
     augmentation: translate
     experiment:
         query: true                 # query sweep; panel ALWAYS generated
@@ -68,9 +68,9 @@ simulation:
 #                                     # augmentation (+-10 deg cannot turn a 2 into a 5,
 #                                     # and colour never causes Y); this is finite-sample
 #                                     # slack. eps=0 makes the IV budget exactly 0.
-#                                     # WARNING: PI_INV is a knife edge. Measured at
+#                                     # WARNING: PI+INV is a knife edge. Measured at
 #                                     # n_pi=8k, this gives floor 0.003415 > eps^2 0.0025,
-#                                     # so PI_INV comes back honestly all-INFEASIBLE
+#                                     # so PI+INV comes back honestly all-INFEASIBLE
 #                                     # (SOURCE does the same at these settings). It needs
 #                                     # eps >= 0.059 there. Re-read the floor/budget pair
 #                                     # logged per experiment at the real n_pi before
@@ -82,10 +82,10 @@ simulation:
 #         # - DA+ERM
 #         - PI
 #         - DA+PI
-#         - PI_INV
-#         - DA+PI_IV
+#         - PI+INV
+#         - DA+PI+IV
 #         - PI&DA+PI
-#         - PI&DA+PI_IV
+#         - PI&DA+PI+IV
 #     calibrate: true                 # budgets scaled by sigma-hat^2 = E[mu(1-mu)]
 #     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
 #                                     # bit-identical to n_jobs=1.
@@ -104,12 +104,12 @@ optical_device:
         # - ERM
         # - DA+ERM
         # - DA+IV
-        - PI_INV
+        - PI+INV
         - PI
         - DA+PI
-        - DA+PI_IV
+        - DA+PI+IV
         - PI&DA+PI
-        - PI&DA+PI_IV
+        - PI&DA+PI+IV
     # augmentation: all
     augmentation: rotation > gaussian-noise # rotation > gaussian
     # augmentation: rotation > hflip > vflip > random-permutation

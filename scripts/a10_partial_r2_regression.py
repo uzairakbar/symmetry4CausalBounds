@@ -34,8 +34,8 @@ def direct_solves():
 
     cases = {
         "PI": lambda nj: sm.PartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y),
-        "PI_INV": lambda nj: sm.InvarianceConstrainedPartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y, GX=GX),
-        "DA+PI_IV": lambda nj: sm.InstrumentalVariablePartialR2(gamma=0.5, epsilon=0.3, epsilon_iv=0.2, n_jobs=nj).fit(
+        "PI+INV": lambda nj: sm.InvarianceConstrainedPartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y, GX=GX),
+        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(gamma=0.5, epsilon=0.3, epsilon_iv=0.2, n_jobs=nj).fit(
             GX, y, Z=GX
         ),
         "PI&DA+PI": lambda nj: sm.IntersectedPartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y, GX=GX, G=GX),
@@ -59,7 +59,7 @@ def optical_sweep():
         n_samples=200,
         n_experiments=2,
         sweep_samples=3,
-        methods=["PI", "PI_INV", "DA+PI", "PI&DA+PI"],
+        methods=["PI", "PI+INV", "DA+PI", "PI&DA+PI"],
         hyperparameters={},
         n_jobs=1,
         augmentation="rotation > hflip > vflip > gaussian-noise",

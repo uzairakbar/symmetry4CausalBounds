@@ -81,14 +81,14 @@ def log_vacuous(bounds: dict[str, np.ndarray]):
             )
 
 
-#: (constrained method, the UNCONSTRAINED model on the same ball). PI_INV is paired
+#: (constrained method, the UNCONSTRAINED model on the same ball). PI+INV is paired
 #: with DA+PI, not PI: `RecentredInvCopSens` fits the post-DA measure, so DA+PI is
 #: its parent and PI is a different ball entirely.
 NESTED_IN = {
-    "PI_INV": "DA+PI",
-    "DA+PI_IV": "DA+PI",
+    "PI+INV": "DA+PI",
+    "DA+PI+IV": "DA+PI",
     "PI&DA+PI": "DA+PI",
-    "PI&DA+PI_IV": "DA+PI",
+    "PI&DA+PI+IV": "DA+PI",
 }
 
 

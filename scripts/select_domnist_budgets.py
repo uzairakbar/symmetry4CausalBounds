@@ -8,11 +8,11 @@ oracle quantity certifies membership on the copsens backend.
 Three sequential legs at ONE target coverage X, each fixing its knob for good:
 
     1. lowest gamma      with coverage >= X on PI          -> FIXED, never re-selected
-    2. lowest epsilon_iv with coverage >= X on DA+PI_IV    (at that gamma)
-    3. lowest epsilon    with coverage >= X on PI_INV      (at that gamma)
+    2. lowest epsilon_iv with coverage >= X on DA+PI+IV    (at that gamma)
+    3. lowest epsilon    with coverage >= X on PI+INV      (at that gamma)
 
 gamma is fixed by leg 1 because the pipeline consumes ONE gamma for every method; a
-per-method gamma would report a tuple no experiment can use. DA+PI_IV and PI_INV are
+per-method gamma would report a tuple no experiment can use. DA+PI+IV and PI+INV are
 subsets of DA+PI, so if DA+PI misses X at that gamma no budget can reach it -- the
 report says so and marks the leg `target_reachable: false` rather than pretending.
 
@@ -237,10 +237,10 @@ def main(args):
         fit_kw = {
             "PI": dict(X=X),
             "DA+PI": dict(X=GX),
-            "PI_INV": dict(X=X, GX=GX, G=G_pi),
-            "DA+PI_IV": dict(X=GX, Z=G_pi),
+            "PI+INV": dict(X=X, GX=GX, G=G_pi),
+            "DA+PI+IV": dict(X=GX, Z=G_pi),
             "PI&DA+PI": dict(X=X, GX=GX, G=G_pi),
-            "PI&DA+PI_IV": dict(X=X, GX=GX, G=G_pi),
+            "PI&DA+PI+IV": dict(X=X, GX=GX, G=G_pi),
         }[name]
         return model.fit(y=y_pi, **fit_kw)
 
@@ -267,7 +267,7 @@ def main(args):
     ceiling = da_pi_record.coverage
     warnings = []
     if ceiling < target:
-        # DA+PI_IV and PI_INV are subsets of DA+PI, so neither can out-cover it. The
+        # DA+PI+IV and PI+INV are subsets of DA+PI, so neither can out-cover it. The
         # target is then unattainable at this gamma -- a finding about the fixture,
         # reported as such. Legs 2/3 fall back to the ceiling so the report still
         # carries a usable number, flagged `target_reachable: false`.
@@ -277,7 +277,7 @@ def main(args):
             "since both constraints only shrink DA+PI."
         )
         warnings.append(
-            f"target {target} is UNATTAINABLE for DA+PI_IV and PI_INV at gamma "
+            f"target {target} is UNATTAINABLE for DA+PI+IV and PI+INV at gamma "
             f"{gamma:.6g}: DA+PI itself covers {ceiling:.4f} and both methods are "
             "subsets of it. Legs 2/3 report the lowest budget reaching that ceiling "
             f"({ceiling:.4f}) instead, marked target_reachable=false. Raise the "
@@ -302,17 +302,17 @@ def main(args):
         setattr(model, attr, selected["value"])
         return selected, floor
 
-    logger.info("leg 2/3: epsilon_iv on DA+PI_IV")
-    iv_sel, iv_floor = budget_leg("DA+PI_IV", "epsilon_iv", "leg 2")
+    logger.info("leg 2/3: epsilon_iv on DA+PI+IV")
+    iv_sel, iv_floor = budget_leg("DA+PI+IV", "epsilon_iv", "leg 2")
 
-    logger.info("leg 3/3: epsilon on PI_INV")
-    inv_sel, inv_floor = budget_leg("PI_INV", "epsilon", "leg 3")
+    logger.info("leg 3/3: epsilon on PI+INV")
+    inv_sel, inv_floor = budget_leg("PI+INV", "epsilon", "leg 3")
 
     epsilon, epsilon_iv = inv_sel["value"], iv_sel["value"]
 
     # ------------------------------------- intersections: NOT bounded by the legs above
-    # PI & DA+PI_IV can be empty when neither branch is, so marginal selection on
-    # DA+PI_IV says nothing about it. Measure, do not infer.
+    # PI & DA+PI+IV can be empty when neither branch is, so marginal selection on
+    # DA+PI+IV says nothing about it. Measure, do not infer.
     # a budget that buys no width is a duplicate column, whatever its coverage
     def flag_inert(label, width, reference, where=""):
         # relative, not absolute: buying 0.005% of width is inert at any scale
@@ -327,7 +327,7 @@ def main(args):
         flag_inert(f"{label} = {selected['value']:.6g}", selected["record"].interval_width, da_pi_record.interval_width)
 
     intersections = {}
-    for name in ("PI&DA+PI", "PI&DA+PI_IV"):
+    for name in ("PI&DA+PI", "PI&DA+PI+IV"):
         if name not in block.get("methods", []):
             continue
         model = fitted(name, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv)

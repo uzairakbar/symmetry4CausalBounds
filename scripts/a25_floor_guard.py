@@ -29,7 +29,7 @@ from src.methods.sensitivity_models import (
     iv_constraint_terms,
 )
 
-METHODS = ["PI", "DA+PI", "PI_INV", "DA+PI_IV"]
+METHODS = ["PI", "DA+PI", "PI+INV", "DA+PI+IV"]
 FAIL = []
 
 
@@ -181,8 +181,8 @@ def a25_rescues_infeasible():
             models = runner.build_models(0, index, data)
             record = evaluate_queries(
                 data.estimand,
-                models["DA+PI_IV"].predict(data.X_test, **runner.get_predict_kwargs(knob, 0)),
-                getattr(models["DA+PI_IV"], "query_status", None),
+                models["DA+PI+IV"].predict(data.X_test, **runner.get_predict_kwargs(knob, 0)),
+                getattr(models["DA+PI+IV"], "query_status", None),
                 0.0,
             )
             solved = np.isfinite(record.interval_width) and record.interval_width > 0

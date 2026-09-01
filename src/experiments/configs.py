@@ -136,7 +136,7 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 # SWEEP PARAMETER / METRIC SPECS
 # =============================================================================
 
-# keeps auto-set epsilon off the PI_INV feasibility knife edge (eps=0 forces h~0)
+# keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
 EPS_TOL: float = 2**-8
 
 # Floor guard. An auto-set budget below the constraint's own attainable floor is not
@@ -146,8 +146,8 @@ EPS_TOL: float = 2**-8
 # oracle value was already unusable.
 #
 # Calibrated on the simulation trS grid, where the oracle IV budget (EPS_TOL, 0.0039)
-# sits below the floor at the 5 lowest knobs and DA+PI_IV was all-NaN there. Measured
-# DA+PI_IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
+# sits below the floor at the 5 lowest knobs and DA+PI+IV was all-NaN there. Measured
+# DA+PI+IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
 #   r=2.25  0.82-0.88            under-covers
 #   r=4     0.931-1.000  2.9-4.3 two steps under nominal
 #   r=9     0.985-1.000  4.2-6.0 <- CHOSEN: covers everywhere, still 24-47% inside
@@ -372,13 +372,13 @@ ALL_METHODS: tuple[str, ...] = (
     "ERM",
     "DA+ERM",
     "DA+IV",
-    "PI_INV",
+    "PI+INV",
     "PI",
-    "PI_IV",
+    "PI+IV",
     "DA+PI",
-    "DA+PI_IV",
+    "DA+PI+IV",
     "PI&DA+PI",
-    "PI&DA+PI_IV",
+    "PI&DA+PI+IV",
 )
 
 # the copsens backend defines a strict subset: no 2SLS and no baseline-IV. It DOES
@@ -388,12 +388,12 @@ COPSENS_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
-    "PI_INV",
+    "PI+INV",
     "PI",
     "DA+PI",
-    "DA+PI_IV",
+    "DA+PI+IV",
     "PI&DA+PI",
-    "PI&DA+PI_IV",
+    "PI&DA+PI+IV",
 )
 
 
@@ -431,9 +431,9 @@ def _copsens_builders(
         "DA+ERM": lambda: net("GX"),
         "PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
         "DA+PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **common),
-        # recentred on the post-DA measure: from an X-centred ball PI_INV is empty
+        # recentred on the post-DA measure: from an X-centred ball PI+INV is empty
         # at any reasonable eps (see RecentredInvCopSens)
-        "PI_INV": lambda: RecentredInvCopSens(
+        "PI+INV": lambda: RecentredInvCopSens(
             gamma=gamma,
             epsilon=epsilon,
             pad=False,
@@ -441,7 +441,7 @@ def _copsens_builders(
             n_constraint=config.n_constraint_inv,
             **common,
         ),
-        "DA+PI_IV": lambda: IVCopSens(
+        "DA+PI+IV": lambda: IVCopSens(
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
@@ -455,7 +455,7 @@ def _copsens_builders(
         "PI&DA+PI": lambda: IntCopSens(
             gamma=gamma, epsilon=epsilon, pad=pad, outcome_models={"X": net("X"), "GX": net("GX")}, **common
         ),
-        "PI&DA+PI_IV": lambda: IntIVCopSens(
+        "PI&DA+PI+IV": lambda: IntIVCopSens(
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
@@ -496,7 +496,7 @@ class MethodRegistry:
         """
         Build only requested methods with given hyperparameters.
 
-        `pad` is applied to DA+ methods only; baseline PI/PI_INV/PI_IV never pad.
+        `pad` is applied to DA+ methods only; baseline PI/PI+INV/PI+IV never pad.
         `gamma_z` is never set: no experiment uses instruments.
 
         Args:
@@ -541,15 +541,15 @@ class MethodRegistry:
             "ERM": lambda: ERM(),
             "DA+ERM": lambda: ERM(),
             "DA+IV": lambda: IV(),
-            "PI_INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
+            "PI+INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
             "PI": lambda: PartialR2(gamma=gamma, pad=False, **common),
-            # baseline PI_IV has a null instrument, so it reduces to PI and
+            # baseline PI+IV has a null instrument, so it reduces to PI and
             # never reads the IV budget
-            "PI_IV": lambda: IVPartialR2(gamma=gamma, pad=False, **common),
+            "PI+IV": lambda: IVPartialR2(gamma=gamma, pad=False, **common),
             "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **common),
-            "DA+PI_IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **iv_common),
+            "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **iv_common),
             "PI&DA+PI": lambda: IntPartialR2(gamma=gamma, pad=pad, **common),
-            "PI&DA+PI_IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
+            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
         }
 
         if set(all_builders) != set(ALL_METHODS):
@@ -617,5 +617,8 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     for key in ("n_samples", "n_experiments", "sweep_samples"):
         block.setdefault(key, getattr(defaults, key))
     block.setdefault("methods", list(ALL_METHODS))
+    # a stale method name (e.g. an old underscore spelling) must be a config
+    # error here, not silently filtered out of the run by the registry
+    _reject_unknown(block["methods"], ALL_METHODS, f"config.{name}.methods")
 
     return block
