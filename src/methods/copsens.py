@@ -469,9 +469,9 @@ class InvarianceConstrainedCopSens(CopSensPI):
 
 
 class RecentredInvCopSens(InvarianceConstrainedCopSens):
-    """PI_INV, fitted against the POST-DA measure.
+    """PI+INV, fitted against the POST-DA measure.
 
-    From an X-centred ball, PI_INV is empty at any reasonable eps: a fixed net plus
+    From an X-centred ball, PI+INV is empty at any reasonable eps: a fixed net plus
     a 32-d latent shift cannot reach the invariant slice from a centre whose own
     invariance defect IS the confounding (measured floor 0.0357 vs eps^2 0.01).
     E_inv is symmetric in (X, GX), so swapping them leaves the CONSTRAINT untouched;
@@ -614,7 +614,7 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
 
 
 class IntersectedIVCopSens(IntersectedCopSens):
-    """Baseline PI (null instrument) intersected with DA+PI_IV."""
+    """Baseline PI (null instrument) intersected with DA+PI+IV."""
 
     def __init__(self, epsilon_iv=None, n_constraint=384, **kwargs):
         if epsilon_iv is None:

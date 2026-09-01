@@ -14,10 +14,10 @@ optical_device:
         - ERM
         - DA+ERM
         - DA+IV
-        - PI_INV
+        - PI+INV
         - PI
         - DA+PI
-        - DA+PI_IV
+        - DA+PI+IV
     augmentation: all
     experiment:
         query: true

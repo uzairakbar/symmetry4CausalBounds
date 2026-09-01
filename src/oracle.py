@@ -157,7 +157,7 @@ def epsilon_star(
     to RMS. Two properties that make it the right budget:
       - Thm. 3.A padding needs ||E[W|X~]||, and ||W||^2 = ||E[W|X~]||^2 + ||W#||^2
         by orthogonality, so ||W|| dominates it.
-      - it equals the PI_INV constraint evaluated at h_* exactly, since
+      - it equals the PI+INV constraint evaluated at h_* exactly, since
         (Phi(GX) - Phi(X)) h_* = -w. So eps* + EPS_TOL admits h_* by construction.
     """
     w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)

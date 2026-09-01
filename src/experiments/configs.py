@@ -589,7 +589,7 @@ REQUIRED_KEYS: dict[str, set] = {
     "simulation": {"seed", "kernel_dim"},
     "optical_device": {"seed", "augmentation"},
     # `methods` is required HERE and nowhere else: the fallback below is all 11 of
-    # ALL_METHODS, and the copsens backend defines only 7. Omitting it would be a
+    # ALL_METHODS, and the copsens backend defines only 9. Omitting it would be a
     # hard error mid-run rather than a config error up front.
     "do_mnist": {"seed", "augmentation", "gamma", "epsilon", "methods"},
 }

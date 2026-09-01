@@ -121,7 +121,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv(self) -> float:
-        """Oracle IV budget, off the knife edge (same guard as PI_INV), then raised
+        """Oracle IV budget, off the knife edge (same guard as PI+INV), then raised
         to the constraint's own floor if it lands under it (`FLOOR_GUARD_R`)."""
         budget = getattr(self.oracle, "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
@@ -323,7 +323,7 @@ class EpsilonRatioStrategy(GenericParamSweep):
     gamma stays at gamma*_j, as everywhere outside the validity sweep, so the
     baseline is valid and the plot isolates the effect of misstating epsilon.
     (Pinning gamma to the Thm. 1 threshold instead would make the baseline
-    invalid by construction, leaving PI_INV infeasible throughout and the
+    invalid by construction, leaving PI+INV infeasible throughout and the
     intersections inheriting that invalidity -- see PLAN 7.)
 
     This is the ONLY sweep that recalibrates the DA (to ROBUSTNESS_EPSILON_TRUE),

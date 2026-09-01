@@ -327,7 +327,7 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False
         design: the matrix the METHOD fits on -- X for `inv`, GX for `iv`
         y: outcomes, paired with `design`
         gamma: the ball this budget will be used with
-        kind: 'inv' (PI_INV) or 'iv' (DA+PI_IV)
+        kind: 'inv' (PI+INV) or 'iv' (DA+PI+IV)
         GX: augmented design, required for `inv`
         Z: instrument, required for `iv`
         calibrate: scale the radius by sigma-hat, as the fitted model does
@@ -553,7 +553,7 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
 
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
-    """Baseline PI_IV (null instrument) intersected with DA+PI_IV."""
+    """Baseline PI+IV (null instrument) intersected with DA+PI+IV."""
 
     def __init__(self, gamma_z=0.0, epsilon_iv=None, **kwargs):
         self.gamma_z = gamma_z

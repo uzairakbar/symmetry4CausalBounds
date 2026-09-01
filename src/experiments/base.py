@@ -262,7 +262,7 @@ class ParamSweepRunner(BaseExperimentRunner):
     def fit_epsilon(self, experiment_index: int, step_index: int = 0, data=None) -> float:
         """
         Assumed invariance error: oracle eps* = ||W|| over the full augmentation,
-        just large enough to admit h_* in PI_INV, off the knife edge.
+        just large enough to admit h_* in PI+INV, off the knife edge.
 
         Floor-guarded (see `_floor_guard`): the oracle quantity is the budget, but
         never below what the constraint can actually attain on this ball.
