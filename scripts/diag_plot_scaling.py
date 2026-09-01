@@ -68,7 +68,7 @@ def report_real():
         if param not in PARAM_SPECS:
             continue
         with open(path, 'rb') as handle:
-            results = pickle.load(handle)
+            results = pickle.load(handle)  # noqa: S301 - our own artifacts, no untrusted input
 
         for metric, spec in METRIC_SPECS.items():
             if spec.perf_only:

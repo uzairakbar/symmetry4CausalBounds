@@ -199,7 +199,7 @@ def load(path: str):
     try:
         if file_format == 'pkl':
             with open(path, 'rb') as file:
-                data = pickle.load(file)
+                data = pickle.load(file)  # noqa: S301 - our own artifacts, no untrusted input
         else:  # json
             with open(path, 'r') as file:
                 data = json.load(file)
