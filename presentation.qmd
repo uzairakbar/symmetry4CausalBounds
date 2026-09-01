@@ -62,8 +62,106 @@ hidden confounding $U$ makes $\hstar$ generally unidentifiable.
 > Can **known data symmetries** $\sT$ — invariances $\hstar(\tau \vx) = \hstar(\vx)$, with $\sT \indep U$ by design — be repurposed as constraints that **provably sharpen** PI bounds, e.g. via post-DA data $(\tX, Y)$?
 :::
 
+## Hidden confounding leaves causal effects underdetermined
+
+::: {.columns}
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/sem-graph.svg){fig-alt="Structural equation model with hidden confounding" width=78%}
+
+Observational SEM with hidden confounding.
+:::
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/intervention-graph.svg){fig-alt="Intervention graph for do(x)" width=78%}
+
+The causal query asks what changes under $\doop(X=x)$.
+:::
+:::
+
+## Partial identification reports a set, not a single answer
+
+::: {.columns}
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/pi-x.svg){fig-alt="Partial-identification interval at a query point" width=88%}
+
+At a query point, compatible DGPs produce an interval of possible effects.
+:::
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/pi-metrics.svg){fig-alt="Identified-set geometry and partial-identification metrics" width=88%}
+
+The width and position of the identified set determine how useful the bound is.
+:::
+:::
+
 # Symmetry-Constrained Bounds
 
-## TODO
+## Data augmentation behaves like a soft intervention
 
-<!-- content goes here -->
+::: {.columns}
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/da-graph.svg){fig-alt="Data augmentation graph" width=78%}
+
+Transform observations using a known symmetry.
+:::
+::: {.column width="50%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/transformation-intervention-graph.svg){fig-alt="Soft-intervention graph induced by the transformation" width=78%}
+
+The transformation has the semantics of a soft intervention.
+:::
+:::
+
+## Point identification and PI react differently to augmentation
+
+![](https://uzairakbar.github.io/symmetry4CausalBounds/table-point-vs-partial.svg){fig-alt="Comparison of point and partial identification under data augmentation" width=82%}
+
+For PI, augmentation can sharpen bounds without requiring point identification.
+
+## Symmetry yields four complementary ways to sharpen PI bounds
+
+::: {.columns}
+::: {.column width="25%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/inv-pi.svg){fig-alt="Invariance-constrained identified set" width=96%}
+
+Explicit invariance.
+:::
+::: {.column width="25%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/da-pi.svg){fig-alt="Post-data-augmentation identified set" width=96%}
+
+Post-DA PI.
+:::
+::: {.column width="25%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/da-iv-pi.svg){fig-alt="Post-data-augmentation invariance-constrained identified set" width=96%}
+
+Post-DA + IV.
+:::
+::: {.column width="25%"}
+![](https://uzairakbar.github.io/symmetry4CausalBounds/pi-da-pi-intersection.svg){fig-alt="Intersection of baseline and data-augmentation identified sets" width=96%}
+
+Robust intersection.
+:::
+:::
+
+Explicit constraints prune the baseline set; DA can recenter and tighten it; their intersection remains robust under arbitrary DA.
+
+# Experimental Results
+
+## Simulated query sweeps: symmetry consistently tightens bounds
+
+![](https://uzairakbar.github.io/symmetry4CausalBounds/simulation-query-sweep.svg){fig-alt="Query sweeps on simulated data" width=90%}
+
+## Optical-device query sweeps confirm the pattern
+
+![](https://uzairakbar.github.io/symmetry4CausalBounds/optical-query-sweep.svg){fig-alt="Query sweeps on the optical-device dataset" width=90%}
+
+## do-MNIST: post-DA invariance gives the sharpest valid bounds
+
+![](https://uzairakbar.github.io/symmetry4CausalBounds/do-mnist-sweep.svg){fig-alt="do-MNIST digit sweep" width=90%}
+
+# Takeaway
+
+## Known symmetries turn into useful causal information
+
+::: {.incremental}
+- PI is essential under hidden confounding, but its bounds can be too wide to act on.
+- Symmetry constraints are an underused, principled source of extra information.
+- Explicit invariance, post-DA PI, and their robust intersection all sharpen bounds while preserving validity.
+:::
