@@ -84,7 +84,7 @@ class RandomPermutation(Permutation):
 
     @property
     def augmentation(self):
-        return 'random-permutation'
+        return "random-permutation"
 
     def augment(self, x, g):
         return self.permute(x, 1.0, g)
@@ -95,7 +95,7 @@ class RandomRotation(Permutation):
 
     @property
     def augmentation(self):
-        return 'rotation'
+        return "rotation"
 
     def augment(self, x, g):
         ROTATION90 = np.array([6, 3, 0, 7, 4, 1, 8, 5, 2])
@@ -107,7 +107,7 @@ class RandomHorizontalFlip(Permutation):
 
     @property
     def augmentation(self):
-        return 'hflip'
+        return "hflip"
 
     def augment(self, x, g):
         HORIZONTAL_FLIP = np.array([2, 1, 0, 5, 4, 3, 8, 7, 6])
@@ -119,7 +119,7 @@ class RandomVerticalFlip(Permutation):
 
     @property
     def augmentation(self):
-        return 'vflip'
+        return "vflip"
 
     def augment(self, x, g):
         VERTICAL_FLIP = np.array([6, 7, 8, 3, 4, 5, 0, 1, 2])
@@ -141,7 +141,7 @@ class GaussianNoise(DA):
 
     @strength.setter
     def strength(self, value: float):
-        assert value >= 0.0, '`strength` must be non-negative.'
+        assert value >= 0.0, "`strength` must be non-negative."
         self._strength = float(value)
 
     def __call__(self, X, noise_coeff: Optional[float] = None, **kwargs):
@@ -155,7 +155,7 @@ class GaussianNoise(DA):
 
     @property
     def augmentation(self):
-        return 'gaussian-noise'
+        return "gaussian-noise"
 
     def augment(self, X, G):
         return X + self._strength * np.std(X) * G
@@ -166,21 +166,21 @@ class Identity(DA):
 
     @property
     def augmentation(self):
-        return 'identity'
+        return "identity"
 
     def augment(self, X, **kwargs):
         return X, X
 
 
-Augmentation = Literal['rotation', 'hflip', 'vflip', 'gaussian-noise', 'random-permutation']
+Augmentation = Literal["rotation", "hflip", "vflip", "gaussian-noise", "random-permutation"]
 
 # constructors, NOT instances: augmenters carry per-DA state (p, strength)
 ALL_AUGMENTATIONS: Dict[Augmentation, Callable[[], DA]] = {
-    'rotation': RandomRotation,
-    'hflip': RandomHorizontalFlip,
-    'vflip': RandomVerticalFlip,
-    'gaussian-noise': GaussianNoise,
-    'random-permutation': RandomPermutation,
+    "rotation": RandomRotation,
+    "hflip": RandomHorizontalFlip,
+    "vflip": RandomVerticalFlip,
+    "gaussian-noise": GaussianNoise,
+    "random-permutation": RandomPermutation,
 }
 
 
@@ -189,22 +189,20 @@ class OpticalDeviceDA(DA):
 
     exact_invariance = False
 
-    def __init__(self, augmentations: Optional[str] = 'all'):
-        if augmentations == 'all':
+    def __init__(self, augmentations: Optional[str] = "all"):
+        if augmentations == "all":
             augmentations: List[Augmentation] = list(ALL_AUGMENTATIONS.keys())
         elif augmentations:
-            augmentations: List[Augmentation] = augmentations.replace(' ', '').split('>')
+            augmentations: List[Augmentation] = augmentations.replace(" ", "").split(">")
 
         if augmentations:
-            self._augmentations: List[DA] = [
-                ALL_AUGMENTATIONS[augmentation]() for augmentation in augmentations
-            ]
+            self._augmentations: List[DA] = [ALL_AUGMENTATIONS[augmentation]() for augmentation in augmentations]
         else:
             self._augmentations: List[DA] = [Identity()]
 
     @property
     def augmentation(self):
-        return 'optical_device'
+        return "optical_device"
 
     @property
     def _inexact(self) -> List[DA]:
@@ -220,7 +218,7 @@ class OpticalDeviceDA(DA):
     def strength(self, value: float):
         inexact = self._inexact
         if not inexact:
-            raise NotImplementedError('No invariance-error carrying augmentation.')
+            raise NotImplementedError("No invariance-error carrying augmentation.")
         for augmentation in inexact:
             augmentation.strength = value
 

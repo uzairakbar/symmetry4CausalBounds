@@ -4,6 +4,7 @@ Oracle sensitivity parameters for an (SEM, DA) pair.
 Computed in sequence gamma* -> epsilon* -> gamma_z*, and returned to the
 experiment scripts, which may or may not use them.
 """
+
 import numpy as np
 from loguru import logger
 from contextlib import contextmanager
@@ -18,12 +19,13 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 CALIBRATION_SAMPLES: int = 2048
 STRENGTH_BRACKET: tuple = (0.0, 1e3)
 STRENGTH_TOLERANCE: float = 1e-9
-STRENGTH_DOUBLINGS: int = 20     # bracket expansions before declaring the target unreachable
+STRENGTH_DOUBLINGS: int = 20  # bracket expansions before declaring the target unreachable
 
 
 @dataclass(frozen=True)
 class OracleParameters:
     """Oracle values; `calibrate` fixes the units of gamma_star."""
+
     gamma_star: float
     epsilon_star: float
     gamma_z_star: Optional[float]
@@ -51,6 +53,7 @@ def preserve_rng():
     torch_state = cuda_state = None
     try:
         import torch
+
         torch_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_state = torch.cuda.get_rng_state_all()
@@ -63,6 +66,7 @@ def preserve_rng():
         np.random.set_state(numpy_state)
         if torch_state is not None:
             import torch
+
             torch.random.set_rng_state(torch_state)
             if cuda_state is not None:
                 torch.cuda.set_rng_state_all(cuda_state)
@@ -75,6 +79,7 @@ def _identity(X: NDArray) -> NDArray:
 # =============================================================================
 # gamma*
 # =============================================================================
+
 
 class GammaStarStrategy(ABC):
     """Selection strategy for the confounding budget gamma*."""
@@ -93,7 +98,7 @@ class ValidityForBaselinePI(GammaStarStrategy):
             return float(bias_sq)
         sigma_sq = sem.sigma_sq
         if sigma_sq <= 0.0:
-            logger.warning('sigma^2 = 0 (fully confounded): gamma* is unbounded.')
+            logger.warning("sigma^2 = 0 (fully confounded): gamma* is unbounded.")
             return float(np.inf)
         return float(bias_sq / sigma_sq)
 
@@ -108,6 +113,7 @@ def gamma_star(sem, calibrate: bool = False, strategy: GammaStarStrategy = DEFAU
 # =============================================================================
 # epsilon*
 # =============================================================================
+
 
 def _invariance_signal(
     sem,
@@ -156,7 +162,7 @@ def epsilon_star(
         (Phi(GX) - Phi(X)) h_* = -w. So eps* + EPS_TOL admits h_* by construction.
     """
     w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
-    return float(np.sqrt(np.mean(w ** 2)))
+    return float(np.sqrt(np.mean(w**2)))
 
 
 def invariance_error(
@@ -184,7 +190,7 @@ def invariance_error(
 
         residuals = sem.f(features(X)) - sem.f(features(GX))
 
-    return float(np.sqrt(np.mean(residuals ** 2)))
+    return float(np.sqrt(np.mean(residuals**2)))
 
 
 def calibrate_da_epsilon(
@@ -200,12 +206,10 @@ def calibrate_da_epsilon(
     `epsilon_target`. Returns the achieved eps*.
     """
     if epsilon_target < 0.0:
-        raise ValueError('`epsilon_target` must be non-negative.')
+        raise ValueError("`epsilon_target` must be non-negative.")
 
     if da.strength is None:
-        raise NotImplementedError(
-            f'{type(da).__name__} has no strength knob to hit eps={epsilon_target}.'
-        )
+        raise NotImplementedError(f"{type(da).__name__} has no strength knob to hit eps={epsilon_target}.")
 
     # freeze the sample so the 1-D solve sees a deterministic objective
     if X is None:
@@ -220,9 +224,9 @@ def calibrate_da_epsilon(
     if error(low) >= 0.0:
         da.strength = low
         logger.warning(
-            f'eps* floor {epsilon_star(sem, da, X=X, features=features):.6g} exceeds '
-            f'target {epsilon_target:.6g}; strength clamped to {low}. The sweep '
-            'will not vary the DA -- raise the target above the floor.'
+            f"eps* floor {epsilon_star(sem, da, X=X, features=features):.6g} exceeds "
+            f"target {epsilon_target:.6g}; strength clamped to {low}. The sweep "
+            "will not vary the DA -- raise the target above the floor."
         )
     else:
         # eps* saturates in strength, so a target above the reachable ceiling
@@ -235,8 +239,8 @@ def calibrate_da_epsilon(
             da.strength = high
             achieved = epsilon_star(sem, da, X=X, features=features)
             raise ValueError(
-                f'eps* target {epsilon_target:.6g} is above the reachable ceiling '
-                f'(~{achieved:.6g} at strength {high:.6g}); it saturates in strength.'
+                f"eps* target {epsilon_target:.6g} is above the reachable ceiling "
+                f"(~{achieved:.6g} at strength {high:.6g}); it saturates in strength."
             )
         for _ in range(200):
             mid = 0.5 * (low + high)
@@ -249,13 +253,14 @@ def calibrate_da_epsilon(
         da.strength = 0.5 * (low + high)
 
     achieved = epsilon_star(sem, da, X=X, features=features)
-    logger.info(f'DA strength {da.strength:.6g} -> eps* {achieved:.6g} (target {epsilon_target:.6g}).')
+    logger.info(f"DA strength {da.strength:.6g} -> eps* {achieved:.6g} (target {epsilon_target:.6g}).")
     return achieved
 
 
 # =============================================================================
 # Thm. 3.B diagnostics
 # =============================================================================
+
 
 def eps_iv_star(
     sem,
@@ -286,7 +291,7 @@ def eps_iv_star(
     # exactly linear in Phi(GX), so OLS absorbs it and this is the part of
     # f(Phi(X)) unreachable from the augmented data.
     W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
-    eps_rms = float(np.sqrt(np.mean(W_sharp ** 2)))
+    eps_rms = float(np.sqrt(np.mean(W_sharp**2)))
 
     # project onto span(G): same QR geometry as the IV constraint itself
     Q, _ = np.linalg.qr(G)
@@ -300,7 +305,8 @@ def eps_iv_star(
 # Thm. 1 threshold
 # =============================================================================
 
-def thm1_gamma_min(oracle: 'OracleParameters', calibrate: bool = False) -> float:
+
+def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float:
     """
     Smallest gamma at which the DA+PI set still contains h_* (Thm. 1), i.e. the
     budget the augmentation buys back. Below gamma* by an amount set by rho.
@@ -310,7 +316,7 @@ def thm1_gamma_min(oracle: 'OracleParameters', calibrate: bool = False) -> float
     """
     rho = oracle.rho
     if rho is None or not np.isfinite(rho):
-        logger.warning('rho unavailable; Thm. 1 threshold falls back to gamma*.')
+        logger.warning("rho unavailable; Thm. 1 threshold falls back to gamma*.")
         return float(oracle.gamma_star)
 
     if calibrate:
@@ -324,6 +330,7 @@ def thm1_gamma_min(oracle: 'OracleParameters', calibrate: bool = False) -> float
 # gamma_z*
 # =============================================================================
 
+
 def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> Optional[float]:
     """
     Oracle IV budget (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
@@ -336,6 +343,7 @@ def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> Opt
 # entry point
 # =============================================================================
 
+
 def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) -> Optional[float]:
     """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1)."""
     sigma_sq = sem.sigma_sq
@@ -343,13 +351,13 @@ def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) 
         return None
 
     with preserve_rng():
-        if y is None:       # X given without outcomes: rho needs its own draw
+        if y is None:  # X given without outcomes: rho needs its own draw
             X, y = sem(N=n_samples)
         GX, _ = da(X)
         Phi = features(GX)
         residuals = y.flatten() - Phi @ OLS().fit(Phi, y).solution.flatten()
 
-    return float(np.mean(residuals ** 2) / sigma_sq)
+    return float(np.mean(residuals**2) / sigma_sq)
 
 
 def compute_oracle_parameters(
@@ -369,9 +377,7 @@ def compute_oracle_parameters(
         with preserve_rng():
             X, y = sem(N=n_samples)
 
-    iv_budget, eps_rms, eta = eps_iv_star(
-        sem, da, X=X, features=features, n_samples=n_samples
-    )
+    iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples)
 
     return OracleParameters(
         gamma_star=gamma_star(sem, calibrate=calibrate, strategy=strategy),

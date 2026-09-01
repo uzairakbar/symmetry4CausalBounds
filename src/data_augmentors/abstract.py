@@ -16,7 +16,7 @@ class DataAugmenter(ABC):
         pass
 
     def __call__(self, X, **kwargs):
-        return self.augment(X = X, **kwargs)
+        return self.augment(X=X, **kwargs)
 
     @property
     def strength(self) -> Optional[float]:
@@ -25,7 +25,7 @@ class DataAugmenter(ABC):
 
     @strength.setter
     def strength(self, value: float):
-        raise NotImplementedError(f'{type(self).__name__} has no strength knob.')
+        raise NotImplementedError(f"{type(self).__name__} has no strength knob.")
 
     def perturb(self, X, **kwargs):
         """Apply only the invariance-error carrying part of the augmentation."""

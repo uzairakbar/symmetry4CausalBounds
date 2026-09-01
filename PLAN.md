@@ -290,28 +290,27 @@ unreproducible. It is a prerequisite, not a drive-by.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
 #   legend         False = hide, True = auto, str = matplotlib loc (legend_loc)
 #   bars           perf only; False retires the stacked reliability bars
-_PLOT_KEYS: set = {'xlim', 'ylim', 'xscale', 'yscale',
-                   'linear_width', 'linthresh', 'legend'}
-_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {'xlim', 'xscale'}) | {'bars'}  # categorical x
+_PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh", "legend"}
+_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale"}) | {"bars"}  # categorical x
 
 PLOT_CONFIGS: Dict[str, Dict[str, Dict[str, Any]]] = {
-    '*': {
-        'perf': {'bars': False},                     # stacked bars retired
+    "*": {
+        "perf": {"bars": False},  # stacked bars retired
     },
-    'simulation': {
+    "simulation": {
         # pinned: bootstrap() is unseeded and this series is NaN-heavy, so the
         # automatic p98 swings 1.93x across seeds
-        'gamma_approx_error': {'ylim': (None, 0.012)},
-        'trS_worst_error':    {'linear_width': 0.25},
-        'scatter_n_width_vs_coverage': {'ylim': (0.0, 1.02), 'legend': 'lower right'},
+        "gamma_approx_error": {"ylim": (None, 0.012)},
+        "trS_worst_error": {"linear_width": 0.25},
+        "scatter_n_width_vs_coverage": {"ylim": (0.0, 1.02), "legend": "lower right"},
     },
 }
 
-for _exp, _plots in PLOT_CONFIGS.items():      # typos must not be silent no-ops
-    for _id, _cfg in _plots.items():           # inlined, not configs._reject_unknown
-        _bad = set(_cfg) - (_PLOT_KEYS_PERF if _id == 'perf' else _PLOT_KEYS)
+for _exp, _plots in PLOT_CONFIGS.items():  # typos must not be silent no-ops
+    for _id, _cfg in _plots.items():  # inlined, not configs._reject_unknown
+        _bad = set(_cfg) - (_PLOT_KEYS_PERF if _id == "perf" else _PLOT_KEYS)
         if _bad:
-            raise ValueError(f'PLOT_CONFIGS[{_exp!r}][{_id!r}]: unknown key(s) {sorted(_bad)}.')
+            raise ValueError(f"PLOT_CONFIGS[{_exp!r}][{_id!r}]: unknown key(s) {sorted(_bad)}.")
 ```
 
 Needs `Any` added to `constants.py:4` (`from typing import Dict, Literal, List`).

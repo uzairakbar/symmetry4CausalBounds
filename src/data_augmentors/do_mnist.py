@@ -12,6 +12,7 @@ Staying on the R/B line keeps P_X~ on do-MNIST's support. saturation and hue are
 affine in t, so as IV columns they are not independent directions the way rotation
 and translation are.
 """
+
 import torch
 import numpy as np
 import torch.nn.functional as Fn
@@ -26,9 +27,9 @@ from src.methods.nets import device
 ROT_DEG, TRANS_FRAC = 10.0, 0.2
 # colour amounts at strength 1; contrast/saturation are multiplicative factors around
 # one, hue is an additive movement on the red-blue tint coordinate t
-COLOR_AMOUNTS = {'contrast': 0.15, 'saturation': 0.10, 'hue': 0.025}
+COLOR_AMOUNTS = {"contrast": 0.15, "saturation": 0.10, "hue": 0.025}
 COLOR_OPS = tuple(COLOR_AMOUNTS)
-GEOMETRIC_OPS = ('translate', 'rotation')
+GEOMETRIC_OPS = ("translate", "rotation")
 OPS = GEOMETRIC_OPS + COLOR_OPS
 
 CHUNK: int = 16_384
@@ -36,7 +37,7 @@ CHUNK: int = 16_384
 
 def _scaler(name: str, amount: float) -> BetaStandardScaler:
     """The op's parameter range. hue is centred on 0, the factors on 1."""
-    if name == 'hue':
+    if name == "hue":
         return BetaStandardScaler(-amount, amount)
     return BetaStandardScaler(max(0.0, 1.0 - amount), 1.0 + amount)
 
@@ -73,18 +74,22 @@ class DoMNISTDA(DataAugmenter):
 
     exact_invariance = True
 
-    def __init__(self, augmentations: str = 'translate > rotation > contrast > saturation > hue',
-                 strength: float = 1.0, chunk: int = CHUNK):
-        names: List[str] = [n for n in augmentations.replace(' ', '').split('>') if n]
+    def __init__(
+        self,
+        augmentations: str = "translate > rotation > contrast > saturation > hue",
+        strength: float = 1.0,
+        chunk: int = CHUNK,
+    ):
+        names: List[str] = [n for n in augmentations.replace(" ", "").split(">") if n]
         unknown = sorted(set(names) - set(OPS))
         if unknown:
-            raise ValueError(f'unknown do-MNIST augmentation(s) {unknown}; valid: {sorted(OPS)}')
+            raise ValueError(f"unknown do-MNIST augmentation(s) {unknown}; valid: {sorted(OPS)}")
         self.names, self.chunk = names, chunk
         self._strength = float(strength)
 
     @property
     def augmentation(self):
-        return ' > '.join(self.names)
+        return " > ".join(self.names)
 
     @property
     def strength(self) -> float:
@@ -102,17 +107,17 @@ class DoMNISTDA(DataAugmenter):
         scaler = _scaler(name, COLOR_AMOUNTS[name] * self._strength)
         u = torch.rand(len(x), device=x.device, generator=generator)
         report = (u - float(scaler.mean)) / float(scaler.std)
-        v = scaler.rescale(u)[:, None, None]              # U[0,1] -> the op's range
+        v = scaler.rescale(u)[:, None, None]  # U[0,1] -> the op's range
 
         ink, tint = _ink_and_tint(x)
-        if name == 'contrast':
+        if name == "contrast":
             # mean over FOREGROUND pixels only, per image; background stays exactly 0
             foreground = ink > 0
             mean = (ink.sum((1, 2)) / foreground.sum((1, 2)).clamp_min(1))[:, None, None]
             ink = torch.where(foreground, ((ink - mean) * v + mean).clamp(0.0, 1.0), ink)
-        elif name == 'saturation':
+        elif name == "saturation":
             tint = (0.5 + v * (tint - 0.5)).clamp(0.0, 1.0)
-        else:                                             # hue
+        else:  # hue
             tint = (tint + v).clamp(0.0, 1.0)
         return _restore(x, ink, tint), report
 
@@ -120,44 +125,52 @@ class DoMNISTDA(DataAugmenter):
         x = torch.as_tensor(chunk, dtype=torch.float, device=dev)
         n, params = len(x), []
 
-        if 'translate' in self.names:
+        if "translate" in self.names:
             # integer pixels, as torchvision Translate does: sub-pixel bilinear shifts
             # blur high frequencies and wreck the covariance geometry
             width = x.shape[-1]
-            tx, ty = (torch.round((torch.rand(2, n, device=dev, generator=generator) * 2 - 1)
-                                  * TRANS_FRAC * self._strength * width) / width)
+            tx, ty = (
+                torch.round(
+                    (torch.rand(2, n, device=dev, generator=generator) * 2 - 1) * TRANS_FRAC * self._strength * width
+                )
+                / width
+            )
             params += [tx, ty]
         else:
             tx = ty = torch.zeros(n, device=dev)
 
-        rotating = 'rotation' in self.names
-        angle = ((torch.rand(n, device=dev, generator=generator) * 2 - 1)
-                 * ROT_DEG * self._strength * np.pi / 180.0
-                 if rotating else torch.zeros(n, device=dev))
+        rotating = "rotation" in self.names
+        angle = (
+            (torch.rand(n, device=dev, generator=generator) * 2 - 1) * ROT_DEG * self._strength * np.pi / 180.0
+            if rotating
+            else torch.zeros(n, device=dev)
+        )
         cos, sin = torch.cos(angle), torch.sin(angle)
         if rotating:
             params += [sin, cos]
 
-        if 'translate' in self.names or rotating:
+        if "translate" in self.names or rotating:
             theta = torch.zeros(n, 2, 3, device=dev)
             theta[:, 0, 0], theta[:, 0, 1], theta[:, 0, 2] = cos, -sin, 2 * tx
             theta[:, 1, 0], theta[:, 1, 1], theta[:, 1, 2] = sin, cos, 2 * ty
             grid = Fn.affine_grid(theta, list(x.shape), align_corners=False)
             # nearest: torchvision F.rotate defaults to NEAREST, and bilinear blurring
             # moves tr(S)/k from 0.65 to 1.55
-            x = Fn.grid_sample(x, grid, mode='nearest', padding_mode='zeros',
-                               align_corners=False)
+            x = Fn.grid_sample(x, grid, mode="nearest", padding_mode="zeros", align_corners=False)
 
         for name in self.names:
             if name in COLOR_OPS:
                 x, report = self._color(name, x, generator)
                 params.append(report)
 
-        return (x.cpu().numpy().astype(np.float32),
-                torch.stack(params, 1).cpu().numpy() if params else np.zeros((n, 0)))
+        return (
+            x.cpu().numpy().astype(np.float32),
+            torch.stack(params, 1).cpu().numpy() if params else np.zeros((n, 0)),
+        )
 
-    def augment(self, X: NDArray, strength: Optional[float] = None,
-                seed: Optional[int] = None, **kwargs) -> Tuple[NDArray, NDArray]:
+    def augment(
+        self, X: NDArray, strength: Optional[float] = None, seed: Optional[int] = None, **kwargs
+    ) -> Tuple[NDArray, NDArray]:
         """
         (GX, G) for X of shape (N,3,H,W).
 
@@ -176,7 +189,7 @@ class DoMNISTDA(DataAugmenter):
 
         augmented, params = [], []
         for i in range(0, len(X), self.chunk):
-            gx, g = self._augment_chunk(X[i:i + self.chunk], dev, generator)
+            gx, g = self._augment_chunk(X[i : i + self.chunk], dev, generator)
             augmented.append(gx)
             params.append(g)
         return np.concatenate(augmented), np.concatenate(params)

@@ -2,22 +2,23 @@
 Generic experiment runners that work with any SEM/DA combination.
 Eliminates duplication between simulation and optical device experiments.
 """
+
 import numpy as np
 from loguru import logger
 from sklearn.model_selection import train_test_split
 from typing import Callable, Optional, Dict
 
-from src.experiments.base import (
-    QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
-)
+from src.experiments.base import QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import trace_S_over_k, rho_hat
-from src.experiments.configs import (EPS_TOL, ROBUSTNESS_EPSILON_TRUE,
-                                    SPECTRUM_KEEP, FLOOR_GUARD_R)
+from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, FLOOR_GUARD_R
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import (
-    calibrate_da_epsilon, compute_oracle_parameters, epsilon_star,
-    thm1_gamma_min, preserve_rng,
+    calibrate_da_epsilon,
+    compute_oracle_parameters,
+    epsilon_star,
+    thm1_gamma_min,
+    preserve_rng,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -27,6 +28,7 @@ CRN_OFFSET: int = 10_000
 # =============================================================================
 # ORACLE MIXIN
 # =============================================================================
+
 
 class OracleMixin:
     """
@@ -39,21 +41,21 @@ class OracleMixin:
     def prepare_pair(self, sem, da, features: Optional[Callable] = None):
         if self.epsilon_true is not None:
             calibrate_da_epsilon(
-                sem=sem, da=da,
+                sem=sem,
+                da=da,
                 epsilon_target=self.epsilon_true,
                 features=features,
             )
 
-        oracle = compute_oracle_parameters(
-            sem=sem, da=da, features=features, calibrate=self.calibrate
-        )
-        logger.info(f'Oracle parameters: {oracle}')
+        oracle = compute_oracle_parameters(sem=sem, da=da, features=features, calibrate=self.calibrate)
+        logger.info(f"Oracle parameters: {oracle}")
         return oracle
 
 
 # =============================================================================
 # GENERIC QUERY SWEEP RUNNER
 # =============================================================================
+
 
 class GenericQuerySweep(OracleMixin, QuerySweepRunner):
     """
@@ -69,7 +71,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         method_factory: Optional[Callable] = None,
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
 
@@ -120,27 +122,25 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
     def epsilon_iv(self) -> float:
         """Oracle IV budget, off the knife edge (same guard as PI_INV), then raised
         to the constraint's own floor if it lands under it (`FLOOR_GUARD_R`)."""
-        budget = getattr(self.oracle, 'eps_iv_star', None)
+        budget = getattr(self.oracle, "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
-            logger.warning('eps_iv_star unavailable; IV budget falls back to EPS_TOL.')
+            logger.warning("eps_iv_star unavailable; IV budget falls back to EPS_TOL.")
             budget = 0.0
         budget = float(budget) + EPS_TOL
 
-        if getattr(self, 'G', None) is None or np.size(self.G) == 0:
+        if getattr(self, "G", None) is None or np.size(self.G) == 0:
             return budget
         try:
-            floor = constraint_floor(self.GX, self.y, self.default_gamma, kind='iv',
-                                     Z=self.G, calibrate=self.calibrate)
+            floor = constraint_floor(self.GX, self.y, self.default_gamma, kind="iv", Z=self.G, calibrate=self.calibrate)
         except Exception as error:
-            logger.warning(f'epsilon_iv: constraint floor unavailable ({error}).')
+            logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")
             return budget
 
-        if budget ** 2 >= floor:            # feasible: leave it exactly as it was
+        if budget**2 >= floor:  # feasible: leave it exactly as it was
             return budget
 
         guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
-        logger.info(f'epsilon_iv: oracle {budget:.6g} is INFEASIBLE (floor '
-                    f'{floor:.4g}); raising to {guarded:.6g}.')
+        logger.info(f"epsilon_iv: oracle {budget:.6g} is INFEASIBLE (floor {floor:.4g}); raising to {guarded:.6g}.")
         return guarded
 
     @property
@@ -149,7 +149,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     def get_sweep_values(self) -> np.ndarray:
         """Generate radial sweep points with optional polynomial features."""
-        geometry = self.X_raw if not hasattr(self, 'poly') else self.GX_raw
+        geometry = self.X_raw if not hasattr(self, "poly") else self.GX_raw
         raw_sweep = radial_sweep_pcs(geometry, self.sweep_samples)
 
         if self.poly:
@@ -167,15 +167,14 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             G=self.G,
             X_raw=self.X_raw,
             GX_raw=self.GX_raw,
-            oracle=self.oracle
+            oracle=self.oracle,
         )
-
-
 
 
 # =============================================================================
 # GENERIC PARAMETER SWEEP BASE
 # =============================================================================
+
 
 class GenericParamSweep(OracleMixin, ParamSweepRunner):
     """
@@ -193,7 +192,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         epsilon_true: Optional[float] = None,
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
-        **kwargs
+        **kwargs,
     ):
         self.sem_factory = sem_factory
         self.da_factory = da_factory
@@ -213,10 +212,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         """Setup SEMs and DAs for all experiments."""
         self.sems = [self.sem_factory() for _ in range(self.n_experiments)]
         self.das = [self.da_factory(sem) for sem in self.sems]
-        self.oracles = [
-            self.prepare_pair(sem, da, features=self._features)
-            for sem, da in zip(self.sems, self.das)
-        ]
+        self.oracles = [self.prepare_pair(sem, da, features=self._features) for sem, da in zip(self.sems, self.das)]
 
     def get_da(self, experiment_index: int):
         return self.das[experiment_index]
@@ -232,7 +228,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
     @property
     def finite_pool(self) -> bool:
         """Optical draws from a fixed pool and needs a train/test split."""
-        return 'OpticalDeviceSEM' in str(type(self.sems[0]))
+        return "OpticalDeviceSEM" in str(type(self.sems[0]))
 
     # ------------------------------------------------------- fixed base sample
 
@@ -251,20 +247,15 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             # finite pool: split unique instances; test set fixed across steps
             X_all, y_all = sem(N=n_total)
             X_train_raw, X_test_raw, y_train, _ = train_test_split(
-                X_all, y_all,
-                test_size=self.test_fraction,
-                random_state=self.seed + experiment_index
+                X_all, y_all, test_size=self.test_fraction, random_state=self.seed + experiment_index
             )
         else:
             # generator: interventional test set
             X_train_raw, y_train = sem(N=n_total)
-            X_test_raw, _ = sem(
-                N=int(self.test_fraction * n_total), intervention=True
-            )
+            X_test_raw, _ = sem(N=int(self.test_fraction * n_total), intervention=True)
 
         X_test = self.apply_transform(X_test_raw)
-        return (X_train_raw, self.apply_transform(X_train_raw), y_train,
-                X_test, sem.f(X_test))
+        return (X_train_raw, self.apply_transform(X_train_raw), y_train, X_test, sem.f(X_test))
 
     def _augment_once(self, experiment_index: int, X_raw, **augment_kwargs):
         """One DA pass; common random numbers across a knob grid within an experiment."""
@@ -272,8 +263,9 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             np.random.seed(self.seed + CRN_OFFSET + experiment_index)
             return self.das[experiment_index](X_raw, **augment_kwargs)
 
-    def _sweep_data(self, experiment_index: int, n_samples: Optional[int] = None,
-                    common_random: bool = False, **augment_kwargs) -> SweepData:
+    def _sweep_data(
+        self, experiment_index: int, n_samples: Optional[int] = None, common_random: bool = False, **augment_kwargs
+    ) -> SweepData:
         """Default single-fold SweepData on the fixed base sample."""
         X_raw, X, y, X_test, estimand = self._base_data(experiment_index, n_samples)
 
@@ -282,13 +274,13 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         else:
             GX_raw, G = self.das[experiment_index](X_raw, **augment_kwargs)
 
-        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G,
-                         X_test=X_test, estimand=estimand)
+        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G, X_test=X_test, estimand=estimand)
 
 
 # =============================================================================
 # SWEEP STRATEGIES (one per PARAM_SPECS key)
 # =============================================================================
+
 
 class GammaRatioStrategy(GenericParamSweep):
     """
@@ -298,13 +290,13 @@ class GammaRatioStrategy(GenericParamSweep):
     Data is constant, so models are fit once per experiment and only re-solved.
     """
 
-    param_key = 'gamma'
+    param_key = "gamma"
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         return self._sweep_data(experiment_index)
 
     def get_predict_kwargs(self, param, experiment_index: int):
-        return {'gamma': float(param) * self.fit_gamma(experiment_index)}
+        return {"gamma": float(param) * self.fit_gamma(experiment_index)}
 
     @property
     def vlines(self):
@@ -312,7 +304,7 @@ class GammaRatioStrategy(GenericParamSweep):
         ratios = []
         for j in range(self.n_experiments):
             oracle = self.get_oracle(j)
-            gamma_star = self._finite(oracle.gamma_star, self.default_gamma, 'gamma*')
+            gamma_star = self._finite(oracle.gamma_star, self.default_gamma, "gamma*")
             if gamma_star > 0:
                 ratios.append(thm1_gamma_min(oracle, self.calibrate) / gamma_star)
 
@@ -335,24 +327,24 @@ class EpsilonRatioStrategy(GenericParamSweep):
     so that eps* > 0 makes the ratio axis meaningful.
     """
 
-    param_key = 'epsilon'
+    param_key = "epsilon"
 
     def __init__(self, **kwargs):
         # scoped to this sweep only; never leaks into trS/n/m/perf/scatter
-        kwargs['epsilon_true'] = ROBUSTNESS_EPSILON_TRUE
+        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE
         super().__init__(**kwargs)
 
         if not self.pad:
             logger.warning(
-                'Robustness sweep with pad=false: the DA+ validity claim needs '
-                'eps-padding (Thm. 3.A). Run under `pad: true`.'
+                "Robustness sweep with pad=false: the DA+ validity claim needs "
+                "eps-padding (Thm. 3.A). Run under `pad: true`."
             )
 
     def prepare_pair(self, sem, da, features=None):
         if da.strength is None:
             logger.warning(
-                f'{type(da).__name__} has no strength knob; robustness sweep '
-                'keeps the DA as configured (eps* may be 0).'
+                f"{type(da).__name__} has no strength knob; robustness sweep "
+                "keeps the DA as configured (eps* may be 0)."
             )
             self.epsilon_true = None
         return super().prepare_pair(sem, da, features=features)
@@ -361,11 +353,8 @@ class EpsilonRatioStrategy(GenericParamSweep):
         return self._sweep_data(experiment_index)
 
     def get_predict_kwargs(self, param, experiment_index: int):
-        eps_star = self._finite(
-            self.get_oracle(experiment_index).epsilon_star,
-            self.default_epsilon, 'eps*'
-        )
-        return {'epsilon': float(param) * eps_star + EPS_TOL}
+        eps_star = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*")
+        return {"epsilon": float(param) * eps_star + EPS_TOL}
 
 
 class ExpansionStrategy(GenericParamSweep):
@@ -376,20 +365,17 @@ class ExpansionStrategy(GenericParamSweep):
     random numbers, so the measured x moves monotonically with the knob.
     """
 
-    param_key = 'trS'
+    param_key = "trS"
 
     def __init__(self, augment_kwargs_fn: Optional[Callable] = None, **kwargs):
         # knob -> DA call kwargs; dataset-specific
-        self.augment_kwargs_fn = augment_kwargs_fn or (lambda s: {'scale': float(s)})
+        self.augment_kwargs_fn = augment_kwargs_fn or (lambda s: {"scale": float(s)})
         self._measured = {}
         self._step_epsilon = {}
         super().__init__(**kwargs)
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
-        data = self._sweep_data(
-            experiment_index, common_random=True,
-            **self.augment_kwargs_fn(param)
-        )
+        data = self._sweep_data(experiment_index, common_random=True, **self.augment_kwargs_fn(param))
 
         # measured expansion in the space the methods fit in. The spectrum is
         # TRUNCATED: this axis is exactly where Sigma_GX goes ill-conditioned, so
@@ -398,9 +384,9 @@ class ExpansionStrategy(GenericParamSweep):
         trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
         self._measured[(experiment_index, float(param))] = rho * trace_S
         logger.info(
-            f'trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} '
-            f'(untruncated {trace_S_over_k(data.X, data.GX):.5f}) '
-            f'x {rho * trace_S:.5f}'
+            f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
+            f"(untruncated {trace_S_over_k(data.X, data.GX):.5f}) "
+            f"x {rho * trace_S:.5f}"
         )
 
         # The knob IS the invariance-error driver, so a setup-time eps* is
@@ -408,32 +394,35 @@ class ExpansionStrategy(GenericParamSweep):
         # does NOT persist on the DA, so omitting them would silently measure
         # eps* at scale=1.0 for every step.
         X_raw = self._base_data(experiment_index)[0]
-        self._step_epsilon[experiment_index] = epsilon_star(
-            self.sems[experiment_index], self.das[experiment_index],
-            X=X_raw, features=self._features,
-            **self.augment_kwargs_fn(param)
-        ) + EPS_TOL
+        self._step_epsilon[experiment_index] = (
+            epsilon_star(
+                self.sems[experiment_index],
+                self.das[experiment_index],
+                X=X_raw,
+                features=self._features,
+                **self.augment_kwargs_fn(param),
+            )
+            + EPS_TOL
+        )
 
         return data
 
-    def fit_epsilon(self, experiment_index: int, step_index: int = 0,
-                    data=None) -> float:
+    def fit_epsilon(self, experiment_index: int, step_index: int = 0, data=None) -> float:
         per_step = self._step_epsilon.get(experiment_index)
         if per_step is None:
             return super().fit_epsilon(experiment_index, step_index, data)
         # the knob drives eps*, but it can still land under the floor -- guard it
         # exactly as the base does, or this sweep alone bypasses the guard
-        return self._floor_guard(per_step, data, 'inv', experiment_index, 'epsilon')
+        return self._floor_guard(per_step, data, "inv", experiment_index, "epsilon")
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:
         """Mean over experiments of the measured expansion."""
-        return np.array([
-            np.nanmean([
-                self._measured.get((j, float(s)), np.nan)
-                for j in range(self.n_experiments)
-            ])
-            for s in param_values
-        ])
+        return np.array(
+            [
+                np.nanmean([self._measured.get((j, float(s)), np.nan) for j in range(self.n_experiments)])
+                for s in param_values
+            ]
+        )
 
 
 class SampleSizeStrategy(GenericParamSweep):
@@ -446,7 +435,7 @@ class SampleSizeStrategy(GenericParamSweep):
     n, taken from the (larger) default draw.
     """
 
-    param_key = 'n'
+    param_key = "n"
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         n = int(param)
@@ -455,13 +444,12 @@ class SampleSizeStrategy(GenericParamSweep):
         # optical n counts pre-split rows; sim n is the train size itself
         n_train = int(round((1.0 - self.test_fraction) * n)) if self.finite_pool else n
         if n_train > len(X):
-            logger.warning(f'n={n} needs {n_train} train rows, only {len(X)} drawn.')
+            logger.warning(f"n={n} needs {n_train} train rows, only {len(X)} drawn.")
             n_train = len(X)
         X_raw, X, y = X_raw[:n_train], X[:n_train], y[:n_train]
 
         GX_raw, G = self.das[experiment_index](X_raw)
-        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G,
-                         X_test=X_test, estimand=estimand)
+        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G, X_test=X_test, estimand=estimand)
 
 
 class FoldStrategy(GenericParamSweep):
@@ -475,7 +463,7 @@ class FoldStrategy(GenericParamSweep):
     equivalent, and avoids a QR on the m-fold matrix).
     """
 
-    param_key = 'm'
+    param_key = "m"
 
     def __init__(self, n_samples_override: Optional[int] = None, **kwargs):
         self.n_samples_override = n_samples_override
@@ -484,9 +472,7 @@ class FoldStrategy(GenericParamSweep):
     def generate_data(self, experiment_index: int, param) -> SweepData:
         m = int(param)
         da = self.das[experiment_index]
-        X_raw, X, y, X_test, estimand = self._base_data(
-            experiment_index, self.n_samples_override
-        )
+        X_raw, X, y, X_test, estimand = self._base_data(experiment_index, self.n_samples_override)
 
         GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)))
 
@@ -504,9 +490,9 @@ class FoldStrategy(GenericParamSweep):
 
 
 STRATEGIES: Dict[str, type] = {
-    'gamma': GammaRatioStrategy,
-    'epsilon': EpsilonRatioStrategy,
-    'trS': ExpansionStrategy,
-    'n': SampleSizeStrategy,
-    'm': FoldStrategy,
+    "gamma": GammaRatioStrategy,
+    "epsilon": EpsilonRatioStrategy,
+    "trS": ExpansionStrategy,
+    "n": SampleSizeStrategy,
+    "m": FoldStrategy,
 }

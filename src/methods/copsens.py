@@ -15,6 +15,7 @@ comparable -- select each against population coverage before comparing them.
 
 `a` de-convolves the posterior smearing, so h_0(x) == mu_y(x) exactly.
 """
+
 import copy
 import numpy as np
 from loguru import logger
@@ -34,6 +35,7 @@ FLOOR_STARTS = 6
 
 # ------------------------------------------------------------------ latent model
 
+
 class LatentTreatmentModel:
     """Factor model on the treatments -> posterior U|x ~ N(mu_u(x), Sigma)."""
 
@@ -47,15 +49,15 @@ class LatentTreatmentModel:
         W, psi = fa.components_.T, np.maximum(fa.noise_variance_, EPS)
         self.mean_ = fa.mean_
 
-        WtPsi = W.T / psi                                    # (m, d)
+        WtPsi = W.T / psi  # (m, d)
         self.Sigma_ = np.linalg.inv(np.eye(m) + WtPsi @ W)
         self.Sigma_ = (self.Sigma_ + self.Sigma_.T) / 2
-        self.proj_ = WtPsi.T @ self.Sigma_                   # (d, m)
+        self.proj_ = WtPsi.T @ self.Sigma_  # (d, m)
 
         w, V = np.linalg.eigh(self.Sigma_)
         w = np.maximum(w, EPS)
-        self.half_ = V @ np.diag(np.sqrt(w)) @ V.T           # Sigma^{1/2}
-        self.halfinv_ = V @ np.diag(1 / np.sqrt(w)) @ V.T    # Sigma^{-1/2}
+        self.half_ = V @ np.diag(np.sqrt(w)) @ V.T  # Sigma^{1/2}
+        self.halfinv_ = V @ np.diag(1 / np.sqrt(w)) @ V.T  # Sigma^{-1/2}
         return self
 
     def transform(self, X):
@@ -64,16 +66,17 @@ class LatentTreatmentModel:
 
 # ------------------------------------------------------------------------- links
 
+
 class Probit:
     """g(a, s) = Phi(a / sqrt(1+s^2)). Closed form -- no quadrature, no bisection."""
 
     @staticmethod
     def g_inv(mu, s):
-        return np.sqrt(1.0 + s ** 2) * norm.ppf(np.clip(mu, CLIP, 1 - CLIP))
+        return np.sqrt(1.0 + s**2) * norm.ppf(np.clip(mu, CLIP, 1 - CLIP))
 
     @staticmethod
     def h(base, s, axis):
-        return norm.cdf(base / np.sqrt(1.0 + s ** 2)).mean(axis=axis)
+        return norm.cdf(base / np.sqrt(1.0 + s**2)).mean(axis=axis)
 
 
 class Gaussian:
@@ -89,10 +92,11 @@ class Gaussian:
         return base.mean(axis=axis)
 
 
-LINKS = {'probit': Probit, 'gaussian': Gaussian}
+LINKS = {"probit": Probit, "gaussian": Gaussian}
 
 
 # --------------------------------------------------------------- solver plumbing
+
 
 class _Cached:
     """value_and_grad behind a 1-entry cache: scipy asks for `fun` and `jac`
@@ -123,30 +127,43 @@ def _build_terms(model, radius):
         return None, None
     try:
         from src.methods import copsens_jax
+
         return copsens_jax.build_terms(model, radius)
-    except Exception as exc:            # jax missing, jit failure -> degrade, don't die
-        logger.warning(f'JAX unavailable ({type(exc).__name__}: {exc}); '
-                       'falling back to finite differences')
+    except Exception as exc:  # jax missing, jit failure -> degrade, don't die
+        logger.warning(f"JAX unavailable ({type(exc).__name__}: {exc}); falling back to finite differences")
         return None, None
 
 
 def _unit_ball():
     """||v||^2 <= 1, with its trivial analytic jacobian."""
-    return NonlinearConstraint(lambda v: float(v @ v), -np.inf, 1.0,
-                               jac=lambda v: 2.0 * np.asarray(v, dtype=float))
+    return NonlinearConstraint(lambda v: float(v @ v), -np.inf, 1.0, jac=lambda v: 2.0 * np.asarray(v, dtype=float))
 
 
 # ---------------------------------------------------------------------- estimator
 
+
 class CopSensPI(BoundedSA):
     """Bounds on E[Y|do(x)] over the covariance ball {g : g' Sigma g <= gamma sigma^2}."""
 
-    def __init__(self, gamma=None, epsilon=0.0, pad=False, calibrate=False,
-                 clipy=True, n_jobs=1, n_components=32, link='probit',
-                 n_anchors=256, n_anchors_c=48, outcome_model=None,
-                 mu_clip=None, jax_grad=True, seed=0):
+    def __init__(
+        self,
+        gamma=None,
+        epsilon=0.0,
+        pad=False,
+        calibrate=False,
+        clipy=True,
+        n_jobs=1,
+        n_components=32,
+        link="probit",
+        n_anchors=256,
+        n_anchors_c=48,
+        outcome_model=None,
+        mu_clip=None,
+        jax_grad=True,
+        seed=0,
+    ):
         if link not in LINKS:
-            raise ValueError(f'unknown link {link!r}; valid: {sorted(LINKS)}')
+            raise ValueError(f"unknown link {link!r}; valid: {sorted(LINKS)}")
         self.n_components = n_components
         self.link_name = link
         self.n_anchors = n_anchors
@@ -160,8 +177,7 @@ class CopSensPI(BoundedSA):
         self.seed = seed
         self._ctx = None
         self._kernels = None
-        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad,
-                         calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
+        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
 
     # ------------------------------------------------------------------- fit
 
@@ -176,26 +192,29 @@ class CopSensPI(BoundedSA):
         model = model() if callable(model) else model
         if model is None:
             raise ValueError(
-                'CopSensPI needs an outcome model: pass the prefit net that owns '
-                'mu_y. Refitting one per PI variant would train on the n_pi subset '
-                'and break the ERM/PI matching.')
-        if not getattr(model, 'prefit_', False):
+                "CopSensPI needs an outcome model: pass the prefit net that owns "
+                "mu_y. Refitting one per PI variant would train on the n_pi subset "
+                "and break the ERM/PI matching."
+            )
+        if not getattr(model, "prefit_", False):
             model = model.fit(X, y, **kwargs)
         self.outcome_ = model
 
         mu_hat = self._mu(X)
-        self.sigma2_ = (float(np.var(np.asarray(y).ravel() - mu_hat))
-                        if self.link_name == 'gaussian'
-                        else float(np.mean(mu_hat * (1 - mu_hat))))
+        self.sigma2_ = (
+            float(np.var(np.asarray(y).ravel() - mu_hat))
+            if self.link_name == "gaussian"
+            else float(np.mean(mu_hat * (1 - mu_hat)))
+        )
 
         idx = self.rng_.choice(len(X), size=min(self.n_anchors, len(X)), replace=False)
-        self.anchors_ = self.mu_tr_[idx]                    # (J, m)
-        self.anchors_c_ = self.anchors_[:self.n_anchors_c]  # coarse set, for feasibility
+        self.anchors_ = self.mu_tr_[idx]  # (J, m)
+        self.anchors_c_ = self.anchors_[: self.n_anchors_c]  # coarse set, for feasibility
 
         # clipy clips to what the DATA says, not to [0, 1]
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
 
-        self._floor_cache = {}          # keyed on radius; a refit invalidates it
+        self._floor_cache = {}  # keyed on radius; a refit invalidates it
         self._precompute(X, y, **kwargs)
         return self
 
@@ -222,9 +241,8 @@ class CopSensPI(BoundedSA):
     def _h(self, mu_q, Gam, s, mu_y, anchors=None):
         """E[Y|do(x); g] for every (query, candidate) -> (n_q, n_cand)."""
         anchors = self.anchors_ if anchors is None else anchors
-        a = self.link_.g_inv(mu_y, s)                       # (n_q,)
-        base = (a[:, None, None] + (anchors @ Gam.T)[None, :, :]
-                - (mu_q @ Gam.T)[:, None, :])
+        a = self.link_.g_inv(mu_y, s)  # (n_q,)
+        base = a[:, None, None] + (anchors @ Gam.T)[None, :, :] - (mu_q @ Gam.T)[:, None, :]
         return self.link_.h(base, s, axis=1)
 
     def _h_v(self, v, mu_q_i, mu_y_i, radius):
@@ -233,13 +251,13 @@ class CopSensPI(BoundedSA):
         g = radius * (v @ self.latent_.halfinv_)
         s = radius * float(np.sqrt(v @ v))
         a = float(np.ravel(self.link_.g_inv(np.atleast_1d(mu_y_i), s))[0])
-        d = a + self.anchors_ @ g - float(mu_q_i @ g)       # (J,)
+        d = a + self.anchors_ @ g - float(mu_q_i @ g)  # (J,)
         return float(self.link_.h(d, s, axis=0))
 
     def _con_v(self, v, radius):
-        c = self._constraint(np.atleast_2d(radius * (np.asarray(v, float)
-                                                     @ self.latent_.halfinv_)),
-                             radius * float(np.linalg.norm(v)))
+        c = self._constraint(
+            np.atleast_2d(radius * (np.asarray(v, float) @ self.latent_.halfinv_)), radius * float(np.linalg.norm(v))
+        )
         return np.inf if c is None else float(np.ravel(c)[0])
 
     def _constraint(self, Gam, s):
@@ -260,7 +278,7 @@ class CopSensPI(BoundedSA):
         (scripts/select_domnist_budgets.py) would otherwise pay 6 SLSQP solves a probe.
         """
         key = (float(radius), int(n_starts))
-        cached = getattr(self, '_floor_cache', None)
+        cached = getattr(self, "_floor_cache", None)
         if cached is None:
             cached = self._floor_cache = {}
         if key in cached:
@@ -277,9 +295,14 @@ class CopSensPI(BoundedSA):
         for _ in range(n_starts):
             v0 = rng.standard_normal(m)
             v0 /= max(np.linalg.norm(v0), EPS)
-            result = minimize(fun, v0 * 0.5, method='SLSQP', jac=jac,
-                              constraints=[_unit_ball()],
-                              options={'maxiter': MAXITER, 'ftol': FTOL})
+            result = minimize(
+                fun,
+                v0 * 0.5,
+                method="SLSQP",
+                jac=jac,
+                constraints=[_unit_ball()],
+                options={"maxiter": MAXITER, "ftol": FTOL},
+            )
             if result.success and result.x @ result.x <= 1 + 1e-6:
                 best = min(best, float(result.fun))
         cached[key] = best
@@ -299,19 +322,17 @@ class CopSensPI(BoundedSA):
         L = L / np.maximum(np.linalg.norm(L, axis=1, keepdims=True), EPS)
         R = rng.standard_normal((n_extra, m))
         R /= np.maximum(np.linalg.norm(R, axis=1, keepdims=True), EPS)
-        return [[0.99 * L[i], -0.99 * L[i]] + [0.9 * r for r in R]
-                for i in range(len(mu_q))]
+        return [[0.99 * L[i], -0.99 * L[i]] + [0.9 * r for r in R] for i in range(len(mu_q))]
 
     # --------------------------------------------------------- BoundedSA hooks
 
     def _raw_bounds(self, X, gamma):
         """Unconstrained gaussian is linear in g, so min/max over the ellipsoid is
         the dual norm -- exact, and no solver of any kind."""
-        if self.link_name == 'gaussian' and self._budget() is None:
+        if self.link_name == "gaussian" and self._budget() is None:
             radius = self._radius(gamma)
             mu_q = self.latent_.transform(X)
-            margin = radius * np.linalg.norm(
-                (mu_q - self.anchors_.mean(axis=0)) @ self.latent_.halfinv_, axis=1)
+            margin = radius * np.linalg.norm((mu_q - self.anchors_.mean(axis=0)) @ self.latent_.halfinv_, axis=1)
             mu_y = self._mu(X)
             self.query_status = np.full(len(X), SolveStatus.OK, dtype=int)
             return np.column_stack([mu_y - margin, mu_y + margin])
@@ -324,20 +345,19 @@ class CopSensPI(BoundedSA):
 
         if budget is not None:
             floor = self.constraint_floor(radius)
-            logger.info(f'{type(self).__name__}: constraint floor {floor:.4g} '
-                        f'vs budget {budget:.4g}')
+            logger.info(f"{type(self).__name__}: constraint floor {floor:.4g} vs budget {budget:.4g}")
             if floor > budget:
                 logger.error(
-                    f'{type(self).__name__}: infeasible -- budget {budget:.4g} is '
-                    f'below the attainable floor {floor:.4g}. All queries INFEASIBLE.')
+                    f"{type(self).__name__}: infeasible -- budget {budget:.4g} is "
+                    f"below the attainable floor {floor:.4g}. All queries INFEASIBLE."
+                )
                 return None
 
-        self._ctx = dict(radius=radius, has_con=budget is not None,
-                         budget=(np.inf if budget is None else budget))
-        self._kernels = None                # radius moved => the JIT must be rebuilt
+        self._ctx = dict(radius=radius, has_con=budget is not None, budget=(np.inf if budget is None else budget))
+        self._kernels = None  # radius moved => the JIT must be rebuilt
 
         mu_q = self.latent_.transform(X)
-        mu_y = self._mu(X)                  # precomputed: workers never call the net
+        mu_y = self._mu(X)  # precomputed: workers never call the net
         return list(zip(mu_q, mu_y, self._starts(mu_q)))
 
     def _worker_view(self):
@@ -354,18 +374,19 @@ class CopSensPI(BoundedSA):
         compile per query, which costs more than the solve it replaces."""
         if self._kernels is not None:
             return
-        radius, has_con = self._ctx['radius'], self._ctx['has_con']
+        radius, has_con = self._ctx["radius"], self._ctx["has_con"]
         objective, con_vg = _build_terms(self, radius)
 
         cache = _Cached(con_vg) if con_vg is not None else None
-        con_val = (cache.val if cache is not None
-                   else (lambda v: self._con_v(v, radius)))
+        con_val = cache.val if cache is not None else (lambda v: self._con_v(v, radius))
 
         constraints = [_unit_ball()]
         if has_con:
-            constraints.append(NonlinearConstraint(
-                con_val, -np.inf, self._ctx['budget'],
-                **({'jac': cache.grad} if cache is not None else {})))
+            constraints.append(
+                NonlinearConstraint(
+                    con_val, -np.inf, self._ctx["budget"], **({"jac": cache.grad} if cache is not None else {})
+                )
+            )
         self._kernels = (objective, con_val, constraints)
 
     def _solve_single(self, payload):
@@ -378,31 +399,33 @@ class CopSensPI(BoundedSA):
         """
         mu_q_i, mu_y_i, starts = payload
         objective, con_val, constraints = self._kernels
-        radius, has_con, budget = (self._ctx['radius'], self._ctx['has_con'],
-                                   self._ctx['budget'])
+        radius, has_con, budget = (self._ctx["radius"], self._ctx["has_con"], self._ctx["budget"])
 
-        cache = (_Cached(lambda v: objective(v, mu_q_i, mu_y_i))
-                 if objective is not None else None)
+        cache = _Cached(lambda v: objective(v, mu_q_i, mu_y_i)) if objective is not None else None
 
         def h_at(v):
-            return (cache.val(v) if cache is not None
-                    else self._h_v(v, mu_q_i, mu_y_i, radius))
+            return cache.val(v) if cache is not None else self._h_v(v, mu_q_i, mu_y_i, radius)
 
         best = [np.inf, -np.inf]
         got = [False, False]
         for sign, side in ((+1.0, 0), (-1.0, 1)):
-            fun = lambda v, s=sign: s * h_at(v)                        # noqa: E731
-            jac = ((lambda v, s=sign: s * cache.grad(v))
-                   if cache is not None else None)
+            fun = lambda v, s=sign: s * h_at(v)  # noqa: E731
+            jac = (lambda v, s=sign: s * cache.grad(v)) if cache is not None else None
             for v0 in starts:
                 try:
-                    result = minimize(fun, v0, method='SLSQP', jac=jac,
-                                      constraints=constraints,
-                                      options={'maxiter': MAXITER, 'ftol': FTOL})
+                    result = minimize(
+                        fun,
+                        v0,
+                        method="SLSQP",
+                        jac=jac,
+                        constraints=constraints,
+                        options={"maxiter": MAXITER, "ftol": FTOL},
+                    )
                 except Exception:
                     continue
                 feasible = (result.x @ result.x <= 1.0 + 1e-6) and (
-                    not has_con or con_val(result.x) <= budget * (1 + 1e-6))
+                    not has_con or con_val(result.x) <= budget * (1 + 1e-6)
+                )
                 if not (bool(result.success) and feasible):
                     continue
                 value = h_at(result.x)
@@ -416,31 +439,32 @@ class CopSensPI(BoundedSA):
 
 # --------------------------------------------------------- constrained variants
 
+
 class InvarianceConstrainedCopSens(CopSensPI):
     """CopSens + explicit invariance-error constraint: E|h(X) - h(GX)|^2 <= eps^2."""
 
     def __init__(self, gamma=None, epsilon=None, n_constraint=192, **kwargs):
         if epsilon is None:
-            raise ValueError('epsilon required')
+            raise ValueError("epsilon required")
         self.n_constraint = n_constraint
         super().__init__(gamma=gamma, epsilon=epsilon, **kwargs)
 
     def _precompute(self, X, y, GX=None, **kwargs):
         GX = X if GX is None else np.asarray(GX).reshape(len(X), -1)
-        idx = self.rng_.choice(len(X), size=min(self.n_constraint, len(X)),
-                               replace=False)
+        idx = self.rng_.choice(len(X), size=min(self.n_constraint, len(X)), replace=False)
         self.cX_ = self.latent_.transform(X[idx])
         self.cGX_ = self.latent_.transform(GX[idx])
         self.cmuX_ = self._mu(X[idx])
         self.cmuGX_ = self._mu(GX[idx])
 
     def _constraint(self, Gam, s):
-        d = (self._h(self.cX_, Gam, s, self.cmuX_, self.anchors_c_)
-             - self._h(self.cGX_, Gam, s, self.cmuGX_, self.anchors_c_))
-        return (d ** 2).mean(axis=0)
+        d = self._h(self.cX_, Gam, s, self.cmuX_, self.anchors_c_) - self._h(
+            self.cGX_, Gam, s, self.cmuGX_, self.anchors_c_
+        )
+        return (d**2).mean(axis=0)
 
     def _budget(self):
-        return self.epsilon ** 2
+        return self.epsilon**2
 
 
 class RecentredInvCopSens(InvarianceConstrainedCopSens):
@@ -456,7 +480,7 @@ class RecentredInvCopSens(InvarianceConstrainedCopSens):
 
     def _fit(self, X, y, GX=None, **kwargs):
         if GX is None:
-            raise ValueError('GX (augmented treatment) required')
+            raise ValueError("GX (augmented treatment) required")
         GX = np.asarray(GX).reshape(len(GX), -1)
         return super()._fit(GX, y, GX=X, **kwargs)
 
@@ -471,7 +495,7 @@ class IVConstrainedCopSens(CopSensPI):
 
     def __init__(self, gamma=None, epsilon_iv=None, n_constraint=384, **kwargs):
         if epsilon_iv is None:
-            raise ValueError('epsilon_iv required')
+            raise ValueError("epsilon_iv required")
         self.epsilon_iv = epsilon_iv
         self.n_constraint = n_constraint
         super().__init__(gamma=gamma, **kwargs)
@@ -483,30 +507,29 @@ class IVConstrainedCopSens(CopSensPI):
             # was `Z = X`, i.e. instrument on the treatment, which keeps a live and
             # possibly infeasible constraint. Refuse rather than silently differ.
             raise ValueError(
-                'IVConstrainedCopSens needs an instrument. Z=None would instrument '
-                'on X, which is a live constraint, not the no-op that the '
-                'partial-r2 backend gives you. For a baseline branch use a plain '
-                'CopSensPI.')
-        idx = self.rng_.choice(len(X), size=min(self.n_constraint, len(X)),
-                               replace=False)
+                "IVConstrainedCopSens needs an instrument. Z=None would instrument "
+                "on X, which is a live constraint, not the no-op that the "
+                "partial-r2 backend gives you. For a baseline branch use a plain "
+                "CopSensPI."
+            )
+        idx = self.rng_.choice(len(X), size=min(self.n_constraint, len(X)), replace=False)
         self.cX_ = self.latent_.transform(X[idx])
         self.cmuX_ = self._mu(X[idx])
         self.cy_ = np.asarray(y).ravel()[idx]
-        Zc = np.column_stack([np.ones(len(idx)),
-                              np.asarray(Z)[idx].reshape(len(idx), -1)])
-        self.Qz_, _ = np.linalg.qr(Zc)                       # (n, k) orthonormal
+        Zc = np.column_stack([np.ones(len(idx)), np.asarray(Z)[idx].reshape(len(idx), -1)])
+        self.Qz_, _ = np.linalg.qr(Zc)  # (n, k) orthonormal
 
     def _constraint(self, Gam, s):
-        residual = self.cy_[:, None] - self._h(self.cX_, Gam, s, self.cmuX_,
-                                               self.anchors_c_)
+        residual = self.cy_[:, None] - self._h(self.cX_, Gam, s, self.cmuX_, self.anchors_c_)
         fitted = self.Qz_ @ (self.Qz_.T @ residual)
-        return (fitted ** 2).mean(axis=0) - fitted.mean(axis=0) ** 2
+        return (fitted**2).mean(axis=0) - fitted.mean(axis=0) ** 2
 
     def _budget(self):
-        return self.epsilon_iv ** 2
+        return self.epsilon_iv**2
 
 
 # ------------------------------------------------------------------ intersections
+
 
 class IntersectedCopSens(IntersectionMixin, CopSensPI):
     """
@@ -530,11 +553,12 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
     """
 
     def __init__(self, outcome_models=None, **kwargs):
-        if outcome_models is None or not {'X', 'GX'} <= set(outcome_models):
+        if outcome_models is None or not {"X", "GX"} <= set(outcome_models):
             raise ValueError(
                 'IntersectedCopSens needs the prefit outcome nets {"X": .., "GX": ..}: '
-                'the baseline branch fits on X with the X net, the DA branch on GX '
-                f'with the GX net. Got {sorted(outcome_models or {})}.')
+                "the baseline branch fits on X with the X net, the DA branch on GX "
+                f"with the GX net. Got {sorted(outcome_models or {})}."
+            )
         self.outcome_models = outcome_models
         # outcome_model=None is safe: our _fit never reaches CopSensPI._fit's check
         super().__init__(outcome_model=None, **kwargs)
@@ -543,28 +567,40 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
     def _branch_kwargs(self, key, pad):
         """Everything a sibling CopSensPI needs. One place, so a new knob on
         CopSensPI cannot silently stop reaching the branches."""
-        return dict(gamma=self.gamma, epsilon=self.epsilon, pad=pad,
-                    calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
-                    n_components=self.n_components, link=self.link_name,
-                    n_anchors=self.n_anchors, n_anchors_c=self.n_anchors_c,
-                    mu_clip=self.mu_clip, jax_grad=self.jax_grad, seed=self.seed,
-                    outcome_model=self.outcome_models[key])
+        return dict(
+            gamma=self.gamma,
+            epsilon=self.epsilon,
+            pad=pad,
+            calibrate=self.calibrate,
+            clipy=self.clipy,
+            n_jobs=self.n_jobs,
+            n_components=self.n_components,
+            link=self.link_name,
+            n_anchors=self.n_anchors,
+            n_anchors_c=self.n_anchors_c,
+            mu_clip=self.mu_clip,
+            jax_grad=self.jax_grad,
+            seed=self.seed,
+            outcome_model=self.outcome_models[key],
+        )
 
     def _fit_branches(self, X, y, GX, G):
-        self.baseline = CopSensPI(**self._branch_kwargs('X', pad=False)).fit(X, y)
-        self.augmented = CopSensPI(**self._branch_kwargs('GX', pad=self.pad)).fit(GX, y)
+        self.baseline = CopSensPI(**self._branch_kwargs("X", pad=False)).fit(X, y)
+        self.augmented = CopSensPI(**self._branch_kwargs("GX", pad=self.pad)).fit(GX, y)
 
     def _fit(self, X, y, GX=None, G=None, **kwargs):
         if GX is None:
-            raise ValueError('GX (augmented treatment) required')
+            raise ValueError("GX (augmented treatment) required")
         GX = np.asarray(GX).reshape(len(GX), -1)
         self._fit_branches(X, y, GX, G)
 
         self.sigma2_ = self.baseline.sigma2_
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
-        logger.info(f'{type(self).__name__}: sigma2 ratio (GX/X) '
-                    f'{self.sigma2_ratio:.4f} -- the DA ball is '
-                    f'{np.sqrt(self.sigma2_ratio):.4f}x the baseline radius')
+        logger.info(
+            f"{type(self).__name__}: sigma2 ratio (GX/X) "
+            f"{self.sigma2_ratio:.4f} -- the DA ball is "
+            f"{np.sqrt(self.sigma2_ratio):.4f}x the baseline radius"
+        )
         return self
 
     @property
@@ -581,7 +617,7 @@ class IntersectedIVCopSens(IntersectedCopSens):
 
     def __init__(self, epsilon_iv=None, n_constraint=384, **kwargs):
         if epsilon_iv is None:
-            raise ValueError('epsilon_iv required')
+            raise ValueError("epsilon_iv required")
         self.epsilon_iv, self.n_constraint = epsilon_iv, n_constraint
         super().__init__(**kwargs)
 
@@ -590,7 +626,7 @@ class IntersectedIVCopSens(IntersectedCopSens):
         # explicitly. Do NOT reach for IVConstrainedCopSens(...).fit(Z=None) for
         # symmetry with the partial-r2 backend: there Z=None drops the constraint,
         # here it would instrument on X. That path now raises.
-        self.baseline = CopSensPI(**self._branch_kwargs('X', pad=False)).fit(X, y)
+        self.baseline = CopSensPI(**self._branch_kwargs("X", pad=False)).fit(X, y)
         self.augmented = IVConstrainedCopSens(
-            epsilon_iv=self.epsilon_iv, n_constraint=self.n_constraint,
-            **self._branch_kwargs('GX', pad=self.pad)).fit(GX, y, Z=G)
+            epsilon_iv=self.epsilon_iv, n_constraint=self.n_constraint, **self._branch_kwargs("GX", pad=self.pad)
+        ).fit(GX, y, Z=G)

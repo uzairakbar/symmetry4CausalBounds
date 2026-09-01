@@ -6,6 +6,7 @@ so it is a genuine confounder, not an adjustable covariate. Colour never causes 
 digit identity does. The confounding is therefore ADDITIVE in probability and
 CONSTANT in x: |h_erm - h_*| = beta(1/2 - eta).
 """
+
 import os
 import numpy as np
 from loguru import logger
@@ -15,7 +16,7 @@ from torchvision import datasets
 
 from src.sem.abstract import StructuralEquationModel
 
-DATA_DIR: str = os.environ.get('MNIST_DIR', os.path.expanduser('~/scratch/data/mnist'))
+DATA_DIR: str = os.environ.get("MNIST_DIR", os.path.expanduser("~/scratch/data/mnist"))
 TINT_LO, TINT_HI, TINT_JITTER = 0.1, 0.9, 0.05
 
 
@@ -49,11 +50,20 @@ class DoMNISTSEM(StructuralEquationModel):
     U for the outcome line only, so E[Y | X=x, do] = h_*(x) exactly.
     """
 
-    def __init__(self, seed: int, train: bool = True, alpha: float = 0.0,
-                 beta: float = 0.4, eta: float = 0.25, jitter: float = TINT_JITTER,
-                 subsample: int = 2, net: str = 'domnist-fast',
-                 target_samples: int = 1_200_000, target_kw: Optional[dict] = None,
-                 directory: str = DATA_DIR):
+    def __init__(
+        self,
+        seed: int,
+        train: bool = True,
+        alpha: float = 0.0,
+        beta: float = 0.4,
+        eta: float = 0.25,
+        jitter: float = TINT_JITTER,
+        subsample: int = 2,
+        net: str = "domnist-fast",
+        target_samples: int = 1_200_000,
+        target_kw: Optional[dict] = None,
+        directory: str = DATA_DIR,
+    ):
         ds = datasets.MNIST(directory, train=train, download=True)
         self.seed, self.train = seed, train
         self.images, self.targets = ds.data.numpy(), ds.targets.numpy()
@@ -62,10 +72,11 @@ class DoMNISTSEM(StructuralEquationModel):
         self.net, self.target_samples = net, target_samples
         self.target_kw = dict(target_kw or {})
         self._target = None
-        is_high = (self.targets >= 5)
+        is_high = self.targets >= 5
         self._pools = (np.flatnonzero(~is_high), np.flatnonzero(is_high))
-        logger.info(f'do-mnist: n={len(self.images):,} train={train} '
-                    f'alpha={alpha} beta={beta} eta={eta} sub={subsample}')
+        logger.info(
+            f"do-mnist: n={len(self.images):,} train={train} alpha={alpha} beta={beta} eta={eta} sub={subsample}"
+        )
 
     def __len__(self) -> int:
         return len(self.images)
@@ -89,8 +100,7 @@ class DoMNISTSEM(StructuralEquationModel):
 
     @property
     def solution(self) -> NDArray:
-        raise NotImplementedError(
-            'do-MNIST h_* is not linear in pixels; use sem.f(X) instead.')
+        raise NotImplementedError("do-MNIST h_* is not linear in pixels; use sem.f(X) instead.")
 
     @property
     def bias_sq(self) -> float:
@@ -121,8 +131,9 @@ class DoMNISTSEM(StructuralEquationModel):
         """P(f=1) = 1/2 exactly, whatever MNIST's own class balance is."""
         lo, hi = self._pools
         n1 = N // 2
-        idx = np.concatenate([rng.choice(lo, N - n1, replace=N - n1 > len(lo)),
-                              rng.choice(hi, n1, replace=n1 > len(hi))])
+        idx = np.concatenate(
+            [rng.choice(lo, N - n1, replace=N - n1 > len(lo)), rng.choice(hi, n1, replace=n1 > len(hi))]
+        )
         rng.shuffle(idx)
         return idx
 
@@ -134,8 +145,7 @@ class DoMNISTSEM(StructuralEquationModel):
         f = (digits >= 5).astype(float)
         U = _bern(0.5, N, rng)
         C = np.logical_xor(U > 0.5, _bern(self.eta, N, rng) > 0.5).astype(float)
-        t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO)
-                    + rng.normal(0, self.jitter, N), 0.0, 1.0)
+        t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO) + rng.normal(0, self.jitter, N), 0.0, 1.0)
         X = tint(self._grey(idx), t)
         S = _bern(self.beta, N, rng)
         y_causal = np.logical_xor(f > 0.5, _bern(self.alpha, N, rng) > 0.5).astype(float)
@@ -144,19 +154,19 @@ class DoMNISTSEM(StructuralEquationModel):
     def _stash(self, d, mode):
         """Per-draw provenance. MUTABLE: every sample/sample_paired overwrites it,
         so read it immediately after its own draw."""
-        self.last_ = dict(idx=d['idx'], digits=d['digits'], f=d['f'], U=d['U'],
-                          C=d['C'], t=d['t'], S=d['S'], mode=mode)
+        self.last_ = dict(idx=d["idx"], digits=d["digits"], f=d["f"], U=d["U"], C=d["C"], t=d["t"], S=d["S"], mode=mode)
 
-    def sample(self, N: int = 1, intervention: bool = False,
-               seed: Optional[int] = None, **kwargs) -> Tuple[NDArray, NDArray]:
+    def sample(
+        self, N: int = 1, intervention: bool = False, seed: Optional[int] = None, **kwargs
+    ) -> Tuple[NDArray, NDArray]:
         """intervention=False uses the image's own U; True resamples it for Y only."""
         rng = np.random.default_rng(seed) if seed is not None else np.random
         N = len(self.images) if (N is None or N <= 0) else int(N)
         d = self._draw(N, rng)
-        U_out = _bern(0.5, N, rng) if intervention else d['U']
-        y = np.where(d['S'] > 0.5, U_out, d['y_causal'])
-        self._stash(d, 'do' if intervention else 'obs')
-        return d['X'].astype(np.float32), y[:, None]
+        U_out = _bern(0.5, N, rng) if intervention else d["U"]
+        y = np.where(d["S"] > 0.5, U_out, d["y_causal"])
+        self._stash(d, "do" if intervention else "obs")
+        return d["X"].astype(np.float32), y[:, None]
 
     def sample_paired(self, N: int, seed: int):
         """(X, y_obs, y_do) from ONE draw: same images and (U,C,t,S), only U_out differs.
@@ -169,10 +179,10 @@ class DoMNISTSEM(StructuralEquationModel):
         rng = np.random.default_rng(seed)
         N = len(self.images) if (N is None or N <= 0) else int(N)
         d = self._draw(N, rng)
-        y_obs = np.where(d['S'] > 0.5, d['U'], d['y_causal'])
-        y_do = np.where(d['S'] > 0.5, _bern(0.5, N, rng), d['y_causal'])
-        self._stash(d, 'paired')
-        return d['X'].astype(np.float32), y_obs[:, None], y_do[:, None]
+        y_obs = np.where(d["S"] > 0.5, d["U"], d["y_causal"])
+        y_do = np.where(d["S"] > 0.5, _bern(0.5, N, rng), d["y_causal"])
+        self._stash(d, "paired")
+        return d["X"].astype(np.float32), y_obs[:, None], y_do[:, None]
 
     # ------------------------------------------------------- the estimand h_*
 
@@ -183,13 +193,11 @@ class DoMNISTSEM(StructuralEquationModel):
         if self._target is None:
             from src.methods.regression import GradientDescentERM
 
-            logger.info(f'do-mnist: fitting the target net on '
-                        f'{self.target_samples:,} interventional draws')
+            logger.info(f"do-mnist: fitting the target net on {self.target_samples:,} interventional draws")
             X, _, y_do = self.sample_paired(self.target_samples, seed=self.seed)
             # Same draw and same init_seed as the runner's ERM pair (which draws at
             # this same (N, seed)) => the two nets are coupled and share error.
-            self._target = GradientDescentERM(self.net).fit(
-                _flat(X), y_do, init_seed=self.seed, **self.target_kw)
+            self._target = GradientDescentERM(self.net).fit(_flat(X), y_do, init_seed=self.seed, **self.target_kw)
             del X
         return self._target
 
@@ -199,8 +207,13 @@ class DoMNISTSEM(StructuralEquationModel):
 
     # ------------------------------------------------------------- exemplars
 
-    def exemplars(self, seed: int = 420, digits: Sequence[int] = range(10),
-                  colors: str = 'alternating', subsample: Optional[int] = None):
+    def exemplars(
+        self,
+        seed: int = 420,
+        digits: Sequence[int] = range(10),
+        colors: str = "alternating",
+        subsample: Optional[int] = None,
+    ):
         """One frozen sample per digit, for the query-sweep x-axis.
 
         colors='alternating': C = 0,1,0,1,... so the colour-driven ERM zig-zag reads
@@ -214,11 +227,10 @@ class DoMNISTSEM(StructuralEquationModel):
         rng = np.random.default_rng(seed)
         idx = np.array([int(rng.choice(np.flatnonzero(self.targets == d))) for d in digits])
         n = len(idx)
-        if colors == 'alternating':
-            C = (np.arange(n) % 2).astype(float)          # 0=blue, 1=red
+        if colors == "alternating":
+            C = (np.arange(n) % 2).astype(float)  # 0=blue, 1=red
         else:
             U = _bern(0.5, n, rng)
             C = np.logical_xor(U > 0.5, _bern(self.eta, n, rng) > 0.5).astype(float)
-        t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO)
-                    + rng.normal(0, self.jitter, n), 0.0, 1.0)
+        t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO) + rng.normal(0, self.jitter, n), 0.0, 1.0)
         return tint(self._grey(idx, subsample), t).astype(np.float32), self.targets[idx]

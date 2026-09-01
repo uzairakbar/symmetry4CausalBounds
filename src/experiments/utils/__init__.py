@@ -12,28 +12,42 @@ from .panels import *
 
 __all__ = [
     # Constants
-    'RC_PARAMS', 'TEX_MAPPER', 'COLOR_MAP', 'ALPHA_MAP',
-    'FS_TICK', 'FS_LABEL', 'PLOT_DPI', 'PLOT_FORMAT',
-    'ARTIFACTS_DIRECTORY',
-    
+    "RC_PARAMS",
+    "TEX_MAPPER",
+    "COLOR_MAP",
+    "ALPHA_MAP",
+    "FS_TICK",
+    "FS_LABEL",
+    "PLOT_DPI",
+    "PLOT_FORMAT",
+    "ARTIFACTS_DIRECTORY",
     # Metrics
-    'estimation_error', 'approximation_error',
-    'worst_error', 'interval_width', 'coverage',
-    'trace_S_over_k', 'rho_hat',
-    'QueryEval', 'evaluate_queries', 'STATUS_CATEGORIES',
-    
+    "estimation_error",
+    "approximation_error",
+    "worst_error",
+    "interval_width",
+    "coverage",
+    "trace_S_over_k",
+    "rho_hat",
+    "QueryEval",
+    "evaluate_queries",
+    "STATUS_CATEGORIES",
     # Plotting
-    'create_sweep_plot', 'create_scatter_plot', 'create_perf_plot',
-    'create_query_sweep_plot',
-    'create_panel_plot',
-    
+    "create_sweep_plot",
+    "create_scatter_plot",
+    "create_perf_plot",
+    "create_query_sweep_plot",
+    "create_panel_plot",
     # Data operations
-    'set_seed', 'bootstrap', 'save', 'load',
-    'radial_sweep_pcs', 'sweep_along_pc', 'project_onto_pc',
-    
+    "set_seed",
+    "bootstrap",
+    "save",
+    "load",
+    "radial_sweep_pcs",
+    "sweep_along_pc",
+    "project_onto_pc",
     # Model fitting
-    'fit_model',
-    
+    "fit_model",
     # Panels
-    'PanelBuilder',
+    "PanelBuilder",
 ]

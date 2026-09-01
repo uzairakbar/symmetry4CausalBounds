@@ -1,6 +1,7 @@
 """
 Utilities for fitting causal estimation models.
 """
+
 from typing import Optional, Dict, Any
 
 
@@ -14,7 +15,7 @@ def fit_model(
     X_base=None,
     y_base=None,
     hyperparameters: Optional[Dict[str, Any]] = None,
-    **kwargs
+    **kwargs,
 ):
     """
     Fit a causal estimation model with appropriate data.
@@ -37,14 +38,14 @@ def fit_model(
         hyperparameters: Training hyperparameters (optional)
         **kwargs: Additional arguments (e.g., pbar_manager, da)
     """
-    if method_name == 'ATE':
+    if method_name == "ATE":
         # ATE is computed analytically, no fitting required
         return
 
     # A prefit model was trained once on the FULL draw and handed to every variant.
     # Refitting it here would train it on whatever subset this step passes and break
     # the matched ERM/DA-ERM pairing the coupling depends on.
-    if getattr(model, 'prefit_', False):
+    if getattr(model, "prefit_", False):
         return
 
     # Prepare fit kwargs with hyperparameters
@@ -55,42 +56,42 @@ def fit_model(
     y_solo = y if y_base is None else y_base
 
     # Dispatch based on method name to use correct data
-    if method_name == 'PI':
+    if method_name == "PI":
         # PI uses original data only
         model.fit(X=X_solo, y=y_solo, **fit_kwargs)
 
-    elif method_name == 'DA+PI':
+    elif method_name == "DA+PI":
         # DA+PI uses augmented data only
         model.fit(X=GX, y=y, **fit_kwargs)
 
-    elif method_name == 'PI_INV':
+    elif method_name == "PI_INV":
         # PI_INV uses both original and augmented data
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
 
-    elif method_name == 'PI_IV':
+    elif method_name == "PI_IV":
         # baseline IV PI: no instrument in the original data
         model.fit(X=X_solo, y=y_solo, Z=None, **fit_kwargs)
 
-    elif method_name == 'DA+PI_IV':
+    elif method_name == "DA+PI_IV":
         # DA+PI_IV uses both original and augmented data
         model.fit(X=GX, y=y, Z=G, **fit_kwargs)
 
-    elif method_name in ('PI&DA+PI', 'PI&DA+PI_IV'):
+    elif method_name in ("PI&DA+PI", "PI&DA+PI_IV"):
         # intersections fit a baseline branch on X and a DA branch on GX
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
 
-    elif method_name == 'ERM':
+    elif method_name == "ERM":
         # ERM uses original data
         model.fit(X=X_solo, y=y_solo, **fit_kwargs)
-    
-    elif method_name == 'DA+ERM':
+
+    elif method_name == "DA+ERM":
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, **fit_kwargs)
-    
-    elif method_name == 'DA+IV':
+
+    elif method_name == "DA+IV":
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, Z=G, **fit_kwargs)
-    
+
     else:
         # Fallback for any custom methods - pass everything
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)

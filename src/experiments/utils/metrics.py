@@ -1,6 +1,7 @@
 """
 Error metrics for evaluating causal estimation methods.
 """
+
 import numpy as np
 from dataclasses import dataclass
 from numpy.typing import NDArray
@@ -28,21 +29,21 @@ def estimation_error(
 ) -> float:
     """
     Compute estimation error between estimand and estimate.
-    
+
     Args:
         estimand: Ground truth target f or f(x)
         estimate: Hypothesis h or h(x)
         normalize: Whether to normalize by baseline error
-        
+
     Returns:
         Squared error, optionally normalized
     """
     sq_error = _compute_squared_norm(estimate - estimand)
-    
+
     if normalize:
         baseline = _compute_squared_norm(estimand)
         sq_error = sq_error / (sq_error + baseline)
-    
+
     return sq_error
 
 
@@ -53,46 +54,45 @@ def approximation_error(
 ) -> float:
     """
     Compute approximation error for interval estimates.
-    
+
     For points inside the interval, error is 0.
     For points outside, error is squared distance to nearest bound.
-    
+
     Args:
         estimand: Ground truth target f or f(x)
         estimate: Interval estimates [lower, upper] or point estimates
         normalize: Whether to normalize by baseline error
-        
+
     Returns:
         Approximation error
     """
-    assert estimate.ndim >= estimand.ndim, \
-        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
-    assert estimate.shape[0] == estimand.shape[0], \
-        f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
-    
+    assert estimate.ndim >= estimand.ndim, (
+        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
+    )
+    assert estimate.shape[0] == estimand.shape[0], (
+        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
+    )
+
     estimate = _as_interval(estimate)
-    
+
     lower_bound = estimate[:, 0]
     upper_bound = estimate[:, 1]
     estimand_flat = estimand.squeeze()
-    
+
     # Check if points are inside intervals
     inside_interval = (estimand_flat >= lower_bound) & (estimand_flat <= upper_bound)
-    
+
     # For points outside, compute squared distance to nearest bound
-    distance_squared = np.minimum(
-        (lower_bound - estimand_flat)**2,
-        (upper_bound - estimand_flat)**2
-    )
-    
+    distance_squared = np.minimum((lower_bound - estimand_flat) ** 2, (upper_bound - estimand_flat) ** 2)
+
     # Combine: 0 if inside, distance_squared if outside
     errors = np.where(inside_interval, 0, distance_squared)
     approx_sq_error = np.nanmean(errors[:, None])
-    
+
     if normalize:
         baseline = estimation_error(estimand, np.zeros_like(estimand), normalize=False)
         approx_sq_error = approx_sq_error / (approx_sq_error + baseline)
-    
+
     return approx_sq_error
 
 
@@ -103,32 +103,34 @@ def worst_error(
 ) -> float:
     """
     Compute worst-case error for interval estimates.
-    
+
     Takes the maximum squared error across both bounds.
-    
+
     Args:
         estimand: Ground truth target f or f(x)
         estimate: Interval estimates [lower, upper] or point estimates
         normalize: Whether to normalize by baseline error
-        
+
     Returns:
         Worst-case squared error
     """
-    assert estimate.ndim >= estimand.ndim, \
-        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
-    assert estimate.shape[0] == estimand.shape[0], \
-        f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
-    
+    assert estimate.ndim >= estimand.ndim, (
+        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
+    )
+    assert estimate.shape[0] == estimand.shape[0], (
+        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
+    )
+
     estimate = _as_interval(estimate)
-    
+
     difference = estimate - estimand
     squared_errors = difference**2
     worst_sq_error = np.nanmean(squared_errors.max(axis=1))
-    
+
     if normalize:
         baseline = estimation_error(estimand, np.zeros_like(estimand), normalize=False)
         worst_sq_error = worst_sq_error / (worst_sq_error + baseline)
-    
+
     return worst_sq_error
 
 
@@ -139,31 +141,32 @@ def interval_width(
 ) -> float:
     """
     Compute average width of interval estimates.
-    
+
     Args:
         estimand: Ground truth (used for normalization only)
         estimate: Interval estimates [lower, upper] or point estimates
         normalize: Whether to normalize by standard deviation of estimand
-        
+
     Returns:
         Average interval width
     """
-    assert estimate.ndim >= estimand.ndim, \
-        f'Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.'
-    assert estimate.shape[0] == estimand.shape[0], \
-        f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
-    
+    assert estimate.ndim >= estimand.ndim, (
+        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
+    )
+    assert estimate.shape[0] == estimand.shape[0], (
+        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
+    )
+
     estimate = _as_interval(estimate)
-    
+
     widths = estimate[:, 1] - estimate[:, 0]
     width = np.nanmean(widths)
-    
-    assert np.all(widths[~np.isnan(widths)] >= 0), \
-        'Upper bound should be greater than lower bound for all samples.'
-    
+
+    assert np.all(widths[~np.isnan(widths)] >= 0), "Upper bound should be greater than lower bound for all samples."
+
     if normalize:
         width = width / (width + np.std(estimand))
-    
+
     return width
 
 
@@ -187,8 +190,9 @@ def coverage(
     Returns:
         Fraction of queries whose interval contains the truth
     """
-    assert estimate.shape[0] == estimand.shape[0], \
-        f'Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.'
+    assert estimate.shape[0] == estimand.shape[0], (
+        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
+    )
 
     estimate = _as_interval(estimate)
     estimand_flat = estimand.squeeze()
@@ -210,9 +214,10 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray) -> float:
     Returns:
         rho_hat, or NaN if the baseline MSE vanishes
     """
+
     def mse(A):
         residuals = y.flatten() - A @ np.linalg.lstsq(A, y.flatten(), rcond=None)[0]
-        return float(np.mean(residuals ** 2))
+        return float(np.mean(residuals**2))
 
     denominator = mse(X)
     if denominator <= 0.0:
@@ -225,19 +230,19 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray) -> float:
 # =============================================================================
 
 # status_counts layout; precedence is first match wins
-STATUS_CATEGORIES = ('solver_failure', 'infeasible',
-                     'feasible_and_covers', 'feasible_and_noncovering')
+STATUS_CATEGORIES = ("solver_failure", "infeasible", "feasible_and_covers", "feasible_and_noncovering")
 
 
 @dataclass
 class QueryEval:
     """All metrics for one fit+predict, computed in a single pass."""
+
     approximation_error: float
     worst_error: float
     interval_width: float
     coverage: float
-    wall_clock: float               # predict seconds per query
-    status_counts: NDArray          # counts over STATUS_CATEGORIES, sums to n
+    wall_clock: float  # predict seconds per query
+    status_counts: NDArray  # counts over STATUS_CATEGORIES, sums to n
 
 
 def evaluate_queries(
@@ -266,21 +271,21 @@ def evaluate_queries(
     statuses = np.asarray(statuses, dtype=int)
 
     estimand_flat = estimand.squeeze()
-    covered = (
-        (estimand_flat >= interval[:, 0]) & (estimand_flat <= interval[:, 1])
-        & ~np.isnan(interval).any(axis=1)
-    )
+    covered = (estimand_flat >= interval[:, 0]) & (estimand_flat <= interval[:, 1]) & ~np.isnan(interval).any(axis=1)
 
     # mutually exclusive, ordered: failure -> infeasible -> covers -> non-covering
     failure = statuses == SolveStatus.FAILURE
     infeasible = ~failure & (statuses == SolveStatus.INFEASIBLE)
     feasible = ~failure & ~infeasible
-    counts = np.array([
-        failure.sum(),
-        infeasible.sum(),
-        (feasible & covered).sum(),
-        (feasible & ~covered).sum(),
-    ], dtype=int)
+    counts = np.array(
+        [
+            failure.sum(),
+            infeasible.sum(),
+            (feasible & covered).sum(),
+            (feasible & ~covered).sum(),
+        ],
+        dtype=int,
+    )
 
     return QueryEval(
         approximation_error=approximation_error(estimand, estimate),

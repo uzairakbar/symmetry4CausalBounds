@@ -1,4 +1,5 @@
 """Torch backbones for the image experiments."""
+
 import torch
 from torch import nn
 from loguru import logger
@@ -18,16 +19,21 @@ def _domnist_fast(input_dim: int, channels: int = 3) -> nn.Sequential:
     flat = 32 * ((((side - 4) // 2) - 2) ** 2)
     return nn.Sequential(
         nn.Unflatten(1, torch.Size([channels, side, side])),
-        nn.Conv2d(channels, 24, 5, 1), nn.MaxPool2d(2), nn.ReLU(),
-        nn.Conv2d(24, 32, 3, 1), nn.ReLU(),
+        nn.Conv2d(channels, 24, 5, 1),
+        nn.MaxPool2d(2),
+        nn.ReLU(),
+        nn.Conv2d(24, 32, 3, 1),
+        nn.ReLU(),
         nn.Flatten(1),
-        nn.Linear(flat, 256), nn.ReLU(),
-        nn.Linear(256, 1), nn.Sigmoid(),
+        nn.Linear(flat, 256),
+        nn.ReLU(),
+        nn.Linear(256, 1),
+        nn.Sigmoid(),
     )
 
 
 NETS: Dict[str, Callable[[int], nn.Sequential]] = {
-    'domnist-fast': _domnist_fast,
+    "domnist-fast": _domnist_fast,
 }
 
 
@@ -35,12 +41,12 @@ def device():
     """Cached: the DA calls this once per chunk and the log line is not news."""
     global _DEVICE
     if _DEVICE is None:
-        name = 'cpu'
+        name = "cpu"
         if not CPU_ONLY:
             if torch.cuda.is_available():
-                name = 'cuda'
+                name = "cuda"
             elif torch.backends.mps.is_available():
-                name = 'mps'
-        logger.info(f'Using {name} device.')
+                name = "mps"
+        logger.info(f"Using {name} device.")
         _DEVICE = torch.device(name)
     return _DEVICE

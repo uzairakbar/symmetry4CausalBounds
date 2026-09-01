@@ -4,6 +4,7 @@ Partial identification / sensitivity models.
 Uniform signature: gamma (budget), epsilon (invariance error), pad (Thm. 3.A),
 calibrate (paper's sigma-scaled budgets), clipy (clip to observed y range).
 """
+
 import numpy as np
 import cvxpy as cp
 from enum import IntEnum
@@ -19,9 +20,10 @@ CLOSED_FORM_SOLUTION: bool = False
 
 class SolveStatus(IntEnum):
     """Per-query outcome. Ordered: a pair takes the worse of its two sides."""
+
     OK = 0
-    INFEASIBLE = 1      # solver proved the constraint set empty: data rejects the budget
-    FAILURE = 2         # numerical breakdown: no answer produced
+    INFEASIBLE = 1  # solver proved the constraint set empty: data rejects the budget
+    FAILURE = 2  # numerical breakdown: no answer produced
 
 
 def _solve_chunk(view, chunk):
@@ -59,7 +61,7 @@ class BoundedSA(SA):
         self.calibrate = calibrate
         self.clipy = clipy
         self.n_jobs = n_jobs
-        self.query_status = None    # per-query SolveStatus, set on every predict
+        self.query_status = None  # per-query SolveStatus, set on every predict
         self.y_min = -np.inf
         self.y_max = np.inf
 
@@ -70,13 +72,13 @@ class BoundedSA(SA):
     def _predict(self, X, gamma=None, epsilon=None, **kwargs):
         gamma = self.gamma if gamma is None else gamma
         if epsilon is not None:
-            self.epsilon = epsilon      # constraint RHS and padding both read it
+            self.epsilon = epsilon  # constraint RHS and padding both read it
         return self._finalize(self._raw_bounds(X, gamma))
 
     def _raw_bounds(self, X, gamma):
         """Unpadded, unclipped [lower, upper] per query; sets `query_status`."""
         payloads = self._prepare(X, gamma)
-        if payloads is None:            # the whole constraint set is empty
+        if payloads is None:  # the whole constraint set is empty
             self.query_status = np.full(len(X), SolveStatus.INFEASIBLE, dtype=int)
             return np.full((len(X), 2), np.nan)
 
@@ -92,17 +94,12 @@ class BoundedSA(SA):
             # tasks re-canonicalize every query (measured ~2x slower).
             # Split INDICES, not the payload list: CopSens payloads are ragged
             # and np.array_split would raise on them.
-            n_chunks = effective_n_jobs(self.n_jobs)      # resolves -1
-            chunks = [c for c in np.array_split(np.arange(len(payloads)), n_chunks)
-                      if len(c)]
+            n_chunks = effective_n_jobs(self.n_jobs)  # resolves -1
+            chunks = [c for c in np.array_split(np.arange(len(payloads)), n_chunks) if len(c)]
             # loky sets inner threads to cpu_count//n_jobs, which a submit-script
             # OMP_NUM_THREADS overrides. Pin it.
-            with parallel_config(backend='loky', n_jobs=self.n_jobs,
-                                 inner_max_num_threads=1):
-                out = Parallel()(
-                    delayed(_solve_chunk)(view, [payloads[i] for i in c])
-                    for c in chunks
-                )
+            with parallel_config(backend="loky", n_jobs=self.n_jobs, inner_max_num_threads=1):
+                out = Parallel()(delayed(_solve_chunk)(view, [payloads[i] for i in c]) for c in chunks)
             solved = [q for c in out for q in c]
 
         solved = np.asarray(solved, dtype=float)
@@ -158,10 +155,9 @@ class PartialR2(BoundedSA):
         self.R_constraint = None
         self.h_erm = None
         self.N_samples = 0
-        self.sigma_sq = 1.0     # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
+        self.sigma_sq = 1.0  # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
 
-        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad,
-                         calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
+        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
 
     # ------------------------------------------------------------------ fit
 
@@ -171,7 +167,7 @@ class PartialR2(BoundedSA):
 
         # noise level: sigma^2 = min MSE. Fit on post-DA data => sigma-tilde^2.
         residuals = y.flatten() - X @ self.h_erm
-        self.sigma_sq = float(np.mean(residuals ** 2))
+        self.sigma_sq = float(np.mean(residuals**2))
 
         # observable outcome limits (clipy)
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
@@ -207,10 +203,7 @@ class PartialR2(BoundedSA):
     def _get_constraints(self):
         """SOCP: || R (h - h_erm) ||_2 <= sqrt(N) * radius."""
         threshold = np.sqrt(self.N_samples) * self.radius_param
-        return [
-            cp.norm(cp.Constant(self.R_constraint) @ (self.h_var - cp.Constant(self.h_erm)), 2)
-            <= threshold
-        ]
+        return [cp.norm(cp.Constant(self.R_constraint) @ (self.h_var - cp.Constant(self.h_erm)), 2) <= threshold]
 
     def _setup_cvx_problems(self):
         M = len(self.h_erm)
@@ -294,14 +287,14 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
     nonzero = s > max(s.max(initial=0.0), 1.0) * 1e-14
     coefficients = np.zeros_like(s)
     coefficients[nonzero] = Utc[nonzero] / s[nonzero]
-    if np.linalg.norm(coefficients) <= delta:            # interior
+    if np.linalg.norm(coefficients) <= delta:  # interior
         return float(np.linalg.norm(B @ (Vt.T @ coefficients) - c))
 
     def norm_at(lam):
-        return float(np.linalg.norm(s * Utc / (s ** 2 + lam)))
+        return float(np.linalg.norm(s * Utc / (s**2 + lam)))
 
     lo, hi = 0.0, 1.0
-    while norm_at(hi) > delta:                           # bracket the root
+    while norm_at(hi) > delta:  # bracket the root
         hi *= 2.0
         if hi > 1e18:
             break
@@ -313,7 +306,7 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
             hi = mid
         if hi - lo < tol * max(hi, 1.0):
             break
-    u = Vt.T @ (s * Utc / (s ** 2 + 0.5 * (lo + hi)))
+    u = Vt.T @ (s * Utc / (s**2 + 0.5 * (lo + hi)))
     return float(np.linalg.norm(B @ u - c))
 
 
@@ -346,19 +339,19 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False
 
     h_erm = OLS().fit(design, y).solution.flatten()
     residuals = np.asarray(y).flatten() - design @ h_erm
-    scale = float(np.sqrt(np.mean(residuals ** 2))) if calibrate else 1.0
+    scale = float(np.sqrt(np.mean(residuals**2))) if calibrate else 1.0
     delta = np.sqrt(N) * scale * np.sqrt(max(float(gamma), 0.0))
 
-    if kind == 'inv':
+    if kind == "inv":
         if GX is None:
             raise ValueError("constraint_floor(kind='inv') needs GX")
         A, b = inv_constraint_terms(design, np.asarray(GX))
-    elif kind == 'iv':
+    elif kind == "iv":
         if Z is None:
             raise ValueError("constraint_floor(kind='iv') needs Z")
         A, b = iv_constraint_terms(design, y, np.asarray(Z))
     else:
-        raise ValueError(f'unknown constraint kind {kind!r}')
+        raise ValueError(f"unknown constraint kind {kind!r}")
 
     # u = R(h - h_erm) turns the ball into ||u|| <= delta
     _, R = np.linalg.qr(design)
@@ -415,8 +408,7 @@ class InvarianceConstrainedPartialR2(PartialR2):
         # Parameter, not constant: epsilon is swept at predict time (robustness)
         self.eps_param = cp.Parameter(nonneg=True)
         constraints.append(
-            cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2)
-            <= np.sqrt(self.N_samples) * self.eps_param
+            cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2) <= np.sqrt(self.N_samples) * self.eps_param
         )
         return constraints
 
@@ -445,9 +437,9 @@ class InstrumentalVariablePartialR2(PartialR2):
 
         if gamma_z != 0.0:
             logger.warning(
-                f'gamma_z={gamma_z} != 0: the IV budget is exact only at '
-                'gamma_z = 0, where the cross-term vanishes. The additive '
-                's*sqrt(gamma_z) top-up is a heuristic.'
+                f"gamma_z={gamma_z} != 0: the IV budget is exact only at "
+                "gamma_z = 0, where the cross-term vanishes. The additive "
+                "s*sqrt(gamma_z) top-up is a heuristic."
             )
 
     @property
@@ -463,8 +455,7 @@ class InstrumentalVariablePartialR2(PartialR2):
             return
         if self.epsilon_iv is None:
             raise ValueError(
-                'epsilon_iv is required when an instrument is supplied; '
-                'pass the oracle `eps_iv_star` (+ EPS_TOL).'
+                "epsilon_iv is required when an instrument is supplied; pass the oracle `eps_iv_star` (+ EPS_TOL)."
             )
 
         self.Z_projector_R, self.y_residual_base = iv_constraint_terms(X, y, Z)
@@ -476,10 +467,8 @@ class InstrumentalVariablePartialR2(PartialR2):
 
         self.iv_threshold_param = cp.Parameter(nonneg=True)
         constraints.append(
-            cp.norm(
-                cp.Constant(self.y_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var,
-                2
-            ) <= self.iv_threshold_param
+            cp.norm(cp.Constant(self.y_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var, 2)
+            <= self.iv_threshold_param
         )
         return constraints
 
@@ -514,7 +503,7 @@ class IntersectionMixin:
         # empty intersection: infeasible, same convention as the solver
         empty = lower > upper
         if empty.any():
-            logger.warning(f'Empty intersection at {empty.sum()}/{len(empty)} queries.')
+            logger.warning(f"Empty intersection at {empty.sum()}/{len(empty)} queries.")
             lower = np.where(empty, np.nan, lower)
             upper = np.where(empty, np.nan, upper)
             status = np.where(empty, SolveStatus.INFEASIBLE, status)
@@ -533,8 +522,12 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
 
     def _branch(self, pad):
         return PartialR2(
-            gamma=self.gamma, epsilon=self.epsilon, pad=pad,
-            calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
+            gamma=self.gamma,
+            epsilon=self.epsilon,
+            pad=pad,
+            calibrate=self.calibrate,
+            clipy=self.clipy,
+            n_jobs=self.n_jobs,
         )
 
     def _fit_branches(self, X, y, GX, G):
@@ -568,9 +561,15 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
 
     def _branch(self, pad, rho=1.0):
         return InstrumentalVariablePartialR2(
-            gamma=self.gamma, gamma_z=self.gamma_z, rho=rho, epsilon=self.epsilon,
+            gamma=self.gamma,
+            gamma_z=self.gamma_z,
+            rho=rho,
+            epsilon=self.epsilon,
             epsilon_iv=self.epsilon_iv,
-            pad=pad, calibrate=self.calibrate, clipy=self.clipy, n_jobs=self.n_jobs,
+            pad=pad,
+            calibrate=self.calibrate,
+            clipy=self.clipy,
+            n_jobs=self.n_jobs,
         )
 
     def _fit_branches(self, X, y, GX, G):

@@ -6,8 +6,8 @@ from numpy.typing import NDArray
 from src.data_augmentors.abstract import DataAugmenter as DA
 
 
-DA_STD: float=1.0
-BASIS_SELECTOIN_PROBABILITY: float=8.0/10.0
+DA_STD: float = 1.0
+BASIS_SELECTOIN_PROBABILITY: float = 8.0 / 10.0
 
 
 class NullSpaceTranslation(DA):
@@ -20,36 +20,27 @@ class NullSpaceTranslation(DA):
     exact_invariance = False
 
     def __init__(
-            self,
-            W_XY: NDArray,
-            kernel_dim: int,
-            std: float=DA_STD,
-            strength: float=0.0,
-        ):
+        self,
+        W_XY: NDArray,
+        kernel_dim: int,
+        std: float = DA_STD,
+        strength: float = 0.0,
+    ):
         null_basis = self.null_space(W_XY.T).T
 
         k_max, _ = null_basis.shape
 
-        assert k_max >= kernel_dim, \
-            f'`kernel_dim`={kernel_dim} cannot be greater than `k_max`={k_max}.'
+        assert k_max >= kernel_dim, f"`kernel_dim`={kernel_dim} cannot be greater than `k_max`={k_max}."
 
         if kernel_dim < 0:
-            logger.info(
-                '`kernel_dim`<0 means DA is constructed from full bases of ker(f).'
-            )
-            sample = np.ones(k_max, dtype='bool')
+            logger.info("`kernel_dim`<0 means DA is constructed from full bases of ker(f).")
+            sample = np.ones(k_max, dtype="bool")
         elif kernel_dim == 0:
-            logger.info(
-                '`kernel_dim`=0 means DA is constructed from randomly picked bases of ker(f).'
-            )
-            sample = (
-                np.random.random(k_max) < BASIS_SELECTOIN_PROBABILITY
-            )
+            logger.info("`kernel_dim`=0 means DA is constructed from randomly picked bases of ker(f).")
+            sample = np.random.random(k_max) < BASIS_SELECTOIN_PROBABILITY
         else:
-            logger.info(
-                f'Selecting `kernel_dim`={kernel_dim} bases of ker(f) to construct DA.'
-            )
-            sample = np.zeros(k_max, dtype='bool')
+            logger.info(f"Selecting `kernel_dim`={kernel_dim} bases of ker(f) to construct DA.")
+            sample = np.zeros(k_max, dtype="bool")
             sample[:kernel_dim] = True
 
         # randomize bases ordering
@@ -66,7 +57,7 @@ class NullSpaceTranslation(DA):
 
     @property
     def augmentation(self):
-        return 'translate'
+        return "translate"
 
     @property
     def strength(self) -> float:
@@ -74,12 +65,10 @@ class NullSpaceTranslation(DA):
 
     @strength.setter
     def strength(self, value: float):
-        assert value >= 0.0, '`strength` must be non-negative.'
+        assert value >= 0.0, "`strength` must be non-negative."
         self._strength = float(value)
 
-    def augment(
-            self, X: NDArray, scale: float=1.0, **kwargs
-        ) -> Tuple[NDArray, NDArray]:
+    def augment(self, X: NDArray, scale: float = 1.0, **kwargs) -> Tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
 
@@ -100,16 +89,11 @@ class NullSpaceTranslation(DA):
         return X + self._strength * G_perp @ self.W_perp
 
     @staticmethod
-    def null_space(
-            W: NDArray,
-            absolute_tolerance: float=1e-13,
-            relative_tolerance: float=0.0
-        ) -> NDArray:
+    def null_space(W: NDArray, absolute_tolerance: float = 1e-13, relative_tolerance: float = 0.0) -> NDArray:
         U, s, VT = np.linalg.svd(W)
 
         max_singular = s[0]
-        tolerance = max(absolute_tolerance,
-                        relative_tolerance * max_singular)
+        tolerance = max(absolute_tolerance, relative_tolerance * max_singular)
 
         num_singular = (s >= tolerance).sum()
         null_space_basis = VT[num_singular:].T

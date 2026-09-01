@@ -2,6 +2,7 @@
 Simulation experiment using generic runners.
 Dramatically reduced code duplication.
 """
+
 from typing import Type
 
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
@@ -10,7 +11,7 @@ from src.experiments.base import ExperimentOrchestrator
 from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
 from src.experiments.configs import MethodRegistry, SIMULATION_CONFIG
 
-EXPERIMENT_NAME = 'simulation'
+EXPERIMENT_NAME = "simulation"
 
 # m-sweep holds n fixed here (PLAN 5.5)
 FOLD_SWEEP_SAMPLES: int = 512
@@ -19,6 +20,7 @@ FOLD_SWEEP_SAMPLES: int = 512
 # =============================================================================
 # ORCHESTRATOR
 # =============================================================================
+
 
 class SimulationOrchestrator(ExperimentOrchestrator):
     """Orchestrator for simulation experiments."""
@@ -33,10 +35,10 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         """
         self.kernel_dim = kernel_dim
         self.toggles = dict(
-            calibrate=kwargs.get('calibrate', False),
-            pad=kwargs.get('pad', False),
-            clipy=kwargs.get('clipy', True),
-            n_jobs=kwargs.get('n_jobs', 1),
+            calibrate=kwargs.get("calibrate", False),
+            pad=kwargs.get("pad", False),
+            clipy=kwargs.get("clipy", True),
+            n_jobs=kwargs.get("n_jobs", 1),
         )
         toggles = self.toggles
 
@@ -45,10 +47,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             @staticmethod
             def build_methods(names):
                 return MethodRegistry.build_methods(
-                    names,
-                    gamma=SIMULATION_CONFIG.gamma,
-                    epsilon=SIMULATION_CONFIG.epsilon,
-                    **toggles
+                    names, gamma=SIMULATION_CONFIG.gamma, epsilon=SIMULATION_CONFIG.epsilon, **toggles
                 )
 
         super().__init__(EXPERIMENT_NAME, SimulationRegistry(), **kwargs)
@@ -68,6 +67,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
     def get_query_runner_cls(self) -> Type[GenericQuerySweep]:
         """Return query sweep runner."""
+
         # Create a configured class
         class SimulationQuerySweep(GenericQuerySweep):
             def __init__(inner_self, **kwargs):
@@ -85,19 +85,17 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     method_factory=self.build_methods,
                     default_gamma=SIMULATION_CONFIG.gamma,
                     default_epsilon=SIMULATION_CONFIG.epsilon,
-                    **kwargs
+                    **kwargs,
                 )
 
         return SimulationQuerySweep
 
-    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None,
-                      n_jobs=None):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
         toggle -- perf needs serial models to time methods, not the harness."""
-        toggles = self.toggles if n_jobs is None else {**self.toggles, 'n_jobs': n_jobs}
+        toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return MethodRegistry.build_methods(
-            self.kwargs['methods'], gamma=gamma, epsilon=epsilon,
-            epsilon_iv=epsilon_iv, **toggles
+            self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, **toggles
         )
 
     def get_sweep_runner_cls(self, param: str) -> Type:
@@ -107,17 +105,18 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
                 extra = {}
-                if param == 'm':
-                    extra['n_samples_override'] = FOLD_SWEEP_SAMPLES
+                if param == "m":
+                    extra["n_samples_override"] = FOLD_SWEEP_SAMPLES
                 super().__init__(
                     sem_factory=outer._sem_factory,
-                    da_factory=outer._da_factory,   # expects the SEM as argument
+                    da_factory=outer._da_factory,  # expects the SEM as argument
                     poly_transform=None,
                     test_fraction=SIMULATION_CONFIG.test_fraction,
                     default_gamma=SIMULATION_CONFIG.gamma,
                     default_epsilon=SIMULATION_CONFIG.epsilon,
                     experiment_name=EXPERIMENT_NAME,
-                    **extra, **kwargs
+                    **extra,
+                    **kwargs,
                 )
 
         return ConfiguredSweep
