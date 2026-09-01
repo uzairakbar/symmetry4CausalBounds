@@ -7,9 +7,9 @@ torch seed; stage 2 recomputes them here and compares.
     <s4cb>/bin/python       scripts/a3_da_parity.py --check  /tmp/a3.npz
 """
 
+import argparse
 import os
 import sys
-import argparse
 
 import numpy as np
 

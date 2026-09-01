@@ -16,8 +16,8 @@ import os
 os.environ.setdefault("JAX_PLATFORMS", "cpu")  # must precede `import jax`
 os.environ.setdefault("XLA_FLAGS", "--xla_force_host_platform_device_count=1")
 
-import numpy as np  # noqa: E402
 import jax  # noqa: E402
+import numpy as np  # noqa: E402
 
 jax.config.update("jax_enable_x64", True)  # MUST: float32 would cost ~7 digits
 

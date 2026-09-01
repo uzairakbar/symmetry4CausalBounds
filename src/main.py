@@ -4,18 +4,18 @@ Main entry point for experiments.
 
 import os
 import sys
+
 import yaml
 from loguru import logger
 from munch import munchify
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.experiments.utils import set_seed
 from src.experiments.configs import parse_experiment_plan, resolve_dataset_block
-from src.experiments.simulation import SimulationOrchestrator
-from src.experiments.optical_device import OpticalOrchestrator
 from src.experiments.do_mnist import DoMNISTOrchestrator
-
+from src.experiments.optical_device import OpticalOrchestrator
+from src.experiments.simulation import SimulationOrchestrator
+from src.experiments.utils import set_seed
 
 ORCHESTRATORS = {
     "simulation": SimulationOrchestrator,
@@ -26,7 +26,7 @@ ORCHESTRATORS = {
 
 def main():
     """Run experiments based on config.yaml."""
-    with open("config.yaml", "r") as file:
+    with open("config.yaml") as file:
         config = yaml.safe_load(file)
 
     # global toggles, overridable per experiment

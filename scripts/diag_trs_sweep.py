@@ -19,11 +19,10 @@ from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import (
-    trace_S_over_k,  # noqa: E402
-    rho_hat,
     evaluate_queries,
+    rho_hat,
+    trace_S_over_k,  # noqa: E402
 )
-from src.experiments.configs import SIMULATION_CONFIG  # noqa: E402
 
 N_STEPS = 12
 METHODS = ["PI", "DA+PI", "DA+PI_IV"]

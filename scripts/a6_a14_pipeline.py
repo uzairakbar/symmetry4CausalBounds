@@ -7,23 +7,23 @@ own scripts -- they each need SOURCE's environment or a long solve.
 """
 
 import os
+import resource
 import sys
 import time
-import resource
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.sem.do_mnist import DoMNISTSEM, tint, grey_of, TINT_LO, TINT_HI  # noqa: E402
 from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
-from src.methods.regression import GradientDescentERM  # noqa: E402
-from src.methods.copsens import CopSensPI, IVConstrainedCopSens  # noqa: E402
-from src.methods.sensitivity_models import SolveStatus  # noqa: E402
-from src.experiments.configs import resolve_dataset_block, DOMNIST_CONFIG  # noqa: E402
+from src.experiments.configs import DOMNIST_CONFIG, resolve_dataset_block  # noqa: E402
 from src.experiments.do_mnist import DoMNISTOrchestrator, Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import evaluate_queries  # noqa: E402
+from src.methods.copsens import CopSensPI, IVConstrainedCopSens  # noqa: E402
+from src.methods.regression import GradientDescentERM  # noqa: E402
+from src.methods.sensitivity_models import SolveStatus  # noqa: E402
+from src.sem.do_mnist import TINT_HI, TINT_LO, DoMNISTSEM, grey_of, tint  # noqa: E402
 
 N_SAMPLES, N_PI, N_QUERIES = 60_000, 6_000, 48
 FAIL = []
@@ -412,6 +412,7 @@ def a6_perf_fairness():
     check("A6 perf models are actually serial", perf["PI"]().n_jobs == 1, f"{perf['PI']().n_jobs}")
 
     import inspect
+
     import src.experiments.base as base
 
     source = inspect.getsource(base.ExperimentOrchestrator._run_perf)
@@ -428,6 +429,7 @@ def a26_budget_wiring():
     every method, baseline PI included.
     """
     from munch import munchify
+
     from src.experiments.configs import resolve_dataset_block
 
     gamma, epsilon = 0.1, 0.051

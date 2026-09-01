@@ -8,13 +8,13 @@ exceptions, so this installs an ERROR sink -- without it a total failure passes 
     python scripts/diag_plot_scaling.py
 """
 
-import os
-import sys
 import glob
+import os
 import pickle
+import sys
 
-import numpy as np
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -22,13 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from loguru import logger  # noqa: E402
 
+from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
+from src.experiments.utils import plotting  # noqa: E402
 from src.experiments.utils.constants import (
-    PLOT_CONFIGS,  # noqa: E402
     ARTIFACTS_DIRECTORY,
+    PLOT_CONFIGS,  # noqa: E402
 )
 from src.experiments.utils.data_operations import bootstrap  # noqa: E402
-from src.experiments.utils import plotting  # noqa: E402
-from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
 
 DIAG_EXPERIMENT = "_diag"
 SEEDS = (0, 1, 2, 3, 4)

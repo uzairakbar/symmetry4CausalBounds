@@ -23,29 +23,29 @@ Writes artifacts/domnist-budget_report.json. Budgets are conditional on every se
 recorded in there -- change one and they are stale.
 """
 
-import os
-import sys
-import json
-import time
 import argparse
+import json
+import os
 import subprocess
-from datetime import datetime, timezone
+import sys
+import time
+from datetime import UTC, datetime
 
 import numpy as np
 from loguru import logger
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
-from src.experiments.do_mnist import Flatten, train_pair, pi_subset, TEST_SEED_OFFSET  # noqa: E402
-from src.experiments.configs import MethodRegistry, DOMNIST_CONFIG  # noqa: E402
+from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry  # noqa: E402
+from src.experiments.do_mnist import TEST_SEED_OFFSET, Flatten, pi_subset, train_pair  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import (
-    evaluate_queries,  # noqa: E402
     STATUS_CATEGORIES,
+    evaluate_queries,  # noqa: E402
 )
 from src.oracle import compute_oracle_parameters  # noqa: E402
+from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
 OUT_DEFAULT = "artifacts/domnist-budget_report.json"
 START = time.time()
@@ -350,7 +350,7 @@ def main(args):
         oracle = None
     report = {
         "schema_version": 1,
-        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "wall_clock_s": round(time.time() - START, 1),
         "provenance": {
             "git_sha": _git("rev-parse", "--short", "HEAD"),

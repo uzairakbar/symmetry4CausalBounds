@@ -2,7 +2,7 @@
 Centralized constants for experiments.
 """
 
-from typing import Any, Dict, Literal, List
+from typing import Any, Literal
 
 # Plot formatting
 FS_TICK: int = 15
@@ -21,7 +21,7 @@ SUBDIR_SCATTER: str = "scatter"
 SUBDIR_PERF: str = "perf"
 
 # Plotting style
-RC_PARAMS: Dict[str, str | int | bool] = {
+RC_PARAMS: dict[str, str | int | bool] = {
     "text.usetex": True,
     "font.family": "serif",
     "font.serif": ["Computer Modern"],
@@ -33,7 +33,6 @@ RC_PARAMS: Dict[str, str | int | bool] = {
     "ytick.color": "black",
 }
 
-from typing import Dict
 
 # LaTeX building blocks
 ERM = r"\operatorname{erm}"
@@ -42,7 +41,7 @@ PI = r"\operatorname{p}\!\textnormal{\i}"
 INV = r"\textnormal{\i}\!\operatorname{nv}"
 
 # method display names
-TEX_MAPPER: Dict[str, str] = {
+TEX_MAPPER: dict[str, str] = {
     # targets
     "Data": r"$\mathrm{data}$",
     "ATE": r"$\operatorname{ate}$",
@@ -63,7 +62,7 @@ TEX_MAPPER: Dict[str, str] = {
 }
 
 # Color mapping for methods
-COLOR_MAP: Dict[str, int] = {
+COLOR_MAP: dict[str, int] = {
     "ATE": 3,
     "ERM": 0,
     "DA+ERM": 3,
@@ -78,7 +77,7 @@ COLOR_MAP: Dict[str, int] = {
 }
 
 # Alpha (transparency) mapping for methods
-ALPHA_MAP: Dict[str, float] = {
+ALPHA_MAP: dict[str, float] = {
     # Point identification methods (solid)
     "ATE": 1.0,
     "ERM": 1.0,
@@ -95,7 +94,7 @@ ALPHA_MAP: Dict[str, float] = {
 }
 
 # Visual style configuration
-POINT_ESTIMATES: List[str] = ["ATE", "ERM", "DA+ERM", "DA+IV"]
+POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV"]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 
@@ -105,13 +104,13 @@ DEFAULT_NORMALIZE_ERROR: bool = False
 
 # Panel Plot Specific Configurations
 # Requirement 2: specification of y-axis clip values for Row 4 (index 3: h^T x)
-PANEL_PREDICTION_LIMITS: Dict[str, tuple[float, float]] = {
+PANEL_PREDICTION_LIMITS: dict[str, tuple[float, float]] = {
     "simulation": (-3, 3),
     "optical_device": (-2.625, 3.375),
 }
 
 # Requirement 3: specification of scale (log vs linear) for rows 1 and 2 (indices 0 and 1)
-PANEL_Y_SCALES: Dict[str, Literal["linear", "log"]] = {
+PANEL_Y_SCALES: dict[str, Literal["linear", "log"]] = {
     "worst_error": "asinh",  # Row 1 (index 0)
     "width": "asinh",  # Row 2 (index 1)
 }
@@ -152,7 +151,7 @@ PANEL_CONFIGS = {
 _PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh", "legend"}
 _PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale"}) | {"bars"}  # categorical x
 
-PLOT_CONFIGS: Dict[str, Dict[str, Dict[str, Any]]] = {
+PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
     "*": {
         "perf": {"bars": False},  # stacked reliability bars retired
     },

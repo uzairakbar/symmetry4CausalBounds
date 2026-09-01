@@ -2,7 +2,7 @@
 Utilities for fitting causal estimation models.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 def fit_model(
@@ -14,7 +14,7 @@ def fit_model(
     G=None,
     X_base=None,
     y_base=None,
-    hyperparameters: Optional[Dict[str, Any]] = None,
+    hyperparameters: dict[str, Any] | None = None,
     **kwargs,
 ):
     """

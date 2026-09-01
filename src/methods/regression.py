@@ -1,6 +1,7 @@
-import numpy as np
 import cvxpy as cp
+import numpy as np
 from loguru import logger
+
 from src.methods.abstract import pointEstimator
 
 
@@ -26,7 +27,7 @@ class LeastSquaresIterative(pointEstimator):
         try:
             result = prob.solve(solver=cp.CLARABEL)
         except:
-            logger.warning(f"CLARABLE solver failed, falling back to ECOS.")
+            logger.warning("CLARABLE solver failed, falling back to ECOS.")
             result = prob.solve(solver=cp.ECOS)
         self._W = h.value
         return self
@@ -37,7 +38,7 @@ class LeastSquaresIterative(pointEstimator):
 
 class TwoStageLeastSquaresIV(pointEstimator):
     def __init__(self, **kwargs):
-        super(TwoStageLeastSquaresIV, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def _fit(self, X, y, Z, **kwargs):
 
@@ -82,6 +83,7 @@ class GradientDescentERM(pointEstimator):
     ):
         import torch
         import torch.nn.functional as F
+
         from src.methods.nets import NETS, device
 
         dev = device()
@@ -173,6 +175,7 @@ class GradientDescentERM(pointEstimator):
     @classmethod
     def load_state(cls, path):
         import torch
+
         from src.methods.nets import NETS, device
 
         blob = torch.load(path, map_location="cpu", weights_only=True)
@@ -188,7 +191,7 @@ class GradientDescentERM(pointEstimator):
 
 class GeneralizedMomentMethodIV(pointEstimator):
     def __init__(self, **kwargs):
-        super(GeneralizedMomentMethodIV, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def _fit(self, X, y, Z, **kwargs):
         h0 = np.linalg.pinv(X) @ y
@@ -200,7 +203,7 @@ class GeneralizedMomentMethodIV(pointEstimator):
         try:
             result = prob.solve(solver=cp.CLARABEL)
         except:
-            logger.warning(f"CLARABLE solver failed, falling back to ECOS.")
+            logger.warning("CLARABLE solver failed, falling back to ECOS.")
             result = prob.solve(solver=cp.ECOS)
         self._W = h.value
         return self

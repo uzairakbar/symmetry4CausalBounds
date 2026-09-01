@@ -1,13 +1,13 @@
-import torch
+from typing import Literal
+
 import numpy as np
+import torch
 from numpy.typing import NDArray
 from torchvision import transforms
 from torchvision.transforms import functional as F
-from typing import Dict, Literal, List, Optional, Tuple
 
 from src.data_augmentors.abstract import DataAugmenter as DA
 from src.data_augmentors.utils import BetaStandardScaler
-
 
 ALPHA, BETA = 2, 2
 JITTER_PARAM = 0.5
@@ -129,7 +129,7 @@ class Translate(transforms.RandomAffine):
 
 Augmentation = Literal["jitter", "translate"]
 
-ALL_AUGMENTATIONS: Dict[Augmentation, DA] = {
+ALL_AUGMENTATIONS: dict[Augmentation, DA] = {
     augmenter.augmentation: augmenter
     for augmenter in [
         Jitter(JITTER_PARAM, JITTER_PARAM, JITTER_PARAM, JITTER_PARAM),
@@ -141,19 +141,19 @@ ALL_AUGMENTATIONS: Dict[Augmentation, DA] = {
 class ColoredDigitsDA(DA):
     """Data augmenter for colored MNIST digits."""
 
-    def __init__(self, augmentations: Optional[str] = None):
+    def __init__(self, augmentations: str | None = None):
         if augmentations:
-            augmentations: List[Augmentation] = augmentations.replace(" ", "").split(">")
+            augmentations: list[Augmentation] = augmentations.replace(" ", "").split(">")
         else:
-            augmentations: List[Augmentation] = list(ALL_AUGMENTATIONS.keys())
+            augmentations: list[Augmentation] = list(ALL_AUGMENTATIONS.keys())
 
-        self._augmentations: List[DA] = Compose([ALL_AUGMENTATIONS[augmentation] for augmentation in augmentations])
+        self._augmentations: list[DA] = Compose([ALL_AUGMENTATIONS[augmentation] for augmentation in augmentations])
 
     @property
     def augmentation(self):
         return "colored_mnist"
 
-    def augment(self, X: NDArray) -> Tuple[NDArray, NDArray]:
+    def augment(self, X: NDArray) -> tuple[NDArray, NDArray]:
         """Apply augmentations to batch of images."""
         GX, G = [], []
         for image in X:

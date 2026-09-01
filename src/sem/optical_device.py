@@ -1,17 +1,15 @@
 import os
+
 import fsspec
 import numpy as np
 from loguru import logger
-from typing import Dict, Tuple
 from numpy.typing import NDArray
 
-from src.sem.utils import (
-    select_best_degree,
-    fit_ground_truth_f,
-)
 from src.sem.abstract import StructuralEquationModel as SEM
-from src.methods.regression import LeastSquaresClosedForm as ERM
-
+from src.sem.utils import (
+    fit_ground_truth_f,
+    select_best_degree,
+)
 
 # change to 5 if verification needed -- best fit is only either 1 or 2.
 # kept at 2 for faster runtimes in generating experiment results/plots.
@@ -20,7 +18,7 @@ MAX_PLOYNOMIAL_DEGREE: int = 2
 
 class OpticalDeviceSEM(SEM):
     @staticmethod
-    def load_dataset(directory: str = "data/optical_device") -> Dict[int, NDArray]:
+    def load_dataset(directory: str = "data/optical_device") -> dict[int, NDArray]:
 
         def download_dataset(directory: str):
             fs = fsspec.filesystem("github", org="janzing", repo="janzing.github.io")
@@ -42,7 +40,7 @@ class OpticalDeviceSEM(SEM):
             dataset[experiment] = np.genfromtxt(f"{directory}/{file_name}", delimiter=" ")
         return dataset
 
-    _DATASET: Dict[int, NDArray] = load_dataset.__func__()
+    _DATASET: dict[int, NDArray] = load_dataset.__func__()
 
     def __init__(self, experiment: int = 0, center: bool = True, ground_truth: str = "polynomial"):
         experiment_data = self.get_experiment_data(experiment)
@@ -96,10 +94,10 @@ class OpticalDeviceSEM(SEM):
         # Var(xi) = 1 after normalization
         return 1.0 - self._bias_sq
 
-    def sample(self, N: int = 1, **kwargs) -> Tuple[NDArray, NDArray]:
+    def sample(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
         N_max, M = self.X.shape
         indices = np.arange(N_max)
-        replace = N > N_max
+        replace = N_max < N
         sampled = np.random.choice(indices, N, replace)
         return self.X[sampled], self.y[sampled]
 

@@ -11,17 +11,17 @@ Three properties, in order of how badly a regression would hurt:
 import os
 import sys
 
-import numpy as np
 import cvxpy as cp
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
+from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
+from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import evaluate_queries  # noqa: E402
-from src.experiments.configs import FLOOR_GUARD_R, EPS_TOL  # noqa: E402
 from src.methods.regression import LeastSquaresClosedForm as OLS  # noqa: E402
 from src.methods.sensitivity_models import (
     constraint_floor,  # noqa: E402

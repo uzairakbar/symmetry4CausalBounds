@@ -4,9 +4,9 @@
 <s4cb>/bin/python       scripts/a1_a2_sem.py --check  /tmp/a2.npz
 """
 
+import argparse
 import os
 import sys
-import argparse
 
 import numpy as np
 

@@ -17,10 +17,11 @@ comparable -- select each against population coverage before comparing them.
 """
 
 import copy
+
 import numpy as np
 from loguru import logger
-from scipy.stats import norm
 from scipy.optimize import NonlinearConstraint, minimize
+from scipy.stats import norm
 from sklearn.decomposition import FactorAnalysis
 
 from src.methods.sensitivity_models import BoundedSA, IntersectionMixin, SolveStatus

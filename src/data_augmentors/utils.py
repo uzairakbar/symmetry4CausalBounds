@@ -2,8 +2,9 @@
 Utilities for data augmentation including standard scalers.
 """
 
-import numpy as np
 from abc import ABC, abstractmethod
+
+import numpy as np
 
 
 class StandardScaler(ABC):

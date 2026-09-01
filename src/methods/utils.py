@@ -1,18 +1,16 @@
-import torch
-import numpy as np
-import cvxpy as cp
-from torch import nn
-from loguru import logger
-from numpy.typing import NDArray
-from typing import Optional, Literal, Callable, Dict
-from sklearn.model_selection import BaseCrossValidator
+from collections.abc import Callable
+from typing import Literal
 
+import cvxpy as cp
+import torch
+from loguru import logger
+from torch import nn
 
 Model = Literal["linear", "2-layer", "cmnist", "rmnist"]
 
 
 CPU_ONLY: bool = False
-MODELS: Dict[Model, Callable[[int], nn.Sequential]] = {
+MODELS: dict[Model, Callable[[int], nn.Sequential]] = {
     "linear": lambda input_dim: nn.Sequential(nn.Linear(input_dim, 1, bias=False)),
     "2-layer": lambda input_dim: nn.Sequential(nn.Linear(input_dim, 20), nn.LeakyReLU(0.2), nn.Linear(20, 1)),
     "cmnist": lambda input_dim: nn.Sequential(
@@ -55,7 +53,7 @@ def check_feasibility(constraints) -> bool:
     feasibility = cp.Problem(cp.Minimize(0), constraints)
     feasibility.solve(solver=cp.CLARABEL, time_limit_secs=10.0, verbose=False)
     if feasibility.status in [cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE]:
-        logger.warning(f"CLARABLE infeasible! Checking ECOS.")
+        logger.warning("CLARABLE infeasible! Checking ECOS.")
         feasibility.solve(solver=cp.ECOS, time_limit_secs=10.0, verbose=False)
         if feasibility.status in [cp.INFEASIBLE, cp.INFEASIBLE_INACCURATE]:
             logger.warning("ESOC infeasible!")

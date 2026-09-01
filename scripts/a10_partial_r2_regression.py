@@ -6,18 +6,18 @@ change and diff the json.
     python scripts/a10_partial_r2_regression.py > /tmp/after.json
 """
 
+import hashlib
+import json
 import os
 import sys
-import json
-import hashlib
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 import src.methods.sensitivity_models as sm  # noqa: E402
+from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
+from src.experiments.utils import set_seed  # noqa: E402
 
 
 def _digest(a):

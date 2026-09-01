@@ -1,10 +1,10 @@
-import torch
+
 import numpy as np
-from typing import Tuple
-from torch import FloatTensor
+import torch
 from numpy.typing import NDArray
-from torchvision import datasets
+from torch import FloatTensor
 from torch.utils.data import Dataset
+from torchvision import datasets
 
 from src.sem.abstract import StructuralEquationModel as SEM
 
@@ -48,12 +48,12 @@ class ColoredDigitsSEM(SEM):
     def __len__(self) -> int:
         return len(self.images)
 
-    def sample(self, N: int = 1, **kwargs) -> Tuple[NDArray, NDArray]:
+    def sample(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
         N_max = len(self.images)
         indices = np.arange(N_max)
         if N == -1:
             N = N_max
-        replace = N > N_max
+        replace = N_max < N
         sampled = np.random.choice(indices, N, replace)
         images, targets = self.images[sampled], self.targets[sampled]
 

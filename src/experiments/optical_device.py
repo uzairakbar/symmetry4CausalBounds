@@ -3,15 +3,15 @@ Optical device experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
-from typing import Type, Dict
+
 import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
 
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
-from src.sem.optical_device import OpticalDeviceSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
-from src.experiments.configs import MethodRegistry, OPTICAL_CONFIG
+from src.experiments.configs import OPTICAL_CONFIG, MethodRegistry
+from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
+from src.sem.optical_device import OpticalDeviceSEM as SEM
 
 EXPERIMENT_NAME = "optical_device"
 
@@ -19,7 +19,7 @@ EXPERIMENT_NAME = "optical_device"
 FOLD_SWEEP_SAMPLES: int = 512
 
 
-def _knob_to_augment_kwargs(strength: float) -> Dict[str, float]:
+def _knob_to_augment_kwargs(strength: float) -> dict[str, float]:
     """Map the [0, 1] strength knob onto the optical DA's own parameters."""
     return {
         "p": 0.5 * float(strength),  # flip/rotation probability
@@ -72,7 +72,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         sem = self._sem_factory()
         return PolynomialFeatures(sem.poly_degree, include_bias=False)
 
-    def get_query_runner_cls(self) -> Type[GenericQuerySweep]:
+    def get_query_runner_cls(self) -> type[GenericQuerySweep]:
         """Return query sweep runner."""
 
         class OpticalQuerySweep(GenericQuerySweep):
@@ -98,7 +98,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, **toggles
         )
 
-    def get_sweep_runner_cls(self, param: str) -> Type:
+    def get_sweep_runner_cls(self, param: str) -> type:
         """Configured strategy for one sweep parameter."""
         outer, Strategy = self, STRATEGIES[param]
 

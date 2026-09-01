@@ -1,10 +1,9 @@
+
 import numpy as np
-from typing import Tuple
 from loguru import logger
 from numpy.typing import NDArray
 
 from src.data_augmentors.abstract import DataAugmenter as DA
-
 
 DA_STD: float = 1.0
 BASIS_SELECTOIN_PROBABILITY: float = 8.0 / 10.0
@@ -68,7 +67,7 @@ class NullSpaceTranslation(DA):
         assert value >= 0.0, "`strength` must be non-negative."
         self._strength = float(value)
 
-    def augment(self, X: NDArray, scale: float = 1.0, **kwargs) -> Tuple[NDArray, NDArray]:
+    def augment(self, X: NDArray, scale: float = 1.0, **kwargs) -> tuple[NDArray, NDArray]:
         N = len(X)
         G = np.random.randn(N, self.param_dimension) * self.std
 

@@ -8,9 +8,10 @@ CONSTANT in x: |h_erm - h_*| = beta(1/2 - eta).
 """
 
 import os
+from collections.abc import Sequence
+
 import numpy as np
 from loguru import logger
-from typing import Tuple, Optional, Sequence
 from numpy.typing import NDArray
 from torchvision import datasets
 
@@ -61,7 +62,7 @@ class DoMNISTSEM(StructuralEquationModel):
         subsample: int = 2,
         net: str = "domnist-fast",
         target_samples: int = 1_200_000,
-        target_kw: Optional[dict] = None,
+        target_kw: dict | None = None,
         directory: str = DATA_DIR,
     ):
         ds = datasets.MNIST(directory, train=train, download=True)
@@ -115,7 +116,7 @@ class DoMNISTSEM(StructuralEquationModel):
         return float(np.mean(cells * (1 - cells)))
 
     @property
-    def attainable(self) -> Tuple[float, float]:
+    def attainable(self) -> tuple[float, float]:
         """Range h_erm can occupy: [(1-beta)alpha + beta*eta, 1 - that]. mu_y outside
         it is impossible, which is what makes clipping it safe (`mu_clip`)."""
         lo = (1 - self.beta) * self.alpha + self.beta * self.eta
@@ -123,7 +124,7 @@ class DoMNISTSEM(StructuralEquationModel):
 
     # ---------------------------------------------------------------- sampling
 
-    def _grey(self, idx, subsample: Optional[int] = None) -> NDArray:
+    def _grey(self, idx, subsample: int | None = None) -> NDArray:
         step = self.sub if subsample is None else int(subsample)
         return self.images[idx][:, ::step, ::step] / 255.0
 
@@ -157,8 +158,8 @@ class DoMNISTSEM(StructuralEquationModel):
         self.last_ = dict(idx=d["idx"], digits=d["digits"], f=d["f"], U=d["U"], C=d["C"], t=d["t"], S=d["S"], mode=mode)
 
     def sample(
-        self, N: int = 1, intervention: bool = False, seed: Optional[int] = None, **kwargs
-    ) -> Tuple[NDArray, NDArray]:
+        self, N: int = 1, intervention: bool = False, seed: int | None = None, **kwargs
+    ) -> tuple[NDArray, NDArray]:
         """intervention=False uses the image's own U; True resamples it for Y only."""
         rng = np.random.default_rng(seed) if seed is not None else np.random
         N = len(self.images) if (N is None or N <= 0) else int(N)
@@ -212,7 +213,7 @@ class DoMNISTSEM(StructuralEquationModel):
         seed: int = 420,
         digits: Sequence[int] = range(10),
         colors: str = "alternating",
-        subsample: Optional[int] = None,
+        subsample: int | None = None,
     ):
         """One frozen sample per digit, for the query-sweep x-axis.
 

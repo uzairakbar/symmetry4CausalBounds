@@ -1,5 +1,5 @@
+
 import numpy as np
-from typing import Tuple
 from numpy.typing import NDArray
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score
@@ -12,7 +12,7 @@ def select_best_degree(
     C,  # treatment, outcome, confounder variables
     max_degree: int = 5,  # X polynomial features degree
     cv: int = 5,  # CV folds to pick degree to best explain data
-) -> Tuple[int, LinearRegression]:
+) -> tuple[int, LinearRegression]:
     best_degree = 1
     best_model = None
     best_score = -np.inf
@@ -40,7 +40,7 @@ def fit_ground_truth_f(
     y,
     C,  # treatment, outcome, confounder variables
     best_degree: int,  # X polynomial features degree
-) -> Tuple[NDArray, PolynomialFeatures, float]:
+) -> tuple[NDArray, PolynomialFeatures, float]:
     features = PolynomialFeatures(best_degree, include_bias=False)
     X_features = features.fit_transform(X)
 

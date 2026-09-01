@@ -3,19 +3,20 @@
 python scripts/smoke_do_mnist.py [--full]
 """
 
+import argparse
 import os
 import sys
-import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from munch import munchify  # noqa: E402
-from src.experiments.utils import set_seed  # noqa: E402
+
 from src.experiments.configs import (
     parse_experiment_plan,  # noqa: E402
     resolve_dataset_block,
 )
 from src.experiments.do_mnist import DoMNISTOrchestrator  # noqa: E402
+from src.experiments.utils import set_seed  # noqa: E402
 
 SMALL = dict(n_samples=60_000, n_pi=6_000, n_queries=32)
 FULL = dict(n_samples=1_200_000, n_pi=60_000, n_queries=512)

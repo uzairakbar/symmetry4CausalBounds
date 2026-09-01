@@ -7,25 +7,25 @@ CNN fit. Run `select_domnist_budgets.py --smoke` for the end-to-end path.
     python scripts/a24_budget_selection.py
 """
 
+import json
 import os
 import sys
-import json
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
-from src.methods.regression import GradientDescentERM  # noqa: E402
-from src.methods.copsens import RecentredInvCopSens  # noqa: E402
 from src.experiments.configs import DOMNIST_CONFIG  # noqa: E402
 from src.experiments.do_mnist import Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import QueryEval  # noqa: E402
+from src.methods.copsens import RecentredInvCopSens  # noqa: E402
+from src.methods.regression import GradientDescentERM  # noqa: E402
+from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from select_domnist_budgets import min_knob_for_coverage, leg_report  # noqa: E402
+from select_domnist_budgets import leg_report, min_knob_for_coverage  # noqa: E402
 
 N_SAMPLES, N_PI = 20_000, 1_500
 FAIL = []

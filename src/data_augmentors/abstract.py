@@ -1,4 +1,3 @@
-from typing import Optional
 from abc import ABC, abstractmethod
 
 
@@ -19,7 +18,7 @@ class DataAugmenter(ABC):
         return self.augment(X=X, **kwargs)
 
     @property
-    def strength(self) -> Optional[float]:
+    def strength(self) -> float | None:
         """Scalar knob driving the invariance error; None if the DA has none."""
         return None
 

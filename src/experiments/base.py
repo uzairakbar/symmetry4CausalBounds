@@ -4,40 +4,42 @@ Updated to use simplified fit_model signature and OPTIMIZED LOOP ORDER.
 """
 
 import time
-import enlighten
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
+from typing import Any
+
+import enlighten
 import numpy as np
 from loguru import logger
-from abc import ABC, abstractmethod
-from typing import Dict, Callable, Optional, Any, Tuple, Type
-from dataclasses import dataclass
 
-from src.methods.abstract import pointEstimator as Regressor
-from src.experiments.utils import fit_model, set_seed, save
-from src.experiments.utils.metrics import evaluate_queries, STATUS_CATEGORIES
-from src.experiments.utils.plotting import (
-    create_sweep_plot,
-    create_scatter_plot,
-    create_perf_plot,
-    create_query_sweep_plot,
-)
 from src.experiments.configs import (
-    PARAM_SPECS,
-    METRIC_SPECS,
-    EPS_TOL,
     ANNOTATE_SWEEP_PLOT,
-    SCATTER_SE_CROSSHAIRS,
+    EPS_TOL,
     FLOOR_GUARD_R,
+    METRIC_SPECS,
+    PARAM_SPECS,
+    SCATTER_SE_CROSSHAIRS,
 )
-from src.methods.sensitivity_models import constraint_floor
+from src.experiments.utils import fit_model, save, set_seed
 from src.experiments.utils.constants import (
+    SUBDIR_PERF,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
-    SUBDIR_PERF,
 )
+from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
+from src.experiments.utils.plotting import (
+    create_perf_plot,
+    create_query_sweep_plot,
+    create_scatter_plot,
+    create_sweep_plot,
+)
+from src.methods.abstract import pointEstimator as Regressor
+from src.methods.sensitivity_models import constraint_floor
 
 # QueryEval scalar fields recorded at every (method, step, experiment)
-METRIC_FIELDS: Tuple[str, ...] = (
+METRIC_FIELDS: tuple[str, ...] = (
     "approximation_error",
     "worst_error",
     "interval_width",
@@ -64,9 +66,9 @@ class ExperimentDataContext:
     y: np.ndarray
     GX: np.ndarray
     G: np.ndarray
-    X_raw: Optional[np.ndarray] = None
-    GX_raw: Optional[np.ndarray] = None
-    oracle: Optional[Any] = None  # OracleParameters; unused by default
+    X_raw: np.ndarray | None = None
+    GX_raw: np.ndarray | None = None
+    oracle: Any | None = None  # OracleParameters; unused by default
 
 
 @dataclass
@@ -80,8 +82,8 @@ class SweepData:
     X_test: np.ndarray
     estimand: np.ndarray
     # untiled copies for baselines that are exactly tiling-invariant (m-sweep)
-    X_base: Optional[np.ndarray] = None
-    y_base: Optional[np.ndarray] = None
+    X_base: np.ndarray | None = None
+    y_base: np.ndarray | None = None
 
     def __iter__(self):
         return iter((self.X, self.y, self.GX, self.G, self.X_test, self.estimand))
@@ -91,7 +93,7 @@ class SweepData:
         return data if isinstance(data, cls) else cls(*data)
 
     @property
-    def fit_arrays(self) -> Dict[str, Any]:
+    def fit_arrays(self) -> dict[str, Any]:
         return dict(X=self.X, y=self.y, GX=self.GX, G=self.G, X_base=self.X_base, y_base=self.y_base)
 
 
@@ -109,8 +111,8 @@ class BaseExperimentRunner(ABC):
         n_samples: int,
         n_experiments: int,
         sweep_samples: int,
-        methods: Dict[str, ModelBuilder],
-        hyperparameters: Optional[Dict[str, Any]] = None,
+        methods: dict[str, ModelBuilder],
+        hyperparameters: dict[str, Any] | None = None,
         calibrate: bool = False,
         pad: bool = False,
         clipy: bool = True,
@@ -144,7 +146,7 @@ class BaseExperimentRunner(ABC):
 class QuerySweepRunner(BaseExperimentRunner):
     """Runner for query sweep experiments (radial/PC sweeps for visualization)."""
 
-    def run(self, desc: str = "Query Sweep") -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+    def run(self, desc: str = "Query Sweep") -> tuple[np.ndarray, dict[str, np.ndarray]]:
         """
         Run query sweep across treatment space.
 
@@ -215,9 +217,9 @@ class ParamSweepRunner(BaseExperimentRunner):
 
     def __init__(
         self,
-        method_factory: Optional[Callable] = None,
+        method_factory: Callable | None = None,
         experiment_name: str = "simulation",
-        param_grid_override: Optional[Any] = None,
+        param_grid_override: Any | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -247,7 +249,7 @@ class ParamSweepRunner(BaseExperimentRunner):
         return param_values
 
     @property
-    def vlines(self) -> Tuple[float, ...]:
+    def vlines(self) -> tuple[float, ...]:
         """Reference x positions; strategies may add measured thresholds."""
         return self.spec.vlines
 
@@ -318,7 +320,7 @@ class ParamSweepRunner(BaseExperimentRunner):
         )
         return guarded
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> Optional[float]:
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
         """IV budget for this experiment: oracle eps_iv_star, off the knife edge,
         floor-guarded exactly as `fit_epsilon` is."""
         eps_iv_star = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
@@ -326,12 +328,12 @@ class ParamSweepRunner(BaseExperimentRunner):
             return None
         return self._floor_guard(float(eps_iv_star) + EPS_TOL, data, "iv", experiment_index, "epsilon_iv")
 
-    def method_kwargs(self, experiment_index: int) -> Dict[str, Any]:
+    def method_kwargs(self, experiment_index: int) -> dict[str, Any]:
         """Extra builder kwargs. Override when methods need per-experiment state
         the budgets do not carry (e.g. prefit outcome models)."""
         return {}
 
-    def build_models(self, experiment_index: int, step_index: int, data) -> Dict[str, Any]:
+    def build_models(self, experiment_index: int, step_index: int, data) -> dict[str, Any]:
         """Fresh, fitted models at this experiment's budgets."""
         gamma = self.fit_gamma(experiment_index)
         epsilon = self.fit_epsilon(experiment_index, step_index, data)
@@ -363,7 +365,7 @@ class ParamSweepRunner(BaseExperimentRunner):
 
     # ------------------------------------------------------------------ loop
 
-    def run(self, desc: str = "Param Sweep") -> Tuple[np.ndarray, Dict, Dict]:
+    def run(self, desc: str = "Param Sweep") -> tuple[np.ndarray, dict, dict]:
         """Sweep the parameter, recording every metric at every step."""
         param_values = self.get_param_range()
         n_steps = len(param_values)
@@ -424,7 +426,7 @@ class ParamSweepRunner(BaseExperimentRunner):
         """Get oracle parameters for specific experiment."""
         pass
 
-    def get_predict_kwargs(self, param, experiment_index: int) -> Dict[str, Any]:
+    def get_predict_kwargs(self, param, experiment_index: int) -> dict[str, Any]:
         """Additional kwargs for model.predict(). Override to sweep a budget."""
         return {}
 
@@ -458,19 +460,19 @@ class ExperimentOrchestrator(ABC):
         self._sweep_vlines = {}  # (param) -> measured reference x positions
 
     @abstractmethod
-    def get_query_runner_cls(self) -> Type[QuerySweepRunner]:
+    def get_query_runner_cls(self) -> type[QuerySweepRunner]:
         """Return the QuerySweepRunner class for this experiment."""
         pass
 
     @abstractmethod
-    def get_sweep_runner_cls(self, param: str) -> Type[ParamSweepRunner]:
+    def get_sweep_runner_cls(self, param: str) -> type[ParamSweepRunner]:
         """Return the configured strategy class for one sweep parameter."""
         pass
 
     @abstractmethod
     def build_methods(
-        self, gamma: float, epsilon: float, epsilon_iv: Optional[float] = None, n_jobs: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, gamma: float, epsilon: float, epsilon_iv: float | None = None, n_jobs: int | None = None
+    ) -> dict[str, Any]:
         """Build methods at explicit budgets (per-experiment ParamPolicy)."""
         pass
 
@@ -490,7 +492,7 @@ class ExperimentOrchestrator(ABC):
         if plan.perf:
             self._run_perf(plan.perf)
 
-    def _get_clean_kwargs(self) -> Dict[str, Any]:
+    def _get_clean_kwargs(self) -> dict[str, Any]:
         """Remove arguments that cause collision with explicit runner args."""
         clean_kwargs = self.kwargs.copy()
         clean_kwargs.pop("methods", None)

@@ -8,10 +8,10 @@ and the exact arrays rather than the seed that produced them.
     <s4cb>/bin/python       scripts/a4_copsens_parity.py --check  /tmp/a4
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 
 import numpy as np
 
@@ -47,14 +47,19 @@ def _flat(A):
 def dump(stem):
     sys.path.insert(0, SOURCE)
     os.chdir(SOURCE)
-    from src.sem.domnist import DoMNISTSEM  # noqa: PLC0415
     from src.data_augmentors.domnist import DoMNISTDA  # noqa: PLC0415
-    from src.methods.regression import GradientDescentERM  # noqa: PLC0415
+    from src.sem.domnist import DoMNISTSEM  # noqa: PLC0415
+
     from src.methods.copsens import (
         CopSensPI,  # noqa: PLC0415
+    )
+    from src.methods.copsens import (
         InvarianceConstrainedCopSens as InvCopSens,
+    )
+    from src.methods.copsens import (
         IVConstrainedCopSens as IVCopSens,
     )
+    from src.methods.regression import GradientDescentERM  # noqa: PLC0415
 
     sem = DoMNISTSEM(train=True, **SEM_KW)
     X_img, y, _ = sem.sample_paired(N_SAMPLES, seed=SEED)
@@ -122,12 +127,12 @@ def dump(stem):
 
 def check(stem):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from src.methods.regression import GradientDescentERM  # noqa: PLC0415
     from src.methods.copsens import (
         CopSensPI,
-        RecentredInvCopSens,  # noqa: PLC0415
         IVConstrainedCopSens,
+        RecentredInvCopSens,  # noqa: PLC0415
     )
+    from src.methods.regression import GradientDescentERM  # noqa: PLC0415
 
     blob = np.load(f"{stem}.npz")
     with open(f"{stem}.json") as fh:

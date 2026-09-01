@@ -3,13 +3,12 @@ Simulation experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
-from typing import Type
 
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
-from src.sem.simulation import LinearSimulationSEM as SEM
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.generic_runner import GenericQuerySweep, STRATEGIES
-from src.experiments.configs import MethodRegistry, SIMULATION_CONFIG
+from src.experiments.configs import SIMULATION_CONFIG, MethodRegistry
+from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
+from src.sem.simulation import LinearSimulationSEM as SEM
 
 EXPERIMENT_NAME = "simulation"
 
@@ -65,7 +64,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         """
         return DA(sem.W_XY, kernel_dim=self.kernel_dim)
 
-    def get_query_runner_cls(self) -> Type[GenericQuerySweep]:
+    def get_query_runner_cls(self) -> type[GenericQuerySweep]:
         """Return query sweep runner."""
 
         # Create a configured class
@@ -98,7 +97,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, **toggles
         )
 
-    def get_sweep_runner_cls(self, param: str) -> Type:
+    def get_sweep_runner_cls(self, param: str) -> type:
         """Configured strategy for one sweep parameter."""
         outer, Strategy = self, STRATEGIES[param]
 

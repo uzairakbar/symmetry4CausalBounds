@@ -3,33 +3,34 @@ Plotting utilities for experiment results.
 """
 
 import warnings
+from typing import Literal
+
+import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-import matplotlib.pyplot as plt
 from loguru import logger
 from numpy.typing import NDArray
-from typing import Dict, List, Tuple, Optional, Literal
 
 from .constants import (
+    ALPHA_MAP,
+    COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
-    POINT_ESTIMATES,
-    FS_TICK,
     FS_LABEL,
+    FS_TICK,
+    PAGE_WIDTH,
+    PANEL_CONFIGS,
+    PARTIAL_IDENTIFICATION_STYLE,
+    PLOT_CONFIGS,
     PLOT_DPI,
     PLOT_FORMAT,
-    PAGE_WIDTH,
-    RC_PARAMS,
-    TEX_MAPPER,
-    COLOR_MAP,
-    ALPHA_MAP,
     POINT_ESTIMATE_STYLE,
-    PARTIAL_IDENTIFICATION_STYLE,
-    PANEL_CONFIGS,
-    PLOT_CONFIGS,
-    SUBDIR_QUERY,
-    SUBDIR_SWEEP,
-    SUBDIR_SCATTER,
+    POINT_ESTIMATES,
+    RC_PARAMS,
     SUBDIR_PERF,
+    SUBDIR_QUERY,
+    SUBDIR_SCATTER,
+    SUBDIR_SWEEP,
+    TEX_MAPPER,
 )
 from .data_operations import bootstrap, save
 
@@ -44,7 +45,7 @@ LINEAR_WIDTH_RATIO: float = 40.0
 LOG_PROMOTE_RATIO: float = 100.0
 
 
-def _plot_config(experiment: str, fname: Optional[str]) -> Dict[str, object]:
+def _plot_config(experiment: str, fname: str | None) -> dict[str, object]:
     """PLOT_CONFIGS['*'] under PLOT_CONFIGS[experiment], key by key."""
     if not fname:
         return {}
@@ -59,7 +60,7 @@ def _finite(*arrays) -> NDArray:
     return values[np.isfinite(values)]
 
 
-def _limits(series: List[NDArray]) -> Optional[Tuple[float, float]]:
+def _limits(series: list[NDArray]) -> tuple[float, float] | None:
     """
     Clip the top tail of the pooled means, then guarantee no series goes blank.
 
@@ -80,7 +81,7 @@ def _limits(series: List[NDArray]) -> Optional[Tuple[float, float]]:
     return (lo, hi) if hi > lo else None
 
 
-def _scale_kwargs(scale: str, cfg: Dict[str, object], upper: Optional[float] = None) -> Dict[str, float]:
+def _scale_kwargs(scale: str, cfg: dict[str, object], upper: float | None = None) -> dict[str, float]:
     """asinh/symlog knee. Defaults to `upper / 40` -- at 1.0 an asinh axis over data
     at ~1e-3 is asinh in name and linear in fact."""
     if scale not in ("asinh", "symlog"):
@@ -97,11 +98,11 @@ def _scale_kwargs(scale: str, cfg: Dict[str, object], upper: Optional[float] = N
 def _resolve_scale(
     scale: PlotScale,
     values: NDArray,
-    cfg: Dict[str, object],
+    cfg: dict[str, object],
     axis: str,
-    limits: Optional[Tuple[float, float]] = None,
+    limits: tuple[float, float] | None = None,
     promote: bool = True,
-) -> Tuple[PlotScale, Dict[str, float]]:
+) -> tuple[PlotScale, dict[str, float]]:
     """cfg > the caller's spec > auto-promote, then one safety clamp over the winner."""
     scale = cfg.get(f"{axis}scale", scale)
     finite = _finite(values)
@@ -127,7 +128,7 @@ def _resolve_scale(
     return scale, _scale_kwargs(scale, cfg, limits[1] if limits else None)
 
 
-def _pad(axis, lo: float, hi: float, frac: float = 0.05) -> Tuple[float, float]:
+def _pad(axis, lo: float, hi: float, frac: float = 0.05) -> tuple[float, float]:
     """Pad in the axis's own transformed space -- one expression for every scale."""
     transform = axis.get_transform()
     try:
@@ -141,7 +142,7 @@ def _pad(axis, lo: float, hi: float, frac: float = 0.05) -> Tuple[float, float]:
     return tuple(padded) if np.all(np.isfinite(padded)) else (lo, hi)
 
 
-def _apply_cfg_limits(limits: Optional[Tuple[float, float]], cfg_limits, where: str) -> Optional[Tuple[float, float]]:
+def _apply_cfg_limits(limits: tuple[float, float] | None, cfg_limits, where: str) -> tuple[float, float] | None:
     """Element-wise override; None on either end keeps the computed edge."""
     if cfg_limits is None:
         return limits
@@ -158,9 +159,9 @@ def _apply_cfg_limits(limits: Optional[Tuple[float, float]], cfg_limits, where: 
 
 def _rescale(
     ax,
-    cfg: Dict[str, object],
-    x_series: List[NDArray],
-    y_series: List[NDArray],
+    cfg: dict[str, object],
+    x_series: list[NDArray],
+    y_series: list[NDArray],
     xscale: PlotScale,
     yscale: PlotScale,
     pad_x: bool = True,
@@ -188,7 +189,7 @@ def _get_method_color(method_name: str) -> str:
     return palette[color_index]
 
 
-def _apply_tex_highlighting(labels: List[str], hilight_ours: bool) -> List[str]:
+def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
     """Apply bold formatting to our methods in labels."""
     if not hilight_ours:
         return labels
@@ -208,22 +209,22 @@ def _apply_tex_highlighting(labels: List[str], hilight_ours: bool) -> List[str]:
 
 def create_sweep_plot(
     x_values: NDArray,
-    y_results: Dict[str, NDArray],
+    y_results: dict[str, NDArray],
     xlabel: str,
     ylabel: str = "nCER",
     xscale: PlotScale = "linear",
     yscale: PlotScale = "linear",
     savefig: bool = True,
     format: str = PLOT_FORMAT,
-    legend_items: Optional[List[str]] = None,
-    legend_loc: str | Tuple[float, float] = "best",
+    legend_items: list[str] | None = None,
+    legend_loc: str | tuple[float, float] = "best",
     y_color: str = "k",
     hide_legend: bool = False,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
     bootstrapped: bool = True,
     experiment: str = "simulation",
-    fname: Optional[str] = None,
-    vlines: Tuple[float, ...] = (),
+    fname: str | None = None,
+    vlines: tuple[float, ...] = (),
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
@@ -389,14 +390,14 @@ def create_sweep_plot(
 
 def create_query_sweep_plot(
     x_values: NDArray,
-    y_results: Dict[str, NDArray],
+    y_results: dict[str, NDArray],
     xlabel: str,
     ylabel: str = r"$h({\bm{x}})$",
     xscale: Literal["linear", "log"] = "linear",
     savefig: bool = True,
     format: str = PLOT_FORMAT,
-    legend_items: Optional[List[str]] = None,
-    legend_loc: str | Tuple[float, float] = "best",
+    legend_items: list[str] | None = None,
+    legend_loc: str | tuple[float, float] = "best",
     y_color: str = "k",
     hide_legend: bool = False,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
@@ -514,8 +515,8 @@ def create_query_sweep_plot(
 
 def create_panel_plot(
     experiment_name: str,
-    column_data: List[Tuple[Dict[str, NDArray], NDArray, NDArray]],
-    histograms: Dict[str, Tuple[NDArray, NDArray]],
+    column_data: list[tuple[dict[str, NDArray], NDArray, NDArray]],
+    histograms: dict[str, tuple[NDArray, NDArray]],
     legend_ncols: int = 2,
 ):
     plt.rcParams.update(RC_PARAMS)
@@ -667,7 +668,7 @@ def create_panel_plot(
 
 
 def create_scatter_plot(
-    results: Dict[str, Dict[str, NDArray]],
+    results: dict[str, dict[str, NDArray]],
     param_values: NDArray,
     metric_x: str,
     metric_y: str,
@@ -678,10 +679,10 @@ def create_scatter_plot(
     yscale: PlotScale = "linear",
     savefig: bool = True,
     format: str = PLOT_FORMAT,
-    legend_loc: str | Tuple[float, float] = "best",
+    legend_loc: str | tuple[float, float] = "best",
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
     experiment: str = "simulation",
-    fname: Optional[str] = None,
+    fname: str | None = None,
     crosshairs: bool = True,
 ):
     """
@@ -809,19 +810,19 @@ def create_scatter_plot(
 
 
 # 4-way reliability split, in STATUS_CATEGORIES order
-PERF_CATEGORY_LABELS: Tuple[str, ...] = (
+PERF_CATEGORY_LABELS: tuple[str, ...] = (
     "failure",
     "infeasible",
     "covered",
     "not-covered",
 )
 # blue, orange, green, red
-PERF_CATEGORY_COLORS: Tuple[str, ...] = ("#C44E52", "#DD8452", "#55A467", "#4C72B0")
+PERF_CATEGORY_COLORS: tuple[str, ...] = ("#C44E52", "#DD8452", "#55A467", "#4C72B0")
 
 
 def create_perf_plot(
-    perf_record: Dict[str, Dict[str, object]],
-    overlay_metrics: Optional[List[str]] = None,
+    perf_record: dict[str, dict[str, object]],
+    overlay_metrics: list[str] | None = None,
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
@@ -986,12 +987,12 @@ def create_perf_plot(
 
 def create_digit_sweep_plot(
     exemplars: NDArray,
-    y_results: Dict[str, NDArray],
-    labels: List[int],
+    y_results: dict[str, NDArray],
+    labels: list[int],
     experiment: str = "do_mnist",
     fname: str = "digit_sweep",
     ylabel: str = r"$h({\bm{x}})$",
-    ylim: Tuple[float, float] = (-0.05, 1.05),
+    ylim: tuple[float, float] = (-0.05, 1.05),
     legend_width: float = 0.24,
     thumbnail_zoom: float = 0.7,
     savefig: bool = True,
@@ -1020,7 +1021,7 @@ def create_digit_sweep_plot(
         format: file format
         hilight_ours: whether to bold our methods in the legend
     """
-    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")

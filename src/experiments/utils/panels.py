@@ -2,8 +2,8 @@
 Panel plot utilities for 4x3 visualization panels.
 """
 
+
 import numpy as np
-from typing import Dict, Tuple
 
 from src.experiments.utils.data_operations import radial_sweep_pcs, sweep_along_pc
 from src.experiments.utils.plotting import create_panel_plot
@@ -101,7 +101,7 @@ class PanelBuilder:
                 )
                 self.fitted_models[name] = model
 
-    def _predict_sweep(self, raw_points: np.ndarray) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    def _predict_sweep(self, raw_points: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray]:
         """
         Run predictions on specific geometry using cached models.
 
@@ -143,7 +143,7 @@ class PanelBuilder:
         mean: np.ndarray,
         pc1_vector: np.ndarray,
         pc2_vector: np.ndarray,
-    ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         """
         Build histogram projection data for original vs augmented data.
 

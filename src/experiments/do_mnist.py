@@ -19,19 +19,19 @@ Phase 1 is the query sweep + perf. The sweep grids are Phase 2 -- see
 `get_sweep_runner_cls` for what each one still needs.
 """
 
+
 import numpy as np
 from loguru import logger
-from typing import Type, Dict, Optional
 
-from src.sem.do_mnist import DoMNISTSEM as SEM
 from src.data_augmentors.do_mnist import DoMNISTDA as DA
-from src.methods.regression import GradientDescentERM
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.generic_runner import GenericQuerySweep, GenericParamSweep, STRATEGIES
-from src.experiments.configs import MethodRegistry, DOMNIST_CONFIG
+from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry
+from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import save
 from src.experiments.utils.constants import SUBDIR_QUERY
 from src.experiments.utils.plotting import create_digit_sweep_plot
+from src.methods.regression import GradientDescentERM
+from src.sem.do_mnist import DoMNISTSEM as SEM
 
 EXPERIMENT_NAME = "do_mnist"
 
@@ -68,7 +68,7 @@ def pi_subset(n_total: int, n_pi: int, seed: int) -> np.ndarray:
     return np.random.default_rng(seed).choice(n_total, min(n_pi, n_total), replace=False)
 
 
-def log_vacuous(bounds: Dict[str, np.ndarray]):
+def log_vacuous(bounds: dict[str, np.ndarray]):
     """An all-INFEASIBLE method draws nothing, so the figure shows only a legend
     entry. Say so, or it reads as a plotting bug."""
     for name, prediction in bounds.items():
@@ -92,7 +92,7 @@ NESTED_IN = {
 }
 
 
-def log_nesting(bounds: Dict[str, np.ndarray]):
+def log_nesting(bounds: dict[str, np.ndarray]):
     """R5: the SLSQP multi-start is non-convex, so `constrained subset parent` is not
     guaranteed. Logged, never raised -- a violation is information about the
     optimiser, not a reason to discard the run.
@@ -216,11 +216,11 @@ class DoMNISTMixin:
         for these ops, since none of them can change E[Y|do(x)]."""
         return self.default_epsilon
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> Optional[float]:
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
         """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either."""
         return self.default_epsilon
 
-    def method_kwargs(self, experiment_index: int) -> Dict[str, object]:
+    def method_kwargs(self, experiment_index: int) -> dict[str, object]:
         return {"outcome_models": self._nets[experiment_index]}
 
     # ------------------------------------------------------------- base sample
@@ -347,7 +347,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
 
     # ------------------------------------------------------------------ runners
 
-    def get_query_runner_cls(self) -> Type[GenericQuerySweep]:
+    def get_query_runner_cls(self) -> type[GenericQuerySweep]:
         outer = self
 
         class ConfiguredQuerySweep(DoMNISTQuerySweep):
@@ -366,7 +366,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
 
         return ConfiguredQuerySweep
 
-    def get_sweep_runner_cls(self, param: str) -> Type:
+    def get_sweep_runner_cls(self, param: str) -> type:
         if param != "m":
             raise NotImplementedError(
                 f"do_mnist {param} sweep is Phase 2. Blockers: "

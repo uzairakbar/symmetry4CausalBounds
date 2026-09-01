@@ -4,11 +4,11 @@ Provides metrics, plotting, data operations, model fitting, and panels.
 """
 
 from .constants import *
-from .metrics import *
-from .plotting import *
 from .data_operations import *
+from .metrics import *
 from .model_fitting import *
 from .panels import *
+from .plotting import *
 
 __all__ = [
     # Constants

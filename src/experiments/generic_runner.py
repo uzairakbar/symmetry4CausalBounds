@@ -3,22 +3,23 @@ Generic experiment runners that work with any SEM/DA combination.
 Eliminates duplication between simulation and optical device experiments.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 from loguru import logger
 from sklearn.model_selection import train_test_split
-from typing import Callable, Optional, Dict
 
-from src.experiments.base import QuerySweepRunner, ParamSweepRunner, ExperimentDataContext, SweepData
+from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
+from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP
 from src.experiments.utils import radial_sweep_pcs
-from src.experiments.utils.metrics import trace_S_over_k, rho_hat
-from src.experiments.configs import EPS_TOL, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, FLOOR_GUARD_R
+from src.experiments.utils.metrics import rho_hat, trace_S_over_k
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import (
     calibrate_da_epsilon,
     compute_oracle_parameters,
     epsilon_star,
-    thm1_gamma_min,
     preserve_rng,
+    thm1_gamma_min,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -36,9 +37,9 @@ class OracleMixin:
     then records the oracle parameters. Nothing consumes them yet.
     """
 
-    epsilon_true: Optional[float] = None
+    epsilon_true: float | None = None
 
-    def prepare_pair(self, sem, da, features: Optional[Callable] = None):
+    def prepare_pair(self, sem, da, features: Callable | None = None):
         if self.epsilon_true is not None:
             calibrate_da_epsilon(
                 sem=sem,
@@ -66,9 +67,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self,
         sem_factory: Callable,
         da_factory: Callable,
-        poly_transform: Optional[Callable] = None,
-        epsilon_true: Optional[float] = None,
-        method_factory: Optional[Callable] = None,
+        poly_transform: Callable | None = None,
+        epsilon_true: float | None = None,
+        method_factory: Callable | None = None,
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
         **kwargs,
@@ -144,7 +145,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         return guarded
 
     @property
-    def _features(self) -> Optional[Callable]:
+    def _features(self) -> Callable | None:
         return self.poly.fit_transform if self.poly else None
 
     def get_sweep_values(self) -> np.ndarray:
@@ -187,9 +188,9 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         self,
         sem_factory: Callable,
         da_factory: Callable,
-        poly_transform: Optional[Callable] = None,
+        poly_transform: Callable | None = None,
         test_fraction: float = 0.1,
-        epsilon_true: Optional[float] = None,
+        epsilon_true: float | None = None,
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
         **kwargs,
@@ -205,7 +206,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         super().__init__(**kwargs)
 
     @property
-    def _features(self) -> Optional[Callable]:
+    def _features(self) -> Callable | None:
         return self.poly.fit_transform if self.poly else None
 
     def setup_sems_and_das(self):
@@ -232,14 +233,14 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
 
     # ------------------------------------------------------- fixed base sample
 
-    def _base_data(self, experiment_index: int, n_samples: Optional[int] = None):
+    def _base_data(self, experiment_index: int, n_samples: int | None = None):
         """(X_train_raw, X_train, y_train, X_test, estimand), drawn once per j."""
         key = (experiment_index, n_samples)
         if key not in self._base:
             self._base[key] = self._draw_base(experiment_index, n_samples)
         return self._base[key]
 
-    def _draw_base(self, experiment_index: int, n_samples: Optional[int] = None):
+    def _draw_base(self, experiment_index: int, n_samples: int | None = None):
         sem = self.sems[experiment_index]
         n_total = self.n_samples if n_samples is None else int(n_samples)
 
@@ -264,7 +265,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             return self.das[experiment_index](X_raw, **augment_kwargs)
 
     def _sweep_data(
-        self, experiment_index: int, n_samples: Optional[int] = None, common_random: bool = False, **augment_kwargs
+        self, experiment_index: int, n_samples: int | None = None, common_random: bool = False, **augment_kwargs
     ) -> SweepData:
         """Default single-fold SweepData on the fixed base sample."""
         X_raw, X, y, X_test, estimand = self._base_data(experiment_index, n_samples)
@@ -367,7 +368,7 @@ class ExpansionStrategy(GenericParamSweep):
 
     param_key = "trS"
 
-    def __init__(self, augment_kwargs_fn: Optional[Callable] = None, **kwargs):
+    def __init__(self, augment_kwargs_fn: Callable | None = None, **kwargs):
         # knob -> DA call kwargs; dataset-specific
         self.augment_kwargs_fn = augment_kwargs_fn or (lambda s: {"scale": float(s)})
         self._measured = {}
@@ -465,7 +466,7 @@ class FoldStrategy(GenericParamSweep):
 
     param_key = "m"
 
-    def __init__(self, n_samples_override: Optional[int] = None, **kwargs):
+    def __init__(self, n_samples_override: int | None = None, **kwargs):
         self.n_samples_override = n_samples_override
         super().__init__(**kwargs)
 
@@ -489,7 +490,7 @@ class FoldStrategy(GenericParamSweep):
         )
 
 
-STRATEGIES: Dict[str, type] = {
+STRATEGIES: dict[str, type] = {
     "gamma": GammaRatioStrategy,
     "epsilon": EpsilonRatioStrategy,
     "trS": ExpansionStrategy,

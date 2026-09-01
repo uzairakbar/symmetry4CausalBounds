@@ -1,11 +1,12 @@
-import numpy as np
 from abc import abstractmethod
+from collections.abc import Callable
+from typing import Literal
+
+import numpy as np
 from numpy.typing import NDArray
-from typing import Callable, Dict, Literal, List, Optional, Tuple
 
 from src.data_augmentors.abstract import DataAugmenter as DA
 from src.data_augmentors.utils import BernoulliStandardScaler
-
 
 P = 0.5
 NOISE_COEFF = np.sqrt(0.01)
@@ -27,7 +28,7 @@ class Permutation(DA):
         self._p = p
         self.param_scaler = BernoulliStandardScaler(p=p)
 
-    def __call__(self, X, p: Optional[float] = None, **kwargs):
+    def __call__(self, X, p: float | None = None, **kwargs):
         if p is not None:
             self.p = p
 
@@ -144,7 +145,7 @@ class GaussianNoise(DA):
         assert value >= 0.0, "`strength` must be non-negative."
         self._strength = float(value)
 
-    def __call__(self, X, noise_coeff: Optional[float] = None, **kwargs):
+    def __call__(self, X, noise_coeff: float | None = None, **kwargs):
         if noise_coeff is not None:
             self.strength = noise_coeff
 
@@ -175,7 +176,7 @@ class Identity(DA):
 Augmentation = Literal["rotation", "hflip", "vflip", "gaussian-noise", "random-permutation"]
 
 # constructors, NOT instances: augmenters carry per-DA state (p, strength)
-ALL_AUGMENTATIONS: Dict[Augmentation, Callable[[], DA]] = {
+ALL_AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {
     "rotation": RandomRotation,
     "hflip": RandomHorizontalFlip,
     "vflip": RandomVerticalFlip,
@@ -189,28 +190,28 @@ class OpticalDeviceDA(DA):
 
     exact_invariance = False
 
-    def __init__(self, augmentations: Optional[str] = "all"):
+    def __init__(self, augmentations: str | None = "all"):
         if augmentations == "all":
-            augmentations: List[Augmentation] = list(ALL_AUGMENTATIONS.keys())
+            augmentations: list[Augmentation] = list(ALL_AUGMENTATIONS.keys())
         elif augmentations:
-            augmentations: List[Augmentation] = augmentations.replace(" ", "").split(">")
+            augmentations: list[Augmentation] = augmentations.replace(" ", "").split(">")
 
         if augmentations:
-            self._augmentations: List[DA] = [ALL_AUGMENTATIONS[augmentation]() for augmentation in augmentations]
+            self._augmentations: list[DA] = [ALL_AUGMENTATIONS[augmentation]() for augmentation in augmentations]
         else:
-            self._augmentations: List[DA] = [Identity()]
+            self._augmentations: list[DA] = [Identity()]
 
     @property
     def augmentation(self):
         return "optical_device"
 
     @property
-    def _inexact(self) -> List[DA]:
+    def _inexact(self) -> list[DA]:
         """Components carrying invariance error (flips/rotations assumed exact)."""
         return [a for a in self._augmentations if not a.exact_invariance]
 
     @property
-    def strength(self) -> Optional[float]:
+    def strength(self) -> float | None:
         inexact = self._inexact
         return inexact[0].strength if inexact else None
 
@@ -222,10 +223,10 @@ class OpticalDeviceDA(DA):
         for augmentation in inexact:
             augmentation.strength = value
 
-    def augment(self, X: NDArray, **kwargs) -> Tuple[NDArray, NDArray]:
+    def augment(self, X: NDArray, **kwargs) -> tuple[NDArray, NDArray]:
         """Apply augmentations sequentially."""
         GX: NDArray = X.copy()
-        G_list: List[NDArray] = []
+        G_list: list[NDArray] = []
 
         for augmentation in self._augmentations:
             GX, G = augmentation(GX, **kwargs)

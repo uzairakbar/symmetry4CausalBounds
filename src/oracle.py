@@ -5,16 +5,16 @@ Computed in sequence gamma* -> epsilon* -> gamma_z*, and returned to the
 experiment scripts, which may or may not use them.
 """
 
-import numpy as np
-from loguru import logger
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from typing import Callable, Optional
+
+import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from src.methods.regression import LeastSquaresClosedForm as OLS
-
 
 CALIBRATION_SAMPLES: int = 2048
 STRENGTH_BRACKET: tuple = (0.0, 1e3)
@@ -28,17 +28,17 @@ class OracleParameters:
 
     gamma_star: float
     epsilon_star: float
-    gamma_z_star: Optional[float]
+    gamma_z_star: float | None
     bias_sq: float
     sigma_sq: float
-    rho: Optional[float]
+    rho: float | None
     # IV budget (Thm. 3.B, exact at gamma_z* = 0) and its byproducts
-    eps_iv_star: Optional[float] = None
-    eps_rms: Optional[float] = None
-    eta: Optional[float] = None
+    eps_iv_star: float | None = None
+    eps_rms: float | None = None
+    eta: float | None = None
     # SHELVED: eps* under the perturb convention (exactly-invariant components
     # excluded). Recorded, never consumed -- lets the padding choice be revisited.
-    epsilon_star_pointwise: Optional[float] = None
+    epsilon_star_pointwise: float | None = None
 
 
 @contextmanager
@@ -118,8 +118,8 @@ def gamma_star(sem, calibrate: bool = False, strategy: GammaStarStrategy = DEFAU
 def _invariance_signal(
     sem,
     da,
-    X: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
     **augment_kwargs,
 ) -> tuple:
@@ -146,8 +146,8 @@ def _invariance_signal(
 def epsilon_star(
     sem,
     da,
-    X: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
     **augment_kwargs,
 ) -> float:
@@ -168,8 +168,8 @@ def epsilon_star(
 def invariance_error(
     sem,
     da,
-    X: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
@@ -197,8 +197,8 @@ def calibrate_da_epsilon(
     sem,
     da,
     epsilon_target: float,
-    X: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
@@ -265,8 +265,8 @@ def calibrate_da_epsilon(
 def eps_iv_star(
     sem,
     da,
-    X: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> tuple:
     """
@@ -331,7 +331,7 @@ def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float
 # =============================================================================
 
 
-def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> Optional[float]:
+def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> float | None:
     """
     Oracle IV budget (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
     Not implemented: no experiment uses instruments.
@@ -344,7 +344,7 @@ def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> Opt
 # =============================================================================
 
 
-def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) -> Optional[float]:
+def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) -> float | None:
     """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1)."""
     sigma_sq = sem.sigma_sq
     if sigma_sq <= 0.0:
@@ -363,9 +363,9 @@ def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) 
 def compute_oracle_parameters(
     sem,
     da,
-    X: Optional[NDArray] = None,
-    y: Optional[NDArray] = None,
-    features: Optional[Callable] = None,
+    X: NDArray | None = None,
+    y: NDArray | None = None,
+    features: Callable | None = None,
     calibrate: bool = False,
     n_samples: int = CALIBRATION_SAMPLES,
     strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR,

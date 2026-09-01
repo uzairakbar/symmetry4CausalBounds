@@ -13,10 +13,10 @@ affine in t, so as IV columns they are not independent directions the way rotati
 and translation are.
 """
 
-import torch
+
 import numpy as np
+import torch
 import torch.nn.functional as Fn
-from typing import Tuple, Optional, List
 from numpy.typing import NDArray
 
 from src.data_augmentors.abstract import DataAugmenter
@@ -42,7 +42,7 @@ def _scaler(name: str, amount: float) -> BetaStandardScaler:
     return BetaStandardScaler(max(0.0, 1.0 - amount), 1.0 + amount)
 
 
-def _ink_and_tint(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def _ink_and_tint(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """x is (N,3,H,W) -> (ink, tint), both (N,H,W)."""
     ink = x[:, 0] + x[:, 2]
     eps = torch.finfo(x.dtype).eps
@@ -80,7 +80,7 @@ class DoMNISTDA(DataAugmenter):
         strength: float = 1.0,
         chunk: int = CHUNK,
     ):
-        names: List[str] = [n for n in augmentations.replace(" ", "").split(">") if n]
+        names: list[str] = [n for n in augmentations.replace(" ", "").split(">") if n]
         unknown = sorted(set(names) - set(OPS))
         if unknown:
             raise ValueError(f"unknown do-MNIST augmentation(s) {unknown}; valid: {sorted(OPS)}")
@@ -102,7 +102,7 @@ class DoMNISTDA(DataAugmenter):
 
     # ------------------------------------------------------------------ batched
 
-    def _color(self, name: str, x: torch.Tensor, generator) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _color(self, name: str, x: torch.Tensor, generator) -> tuple[torch.Tensor, torch.Tensor]:
         """One batched colour op, plus its standardised report column."""
         scaler = _scaler(name, COLOR_AMOUNTS[name] * self._strength)
         u = torch.rand(len(x), device=x.device, generator=generator)
@@ -121,7 +121,7 @@ class DoMNISTDA(DataAugmenter):
             tint = (tint + v).clamp(0.0, 1.0)
         return _restore(x, ink, tint), report
 
-    def _augment_chunk(self, chunk: NDArray, dev, generator) -> Tuple[NDArray, NDArray]:
+    def _augment_chunk(self, chunk: NDArray, dev, generator) -> tuple[NDArray, NDArray]:
         x = torch.as_tensor(chunk, dtype=torch.float, device=dev)
         n, params = len(x), []
 
@@ -169,8 +169,8 @@ class DoMNISTDA(DataAugmenter):
         )
 
     def augment(
-        self, X: NDArray, strength: Optional[float] = None, seed: Optional[int] = None, **kwargs
-    ) -> Tuple[NDArray, NDArray]:
+        self, X: NDArray, strength: float | None = None, seed: int | None = None, **kwargs
+    ) -> tuple[NDArray, NDArray]:
         """
         (GX, G) for X of shape (N,3,H,W).
 

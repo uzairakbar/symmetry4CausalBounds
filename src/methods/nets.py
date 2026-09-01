@@ -1,9 +1,10 @@
 """Torch backbones for the image experiments."""
 
+from collections.abc import Callable
+
 import torch
-from torch import nn
 from loguru import logger
-from typing import Callable, Dict
+from torch import nn
 
 CPU_ONLY: bool = False
 _DEVICE = None
@@ -32,7 +33,7 @@ def _domnist_fast(input_dim: int, channels: int = 3) -> nn.Sequential:
     )
 
 
-NETS: Dict[str, Callable[[int], nn.Sequential]] = {
+NETS: dict[str, Callable[[int], nn.Sequential]] = {
     "domnist-fast": _domnist_fast,
 }
 

@@ -4,12 +4,11 @@
 #
 ########################################
 
+
 import numpy as np
-from typing import Optional, Tuple
 from numpy.typing import NDArray
 
 from src.sem.abstract import StructuralEquationModel as SEM
-
 
 OUTCOME_DIMENSION: int = 1
 TREATMENT_DIMENSION: int = 32
@@ -34,7 +33,7 @@ class LinearSimulationSEM(SEM):
         self,
         outcome_dimension: int = OUTCOME_DIMENSION,
         treatment_dimension: int = TREATMENT_DIMENSION,
-        gamma: Optional[float] = None,
+        gamma: float | None = None,
     ):
         self.outcome_dimension = outcome_dimension
         self.treatment_dimension = treatment_dimension
@@ -52,12 +51,12 @@ class LinearSimulationSEM(SEM):
     # ---------------------------------------------------------- confounding
 
     @property
-    def gamma(self) -> Optional[float]:
+    def gamma(self) -> float | None:
         """True (calibrated) confounding budget; None = inf."""
         return self._gamma
 
     @gamma.setter
-    def gamma(self, gamma: Optional[float]):
+    def gamma(self, gamma: float | None):
         if gamma is not None:
             assert gamma >= 0.0, "`gamma` must be non-negative."
             assert gamma <= MAX_GAMMA, f"`gamma` must be <= 1/s^2 = {MAX_GAMMA}."
@@ -83,8 +82,8 @@ class LinearSimulationSEM(SEM):
     # -------------------------------------------------------------- sampling
 
     def sample(
-        self, N: int = 1, gamma: Optional[float] = None, intervention: bool = False, **kwargs
-    ) -> Tuple[NDArray, NDArray]:
+        self, N: int = 1, gamma: float | None = None, intervention: bool = False, **kwargs
+    ) -> tuple[NDArray, NDArray]:
         if gamma is not None:
             self.gamma = gamma
         kappa = self.kappa

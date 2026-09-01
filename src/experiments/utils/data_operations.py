@@ -2,18 +2,19 @@
 Data manipulation and I/O utilities.
 """
 
-import os
 import json
+import os
 import pickle
 import random
 import typing
 import warnings
-import torch
+from typing import Any, Literal
+
 import numpy as np
+import torch
 from loguru import logger
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
-from typing import Any, Dict, Literal, Tuple, Optional
 
 from .constants import ARTIFACTS_DIRECTORY, TEX_MAPPER
 
@@ -47,10 +48,10 @@ BOOTSTRAP_SEED: int = 0
 
 
 def bootstrap(
-    data: Dict[str, NDArray] | Dict[str, Dict[str, NDArray]],
+    data: dict[str, NDArray] | dict[str, dict[str, NDArray]],
     n_samples: int = 1000,
     seed: int = BOOTSTRAP_SEED,
-) -> Dict:
+) -> dict:
     """
     Generate bootstrap samples from data.
 
@@ -64,7 +65,7 @@ def bootstrap(
     """
     rng = np.random.default_rng(seed)
 
-    def _bootstrap_single_dict(data_dict: Dict[str, NDArray], n_bootstrap: int = n_samples):
+    def _bootstrap_single_dict(data_dict: dict[str, NDArray], n_bootstrap: int = n_samples):
         """Bootstrap a single level dictionary."""
         # Ensure 2D arrays
         data_dict = {
@@ -72,7 +73,7 @@ def bootstrap(
             for key, value in data_dict.items()
         }
 
-        def _bootstrap_sample(array: NDArray, n_boot: Optional[int] = None) -> NDArray:
+        def _bootstrap_sample(array: NDArray, n_boot: int | None = None) -> NDArray:
             """Generate one bootstrap sample."""
             if len(array.shape) == 1:
                 array = array.reshape(1, -1)
@@ -121,7 +122,7 @@ def save(
     fname: str,
     experiment: ExperimentType,
     format: PlotFormat | Literal["pkl", "json", "tex"],
-    subdir: Optional[str] = None,
+    subdir: str | None = None,
     **kwargs,
 ):
     """
@@ -191,7 +192,7 @@ def load(path: str):
             with open(path, "rb") as file:
                 data = pickle.load(file)  # noqa: S301 - our own artifacts, no untrusted input
         else:  # json
-            with open(path, "r") as file:
+            with open(path) as file:
                 data = json.load(file)
 
         logger.info(f"Loaded data from file {path}.")
@@ -236,7 +237,7 @@ def radial_sweep_pcs(X: NDArray, n_points: int = 100) -> NDArray:
 
 def sweep_along_pc(
     X: NDArray, pc_index: int = 0, n_steps: int = 21, std_range: float = 1.0
-) -> Tuple[NDArray, NDArray, NDArray, NDArray]:
+) -> tuple[NDArray, NDArray, NDArray, NDArray]:
     """
     Generate sweep along a specified principal component.
 
@@ -272,7 +273,7 @@ def sweep_along_pc(
     return sweep_points, t_values, mean, pc_vector
 
 
-def project_onto_pc(X: NDArray, pc_vector: NDArray, mean: Optional[NDArray] = None) -> Tuple[NDArray, NDArray]:
+def project_onto_pc(X: NDArray, pc_vector: NDArray, mean: NDArray | None = None) -> tuple[NDArray, NDArray]:
     """
     Project all points onto a specified principal component.
 

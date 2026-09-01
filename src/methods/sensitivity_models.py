@@ -5,11 +5,12 @@ Uniform signature: gamma (budget), epsilon (invariance error), pad (Thm. 3.A),
 calibrate (paper's sigma-scaled budgets), clipy (clip to observed y range).
 """
 
-import numpy as np
-import cvxpy as cp
 from enum import IntEnum
-from loguru import logger
+
+import cvxpy as cp
+import numpy as np
 from joblib import Parallel, delayed, effective_n_jobs, parallel_config
+from loguru import logger
 
 from src.methods.abstract import sensitivityAnalyzer as SA
 from src.methods.regression import LeastSquaresClosedForm as OLS

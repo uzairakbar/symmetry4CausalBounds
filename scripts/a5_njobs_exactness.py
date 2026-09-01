@@ -14,17 +14,17 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
-from src.methods.regression import GradientDescentERM  # noqa: E402
-from src.methods.copsens import (
-    CopSensPI,
-    RecentredInvCopSens,  # noqa: E402
-    IVConstrainedCopSens,
-)
 from src.experiments.configs import DOMNIST_CONFIG  # noqa: E402
 from src.experiments.do_mnist import Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.methods.copsens import (
+    CopSensPI,
+    IVConstrainedCopSens,
+    RecentredInvCopSens,  # noqa: E402
+)
+from src.methods.regression import GradientDescentERM  # noqa: E402
+from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
 N_SAMPLES, N_PI, N_QUERIES, N_JOBS = 40_000, 5_000, 128, 16
 FAIL = []

@@ -3,30 +3,46 @@ Unified configuration management for experiments.
 All parameters defined here - no defaults in method classes.
 """
 
-import numpy as np
-from loguru import logger
-from typing import Dict, Any, Literal, Callable, Optional, Tuple
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Literal
 
-from src.methods.regression import (
-    LeastSquaresClosedForm as ERM,
-    TwoStageLeastSquaresIV as IV,
-)
-from src.methods.sensitivity_models import (
-    PartialR2,
-    InstrumentalVariablePartialR2 as IVPartialR2,
-    InvarianceConstrainedPartialR2 as InvPartialR2,
-    IntersectedPartialR2 as IntPartialR2,
-    IntersectedInstrumentalVariablePartialR2 as IntIVPartialR2,
-)
+import numpy as np
+
 from src.methods.copsens import (
     CopSensPI,
     RecentredInvCopSens,
-    IVConstrainedCopSens as IVCopSens,
+)
+from src.methods.copsens import (
     IntersectedCopSens as IntCopSens,
+)
+from src.methods.copsens import (
     IntersectedIVCopSens as IntIVCopSens,
 )
-
+from src.methods.copsens import (
+    IVConstrainedCopSens as IVCopSens,
+)
+from src.methods.regression import (
+    LeastSquaresClosedForm as ERM,
+)
+from src.methods.regression import (
+    TwoStageLeastSquaresIV as IV,
+)
+from src.methods.sensitivity_models import (
+    InstrumentalVariablePartialR2 as IVPartialR2,
+)
+from src.methods.sensitivity_models import (
+    IntersectedInstrumentalVariablePartialR2 as IntIVPartialR2,
+)
+from src.methods.sensitivity_models import (
+    IntersectedPartialR2 as IntPartialR2,
+)
+from src.methods.sensitivity_models import (
+    InvarianceConstrainedPartialR2 as InvPartialR2,
+)
+from src.methods.sensitivity_models import (
+    PartialR2,
+)
 
 # =============================================================================
 # EXPERIMENT PARAMETERS
@@ -41,7 +57,7 @@ class SimulationConfig:
     epsilon: float = 2**-8
     # SEM confounding. None = fully confounded, which drives sigma^2 to the
     # outcome-noise floor and rho to ~57: Prop. 2 can then never hold.
-    gamma_true: Optional[float] = 1.0
+    gamma_true: float | None = 1.0
     test_fraction: float = 0.1
 
 
@@ -52,7 +68,7 @@ class OpticalDeviceConfig:
     gamma: float = 2**-1.5
     epsilon: float = 2**-2
     query_epsilon: float = 2**-2
-    epsilon_true: Optional[float] = None
+    epsilon_true: float | None = None
     test_fraction: float = 0.1
     dataset_index: int = 8
     ground_truth_model: Literal["linear", "polynomial"] = "polynomial"
@@ -82,7 +98,7 @@ class DoMNISTConfig:
     test_fraction: float = 0.1
 
     @property
-    def attainable(self) -> Tuple[float, float]:
+    def attainable(self) -> tuple[float, float]:
         """Range h_erm can occupy. mu_y outside it is impossible."""
         lo = (1 - self.beta) * self.alpha + self.beta * self.eta
         return float(lo), float(1.0 - lo)
@@ -108,7 +124,7 @@ class DatasetDefaults:
     sweep_samples: int
 
 
-DATASET_DEFAULTS: Dict[str, DatasetDefaults] = {
+DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
     "simulation": DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32),
     "optical_device": DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
     # sweep_samples = the 10 digit exemplars on the query x-axis
@@ -170,12 +186,12 @@ class ParamSpec:
     xlabel: str
     grid_fn: Callable[[str, int], np.ndarray]
     xscale: Literal["linear", "log"] = "log"
-    vlines: Tuple[float, ...] = ()  # reference values annotated on the x-axis
+    vlines: tuple[float, ...] = ()  # reference values annotated on the x-axis
     include_ate: bool = True  # ATE is flat, useless on budget-ratio axes
     data_constant: bool = False  # False => data regenerated every step
 
 
-PARAM_SPECS: Dict[str, ParamSpec] = {
+PARAM_SPECS: dict[str, ParamSpec] = {
     "gamma": ParamSpec(
         xlabel=r"$\gamma / \gamma^\star$",
         grid_fn=_RATIO_GRID,
@@ -229,7 +245,7 @@ class MetricSpec:
     include_ate: bool = True
 
 
-METRIC_SPECS: Dict[str, MetricSpec] = {
+METRIC_SPECS: dict[str, MetricSpec] = {
     "approx_error": MetricSpec("approximation_error", r"average $E^-_{{\bm{x}}}$", "asinh"),
     "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh"),
     "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
@@ -246,19 +262,19 @@ METRIC_SPECS: Dict[str, MetricSpec] = {
 
 @dataclass(frozen=True)
 class SweepSpec:
-    param: Tuple[str, ...]
-    metric: Tuple[str, ...]
+    param: tuple[str, ...]
+    metric: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class ScatterSpec:
-    param: Tuple[str, ...]
-    metric: Tuple[Tuple[str, str], ...]  # (x-metric, y-metric) pairs
+    param: tuple[str, ...]
+    metric: tuple[tuple[str, str], ...]  # (x-metric, y-metric) pairs
 
 
 @dataclass(frozen=True)
 class PerfSpec:
-    metric: Tuple[str, ...]  # overlay series; bar always drawn
+    metric: tuple[str, ...]  # overlay series; bar always drawn
 
 
 @dataclass(frozen=True)
@@ -266,9 +282,9 @@ class ExperimentPlan:
     """Which experiment types to run. Panel is bound to `query`."""
 
     query: bool = False
-    sweep: Optional[SweepSpec] = None
-    scatter: Optional[ScatterSpec] = None
-    perf: Optional[PerfSpec] = None
+    sweep: SweepSpec | None = None
+    scatter: ScatterSpec | None = None
+    perf: PerfSpec | None = None
 
 
 def _reject_unknown(got, allowed, where: str):
@@ -283,7 +299,7 @@ def _check_values(values, allowed, where: str) -> tuple:
     return values
 
 
-def parse_experiment_plan(block: Optional[Dict[str, Any]]) -> ExperimentPlan:
+def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
     """Parse+validate the `experiment:` block. Unknown keys are a hard error."""
     block = dict(block or {})
     _reject_unknown(block, {"query", "sweep", "scatter", "perf"}, "experiment")
@@ -330,7 +346,7 @@ def parse_experiment_plan(block: Optional[Dict[str, Any]]) -> ExperimentPlan:
 # PLOT ANNOTATIONS
 # =============================================================================
 
-ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
+ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
     "pc1": {
         "xlabel": r"$t$",
         "xscale": "linear",
@@ -349,7 +365,7 @@ ANNOTATE_SWEEP_PLOT: Dict[str, Dict[str, Any]] = {
 # METHOD REGISTRY
 # =============================================================================
 
-ALL_METHODS: Tuple[str, ...] = (
+ALL_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
@@ -366,7 +382,7 @@ ALL_METHODS: Tuple[str, ...] = (
 # the copsens backend defines a strict subset: no 2SLS and no baseline-IV. It DOES
 # define the intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
 # membership fact, not a claim that the two balls share a parameterisation.
-COPSENS_METHODS: Tuple[str, ...] = (
+COPSENS_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
@@ -468,12 +484,12 @@ class MethodRegistry:
         calibrate: bool = False,
         pad: bool = False,
         clipy: bool = True,
-        epsilon_iv: Optional[float] = None,
+        epsilon_iv: float | None = None,
         n_jobs: int = 1,
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
-        outcome_models: Optional[Dict[str, Any]] = None,
+        outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
-    ) -> Dict[str, Callable]:
+    ) -> dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
 
@@ -543,7 +559,7 @@ class MethodRegistry:
 # =============================================================================
 
 # keys a dataset block may carry besides `experiment` and the global toggles
-DATASET_KEYS: Dict[str, set] = {
+DATASET_KEYS: dict[str, set] = {
     "simulation": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation", "kernel_dim"},
     "optical_device": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation"},
     "do_mnist": {
@@ -565,7 +581,7 @@ DATASET_KEYS: Dict[str, set] = {
 TOGGLE_KEYS: set = {"calibrate", "pad", "clipy", "n_jobs"}
 
 # no sensible default: the run is not reproducible / constructible without them
-REQUIRED_KEYS: Dict[str, set] = {
+REQUIRED_KEYS: dict[str, set] = {
     "simulation": {"seed", "kernel_dim"},
     "optical_device": {"seed", "augmentation"},
     # `methods` is required HERE and nowhere else: the fallback below is all 11 of
@@ -575,7 +591,7 @@ REQUIRED_KEYS: Dict[str, set] = {
 }
 
 
-def resolve_dataset_block(name: str, block: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     """Validate a dataset block and fill omitted keys from `DatasetDefaults`."""
     block = dict(block)
     block.pop("experiment", None)

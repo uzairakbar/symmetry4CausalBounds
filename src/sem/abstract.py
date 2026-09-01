@@ -1,14 +1,14 @@
-from typing import Tuple
-from numpy.typing import NDArray
 from abc import ABC, abstractmethod
+
+from numpy.typing import NDArray
 
 
 class StructuralEquationModel(ABC):
     @abstractmethod
-    def sample(self, N: int = 1, **kwargs) -> Tuple[NDArray, NDArray]:
+    def sample(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
         pass
 
-    def __call__(self, N: int = 1, **kwargs) -> Tuple[NDArray, NDArray]:
+    def __call__(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
         return self.sample(N=N, **kwargs)
 
     def f(self, X) -> NDArray:

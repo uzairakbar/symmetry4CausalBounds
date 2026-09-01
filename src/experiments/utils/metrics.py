@@ -2,11 +2,13 @@
 Error metrics for evaluating causal estimation methods.
 """
 
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
 from numpy.typing import NDArray
 
 from src.methods.sensitivity_models import SolveStatus
+
 from .constants import DEFAULT_NORMALIZE_ERROR
 
 
