@@ -25,6 +25,8 @@ dependencies = [
     "scikit-learn>=1.6",
     "scipy>=1.14.1",
     "seaborn>=0.13.2",
+    # single-BLAS-thread pinning in the serial solve path (see sensitivity_models)
+    "threadpoolctl>=3",
     "torch>=2.6",
     "torchvision>=0.21",
 ]

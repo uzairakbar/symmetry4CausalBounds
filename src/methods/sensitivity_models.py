@@ -11,6 +11,7 @@ import cvxpy as cp
 import numpy as np
 from joblib import Parallel, delayed, effective_n_jobs, parallel_config
 from loguru import logger
+from threadpoolctl import threadpool_limits
 
 from src.methods.abstract import sensitivityAnalyzer as SA
 from src.methods.regression import LeastSquaresClosedForm as OLS
@@ -88,8 +89,12 @@ class BoundedSA(SA):
             # Never route a single query through here as a shortcut when
             # n_jobs > 1: a parent-side solve leaves an unpicklable
             # DefaultSolution on the Problem and kills every later dispatch.
-            view._begin_chunk()
-            solved = [view._solve_single(p) for p in payloads]
+            # Single BLAS thread to match the workers (inner_max_num_threads=1
+            # below): numpy 2 kernels vary with thread count at the last ulp,
+            # so serial and parallel would otherwise disagree (A5).
+            with threadpool_limits(limits=1):
+                view._begin_chunk()
+                solved = [view._solve_single(p) for p in payloads]
         else:
             # Chunk, not per query: the DPP cache is per worker, so fine-grained
             # tasks re-canonicalize every query (measured ~2x slower).
