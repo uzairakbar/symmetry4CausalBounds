@@ -29,7 +29,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import numpy as np
 from loguru import logger
@@ -350,7 +350,7 @@ def main(args):
         oracle = None
     report = {
         "schema_version": 1,
-        "generated_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017 - datetime.UTC needs py3.11, env is 3.10 until the upgrade
         "wall_clock_s": round(time.time() - START, 1),
         "provenance": {
             "git_sha": _git("rev-parse", "--short", "HEAD"),
