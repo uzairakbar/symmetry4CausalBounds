@@ -28,19 +28,12 @@ figure {
     }
 }
 
-// @media (min-width: $responsive-cutoff) {
-//   .figrow > figure > div.hug-top {
-//     align-items: flex-start;
-//   }
-// }
-
 @media (min-width: $responsive-cutoff) {
   /* Figure 4 and other ordinary figures */
   figure > div.hug-top {
     align-items: flex-start;
   }
 
-  /* Figure 2 inside .figrow: wins over its page-specific alignment rule */
   .figrow > figure > div.hug-top {
     align-items: flex-start;
   }
@@ -50,7 +43,12 @@ figure > div.hug-top-always,
 .figrow > figure > div.hug-top-always {
   display: flex;
   flex-direction: row;
+  flex-wrap: nowrap;
   align-items: flex-start;
+}
+
+.figrow > figure > div.hug-top-always > img {
+  min-width: 0;
 }
 
 
