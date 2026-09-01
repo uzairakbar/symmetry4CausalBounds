@@ -73,3 +73,17 @@ bash setup_uv.sh
 ```bash
 bash fix_torch.sh
 ```
+
+## Citation
+If you find our work helpful, consider citing our paper and leaving a star :star:.
+```bibtex
+@misc{akbar2026symmetry4CausalBounds,
+      title={Symmetry-Constrained Causal Partial Identification},
+      author={Uzair Akbar and Zulfiqar Zaidi and Niki Kilbertus and Krikamol Muandet and Bo Dai},
+      year={2026},
+      eprint={TBD},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={TBD},
+}
+```
