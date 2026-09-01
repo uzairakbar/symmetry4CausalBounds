@@ -472,12 +472,20 @@ def a26_budget_wiring():
         built = runner.methods[name]()
         check(f"A26 {name} is built on the config gamma", built.gamma == gamma, f"{built.gamma}")
 
-    # and the bounds are not vacuous: a too-large ball pins every query to the
-    # clip range, so the spread across queries collapses
-    bounds = runner.methods["PI"]().fit(X=runner.X, y=runner.y).predict(runner.get_sweep_values())
-    widths = bounds[:, 1] - bounds[:, 0]
-    check("A26 PI bounds are not vacuous", float(np.max(widths)) < 0.99, f"max width {np.max(widths):.4f}")
-    check("A26 PI bounds vary across queries", float(np.ptp(widths)) > 1e-6, f"ptp {np.ptp(widths):.6f}")
+    # and the budget actually reaches the solve: shrinking gamma must shrink the
+    # bounds. (The old "not vacuous at the config gamma" probe was a copsens-era
+    # fact -- the honest partial_r2_net bounds at l=1 fill the clip range, so
+    # width at ONE gamma no longer discriminates a mis-wired budget.)
+    model = runner.methods["PI"]().fit(X=runner.X, y=runner.y)
+    queries = runner.get_sweep_values()
+    widths = np.diff(model.predict(queries), axis=1)
+    widths_tight = np.diff(model.predict(queries, gamma=1e-3), axis=1)
+    check(
+        "A26 PI bounds respond to gamma",
+        float(np.nanmean(widths_tight)) < 0.5 * float(np.nanmean(widths)),
+        f"mean width {np.nanmean(widths):.4f} -> {np.nanmean(widths_tight):.4f} at gamma=1e-3",
+    )
+    check("A26 PI bounds vary across queries", float(np.ptp(widths_tight)) > 1e-6, f"ptp {np.ptp(widths_tight):.6f}")
 
 
 if __name__ == "__main__":

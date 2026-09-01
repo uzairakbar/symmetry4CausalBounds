@@ -1,5 +1,5 @@
 """
-do-MNIST experiment: CopSens partial identification on raw pixels.
+do-MNIST experiment: partial-r2 identification over a last-l-layer refit.
 
 Two things differ from the linear experiments and shape everything here.
 
@@ -82,8 +82,8 @@ def log_vacuous(bounds: dict[str, np.ndarray]):
 
 
 #: (constrained method, the UNCONSTRAINED model on the same ball). PI+INV is paired
-#: with DA+PI, not PI: `RecentredInvCopSens` fits the post-DA measure, so DA+PI is
-#: its parent and PI is a different ball entirely.
+#: with DA+PI, not PI: `RecentredInvPartialR2Net` fits the post-DA measure, so
+#: DA+PI is its parent and PI is a different ball entirely.
 NESTED_IN = {
     "PI+INV": "DA+PI",
     "DA+PI+IV": "DA+PI",
@@ -204,11 +204,9 @@ class DoMNISTMixin:
 
     # -------------------------------------------------------- per-experiment policy
 
-    def fit_gamma(self, experiment_index: int) -> float:
-        """gamma* (= bias_sq) is a Lemma-2 radius in FUNCTION space; CopSens's budget
-        lives in a 32-d latent index space. Not comparable, so the config value is
-        used as-is and gamma_star is recorded unconsumed."""
-        return self.default_gamma
+    # fit_gamma is NOT overridden: the partial_r2_net ball lives in the same
+    # Lemma-2 function space as gamma* = bias_sq/sigma_sq, so the oracle value is
+    # principled again and the base-class default consumes it.
 
     def fit_epsilon(self, experiment_index: int, step_index: int = 0, data=None) -> float:
         """A MODELLING ASSUMPTION, not estimable. The oracle eps* here measures the
@@ -280,12 +278,14 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         n_queries: int = 512,
         n_components: int = 32,
         net: str = "domnist-fast",
+        unfrozen_layers: int = DOMNIST_CONFIG.unfrozen_layers,
         **kwargs,
     ):
         self.augmentation = augmentation
         self.gamma, self.epsilon = gamma, epsilon
         self.n_pi, self.n_queries = n_pi, n_queries
         self.n_components, self.net = n_components, net
+        self.unfrozen_layers = unfrozen_layers
         self.toggles = dict(
             calibrate=kwargs.get("calibrate", False),
             pad=kwargs.get("pad", False),
@@ -299,7 +299,12 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             @staticmethod
             def build_methods(names):
                 return MethodRegistry.build_methods(
-                    names, gamma=gamma, epsilon=epsilon, backend="copsens", n_components=outer.n_components, **toggles
+                    names,
+                    gamma=gamma,
+                    epsilon=epsilon,
+                    backend="partial_r2_net",
+                    unfrozen_layers=outer.unfrozen_layers,
+                    **toggles,
                 )
 
         super().__init__(EXPERIMENT_NAME, DoMNISTRegistry(), **kwargs)
@@ -339,9 +344,9 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
-            backend="copsens",
+            backend="partial_r2_net",
             outcome_models=outcome_models,
-            n_components=self.n_components,
+            unfrozen_layers=self.unfrozen_layers,
             **toggles,
         )
 
@@ -370,13 +375,13 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         if param != "m":
             raise NotImplementedError(
                 f"do_mnist {param} sweep is Phase 2. Blockers: "
-                "(a) gamma -- needs a CopSens-scale gamma*, i.e. the population "
-                "coverage bisection, since oracle.gamma_star is in partial-r2 units; "
-                "(b) epsilon -- needs a trusted eps*, which the estimated target does "
-                "not give (see fit_epsilon); (c) trS -- needs augment_kwargs_fn "
+                "(a) epsilon -- needs a trusted eps*, which the estimated target does "
+                "not give (see fit_epsilon); (b) trS -- needs augment_kwargs_fn "
                 "wired to DA.strength, and _augment_once must pass its seed through "
                 "to the DA so common random numbers reach the torch draws; "
-                "(d) n -- needs the nets retrained per step."
+                "(c) n -- needs the nets retrained per step. gamma is no longer "
+                "blocked -- gamma* is principled under partial_r2_net -- but its "
+                "grid is still unwired."
             )
 
         outer, Strategy = self, STRATEGIES[param]

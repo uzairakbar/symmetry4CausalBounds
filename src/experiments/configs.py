@@ -22,6 +22,13 @@ from src.methods.copsens import (
 from src.methods.copsens import (
     IVConstrainedCopSens as IVCopSens,
 )
+from src.methods.partial_r2_net import (
+    IntersectedIVPartialR2Net,
+    IntersectedPartialR2Net,
+    IVConstrainedPartialR2Net,
+    PartialR2Net,
+    RecentredInvPartialR2Net,
+)
 from src.methods.regression import (
     LeastSquaresClosedForm as ERM,
 )
@@ -86,9 +93,13 @@ class DoMNISTConfig:
     eta: float = 0.25
     subsample: int = 2  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
     exemplar_seed: int = 1  # digit exemplars, frozen across replicates
+    # partial_r2_net takes probit (default) or logistic; gaussian is copsens-only.
+    link: Literal["probit", "logistic", "gaussian"] = "probit"
+    # partial_r2_net: how many trailing layers of the prefit net are refit. l=1 is
+    # the 257-param head; l=2 adds the ~74k-param fc1 (slow, AL solver).
+    unfrozen_layers: int = 1
     # CopSens. n_anchors is SOURCE's EFFECTIVE value: CopSensPI's own default is
     # 256, but every published do-MNIST number was measured at 128.
-    link: Literal["probit", "gaussian"] = "probit"
     n_anchors: int = 128
     n_anchors_c: int = 48  # coarse set, for the feasibility constraint
     n_constraint_inv: int = 256  # 192
@@ -476,6 +487,81 @@ def _copsens_builders(
     return {name: all_builders[name] for name in method_names}
 
 
+# same nine as copsens: no 2SLS and no baseline-IV; intersections included
+# (Cor. 1 needs h_*(x) inside both intervals -- a membership fact)
+PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
+    "ATE",
+    "ERM",
+    "DA+ERM",
+    "PI+INV",
+    "PI",
+    "DA+PI",
+    "DA+PI+IV",
+    "PI&DA+PI",
+    "PI&DA+PI+IV",
+)
+
+
+def _partial_r2_net_builders(
+    method_names, gamma, epsilon, epsilon_iv, calibrate, pad, clipy, n_jobs, outcome_models, unfrozen_layers
+):
+    """partial_r2_net backend (App. D, (P2)). Every method refits the last
+    `unfrozen_layers` layers of a PREFIT outcome net, so only the constraint set
+    differs between them."""
+    common = dict(
+        link=DOMNIST_CONFIG.link,
+        unfrozen_layers=unfrozen_layers,
+        calibrate=calibrate,
+        clipy=clipy,
+        n_jobs=n_jobs,
+    )
+
+    def net(key):
+        if outcome_models is None:
+            raise ValueError(
+                "partial_r2_net methods need the prefit outcome nets. "
+                "`ExperimentOrchestrator.methods` names them only -- the runner "
+                "must rebuild via method_factory(..., outcome_models=...) once the "
+                "nets exist."
+            )
+        return outcome_models[key]
+
+    all_builders = {
+        "ATE": lambda: None,  # computed via sem.f
+        "ERM": lambda: net("X"),  # the prefit net, not a fresh one
+        "DA+ERM": lambda: net("GX"),
+        "PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
+        "DA+PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **common),
+        # recentred on the post-DA measure, same as the copsens variant: from an
+        # X-centred ball the invariant slice is out of reach at any reasonable eps
+        "PI+INV": lambda: RecentredInvPartialR2Net(
+            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **common
+        ),
+        "DA+PI+IV": lambda: IVConstrainedPartialR2Net(
+            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad, outcome_model=net("GX"), **common
+        ),
+        # `pad` reaches the DA branch only (Cor. 1)
+        "PI&DA+PI": lambda: IntersectedPartialR2Net(
+            gamma=gamma, epsilon=epsilon, pad=pad, outcome_models={"X": net("X"), "GX": net("GX")}, **common
+        ),
+        "PI&DA+PI+IV": lambda: IntersectedIVPartialR2Net(
+            gamma=gamma,
+            epsilon=epsilon,
+            epsilon_iv=epsilon_iv,
+            pad=pad,
+            outcome_models={"X": net("X"), "GX": net("GX")},
+            **common,
+        ),
+    }
+    if set(all_builders) != set(PARTIAL_R2_NET_METHODS):
+        raise ValueError("PARTIAL_R2_NET_METHODS out of sync.")
+
+    unknown = sorted(set(method_names) - set(all_builders))
+    if unknown:
+        raise ValueError(f"the partial_r2_net backend does not define {unknown}; valid: {sorted(all_builders)}.")
+    return {name: all_builders[name] for name in method_names}
+
+
 class MethodRegistry:
     """Registry for building method instances with proper configuration."""
 
@@ -489,9 +575,10 @@ class MethodRegistry:
         clipy: bool = True,
         epsilon_iv: float | None = None,
         n_jobs: int = 1,
-        backend: Literal["partial_r2", "copsens"] = "partial_r2",
+        backend: Literal["partial_r2", "partial_r2_net", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
+        unfrozen_layers: int = 1,
     ) -> dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -511,14 +598,31 @@ class MethodRegistry:
                 + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
                 pointwise eps that Thm. 3.A requires.
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
-            backend: which PI machinery. 'copsens' swaps in the latent-factor
-                model (do-MNIST); its gamma is NOT comparable to partial-r2's.
-            outcome_models: {'X': net, 'GX': net}, prefit. copsens only.
+            backend: which PI machinery. 'partial_r2' is the linear SOCP;
+                'partial_r2_net' the do-MNIST last-l-layer refit (same Lemma-2
+                gamma units, so oracle gamma* is principled again); 'copsens' the
+                latent-factor model, whose gamma is comparable to NEITHER.
+            outcome_models: {'X': net, 'GX': net}, prefit. net backends only.
             n_components: latent dimension. copsens only.
+            unfrozen_layers: refit depth `l`. partial_r2_net only.
 
         Returns:
             Dictionary mapping method names to builder functions
         """
+        if backend == "partial_r2_net":
+            return _partial_r2_net_builders(
+                method_names,
+                gamma=gamma,
+                epsilon=epsilon,
+                epsilon_iv=epsilon_iv,
+                calibrate=calibrate,
+                pad=pad,
+                clipy=clipy,
+                n_jobs=n_jobs,
+                outcome_models=outcome_models,
+                unfrozen_layers=unfrozen_layers,
+            )
+
         if backend == "copsens":
             return _copsens_builders(
                 method_names,
@@ -579,6 +683,7 @@ DATASET_KEYS: dict[str, set] = {
         "n_queries",
         "n_components",
         "net",
+        "unfrozen_layers",
     },
 }
 

@@ -23,6 +23,11 @@ from src.methods.copsens import (
     IVConstrainedCopSens,
     RecentredInvCopSens,  # noqa: E402
 )
+from src.methods.partial_r2_net import (  # noqa: E402
+    IVConstrainedPartialR2Net,
+    PartialR2Net,
+    RecentredInvPartialR2Net,
+)
 from src.methods.regression import GradientDescentERM  # noqa: E402
 from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
@@ -69,6 +74,10 @@ def main():
         jax_grad=True,
     )
 
+    # copsens classes stay covered until the stage-5 purge; the r2 cases cover the
+    # partial_r2_net backend the pipeline now runs on
+    r2_common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
+
     cases = {
         "PI": lambda nj: CopSensPI(outcome_model=nets["X"], n_jobs=nj, **common).fit(X, y),
         "DA+PI": lambda nj: CopSensPI(outcome_model=nets["GX"], n_jobs=nj, **common).fit(GX, y),
@@ -80,6 +89,14 @@ def main():
         "DA+PI+IV": lambda nj: IVConstrainedCopSens(outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common).fit(
             GX, y, Z=G
         ),
+        "r2 PI": lambda nj: PartialR2Net(outcome_model=nets["X"], n_jobs=nj, **r2_common).fit(X, y),
+        "r2 DA+PI": lambda nj: PartialR2Net(outcome_model=nets["GX"], n_jobs=nj, **r2_common).fit(GX, y),
+        "r2 PI+INV": lambda nj: RecentredInvPartialR2Net(
+            outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **r2_common
+        ).fit(X, y, GX=GX),
+        "r2 DA+PI+IV": lambda nj: IVConstrainedPartialR2Net(
+            outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **r2_common
+        ).fit(GX, y, Z=G),
     }
 
     for name, build in cases.items():
@@ -94,11 +111,11 @@ def main():
         t_parallel = time.perf_counter() - start
 
         check(
-            f"A5 {name:9s} bounds bit-identical",
+            f"A5 {name:11s} bounds bit-identical",
             np.array_equal(bounds_serial, bounds_parallel, equal_nan=True),
             f"{t_serial:.1f}s -> {t_parallel:.1f}s ({t_serial / t_parallel:.1f}x)",
         )
-        check(f"A5 {name:9s} query_status identical", np.array_equal(status_serial, status_parallel))
+        check(f"A5 {name:11s} query_status identical", np.array_equal(status_serial, status_parallel))
 
     print("\n" + ("ALL PASS" if not FAIL else f"FAILURES: {FAIL}"))
     return 1 if FAIL else 0
