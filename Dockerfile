@@ -1,5 +1,5 @@
 # set base image
-FROM continuumio/miniconda3:24.7.1-0
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 # set working directory
 WORKDIR /app
@@ -8,15 +8,12 @@ WORKDIR /app
 ENV PYTHONPATH=/app
 ENV PYTORCH_ENABLE_MPS_FALLBACK=1
 
-# install packages
-COPY requirements.txt .
-COPY environment.yaml .
-RUN apt-get update \
-    && apt install curl -y
-RUN conda env create -f environment.yaml
+# install locked dependencies
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
 
 # copy source code
 COPY . .
 
 # run script
-CMD exec conda run --no-capture-output -n symmetry4CausalBounds python -u src/main.py
+CMD ["uv", "run", "--frozen", "python", "-u", "src/main.py"]

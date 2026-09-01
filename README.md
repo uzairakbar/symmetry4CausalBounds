@@ -13,26 +13,13 @@
 
 ## Setup
 ### Dependencies
-This code was tested on **MacOS** (Apple silicon) and **Linux**. We recommend running this code using `conda`, however we have also provided Docker and python `venv` setup scripts as alternatives.
+Python 3.13, managed with [`uv`](https://docs.astral.sh/uv/). `uv.lock` pins the
+exact versions the paper figures were generated with.
 
-### Conda environment (recommended)
 ```bash
-environment=symmetry4CausalBounds
-conda env create -f environment.yaml
-conda activate "$environment"
-export PYTORCH_ENABLE_MPS_FALLBACK=1
+uv sync
+uv run python src/main.py
 ```
-Then run experiments with `conda run --no-capture-output -n symmetry4CausalBounds python src/main.py`.
-
-### Python `venv` (tested with `3.10.14`)
-```bash
-environment='.symmetry4CausalBounds'
-python -m venv "$environment"
-"$environment"/bin/python -m pip install -r requirements.txt
-source "$environment"/bin/activate
-export PYTORCH_ENABLE_MPS_FALLBACK=1
-```
-Then run the main script `symmetry4CausalBounds/bin/python src/main.py`.
 
 ### Docker
 Build provided `Dockerfile` and run.
@@ -62,16 +49,13 @@ Comment out (or remove) the experiemnts from `./config.yaml` that you are not in
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
 ## CPU vs. GPU backend
-The code uses a CPU backend for PyTroch by default (recommended for `optical_device` and `simulation` sweep experiments). To use a GPU or MPS backend, however, change the `CPU_ONLY` variable specified in `./src/regressors/utils.py` to `False`.
+PyTorch picks CUDA/MPS automatically when available (only do-MNIST trains nets; `optical_device` and `simulation` never touch torch). To force CPU, set `CPU_ONLY = True` in `./src/methods/utils.py` and `./src/methods/nets.py`.
 
 ## PACE
+Creates the env under `~/scratch/uv_envs/` and symlinks it to `./.venv`.
 
 ```bash
 bash setup_uv.sh
-```
-
-```bash
-bash fix_torch.sh
 ```
 
 ## Citation

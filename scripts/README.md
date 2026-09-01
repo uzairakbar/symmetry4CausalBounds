@@ -1,10 +1,10 @@
 # Acceptance gates
 
-Run with `~/scratch/envs/s4cb/bin/python`, from the repo root.
+Run with `uv run python` (the repo `.venv`), from the repo root.
 
 Gates A2, A3 and A4 compare against SOURCE
 (`../doMNIST/symmetry4CausalBoundsDoMNIST`), so they run in two stages: `--source`
-under SOURCE's own `.venv`, then `--check` under `s4cb`.
+under SOURCE's own `.venv`, then `--check` under this repo's `.venv`.
 
 | gate | script | what it pins |
 |---|---|---|
@@ -61,9 +61,9 @@ $SRC/.venv/bin/python scripts/a1_a2_sem.py       --source /tmp/a2.npz
 $SRC/.venv/bin/python scripts/a3_da_parity.py    --source /tmp/a3.npz
 $SRC/.venv/bin/python scripts/a4_copsens_parity.py --source /tmp/a4
 
-~/scratch/envs/s4cb/bin/python scripts/a1_a2_sem.py        --check /tmp/a2.npz
-~/scratch/envs/s4cb/bin/python scripts/a3_da_parity.py     --check /tmp/a3.npz
-~/scratch/envs/s4cb/bin/python scripts/a4_copsens_parity.py --check /tmp/a4
+uv run python scripts/a1_a2_sem.py         --check /tmp/a2.npz
+uv run python scripts/a3_da_parity.py      --check /tmp/a3.npz
+uv run python scripts/a4_copsens_parity.py --check /tmp/a4
 ```
 
 ## A10
