@@ -2,7 +2,6 @@
 Panel plot utilities for 4x3 visualization panels.
 """
 
-
 import numpy as np
 
 from src.experiments.utils.data_operations import radial_sweep_pcs, sweep_along_pc
@@ -118,7 +117,7 @@ class PanelBuilder:
             transformed_points = raw_points
 
         results = {}
-        for name in self.runner.methods.keys():
+        for name in self.runner.methods:
             if name == "ATE":
                 predictions = self.runner.sem.f(transformed_points)
             else:

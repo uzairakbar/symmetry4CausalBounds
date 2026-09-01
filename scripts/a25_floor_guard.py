@@ -56,7 +56,7 @@ def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False):
     for solver in (cp.CLARABEL, cp.ECOS):
         try:
             problem.solve(solver=solver, verbose=False)
-        except Exception:
+        except Exception:  # noqa: S112 - solver fallback chain, try the next one
             continue
         if problem.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
             return float((problem.value / np.sqrt(N)) ** 2)

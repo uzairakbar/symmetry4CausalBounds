@@ -71,7 +71,7 @@ def a1(sem):
     check("h_* is colour-free", spread < 0.013, f"max cell dev {spread:.4f}")
 
     try:
-        sem.solution
+        sem.solution  # noqa: B018 - the property access itself is the check
         check("solution raises", False, "returned a value")
     except NotImplementedError:
         check("solution raises", True)

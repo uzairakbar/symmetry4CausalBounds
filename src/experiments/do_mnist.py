@@ -19,7 +19,6 @@ Phase 1 is the query sweep + perf. The sweep grids are Phase 2 -- see
 `get_sweep_runner_cls` for what each one still needs.
 """
 
-
 import numpy as np
 from loguru import logger
 
@@ -46,9 +45,10 @@ class Flatten:
     def fit_transform(self, X):
         X = np.asarray(X)
         # reshape on a C-contiguous array is a VIEW, which is what keeps X_raw + X
-        # at ~2.8 GB rather than 5.6 GB at 1.2M draws. Assert it, so a future
+        # at ~2.8 GB rather than 5.6 GB at 1.2M draws. Enforce it, so a future
         # slicing change cannot silently double the footprint.
-        assert X.flags["C_CONTIGUOUS"], "Flatten needs C-contiguous input to stay a view"
+        if not X.flags["C_CONTIGUOUS"]:
+            raise ValueError("Flatten needs C-contiguous input to stay a view")
         return X.reshape(len(X), -1)
 
 

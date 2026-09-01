@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from numpy.typing import NDArray
@@ -66,10 +65,7 @@ class ColoredDigitsSEM(SEM):
         y = torch_xor(fX, n_y)
 
         # assign a color based on the label; flip the color with probability e
-        if self.train:
-            e_space = torch.tensor([0.1, 0.2])
-        else:
-            e_space = torch.tensor([0.5])
+        e_space = torch.tensor([0.1, 0.2]) if self.train else torch.tensor([0.5])
         idx = torch.multinomial(e_space, num_samples=N, replacement=True)
         e = e_space[idx]
         C = torch_xor(y, torch_bernoulli(e, N))  # color C confounds X and y

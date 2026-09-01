@@ -7,7 +7,7 @@ experiment scripts, which may or may not use them.
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 
 import numpy as np
@@ -51,14 +51,13 @@ def preserve_rng():
     """
     numpy_state = np.random.get_state()
     torch_state = cuda_state = None
-    try:
+    # no torch, no torch stream to preserve -- the sentinel None already says so
+    with suppress(ImportError):
         import torch
 
         torch_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_state = torch.cuda.get_rng_state_all()
-    except ImportError:
-        pass
 
     try:
         yield

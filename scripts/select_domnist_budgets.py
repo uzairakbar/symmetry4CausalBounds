@@ -102,7 +102,7 @@ def min_knob_for_coverage(evaluate, lo, hi, target, max_iter=12, tol=0.01):
         return dict(value=float(lo), record=bottom, curve=curve, n_iter=2, bracket=[float(lo), float(lo)], reached=True)
 
     best, log_lo, log_hi = top, np.log(lo), np.log(hi)
-    for iteration in range(max_iter):
+    for _iteration in range(max_iter):
         if (log_hi - log_lo) < np.log(1.0 + tol):
             break
         mid = float(np.exp(0.5 * (log_lo + log_hi)))
@@ -131,7 +131,7 @@ def leg_report(selected, floor=None, reference_width=None, ceiling=None, target_
         "bracket": selected["bracket"],
         "n_iter": selected["n_iter"],
         "target_reachable": bool(target_reachable and selected["reached"]),
-        "status_counts": dict(zip(STATUS_CATEGORIES, (int(c) for c in record.status_counts))),
+        "status_counts": dict(zip(STATUS_CATEGORIES, (int(c) for c in record.status_counts), strict=False)),
         "curve": selected["curve"],
     }
     if floor is not None:

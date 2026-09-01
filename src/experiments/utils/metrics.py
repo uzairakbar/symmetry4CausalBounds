@@ -5,6 +5,7 @@ Error metrics for evaluating causal estimation methods.
 from dataclasses import dataclass
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from src.methods.sensitivity_models import SolveStatus
@@ -68,12 +69,10 @@ def approximation_error(
     Returns:
         Approximation error
     """
-    assert estimate.ndim >= estimand.ndim, (
-        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
-    )
-    assert estimate.shape[0] == estimand.shape[0], (
-        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
-    )
+    if estimate.ndim < estimand.ndim:
+        raise ValueError(f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.")
+    if estimate.shape[0] != estimand.shape[0]:
+        raise ValueError(f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.")
 
     estimate = _as_interval(estimate)
 
@@ -116,12 +115,10 @@ def worst_error(
     Returns:
         Worst-case squared error
     """
-    assert estimate.ndim >= estimand.ndim, (
-        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
-    )
-    assert estimate.shape[0] == estimand.shape[0], (
-        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
-    )
+    if estimate.ndim < estimand.ndim:
+        raise ValueError(f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.")
+    if estimate.shape[0] != estimand.shape[0]:
+        raise ValueError(f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.")
 
     estimate = _as_interval(estimate)
 
@@ -152,19 +149,18 @@ def interval_width(
     Returns:
         Average interval width
     """
-    assert estimate.ndim >= estimand.ndim, (
-        f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}."
-    )
-    assert estimate.shape[0] == estimand.shape[0], (
-        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
-    )
+    if estimate.ndim < estimand.ndim:
+        raise ValueError(f"Estimate dimension {estimate.ndim} less than estimand dimension {estimand.ndim}.")
+    if estimate.shape[0] != estimand.shape[0]:
+        raise ValueError(f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.")
 
     estimate = _as_interval(estimate)
 
     widths = estimate[:, 1] - estimate[:, 0]
     width = np.nanmean(widths)
 
-    assert np.all(widths[~np.isnan(widths)] >= 0), "Upper bound should be greater than lower bound for all samples."
+    if not np.all(widths[~np.isnan(widths)] >= 0):
+        raise ValueError("Upper bound should be greater than lower bound for all samples.")
 
     if normalize:
         width = width / (width + np.std(estimand))
@@ -192,9 +188,8 @@ def coverage(
     Returns:
         Fraction of queries whose interval contains the truth
     """
-    assert estimate.shape[0] == estimand.shape[0], (
-        f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}."
-    )
+    if estimate.shape[0] != estimand.shape[0]:
+        raise ValueError(f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.")
 
     estimate = _as_interval(estimate)
     estimand_flat = estimand.squeeze()
@@ -340,5 +335,7 @@ def trace_S_over_k(X: NDArray, GX: NDArray, keep: float = 1.0) -> float:
 
         whiten = V / np.sqrt(w)
         return float(np.trace(whiten.T @ Sigma_X @ whiten) / max(len(w), 1))
-    except Exception:
+    except Exception as e:
+        # NaN keeps the sweep going, but a silent NaN hides a broken spectrum
+        logger.warning(f"trace_S fallback failed: {e}; returning NaN.")
         return np.nan

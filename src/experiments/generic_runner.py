@@ -213,7 +213,9 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         """Setup SEMs and DAs for all experiments."""
         self.sems = [self.sem_factory() for _ in range(self.n_experiments)]
         self.das = [self.da_factory(sem) for sem in self.sems]
-        self.oracles = [self.prepare_pair(sem, da, features=self._features) for sem, da in zip(self.sems, self.das)]
+        self.oracles = [
+            self.prepare_pair(sem, da, features=self._features) for sem, da in zip(self.sems, self.das, strict=False)
+        ]
 
     def get_da(self, experiment_index: int):
         return self.das[experiment_index]
@@ -475,7 +477,7 @@ class FoldStrategy(GenericParamSweep):
         da = self.das[experiment_index]
         X_raw, X, y, X_test, estimand = self._base_data(experiment_index, self.n_samples_override)
 
-        GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)))
+        GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)), strict=False)
 
         return SweepData(
             # transform is row-wise: transform(tile(.)) == tile(transform(.))

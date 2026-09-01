@@ -1,4 +1,3 @@
-
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.linear_model import LinearRegression

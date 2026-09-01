@@ -185,7 +185,8 @@ def load(path: str):
         raise ValueError(f"Path {path} does not exist.")
 
     file_format = path.split(".")[-1]
-    assert file_format in ["pkl", "json"], f"Incorrect format {file_format}, can only accept pkl or json."
+    if file_format not in ("pkl", "json"):
+        raise ValueError(f"Incorrect format {file_format}, can only accept pkl or json.")
 
     try:
         if file_format == "pkl":

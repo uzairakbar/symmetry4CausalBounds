@@ -147,7 +147,8 @@ def a24_report_schema(path):
     if not os.path.exists(path):
         print(f"[SKIP] A24 report schema -- {path} absent; run select_domnist_budgets.py --smoke")
         return
-    report = json.load(open(path))
+    with open(path) as fh:
+        report = json.load(fh)
 
     for key in (
         "schema_version",

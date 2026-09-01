@@ -359,7 +359,7 @@ class CopSensPI(BoundedSA):
 
         mu_q = self.latent_.transform(X)
         mu_y = self._mu(X)  # precomputed: workers never call the net
-        return list(zip(mu_q, mu_y, self._starts(mu_q)))
+        return list(zip(mu_q, mu_y, self._starts(mu_q), strict=False))
 
     def _worker_view(self):
         """Picklable snapshot. Drops exactly what the per-query solve never touches
@@ -422,7 +422,7 @@ class CopSensPI(BoundedSA):
                         constraints=constraints,
                         options={"maxiter": MAXITER, "ftol": FTOL},
                     )
-                except Exception:
+                except Exception:  # noqa: S112 - failed starts are routine in multi-start; survivors cover
                     continue
                 feasible = (result.x @ result.x <= 1.0 + 1e-6) and (
                     not has_con or con_val(result.x) <= budget * (1 + 1e-6)

@@ -196,12 +196,11 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
 
     highlighted = []
     for label in labels:
-        if "IVL" in label or "average" in label:
-            if label != TEX_MAPPER.get("DA+IVL-a", ""):
-                # Apply bold formatting
-                bold = label.replace(r"\alpha", r"{\boldsymbol{\alpha}}")
-                bold = bold.replace(r"\Pi", r"{\boldsymbol{\Pi}}")
-                label = rf"\textbf{{{bold}}}"
+        if ("IVL" in label or "average" in label) and label != TEX_MAPPER.get("DA+IVL-a", ""):
+            # Apply bold formatting
+            bold = label.replace(r"\alpha", r"{\boldsymbol{\alpha}}")
+            bold = bold.replace(r"\Pi", r"{\boldsymbol{\Pi}}")
+            label = rf"\textbf{{{bold}}}"
         highlighted.append(label)
 
     return highlighted
@@ -649,8 +648,8 @@ def create_panel_plot(
     # === Legend ===
     ax_legend = axes[2, 1]
     ax_legend.axis("off")
-    label_order = [TEX_MAPPER.get(n, n) for n in results_dict.keys()]
-    handles = [legend_handles[l] for l in label_order if l in legend_handles]
+    label_order = [TEX_MAPPER.get(n, n) for n in results_dict]
+    handles = [legend_handles[label] for label in label_order if label in legend_handles]
     ax_legend.legend(
         handles=handles,
         labels=label_order,
@@ -871,7 +870,7 @@ def create_perf_plot(
             rates = np.array([perf_record[m]["rates"] for m in methods], dtype=float) * 100.0
             bottom = np.zeros(len(methods))
             bar_handles = []
-            for index, (category, color) in enumerate(zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS)):
+            for index, (_category, color) in enumerate(zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS, strict=False)):
                 container = ax.bar(
                     positions,
                     rates[:, index],
@@ -1074,7 +1073,7 @@ def create_digit_sweep_plot(
     # thumbnails below the axis. The SEM renders RGB = [t,0,1-t]*grey, so the
     # background is exactly 0 and the ink mask doubles as the alpha channel --
     # without it every digit sits in a black box.
-    for xi, image in zip(x, np.asarray(exemplars)):
+    for xi, image in zip(x, np.asarray(exemplars), strict=False):
         rgb = np.clip(np.transpose(image, (1, 2, 0)), 0.0, 1.0)
         rgba = np.dstack([rgb, np.clip(rgb.sum(-1), 0.0, 1.0)])
         ax.add_artist(

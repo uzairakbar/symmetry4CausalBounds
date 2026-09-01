@@ -184,7 +184,7 @@ def verdicts():
         limits = plotting._limits(series)
         if limits is None:
             continue
-        for method, values in zip(y_results, series):
+        for method, values in zip(y_results, series, strict=False):
             finite = plotting._finite(values)
             if len(finite) and not (limits[0] <= np.median(finite) <= limits[1]):
                 blanked.append(f"{name}/{method}")

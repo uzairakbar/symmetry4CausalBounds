@@ -1,4 +1,3 @@
-
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
@@ -29,7 +28,8 @@ class NullSpaceTranslation(DA):
 
         k_max, _ = null_basis.shape
 
-        assert k_max >= kernel_dim, f"`kernel_dim`={kernel_dim} cannot be greater than `k_max`={k_max}."
+        if k_max < kernel_dim:
+            raise ValueError(f"`kernel_dim`={kernel_dim} cannot be greater than `k_max`={k_max}.")
 
         if kernel_dim < 0:
             logger.info("`kernel_dim`<0 means DA is constructed from full bases of ker(f).")
@@ -64,7 +64,8 @@ class NullSpaceTranslation(DA):
 
     @strength.setter
     def strength(self, value: float):
-        assert value >= 0.0, "`strength` must be non-negative."
+        if value < 0.0:
+            raise ValueError("`strength` must be non-negative.")
         self._strength = float(value)
 
     def augment(self, X: NDArray, scale: float = 1.0, **kwargs) -> tuple[NDArray, NDArray]:

@@ -58,8 +58,10 @@ class LinearSimulationSEM(SEM):
     @gamma.setter
     def gamma(self, gamma: float | None):
         if gamma is not None:
-            assert gamma >= 0.0, "`gamma` must be non-negative."
-            assert gamma <= MAX_GAMMA, f"`gamma` must be <= 1/s^2 = {MAX_GAMMA}."
+            if gamma < 0.0:
+                raise ValueError("`gamma` must be non-negative.")
+            if gamma > MAX_GAMMA:
+                raise ValueError(f"`gamma` must be <= 1/s^2 = {MAX_GAMMA}.")
         self._gamma = gamma
 
     @property

@@ -142,7 +142,8 @@ class GaussianNoise(DA):
 
     @strength.setter
     def strength(self, value: float):
-        assert value >= 0.0, "`strength` must be non-negative."
+        if value < 0.0:
+            raise ValueError("`strength` must be non-negative.")
         self._strength = float(value)
 
     def __call__(self, X, noise_coeff: float | None = None, **kwargs):

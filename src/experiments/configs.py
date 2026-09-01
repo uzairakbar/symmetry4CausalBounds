@@ -175,8 +175,10 @@ SCATTER_SE_CROSSHAIRS: bool = True
 # vs 0.17706 here -- a 23% error, at the end of the axis the sweep is about.
 SPECTRUM_KEEP: float = 0.999
 
+
 # budget-ratio grid: centred on 1, i.e. on the oracle value
-_RATIO_GRID = lambda dataset, n: np.geomspace(2**-3, 2**3, num=n)
+def _RATIO_GRID(dataset, n):
+    return np.geomspace(2**-3, 2**3, num=n)
 
 
 @dataclass(frozen=True)
@@ -463,7 +465,8 @@ def _copsens_builders(
             **common,
         ),
     }
-    assert set(all_builders) == set(COPSENS_METHODS), "COPSENS_METHODS out of sync."
+    if set(all_builders) != set(COPSENS_METHODS):
+        raise ValueError("COPSENS_METHODS out of sync.")
 
     # a HARD error, not a silent filter: quietly dropping 4 of 11 requested methods
     # is how a run comes back missing columns with nothing in the log
@@ -549,7 +552,8 @@ class MethodRegistry:
             "PI&DA+PI_IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
         }
 
-        assert set(all_builders) == set(ALL_METHODS), "ALL_METHODS out of sync."
+        if set(all_builders) != set(ALL_METHODS):
+            raise ValueError("ALL_METHODS out of sync.")
 
         return {name: all_builders[name] for name in method_names if name in all_builders}
 

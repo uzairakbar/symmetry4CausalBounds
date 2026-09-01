@@ -122,7 +122,9 @@ class Translate(transforms.RandomAffine):
 
         img = F.affine(img, *ret, interpolation=self.interpolation, fill=fill, center=self.center)
 
-        scaled_params = tuple(param_scaler(param) for (param_scaler, param) in zip(self.param_scaler, params))
+        scaled_params = tuple(
+            param_scaler(param) for (param_scaler, param) in zip(self.param_scaler, params, strict=False)
+        )
 
         return img, scaled_params
 

@@ -13,7 +13,6 @@ affine in t, so as IV columns they are not independent directions the way rotati
 and translation are.
 """
 
-
 import numpy as np
 import torch
 import torch.nn.functional as Fn

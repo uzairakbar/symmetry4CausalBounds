@@ -110,7 +110,7 @@ def a14_memory(sem):
     try:
         Flatten().fit_transform(X_img[:, :, ::2])
         check("A14 Flatten rejects non-contiguous input", False, "accepted silently")
-    except AssertionError:
+    except ValueError:
         check("A14 Flatten rejects non-contiguous input", True)
 
     peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024**2

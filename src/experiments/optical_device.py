@@ -3,7 +3,6 @@ Optical device experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
-
 import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
 

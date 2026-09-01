@@ -25,10 +25,10 @@ class LeastSquaresIterative(pointEstimator):
         cost = cp.norm(y - X @ h)
         prob = cp.Problem(cp.Minimize(cost))
         try:
-            result = prob.solve(solver=cp.CLARABEL)
-        except:
+            prob.solve(solver=cp.CLARABEL)
+        except cp.SolverError:
             logger.warning("CLARABLE solver failed, falling back to ECOS.")
-            result = prob.solve(solver=cp.ECOS)
+            prob.solve(solver=cp.ECOS)
         self._W = h.value
         return self
 
@@ -201,10 +201,10 @@ class GeneralizedMomentMethodIV(pointEstimator):
         cost = cp.quad_form(moment_vector, cp.psd_wrap(cp.Constant(Pi_Z)))
         prob = cp.Problem(cp.Minimize(cost))
         try:
-            result = prob.solve(solver=cp.CLARABEL)
-        except:
+            prob.solve(solver=cp.CLARABEL)
+        except cp.SolverError:
             logger.warning("CLARABLE solver failed, falling back to ECOS.")
-            result = prob.solve(solver=cp.ECOS)
+            prob.solve(solver=cp.ECOS)
         self._W = h.value
         return self
 

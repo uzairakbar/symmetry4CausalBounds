@@ -3,7 +3,6 @@ Simulation experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
-
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.configs import SIMULATION_CONFIG, MethodRegistry
