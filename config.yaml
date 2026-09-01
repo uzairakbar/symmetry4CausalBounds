@@ -95,7 +95,7 @@ simulation:
 #             metric: [wall_clock, seed_var]    # seed_var needs n_experiments >= 2
 
 optical_device:
-    seed: 69
+    seed: 42
     n_samples: 1_000
     n_experiments: 8
     sweep_samples: 32

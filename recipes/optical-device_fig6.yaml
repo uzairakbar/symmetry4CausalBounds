@@ -1,0 +1,32 @@
+defaults:
+    calibrate: false
+    pad: false
+    clipy: false
+    n_jobs: -1
+
+optical_device:
+    seed: 42
+    n_samples: 1_000
+    n_experiments: 8
+    sweep_samples: 32
+    methods:
+        - ATE
+        - ERM
+        - DA+ERM
+        - DA+IV
+        - PI_INV
+        - PI
+        - DA+PI
+        - DA+PI_IV
+    augmentation: all
+    experiment:
+        query: true
+
+hyperparameters:
+    lr: 0.01
+    batch: 256
+    epochs: 1
+    optimizer: adam
+    betas: [0.7, 0.9]
+    onecycle: true
+    loss: mse

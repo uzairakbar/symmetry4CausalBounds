@@ -45,13 +45,10 @@ class SimulationConfig:
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
-    gamma: float = 2**-2
+    gamma: float = 2**-1.5
     epsilon: float = 2**-2
-    # Query plot ONLY: the query sweep keeps an explicit eps rather than the
-    # oracle eps*, so the panel/radial figures stay under manual control.
-    # Nothing else reads this -- sweeps/scatter/perf all use eps*.
     query_epsilon: float = 2**-2
-    epsilon_true: Optional[float] = None    # DA misspecification target; None = as-is
+    epsilon_true: Optional[float] = None
     test_fraction: float = 0.1
     dataset_index: int = 8
     ground_truth_model: Literal['linear', 'polynomial'] = 'polynomial'
@@ -135,7 +132,7 @@ EPS_TOL: float = 2**-8
 #   r=16    1.000                DA+PI parity: inert, a duplicate column
 # The floor moves with gamma, n and the DA draw, so this is a RATIO, never an epsilon.
 # It stays ~3 orders of magnitude below eps_rms, so "guard" is not "loose".
-FLOOR_GUARD_R: float = 9.0
+FLOOR_GUARD_R: float = 2 #9.0
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
 # true invariance error, so that eps/eps* is a meaningful ratio axis.
