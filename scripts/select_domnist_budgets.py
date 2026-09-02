@@ -1,9 +1,11 @@
-"""Select do-MNIST budgets by POPULATION coverage. Run once; hand-copy into config.yaml.
+"""Select do-MNIST budgets by POPULATION coverage. DEMOTED to a sanity check.
 
-Not part of the pipeline -- nothing in src/ imports this. It answers "what gamma,
-epsilon and epsilon_iv actually hold coverage at this (pad, calibrate, n_pi, net)",
-which the oracle cannot: do-MNIST's h_* is a frozen CNN, `sem.solution` raises, so no
-oracle quantity certifies membership on the copsens backend.
+Selection targets the COPSENS backend, whose latent-space gamma no oracle quantity
+could certify. The pipeline now runs `partial_r2_net`, whose ball is the Lemma-2
+ball in function space -- there oracle gamma* = bias_sq/sigma_sq is principled and
+consumed directly (`ParamSweepRunner.fit_gamma`), and membership is gated by
+`a27_domnist_r2.py`. Kept runnable as an empirical cross-check of the copsens
+numbers until the stage-5 purge; nothing in src/ imports this.
 
 Three sequential legs at ONE target coverage X, each fixing its knob for good:
 

@@ -19,6 +19,7 @@ under SOURCE's own `.venv`, then `--check` under this repo's `.venv`.
 | A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
 | A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
+| A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, JAX≡FD, l=2 path |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
@@ -26,10 +27,10 @@ under SOURCE's own `.venv`, then `--check` under this repo's `.venv`.
 ## Budget selection
 
 `select_domnist_budgets.py` picks `gamma`, `epsilon` and `epsilon_iv` by POPULATION
-coverage and writes `artifacts/domnist-budget_report.json`. Run it once, read the
-report, hand-copy `config_patch` into `config.yaml` — the pipeline never calls it.
-do-MNIST needs it because `sem.solution` raises: `h_*` is a frozen CNN and is not in
-the CopSens candidate class, so no oracle quantity certifies membership.
+coverage and writes `artifacts/domnist-budget_report.json`. DEMOTED to a sanity
+check: it targets the copsens backend, whose latent-space `gamma` no oracle could
+certify. The `partial_r2_net` backend the pipeline now runs consumes oracle
+`gamma* = bias_sq/sigma_sq` directly, and A27 gates membership.
 
 Three sequential legs at one target coverage `X` (`--target-coverage`, or
 `do_mnist.target_coverage`; 0.95 or 0.99):
