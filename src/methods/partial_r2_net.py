@@ -33,10 +33,13 @@ EPS = 1e-9
 FTOL = 1e-8
 FEAS_TOL = 1e-6
 MAXITER = 300
-# per-query polish budget. Profiled at n_pi=6k: one 300-iteration SLSQP is ~0.5 s
-# and the 12-solve multi-start ~4.6 s/query, while the backtracked directed
+# per-query polish budget for UNCONSTRAINED programs. Profiled at n_pi=6k: one
+# 300-iteration SLSQP is ~0.5 s and the 12-solve multi-start ~4.6 s/query, while
+# on programs with no (or an inert) extra constraint the backtracked directed
 # candidates already carry the bounds (widths move < 1e-3 with the full budget) --
-# so each side gets ONE polish solve from its best candidate, capped here.
+# there each side gets ONE polish solve from its best candidate, capped here.
+# Extra-constrained programs are NOT covered by that measurement and keep the
+# full multi-start polish (see _solve_single).
 POLISH_MAXITER = 80
 N_EXTRA_STARTS = 3
 JITTER = 0.05
@@ -577,17 +580,20 @@ class PartialR2Net(BoundedSA):
                 return s * cache.val(theta), s * cache.grad(theta)
 
             if candidates:
-                # ONE polish solve per side, from the candidate already leading
-                # it -- solving from every start cost ~4.6 s/query for < 1e-3 of
-                # extra width. Extra-constrained programs get the anchor as a
-                # second start and the full budget: their optimum need not sit
-                # along the r2-sized directed line (measured: PI+INV loses ~0.2
-                # of width without this).
-                pick = min if side == 0 else max
-                polish_starts = [pick(candidates, key=lambda c: c[0])[1]]
-                maxiter = POLISH_MAXITER
-                if budget is not None:
-                    polish_starts.append(self._ctx["anchor"])
+                # Unconstrained/inert programs: ONE polish per side from the
+                # leading candidate -- solving from every start cost ~4.6 s/query
+                # and moved THOSE widths by < 1e-3. Extra-constrained programs
+                # keep the full multi-start (every RAW start, full budget): their
+                # optima need not sit along the r2-sized directed line, and the
+                # single-polish shortcut measurably NARROWED PI+INV (0.91 ->
+                # 0.80 at the a27 fixture) -- a validity-side loss, not a
+                # tolerable speed trade.
+                if budget is None:
+                    pick = min if side == 0 else max
+                    polish_starts = [pick(candidates, key=lambda c: c[0])[1]]
+                    maxiter = POLISH_MAXITER
+                else:
+                    polish_starts = starts
                     maxiter = MAXITER
                 for theta0 in polish_starts:
                     try:

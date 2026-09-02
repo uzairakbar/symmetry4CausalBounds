@@ -45,7 +45,10 @@ EPSILON, EPSILON_IV = 0.1, 0.1
 # at width scale, orders above this.
 NEST_TOL = 2e-3
 N_JOBS = 16
-EXEMPT = {"PI+INV"}  # reported, never hard-failed (user decision, PLAN stage 4)
+# reported, never hard-failed: realizability under a shallow refit is an open
+# empirical question (see RecentredInvPartialR2Net); PLAN decision 2 additionally
+# bars hard-failing its INFEASIBILITY at l=1
+EXEMPT = {"PI+INV"}
 FAIL = []
 
 
