@@ -33,6 +33,11 @@ EPS = 1e-9
 FTOL = 1e-8
 FEAS_TOL = 1e-6
 MAXITER = 300
+# per-query polish budget. Profiled at n_pi=6k: one 300-iteration SLSQP is ~0.5 s
+# and the 12-solve multi-start ~4.6 s/query, while the backtracked directed
+# candidates already carry the bounds (widths move < 1e-3 with the full budget) --
+# so each side gets ONE polish solve from its best candidate, capped here.
+POLISH_MAXITER = 80
 N_EXTRA_STARTS = 3
 JITTER = 0.05
 FLOOR_STARTS = 6
@@ -100,14 +105,17 @@ def head_index(theta, phi, shapes):
     the two cannot drift without a status change (gate a27)."""
     a = phi
     offset = 0
-    for i, (dout, din) in enumerate(shapes):
-        W = theta[offset : offset + dout * din].reshape(dout, din)
-        offset += dout * din
-        b = theta[offset : offset + dout]
-        offset += dout
-        a = a @ W.T + b
-        if i < len(shapes) - 1:
-            a = np.maximum(a, 0.0)
+    # runaway solver iterates land here through the feasibility checks; their
+    # overflow to inf is exactly what makes them infeasible, not worth a warning
+    with np.errstate(over="ignore"):
+        for i, (dout, din) in enumerate(shapes):
+            W = theta[offset : offset + dout * din].reshape(dout, din)
+            offset += dout * din
+            b = theta[offset : offset + dout]
+            offset += dout
+            a = a @ W.T + b
+            if i < len(shapes) - 1:
+                a = np.maximum(a, 0.0)
     return a[:, 0]
 
 
@@ -136,7 +144,7 @@ class _Cached:
         return self._eval(v)[1]
 
 
-def _minimize_slsqp(fun_vg, x0, cons):
+def _minimize_slsqp(fun_vg, x0, cons, maxiter=MAXITER):
     """One SLSQP solve of min fun s.t. c <= B for cons = [(vg, B), ...]."""
     cache = _Cached(fun_vg)
     constraints = []
@@ -149,7 +157,7 @@ def _minimize_slsqp(fun_vg, x0, cons):
         method="SLSQP",
         jac=cache.grad,
         constraints=constraints,
-        options={"maxiter": MAXITER, "ftol": FTOL},
+        options={"maxiter": maxiter, "ftol": FTOL},
     )
     # status 9 = out of iterations while still making progress. The point is a
     # feasible inner approximation exactly like a converged local optimum (the
@@ -159,10 +167,11 @@ def _minimize_slsqp(fun_vg, x0, cons):
     return result.x, bool(result.success or result.status == 9)
 
 
-def _minimize_al(fun_vg, x0, cons):
+def _minimize_al(fun_vg, x0, cons, maxiter=MAXITER):
     """Augmented-Lagrangian fallback for heads past `SLSQP_DIM_MAX`: L-BFGS-B inner
     solves on the AL merit, multiplier update per round, penalty grown while the
-    violation resists. Acceptance still rests on the caller's feasibility check."""
+    violation resists. Acceptance still rests on the caller's feasibility check.
+    `maxiter` caps each inner L-BFGS-B run."""
     lam = np.zeros(len(cons))
     mu = 10.0
     x = np.asarray(x0, dtype=float)
@@ -184,7 +193,7 @@ def _minimize_al(fun_vg, x0, cons):
                     grad = grad + t * np.asarray(cg, dtype=float)
             return value, grad
 
-        result = minimize(merit, x, method="L-BFGS-B", jac=True, options={"maxiter": AL_INNER_MAXITER})
+        result = minimize(merit, x, method="L-BFGS-B", jac=True, options={"maxiter": min(maxiter, AL_INNER_MAXITER)})
         x = result.x
         viol = violations(x)
         worst = float(np.max(viol, initial=0.0))
@@ -360,10 +369,10 @@ class PartialR2Net(BoundedSA):
             self._terms = partial_r2_net_jax.build_terms(self)
         return self._terms
 
-    def _minimize(self, fun_vg, x0, cons):
+    def _minimize(self, fun_vg, x0, cons, maxiter=MAXITER):
         if len(self.theta_c_) <= SLSQP_DIM_MAX:
-            return _minimize_slsqp(fun_vg, x0, cons)
-        return _minimize_al(fun_vg, x0, cons)
+            return _minimize_slsqp(fun_vg, x0, cons, maxiter=maxiter)
+        return _minimize_al(fun_vg, x0, cons, maxiter=maxiter)
 
     def _feasible(self, theta, b_r2, budget):
         """Acceptance runs on the NUMPY mirror, so a JAX/numpy drift surfaces as a
@@ -551,32 +560,45 @@ class PartialR2Net(BoundedSA):
             starts[1:1] = self._directed_deep(cache, gram, b_r2)
 
         # the backtracked starts are candidates in their own right: the directed
-        # pair already sits near the boundary on each side, so even a solver-free
-        # query gets a real excursion instead of a FAILURE
+        # pair already sits near the boundary on each side and carries most of the
+        # bound (profiled: the full multi-start moves the widths by < 1e-3)
         candidates = []
         for theta0 in starts:
             x = self._to_feasible(theta0, b_r2, budget)
             if x is not None:
-                candidates.append(cache.val(x))
+                candidates.append((cache.val(x), x))
 
         best = [np.inf, -np.inf]
         got = [False, False]
         for sign, side in ((+1.0, 0), (-1.0, 1)):
-            values = list(candidates)
+            values = [value for value, _ in candidates]
 
             def fun_vg(theta, s=sign):
                 return s * cache.val(theta), s * cache.grad(theta)
 
-            for theta0 in starts:
-                try:
-                    x, _ = self._minimize(fun_vg, theta0, cons)
-                except Exception:  # noqa: S112 - failed starts are routine in multi-start; survivors cover
-                    continue
-                # any backtracked iterate is a feasible inner point, wherever the
-                # solver stopped -- the runaway ones just backtrack to the anchor
-                x = self._to_feasible(x, b_r2, budget)
-                if x is not None:
-                    values.append(cache.val(x))
+            if candidates:
+                # ONE polish solve per side, from the candidate already leading
+                # it -- solving from every start cost ~4.6 s/query for < 1e-3 of
+                # extra width. Extra-constrained programs get the anchor as a
+                # second start and the full budget: their optimum need not sit
+                # along the r2-sized directed line (measured: PI+INV loses ~0.2
+                # of width without this).
+                pick = min if side == 0 else max
+                polish_starts = [pick(candidates, key=lambda c: c[0])[1]]
+                maxiter = POLISH_MAXITER
+                if budget is not None:
+                    polish_starts.append(self._ctx["anchor"])
+                    maxiter = MAXITER
+                for theta0 in polish_starts:
+                    try:
+                        x, _ = self._minimize(fun_vg, theta0, cons, maxiter=maxiter)
+                        # any backtracked iterate is a feasible inner point,
+                        # wherever the solver stopped -- runaways just backtrack
+                        x = self._to_feasible(x, b_r2, budget)
+                        if x is not None:
+                            values.append(cache.val(x))
+                    except Exception as exc:  # a lost polish costs width, not validity
+                        logger.debug(f"{type(self).__name__}: polish failed ({exc}); candidate bound kept")
 
             if values:
                 best[side] = min(values) if side == 0 else max(values)
@@ -599,10 +621,11 @@ class RecentredInvPartialR2Net(PartialR2Net):
     (X, GX), so swapping them leaves the CONSTRAINT untouched; only the ball moves
     to the post-DA centre, which already sits near the slice.
 
-    Expect all-INFEASIBLE at unfrozen_layers=1 regardless: a last-layer refit of a
-    trunk trained on raw pixels may simply contain no near-invariant function.
-    That is the honest answer, not a bug -- read the floor/budget pair logged per
-    predict before touching the budget.
+    Realizability at unfrozen_layers=1 is empirical: a shallow refit could contain
+    no near-invariant function, in which case all-INFEASIBLE is the honest answer,
+    not a bug. Measured at l=1, gamma*, n_pi=6k the DA-trunk head DOES reach the
+    slice (floor 0.004 < eps^2 0.01) -- read the floor/budget pair logged per
+    predict before touching the budget either way.
     """
 
     def __init__(self, gamma=None, epsilon=None, **kwargs):
