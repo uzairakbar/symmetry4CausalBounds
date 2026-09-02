@@ -196,7 +196,7 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
 
     highlighted = []
     for label in labels:
-        if ("IVL" in label or "average" in label) and label != TEX_MAPPER.get("DA+IVL-a", ""):
+        if "IVL" in label or "average" in label:
             # Apply bold formatting
             bold = label.replace(r"\alpha", r"{\boldsymbol{\alpha}}")
             bold = bold.replace(r"\Pi", r"{\boldsymbol{\Pi}}")

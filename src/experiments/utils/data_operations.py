@@ -19,7 +19,7 @@ from sklearn.decomposition import PCA
 from .constants import ARTIFACTS_DIRECTORY, TEX_MAPPER
 
 PlotFormat = Literal["png", "pdf", "ps", "eps", "svg"]
-ExperimentType = Literal["simulation", "optical_device", "colored_mnist", "rotated_mnist"]
+ExperimentType = Literal["simulation", "optical_device", "do_mnist"]
 
 
 def set_seed(seed: int = 42):

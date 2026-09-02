@@ -49,7 +49,7 @@ Comment out (or remove) the experiemnts from `./config.yaml` that you are not in
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
 ## CPU vs. GPU backend
-PyTorch picks CUDA/MPS automatically when available (only do-MNIST trains nets; `optical_device` and `simulation` never touch torch). To force CPU, set `CPU_ONLY = True` in `./src/methods/utils.py` and `./src/methods/nets.py`.
+PyTorch picks CUDA/MPS automatically when available (only do-MNIST trains nets; `optical_device` and `simulation` never touch torch). To force CPU, set `CPU_ONLY = True` in `./src/methods/nets.py`.
 
 ## PACE
 Creates the env under `~/scratch/uv_envs/` and symlinks it to `./.venv`.

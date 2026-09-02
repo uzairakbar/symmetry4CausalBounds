@@ -123,14 +123,6 @@ optical_device:
         perf:
             metric: [wall_clock, seed_var]
 
-# colored_mnist:
-#     seed: 42
-#     num_seeds: 10
-#     n_samples: 60_000
-#     augmentation: jitter > translate
-#     experiment:
-#         query: true
-
 # net training; reaches GradientDescentERM._fit via fit_model. The linear
 # experiments have no nets and ignore every key here.
 hyperparameters:

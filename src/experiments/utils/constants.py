@@ -102,22 +102,6 @@ PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
 
-# Panel Plot Specific Configurations
-# Requirement 2: specification of y-axis clip values for Row 4 (index 3: h^T x)
-PANEL_PREDICTION_LIMITS: dict[str, tuple[float, float]] = {
-    "simulation": (-3, 3),
-    "optical_device": (-2.625, 3.375),
-}
-
-# Requirement 3: specification of scale (log vs linear) for rows 1 and 2 (indices 0 and 1)
-PANEL_Y_SCALES: dict[str, Literal["linear", "log"]] = {
-    "worst_error": "asinh",  # Row 1 (index 0)
-    "width": "asinh",  # Row 2 (index 1)
-}
-
-
-# src/experiments/utils/constants.py
-
 # Configuration for panel plots per experiment and per row
 # Row index mapping: 0: Worst Error, 1: Width, 2: Density, 3: Predictions
 PANEL_CONFIGS = {
