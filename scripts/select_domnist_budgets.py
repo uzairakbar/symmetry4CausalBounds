@@ -1,11 +1,10 @@
 """Select do-MNIST budgets by POPULATION coverage. DEMOTED to a sanity check.
 
-Selection targets the COPSENS backend, whose latent-space gamma no oracle quantity
-could certify. The pipeline now runs `partial_r2_net`, whose ball is the Lemma-2
-ball in function space -- there oracle gamma* = bias_sq/sigma_sq is principled and
-consumed directly (`ParamSweepRunner.fit_gamma`), and membership is gated by
-`a27_domnist_r2.py`. Kept runnable as an empirical cross-check of the copsens
-numbers until the stage-5 purge; nothing in src/ imports this.
+The pipeline no longer needs it: the `partial_r2_net` ball is the Lemma-2 ball in
+function space, so oracle gamma* = bias_sq/sigma_sq is principled and consumed
+directly (`ParamSweepRunner.fit_gamma`), and membership is gated by
+`a27_domnist_r2.py`. Kept runnable as an empirical cross-check of those budgets;
+nothing in src/ imports this.
 
 Three sequential legs at ONE target coverage X, each fixing its knob for good:
 
@@ -228,9 +227,9 @@ def main(args):
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
-            backend="copsens",
+            backend="partial_r2_net",
             outcome_models=nets,
-            n_components=block.get("n_components", 32),
+            unfrozen_layers=block.get("unfrozen_layers", DOMNIST_CONFIG.unfrozen_layers),
             **toggles,
         )
 
@@ -247,7 +246,7 @@ def main(args):
         return model.fit(y=y_pi, **fit_kw)
 
     # ------------------------------------------------- leg 1: gamma on baseline PI
-    # The latent fit does not depend on gamma, so fit once and sweep at predict.
+    # The refit does not depend on gamma, so fit once and sweep at predict.
     logger.info("leg 1/3: gamma on baseline PI")
     pi = fitted("PI", gamma=GAMMA_BRACKET[1])
     gamma_sel = min_knob_for_coverage(
@@ -290,7 +289,7 @@ def main(args):
 
     def budget_leg(name, attr, label):
         model = fitted(name, gamma=gamma)
-        floor = model.constraint_floor(model._radius(gamma))
+        floor = model.constraint_floor(gamma)
         lo = float(np.sqrt(max(floor, 0.0)) * FLOOR_MARGIN)
         hi = float(np.sqrt(max(floor, 1e-12) * BUDGET_R_HI))
         logger.info(f"{label}: floor {floor:.6g} (squared) -> bracket [{lo:.6g}, {hi:.6g}], aim {aim:.4f}")
@@ -368,16 +367,10 @@ def main(args):
             "target_coverage": target,
             "eval_draw": "balanced interventional resample over the held-out split",
             **toggles,
-            "n_components": block.get("n_components", 32),
+            "unfrozen_layers": block.get("unfrozen_layers", DOMNIST_CONFIG.unfrozen_layers),
             "net": block.get("net"),
             "augmentation": block["augmentation"],
             "link": DOMNIST_CONFIG.link,
-            "n_anchors": DOMNIST_CONFIG.n_anchors,
-            "n_anchors_c": DOMNIST_CONFIG.n_anchors_c,
-            "n_constraint_inv": DOMNIST_CONFIG.n_constraint_inv,
-            "n_constraint_iv": DOMNIST_CONFIG.n_constraint_iv,
-            "mu_clip": DOMNIST_CONFIG.mu_clip,
-            "jax_grad": DOMNIST_CONFIG.jax_grad,
             "exemplar_seed": DOMNIST_CONFIG.exemplar_seed,
             "sem": {
                 "alpha": DOMNIST_CONFIG.alpha,
@@ -398,8 +391,8 @@ def main(args):
             "epsilon_star_analytic": 0.0,  # provable: DoMNISTDA.exact_invariance
             "sigma_sq": _f(sem.sigma_sq),
             "bias_sq": _f(sem.bias_sq),
-            "note": "sem.solution raises on do-MNIST; no oracle quantity certifies "
-            "membership on the copsens backend. Selected by coverage instead.",
+            "note": "sem.solution raises on do-MNIST; this script selects by "
+            "coverage. a27 gates membership at oracle gamma* instead.",
         },
         "reference": {
             "PI": {"coverage": gamma_sel["record"].coverage, "mean_width": gamma_sel["record"].interval_width},

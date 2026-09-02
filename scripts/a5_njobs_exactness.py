@@ -18,11 +18,6 @@ from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
 from src.experiments.configs import DOMNIST_CONFIG  # noqa: E402
 from src.experiments.do_mnist import Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.methods.copsens import (
-    CopSensPI,
-    IVConstrainedCopSens,
-    RecentredInvCopSens,  # noqa: E402
-)
 from src.methods.partial_r2_net import (  # noqa: E402
     IVConstrainedPartialR2Net,
     PartialR2Net,
@@ -64,38 +59,18 @@ def main():
     X, GX, y, G = X[keep], GX[keep], y[keep], G[keep]
     Q = X[:N_QUERIES]
 
-    common = dict(
-        gamma=0.1,
-        n_components=32,
-        calibrate=True,
-        clipy=True,
-        mu_clip=DOMNIST_CONFIG.attainable,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-        jax_grad=True,
-    )
-
-    # copsens classes stay covered until the stage-5 purge; the r2 cases cover the
-    # partial_r2_net backend the pipeline now runs on
-    r2_common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
+    common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
 
     cases = {
-        "PI": lambda nj: CopSensPI(outcome_model=nets["X"], n_jobs=nj, **common).fit(X, y),
-        "DA+PI": lambda nj: CopSensPI(outcome_model=nets["GX"], n_jobs=nj, **common).fit(GX, y),
+        "PI": lambda nj: PartialR2Net(outcome_model=nets["X"], n_jobs=nj, **common).fit(X, y),
+        "DA+PI": lambda nj: PartialR2Net(outcome_model=nets["GX"], n_jobs=nj, **common).fit(GX, y),
         # eps large enough to clear the floor, so this exercises a FEASIBLE
         # constrained solve rather than the all-INFEASIBLE gate
-        "PI+INV": lambda nj: RecentredInvCopSens(outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **common).fit(
+        "PI+INV": lambda nj: RecentredInvPartialR2Net(outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **common).fit(
             X, y, GX=GX
         ),
-        "DA+PI+IV": lambda nj: IVConstrainedCopSens(outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common).fit(
-            GX, y, Z=G
-        ),
-        "r2 PI": lambda nj: PartialR2Net(outcome_model=nets["X"], n_jobs=nj, **r2_common).fit(X, y),
-        "r2 DA+PI": lambda nj: PartialR2Net(outcome_model=nets["GX"], n_jobs=nj, **r2_common).fit(GX, y),
-        "r2 PI+INV": lambda nj: RecentredInvPartialR2Net(
-            outcome_model=nets["GX"], epsilon=0.2, n_jobs=nj, **r2_common
-        ).fit(X, y, GX=GX),
-        "r2 DA+PI+IV": lambda nj: IVConstrainedPartialR2Net(
-            outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **r2_common
+        "DA+PI+IV": lambda nj: IVConstrainedPartialR2Net(
+            outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common
         ).fit(GX, y, Z=G),
     }
 

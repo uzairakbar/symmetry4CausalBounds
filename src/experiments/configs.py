@@ -9,19 +9,6 @@ from typing import Any, Literal
 
 import numpy as np
 
-from src.methods.copsens import (
-    CopSensPI,
-    RecentredInvCopSens,
-)
-from src.methods.copsens import (
-    IntersectedCopSens as IntCopSens,
-)
-from src.methods.copsens import (
-    IntersectedIVCopSens as IntIVCopSens,
-)
-from src.methods.copsens import (
-    IVConstrainedCopSens as IVCopSens,
-)
 from src.methods.partial_r2_net import (
     IntersectedIVPartialR2Net,
     IntersectedPartialR2Net,
@@ -93,19 +80,10 @@ class DoMNISTConfig:
     eta: float = 0.25
     subsample: int = 2  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
     exemplar_seed: int = 1  # digit exemplars, frozen across replicates
-    # partial_r2_net takes probit (default) or logistic; gaussian is copsens-only.
-    link: Literal["probit", "logistic", "gaussian"] = "probit"
-    # partial_r2_net: how many trailing layers of the prefit net are refit. l=1 is
-    # the 257-param head; l=2 adds the ~74k-param fc1 (slow, AL solver).
+    link: Literal["probit", "logistic"] = "probit"
+    # how many trailing layers of the prefit net are refit. l=1 is the 257-param
+    # head; l=2 adds the ~74k-param fc1 (slow, AL solver).
     unfrozen_layers: int = 1
-    # CopSens. n_anchors is SOURCE's EFFECTIVE value: CopSensPI's own default is
-    # 256, but every published do-MNIST number was measured at 128.
-    n_anchors: int = 128
-    n_anchors_c: int = 48  # coarse set, for the feasibility constraint
-    n_constraint_inv: int = 256  # 192
-    n_constraint_iv: int = 256  # 384
-    mu_clip: bool = False  # True                # clip mu_y to `attainable`; see §2.5
-    jax_grad: bool = True  # analytic gradients for the SLSQP hot path
     test_fraction: float = 0.1
 
     @property
@@ -392,103 +370,9 @@ ALL_METHODS: tuple[str, ...] = (
     "PI&DA+PI+IV",
 )
 
-# the copsens backend defines a strict subset: no 2SLS and no baseline-IV. It DOES
-# define the intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
+# a strict subset of ALL_METHODS: no 2SLS and no baseline-IV. It DOES define the
+# intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
 # membership fact, not a claim that the two balls share a parameterisation.
-COPSENS_METHODS: tuple[str, ...] = (
-    "ATE",
-    "ERM",
-    "DA+ERM",
-    "PI+INV",
-    "PI",
-    "DA+PI",
-    "DA+PI+IV",
-    "PI&DA+PI",
-    "PI&DA+PI+IV",
-)
-
-
-def _copsens_builders(
-    method_names, gamma, epsilon, epsilon_iv, calibrate, pad, clipy, n_jobs, outcome_models, n_components
-):
-    """CopSens backend. Every method takes a PREFIT outcome net, so only the PI
-    machinery differs between them."""
-    config = DOMNIST_CONFIG
-    common = dict(
-        n_components=n_components,
-        link=config.link,
-        calibrate=calibrate,
-        clipy=clipy,
-        n_jobs=n_jobs,
-        n_anchors=config.n_anchors,
-        n_anchors_c=config.n_anchors_c,
-        jax_grad=config.jax_grad,
-        mu_clip=config.attainable if config.mu_clip else None,
-    )
-
-    def net(key):
-        if outcome_models is None:
-            raise ValueError(
-                "copsens methods need the prefit outcome nets. "
-                "`ExperimentOrchestrator.methods` names them only -- the runner "
-                "must rebuild via method_factory(..., outcome_models=...) once the "
-                "nets exist."
-            )
-        return outcome_models[key]
-
-    all_builders = {
-        "ATE": lambda: None,  # computed via sem.f
-        "ERM": lambda: net("X"),  # the prefit net, not a fresh one
-        "DA+ERM": lambda: net("GX"),
-        "PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
-        "DA+PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **common),
-        # recentred on the post-DA measure: from an X-centred ball PI+INV is empty
-        # at any reasonable eps (see RecentredInvCopSens)
-        "PI+INV": lambda: RecentredInvCopSens(
-            gamma=gamma,
-            epsilon=epsilon,
-            pad=False,
-            outcome_model=net("GX"),
-            n_constraint=config.n_constraint_inv,
-            **common,
-        ),
-        "DA+PI+IV": lambda: IVCopSens(
-            gamma=gamma,
-            epsilon=epsilon,
-            epsilon_iv=epsilon_iv,
-            pad=pad,
-            outcome_model=net("GX"),
-            n_constraint=config.n_constraint_iv,
-            **common,
-        ),
-        # `pad` reaches the DA branch only, so pad=false gives H_pi n H_pi~ (Thm. 1
-        # under exact invariance) and pad=true gives H_pi n (H_pi~ +- eps) (Cor. 1)
-        "PI&DA+PI": lambda: IntCopSens(
-            gamma=gamma, epsilon=epsilon, pad=pad, outcome_models={"X": net("X"), "GX": net("GX")}, **common
-        ),
-        "PI&DA+PI+IV": lambda: IntIVCopSens(
-            gamma=gamma,
-            epsilon=epsilon,
-            epsilon_iv=epsilon_iv,
-            pad=pad,
-            outcome_models={"X": net("X"), "GX": net("GX")},
-            n_constraint=config.n_constraint_iv,
-            **common,
-        ),
-    }
-    if set(all_builders) != set(COPSENS_METHODS):
-        raise ValueError("COPSENS_METHODS out of sync.")
-
-    # a HARD error, not a silent filter: quietly dropping 4 of 11 requested methods
-    # is how a run comes back missing columns with nothing in the log
-    unknown = sorted(set(method_names) - set(all_builders))
-    if unknown:
-        raise ValueError(f"the copsens backend does not define {unknown}; valid: {sorted(all_builders)}.")
-    return {name: all_builders[name] for name in method_names}
-
-
-# same nine as copsens: no 2SLS and no baseline-IV; intersections included
-# (Cor. 1 needs h_*(x) inside both intervals -- a membership fact)
 PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
@@ -532,8 +416,8 @@ def _partial_r2_net_builders(
         "DA+ERM": lambda: net("GX"),
         "PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
         "DA+PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **common),
-        # recentred on the post-DA measure, same as the copsens variant: from an
-        # X-centred ball the invariant slice is out of reach at any reasonable eps
+        # recentred on the post-DA measure: from an X-centred ball the invariant
+        # slice is out of reach at any reasonable eps
         "PI+INV": lambda: RecentredInvPartialR2Net(
             gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **common
         ),
@@ -575,9 +459,8 @@ class MethodRegistry:
         clipy: bool = True,
         epsilon_iv: float | None = None,
         n_jobs: int = 1,
-        backend: Literal["partial_r2", "partial_r2_net", "copsens"] = "partial_r2",
+        backend: Literal["partial_r2", "partial_r2_net"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
-        n_components: int = 32,
         unfrozen_layers: int = 1,
     ) -> dict[str, Callable]:
         """
@@ -600,10 +483,8 @@ class MethodRegistry:
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
                 'partial_r2_net' the do-MNIST last-l-layer refit (same Lemma-2
-                gamma units, so oracle gamma* is principled again); 'copsens' the
-                latent-factor model, whose gamma is comparable to NEITHER.
-            outcome_models: {'X': net, 'GX': net}, prefit. net backends only.
-            n_components: latent dimension. copsens only.
+                gamma units, so oracle gamma* is principled).
+            outcome_models: {'X': net, 'GX': net}, prefit. partial_r2_net only.
             unfrozen_layers: refit depth `l`. partial_r2_net only.
 
         Returns:
@@ -623,19 +504,10 @@ class MethodRegistry:
                 unfrozen_layers=unfrozen_layers,
             )
 
-        if backend == "copsens":
-            return _copsens_builders(
-                method_names,
-                gamma=gamma,
-                epsilon=epsilon,
-                epsilon_iv=epsilon_iv,
-                calibrate=calibrate,
-                pad=pad,
-                clipy=clipy,
-                n_jobs=n_jobs,
-                outcome_models=outcome_models,
-                n_components=n_components,
-            )
+        if backend != "partial_r2":
+            # a hard error: an unknown backend must not fall through to the linear
+            # SOCP and quietly report numbers from a model nobody asked for
+            raise ValueError(f"unknown backend {backend!r}; valid: 'partial_r2', 'partial_r2_net'.")
 
         common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
         iv_common = dict(common, epsilon_iv=epsilon_iv)
@@ -681,7 +553,6 @@ DATASET_KEYS: dict[str, set] = {
         "epsilon",
         "n_pi",
         "n_queries",
-        "n_components",
         "net",
         "unfrozen_layers",
     },
@@ -694,8 +565,8 @@ REQUIRED_KEYS: dict[str, set] = {
     "simulation": {"seed", "kernel_dim"},
     "optical_device": {"seed", "augmentation"},
     # `methods` is required HERE and nowhere else: the fallback below is all 11 of
-    # ALL_METHODS, and the copsens backend defines only 9. Omitting it would be a
-    # hard error mid-run rather than a config error up front.
+    # ALL_METHODS, and the partial_r2_net backend defines only 9. Omitting it would
+    # be a hard error mid-run rather than a config error up front.
     "do_mnist": {"seed", "augmentation", "gamma", "epsilon", "methods"},
 }
 

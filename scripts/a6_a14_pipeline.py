@@ -1,7 +1,7 @@
 """do-MNIST pipeline gates: A6, A7, A8, A9, A11, A12, A13, A14.
 
-A1/A2 (SEM), A3 (DA), A4 (CopSens parity) and A5 (n_jobs exactness) live in their
-own scripts -- they each need SOURCE's environment or a long solve.
+A1/A2 (SEM), A3 (DA), A4 (partial_r2_net regression) and A5 (n_jobs exactness)
+live in their own scripts -- they each need SOURCE's environment or a long solve.
 
     python scripts/a6_a14_pipeline.py
 """
@@ -20,7 +20,7 @@ from src.experiments.configs import DOMNIST_CONFIG, resolve_dataset_block  # noq
 from src.experiments.do_mnist import DoMNISTOrchestrator, Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import evaluate_queries  # noqa: E402
-from src.methods.copsens import CopSensPI, IVConstrainedCopSens  # noqa: E402
+from src.methods.partial_r2_net import IVConstrainedPartialR2Net, PartialR2Net  # noqa: E402
 from src.methods.regression import GradientDescentERM  # noqa: E402
 from src.methods.sensitivity_models import SolveStatus  # noqa: E402
 from src.sem.do_mnist import TINT_HI, TINT_LO, DoMNISTSEM, grey_of, tint  # noqa: E402
@@ -67,23 +67,17 @@ def fixture():
 
 def a13_cost_profile(sem, nets, X, GX, y, G, Q):
     """Time each stage separately. A reporting gate: record, do not assert."""
-    common = dict(
-        n_components=32,
-        calibrate=True,
-        clipy=True,
-        mu_clip=DOMNIST_CONFIG.attainable,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-    )
+    common = dict(calibrate=True, clipy=True, unfrozen_layers=1)
     profile = {}
 
     start = time.perf_counter()
     net = GradientDescentERM().fit(X, y, init_seed=42, epochs=1)
     profile["net_fit"] = time.perf_counter() - start
 
-    model = CopSensPI(gamma=0.1, outcome_model=nets["X"], **common)
+    model = PartialR2Net(gamma=0.1, outcome_model=nets["X"], **common)
     start = time.perf_counter()
     model.fit(X, y)
-    profile["fit (FactorAnalysis + anchors)"] = time.perf_counter() - start
+    profile["fit (features + recentre)"] = time.perf_counter() - start
 
     start = time.perf_counter()
     payloads = model._prepare(Q, 0.1)
@@ -121,15 +115,9 @@ def a14_memory(sem):
 
 
 def a7_query_status(sem, nets, X, GX, y, G, Q):
-    common = dict(
-        n_components=32,
-        calibrate=True,
-        clipy=True,
-        mu_clip=DOMNIST_CONFIG.attainable,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-    )
+    common = dict(calibrate=True, clipy=True, unfrozen_layers=1)
 
-    model = CopSensPI(gamma=0.1, outcome_model=nets["X"], **common).fit(X, y)
+    model = PartialR2Net(gamma=0.1, outcome_model=nets["X"], **common).fit(X, y)
     bounds = model.predict(Q)
     check("A7 status length == n_queries", len(model.query_status) == len(Q))
     ok_rows = model.query_status == SolveStatus.OK
@@ -139,7 +127,7 @@ def a7_query_status(sem, nets, X, GX, y, G, Q):
     check("A7 status_counts sums to n_queries", int(record.status_counts.sum()) == len(Q), f"{record.status_counts}")
 
     # a budget below the floor must gate the WHOLE batch, via _prepare -> None
-    starved = IVConstrainedCopSens(gamma=0.1, epsilon_iv=1e-9, outcome_model=nets["GX"], **common).fit(GX, y, Z=G)
+    starved = IVConstrainedPartialR2Net(gamma=0.1, epsilon_iv=1e-9, outcome_model=nets["GX"], **common).fit(GX, y, Z=G)
     bounds = starved.predict(Q)
     check(
         "A7 sub-floor budget => all INFEASIBLE",
@@ -155,34 +143,29 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     `GX=GX` fall into **kwargs silently fits the DA branch on the baseline ball.
     Neither raises; both quietly change every number.
     """
-    from src.methods.copsens import IntersectedCopSens, IntersectedIVCopSens
+    from src.methods.partial_r2_net import IntersectedIVPartialR2Net, IntersectedPartialR2Net
 
-    common = dict(
-        gamma=0.1,
-        n_components=32,
-        calibrate=True,
-        clipy=True,
-        mu_clip=DOMNIST_CONFIG.attainable,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-    )
+    common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
     models = {
-        "PI&DA+PI": IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets, **common).fit(X, y, GX=GX, G=G),
-        "PI&DA+PI+IV": IntersectedIVCopSens(epsilon=0.1, epsilon_iv=0.1, pad=False, outcome_models=nets, **common).fit(
+        "PI&DA+PI": IntersectedPartialR2Net(epsilon=0.1, pad=False, outcome_models=nets, **common).fit(
             X, y, GX=GX, G=G
         ),
+        "PI&DA+PI+IV": IntersectedIVPartialR2Net(
+            epsilon=0.1, epsilon_iv=0.1, pad=False, outcome_models=nets, **common
+        ).fit(X, y, GX=GX, G=G),
     }
 
     for name, model in models.items():
         check(f"A21 {name}: baseline gets the X net", model.baseline.outcome_ is nets["X"])
         check(f"A21 {name}: DA branch gets the GX net", model.augmented.outcome_ is nets["GX"])
-        # the ball each branch was fit on, read off the latent model's own mean
+        # the ball each branch was fit on, read off its own centre mu_hat
         check(
             f"A21 {name}: baseline fit on the X ball",
-            np.allclose(model.baseline.latent_.mean_, X.mean(axis=0), atol=1e-5),
+            np.allclose(model.baseline.mu_, nets["X"].predict_mean(X), atol=1e-6),
         )
         check(
             f"A21 {name}: DA branch fit on the GX ball",
-            np.allclose(model.augmented.latent_.mean_, GX.mean(axis=0), atol=1e-5),
+            np.allclose(model.augmented.mu_, nets["GX"].predict_mean(GX), atol=1e-6),
         )
         # padding reaches the DA branch only (Cor. 1)
         check(f"A21 {name}: pad is DA-only", not model.baseline.pad)
@@ -202,7 +185,7 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
         )
 
     # an infeasible branch must take the whole intersection down, with its status
-    starved = IntersectedIVCopSens(epsilon=0.1, epsilon_iv=1e-9, pad=False, outcome_models=nets, **common).fit(
+    starved = IntersectedIVPartialR2Net(epsilon=0.1, epsilon_iv=1e-9, pad=False, outcome_models=nets, **common).fit(
         X, y, GX=GX, G=G
     )
     bounds = starved.predict(Q)
@@ -211,16 +194,16 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     check("A21 the other branch still solved", bool(np.isfinite(starved.baseline.predict(Q)).all()))
 
     # parallelism must not perturb an intersection either
-    serial = IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets, **{**common, "n_jobs": 1}).fit(
+    serial = IntersectedPartialR2Net(epsilon=0.1, pad=False, outcome_models=nets, **{**common, "n_jobs": 1}).fit(
         X, y, GX=GX, G=G
     )
-    parallel = IntersectedCopSens(epsilon=0.1, pad=False, outcome_models=nets, **{**common, "n_jobs": 8}).fit(
+    parallel = IntersectedPartialR2Net(epsilon=0.1, pad=False, outcome_models=nets, **{**common, "n_jobs": 8}).fit(
         X, y, GX=GX, G=G
     )
     check("A21 intersection n_jobs 1 == 8", np.array_equal(serial.predict(Q), parallel.predict(Q), equal_nan=True))
 
     # pad=False is H_pi n H_pi~; pad=True is H_pi n (H_pi~ +- eps), so it can only widen
-    padded = IntersectedCopSens(epsilon=0.1, pad=True, outcome_models=nets, **common).fit(X, y, GX=GX, G=G)
+    padded = IntersectedPartialR2Net(epsilon=0.1, pad=True, outcome_models=nets, **common).fit(X, y, GX=GX, G=G)
     width_padded = np.nanmean(np.diff(padded.predict(Q), axis=1))
     width_plain = np.nanmean(np.diff(serial.predict(Q), axis=1))
     check(
@@ -230,37 +213,49 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     )
     check("A21 pad=True leaves the baseline branch unpadded", not padded.baseline.pad and padded.augmented.pad)
 
-    # IVConstrainedCopSens must refuse Z=None rather than instrument on X
-    from src.methods.copsens import IVConstrainedCopSens
-
+    # IVConstrainedPartialR2Net must refuse Z=None rather than instrument on X
     try:
-        IVConstrainedCopSens(epsilon_iv=0.1, outcome_model=nets["GX"], **common).fit(GX, y, Z=None)
-        check("A21 IVConstrainedCopSens refuses Z=None", False, "instrumented on X")
+        IVConstrainedPartialR2Net(epsilon_iv=0.1, outcome_model=nets["GX"], **common).fit(GX, y, Z=None)
+        check("A21 IVConstrainedPartialR2Net refuses Z=None", False, "instrumented on X")
     except ValueError:
-        check("A21 IVConstrainedCopSens refuses Z=None", True)
+        check("A21 IVConstrainedPartialR2Net refuses Z=None", True)
 
 
 def a8_jax_equals_fd(nets, X, GX, y, G, Q):
-    common = dict(
-        n_components=32,
-        calibrate=True,
-        clipy=True,
-        n_jobs=1,
-        mu_clip=DOMNIST_CONFIG.attainable,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-    )
-    for name, build in (
-        ("PI", lambda jg: CopSensPI(gamma=0.1, outcome_model=nets["X"], jax_grad=jg, **common).fit(X, y)),
-        (
-            "DA+PI+IV",
-            lambda jg: IVConstrainedCopSens(
-                gamma=0.1, epsilon_iv=0.12, outcome_model=nets["GX"], jax_grad=jg, **common
-            ).fit(GX, y, Z=G),
-        ),
+    """A8: the JAX hot path must agree with the numpy mirror it is derived from.
+
+    There is no finite-difference fallback to toggle any more -- the analytic
+    gradient IS the solve -- so the gate compares the terms directly: value against
+    the mirror exactly, gradient against a central difference of the mirror.
+    """
+    common = dict(gamma=0.1, calibrate=True, clipy=True, n_jobs=1, unfrozen_layers=1)
+    pi = PartialR2Net(outcome_model=nets["X"], **common).fit(X, y)
+    iv = IVConstrainedPartialR2Net(epsilon_iv=0.12, outcome_model=nets["GX"], **common).fit(GX, y, Z=G)
+
+    rng = np.random.default_rng(0)
+    theta = pi.theta_c_ + 0.05 * np.sqrt(np.mean(pi.theta_c_**2)) * rng.standard_normal(pi.theta_c_.size)
+    coords = rng.choice(theta.size, 16, replace=False)
+    step = 1e-6
+
+    for name, jax_vg, mirror in (
+        ("PI", pi._get_terms()[1], pi.r2_value),
+        ("DA+PI+IV", iv._get_terms()[2], iv._extra_value),
     ):
-        with_jax, without = build(True).predict(Q[:16]), build(False).predict(Q[:16])
-        delta = float(np.nanmax(np.abs(with_jax - without)))
-        check(f"A8 {name}: JAX == finite differences", delta <= 1e-6, f"max|d| {delta:.3g}")
+        value, gradient = jax_vg(theta)
+        d_value = abs(float(value) - mirror(theta))
+        gradient = np.asarray(gradient, dtype=float)
+        worst = 0.0
+        for j in coords:
+            up, down = theta.copy(), theta.copy()
+            up[j] += step
+            down[j] -= step
+            fd = (mirror(up) - mirror(down)) / (2 * step)
+            worst = max(worst, abs(fd - gradient[j]) / (1e-4 + abs(gradient[j])))
+        check(
+            f"A8 {name}: JAX == finite differences",
+            d_value <= 1e-12 and worst <= 1e-4,
+            f"|dvalue| {d_value:.3g}, max rel|dgrad| {worst:.3g}",
+        )
 
 
 def a12_training_recipe():
@@ -353,30 +348,41 @@ def a11_config_strictness():
     except ValueError:
         check("A11 n_jobs: true raises", True)
 
-    # the copsens backend must reject a method it does not define, not drop it
+    # the do-mnist backend must reject a method it does not define, not drop it
     from src.experiments.configs import MethodRegistry
 
-    # `DA+IV` is 2SLS -- one of the two names copsens genuinely does not define.
-    # (`PI&DA+PI` used to be the probe here; the backend defines it now.)
+    # `DA+IV` is 2SLS -- one of the two names the backend genuinely does not define.
     try:
         MethodRegistry.build_methods(
-            ["PI", "DA+IV"], gamma=0.1, epsilon=0.05, backend="copsens", outcome_models={"X": None}
+            ["PI", "DA+IV"], gamma=0.1, epsilon=0.05, backend="partial_r2_net", outcome_models={"X": None}
         )
-        check("A11 copsens rejects an undefined method", False, "filtered silently")
+        check("A11 partial_r2_net rejects an undefined method", False, "filtered silently")
     except ValueError:
-        check("A11 copsens rejects an undefined method", True)
+        check("A11 partial_r2_net rejects an undefined method", True)
 
     for name in ("PI&DA+PI", "PI&DA+PI+IV"):
         built = MethodRegistry.build_methods(
-            [name], gamma=0.1, epsilon=0.05, epsilon_iv=0.05, backend="copsens", outcome_models={"X": None, "GX": None}
+            [name],
+            gamma=0.1,
+            epsilon=0.05,
+            epsilon_iv=0.05,
+            backend="partial_r2_net",
+            outcome_models={"X": None, "GX": None},
         )
-        check(f"A11 copsens now defines {name}", name in built)
+        check(f"A11 partial_r2_net defines {name}", name in built)
 
     try:
-        MethodRegistry.build_methods(["PI"], gamma=0.1, epsilon=0.05, backend="copsens")["PI"]()
+        MethodRegistry.build_methods(["PI"], gamma=0.1, epsilon=0.05, backend="partial_r2_net")["PI"]()
         check("A11 missing outcome_models raises clearly", False)
     except ValueError as exc:
         check("A11 missing outcome_models raises clearly", "prefit outcome nets" in str(exc))
+
+    # an unknown backend must not fall through to the linear SOCP
+    try:
+        MethodRegistry.build_methods(["PI"], gamma=0.1, epsilon=0.05, backend="nonesuch")
+        check("A11 an unknown backend raises", False, "fell through")
+    except ValueError:
+        check("A11 an unknown backend raises", True)
 
 
 # ------------------------------------------------------------------------- A6
@@ -439,7 +445,6 @@ def a26_budget_wiring():
             seed=42,
             n_experiments=1,
             sweep_samples=10,
-            n_components=32,
             net="domnist-fast",
             gamma=gamma,
             epsilon=epsilon,
@@ -473,9 +478,9 @@ def a26_budget_wiring():
         check(f"A26 {name} is built on the config gamma", built.gamma == gamma, f"{built.gamma}")
 
     # and the budget actually reaches the solve: shrinking gamma must shrink the
-    # bounds. (The old "not vacuous at the config gamma" probe was a copsens-era
-    # fact -- the honest partial_r2_net bounds at l=1 fill the clip range, so
-    # width at ONE gamma no longer discriminates a mis-wired budget.)
+    # bounds. (The old "not vacuous at the config gamma" probe was a fact about the
+    # retired backend -- the honest partial_r2_net bounds at l=1 fill the clip
+    # range, so width at ONE gamma no longer discriminates a mis-wired budget.)
     model = runner.methods["PI"]().fit(X=runner.X, y=runner.y)
     queries = runner.get_sweep_values()
     widths = np.diff(model.predict(queries), axis=1)

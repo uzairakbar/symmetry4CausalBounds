@@ -98,8 +98,8 @@ class BoundedSA(SA):
         else:
             # Chunk, not per query: the DPP cache is per worker, so fine-grained
             # tasks re-canonicalize every query (measured ~2x slower).
-            # Split INDICES, not the payload list: CopSens payloads are ragged
-            # and np.array_split would raise on them.
+            # Split INDICES, not the payload list: payloads can be ragged and
+            # np.array_split would raise on them.
             n_chunks = effective_n_jobs(self.n_jobs)  # resolves -1
             chunks = [c for c in np.array_split(np.arange(len(payloads)), n_chunks) if len(c)]
             # loky sets inner threads to cpu_count//n_jobs, which a submit-script
@@ -323,9 +323,9 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
 def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
-    Returned SQUARED, matching `CopSensPI._budget()` (`copsens.py:428,491`), so the
-    smallest admissible budget is `sqrt(floor)` on BOTH backends even though the
-    partial-r2 constraint is natively a norm. A budget below it makes every query
+    Returned SQUARED, matching `PartialR2Net._budget()`, so the smallest admissible
+    budget is `sqrt(floor)` on BOTH backends even though the partial-r2 constraint
+    is natively a norm. A budget below it makes every query
     INFEASIBLE -- that is what this exists to prevent.
 
     Closed form, not a solve: the ball is Euclidean in `R(h - h_erm)` and the

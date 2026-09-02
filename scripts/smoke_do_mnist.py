@@ -27,7 +27,6 @@ BLOCK = dict(
     seed=42,
     n_experiments=1,
     sweep_samples=10,
-    n_components=32,
     net="domnist-fast",
     unfrozen_layers=1,
     gamma=0.067,

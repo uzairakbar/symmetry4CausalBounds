@@ -621,8 +621,8 @@ class PartialR2Net(BoundedSA):
 class RecentredInvPartialR2Net(PartialR2Net):
     """PI+INV, fitted against the POST-DA measure.
 
-    Same recentring as CopSens's variant, same reason: from an X-centred ball the
-    invariant slice sits an invariance-defect away -- and that defect IS the
+    Recentred for the obvious reason: from an X-centred ball the invariant slice
+    sits an invariance-defect away -- and that defect IS the
     confounding -- so PI+INV is empty at any reasonable eps. E_inv is symmetric in
     (X, GX), so swapping them leaves the CONSTRAINT untouched; only the ball moves
     to the post-DA centre, which already sits near the slice.
@@ -672,8 +672,8 @@ class IVConstrainedPartialR2Net(PartialR2Net):
 
     def _precompute(self, X, y, Z=None, **kwargs):
         if Z is None:
-            # same contract as IVConstrainedCopSens: a baseline branch wants a
-            # plain PartialR2Net, not a silently self-instrumented constraint
+            # a baseline branch wants a plain PartialR2Net, not a silently
+            # self-instrumented constraint
             raise ValueError("IVConstrainedPartialR2Net needs an instrument; use PartialR2Net for a null-IV baseline.")
         self.Qz_, _ = np.linalg.qr(np.asarray(Z, dtype=float).reshape(len(Z), -1))
 
@@ -693,9 +693,8 @@ class IntersectedPartialR2Net(IntersectionMixin, PartialR2Net):
     """Baseline PI intersected with DA+PI (Cor. 1). Padding hits the DA branch only.
 
     `_fit` is overridden entirely -- each branch owns its own trunk, features and
-    centre, exactly as IntersectedCopSens relates to CopSensPI. Cor. 1 needs
-    h_*(x) inside BOTH intervals, a membership fact, so the branches need not
-    share a parameterisation.
+    centre. Cor. 1 needs h_*(x) inside BOTH intervals, a membership fact, so the
+    branches need not share a parameterisation.
     """
 
     def __init__(self, outcome_models=None, **kwargs):

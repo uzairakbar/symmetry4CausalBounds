@@ -57,7 +57,7 @@ class TwoStageLeastSquaresIV(pointEstimator):
 class GradientDescentERM(pointEstimator):
     """Torch ERM for image treatments. Returns the conditional MEAN, not a label.
 
-    Doubles as CopSens's outcome model: `predict_mean` + `prefit_` let a net trained
+    Doubles as the PI outcome model: `predict_mean` + `prefit_` let a net trained
     once on the full draw be handed to every PI variant instead of refitted per method.
     """
 
@@ -116,8 +116,8 @@ class GradientDescentERM(pointEstimator):
 
         def _loss(p, target):
             t = target * (1 - 2 * label_smoothing) + label_smoothing if sig else target
-            # Brier: proper for the MEAN, which is what CopSens consumes. BCE drives
-            # logits to +-inf on noisy labels.
+            # Brier: proper for the MEAN, which is what the PI backend consumes.
+            # BCE drives logits to +-inf on noisy labels.
             if not sig or loss == "mse":
                 return F.mse_loss(p, t)
             return F.binary_cross_entropy(p, t)
@@ -135,7 +135,7 @@ class GradientDescentERM(pointEstimator):
         self.f.eval()
         del Xt, yt
         self._W = np.concatenate([w.detach().cpu().numpy().ravel() for w in self.f.parameters()])[:, None]
-        self.prefit_ = True  # CopSensPI: reuse instead of refitting
+        self.prefit_ = True  # PartialR2Net: reuse instead of refitting
         return self
 
     def _predict(self, X, **kwargs):
@@ -154,7 +154,7 @@ class GradientDescentERM(pointEstimator):
         return np.concatenate(out)[:, None]
 
     def predict_mean(self, X):
-        """CopSens outcome-model protocol; mu_y is a flat (n,)."""
+        """Outcome-model protocol; mu_y is a flat (n,)."""
         return self._predict(np.asarray(X).reshape(len(X), -1)).ravel()
 
     # -- state round-trip: `self.f` only exists after _fit, so caching needs this --

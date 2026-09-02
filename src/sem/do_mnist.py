@@ -118,7 +118,7 @@ class DoMNISTSEM(StructuralEquationModel):
     @property
     def attainable(self) -> tuple[float, float]:
         """Range h_erm can occupy: [(1-beta)alpha + beta*eta, 1 - that]. mu_y outside
-        it is impossible, which is what makes clipping it safe (`mu_clip`)."""
+        it is impossible."""
         lo = (1 - self.beta) * self.alpha + self.beta * self.eta
         return float(lo), float(1.0 - lo)
 

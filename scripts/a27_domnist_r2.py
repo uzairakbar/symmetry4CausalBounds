@@ -4,8 +4,8 @@ Four properties, none of which SOURCE parity can pin for a new model:
   1. nesting -- a constrained method never comes out WIDER than the unconstrained
      model on the same ball (adding a constraint can only shrink the feasible set);
   2. membership -- the ANALYTIC h_* (exact for this SEM) sits inside the PI bounds
-     at gamma = gamma* for >= 95% of held-out queries. The thing CopSens could
-     never certify: h_* was not in its candidate class.
+     at gamma = gamma* for >= 95% of held-out queries -- something the retired
+     latent-factor model could never certify: h_* was not in its candidate class.
   3. JAX == numpy-mirror finite differences on every term of the NLP (A8 style);
   4. l=2 exercised at reduced scale: correctness + nesting on the AL path.
 

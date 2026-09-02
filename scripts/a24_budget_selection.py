@@ -20,7 +20,7 @@ from src.experiments.configs import DOMNIST_CONFIG  # noqa: E402
 from src.experiments.do_mnist import Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import QueryEval  # noqa: E402
-from src.methods.copsens import RecentredInvCopSens  # noqa: E402
+from src.methods.partial_r2_net import RecentredInvPartialR2Net  # noqa: E402
 from src.methods.regression import GradientDescentERM  # noqa: E402
 from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
@@ -76,7 +76,7 @@ def a24_bisection():
     got = min_knob_for_coverage(lambda v: _eval(0.99), 0.01, 10.0, target=0.95)
     check("A24 already-covered returns the floor of the bracket", got["value"] == 0.01)
 
-    # r is reported in SQUARED units, matching CopSensPI._budget()
+    # r is reported in SQUARED units, matching PartialR2Net._budget()
     report = leg_report(min_knob_for_coverage(lambda v: _eval(0.99, 0.5), 0.2, 10.0, target=0.95), floor=0.01)
     check("A24 r is budget^2 / floor", abs(report["r"] - 0.2**2 / 0.01) < 1e-9, f"got {report['r']}")
     check("A24 floor units are declared", report["floor_units"] == "squared")
@@ -107,37 +107,32 @@ def a24_floor_cache():
     keep = np.random.default_rng(42).choice(len(X), N_PI, replace=False)
     X, GX, y, G = X[keep], GX[keep], y[keep], G[keep]
 
-    model = RecentredInvCopSens(
+    model = RecentredInvPartialR2Net(
         gamma=0.1,
         epsilon=0.1,
         outcome_model=net,
-        n_components=32,
         link=DOMNIST_CONFIG.link,
-        n_anchors=DOMNIST_CONFIG.n_anchors,
-        n_anchors_c=DOMNIST_CONFIG.n_anchors_c,
-        n_constraint=DOMNIST_CONFIG.n_constraint_inv,
-        jax_grad=DOMNIST_CONFIG.jax_grad,
+        unfrozen_layers=DOMNIST_CONFIG.unfrozen_layers,
         calibrate=True,
     )
     model.fit(X=X, y=y, GX=GX, G=G)
 
-    radius = model._radius(0.1)
-    first = model.constraint_floor(radius)
-    second = model.constraint_floor(radius)
+    first = model.constraint_floor(0.1)
+    second = model.constraint_floor(0.1)
     check("A24 floor cache is bit-exact", first == second, f"{first!r} vs {second!r}")
     check("A24 floor cache is populated", len(model._floor_cache) == 1)
 
-    other = model.constraint_floor(model._radius(0.05))
-    check("A24 a different radius is a different entry", len(model._floor_cache) == 2)
+    other = model.constraint_floor(0.05)
+    check("A24 a different gamma is a different entry", len(model._floor_cache) == 2)
     check("A24 a smaller ball has a higher floor", other >= first, f"{other:.6g} vs {first:.6g}")
 
     model.fit(X=X, y=y, GX=GX, G=G)
     check("A24 a refit clears the cache", model._floor_cache == {})
 
     # bypassing the cache reproduces it: the guard is memoisation, not a shortcut
-    model.constraint_floor(radius)
+    model.constraint_floor(0.1)
     model._floor_cache = {}
-    check("A24 cached == uncached", model.constraint_floor(radius) == first)
+    check("A24 cached == uncached", model.constraint_floor(0.1) == first)
 
 
 # ---------------------------------------------------------------- report schema
@@ -179,7 +174,17 @@ def a24_report_schema(path):
 
     # every setting a budget is conditional on must be recorded, or the constants
     # cannot be traced back to the run that produced them
-    for key in ("pad", "calibrate", "n_pi", "n_eval", "n_components", "net", "augmentation", "target_coverage", "seed"):
+    for key in (
+        "pad",
+        "calibrate",
+        "n_pi",
+        "n_eval",
+        "unfrozen_layers",
+        "net",
+        "augmentation",
+        "target_coverage",
+        "seed",
+    ):
         check(f"A24 settings record `{key}`", key in report["settings"])
 
     for leg in ("epsilon", "epsilon_iv"):

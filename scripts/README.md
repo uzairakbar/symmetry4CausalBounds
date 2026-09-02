@@ -2,16 +2,17 @@
 
 Run with `uv run python` (the repo `.venv`), from the repo root.
 
-Gates A2, A3 and A4 compare against SOURCE
+Gates A2 and A3 compare against SOURCE
 (`../doMNIST/symmetry4CausalBoundsDoMNIST`), so they run in two stages: `--source`
-under SOURCE's own `.venv`, then `--check` under this repo's `.venv`.
+under SOURCE's own `.venv`, then `--check` under this repo's `.venv`. A4 keeps the
+same two-stage shape but both stages run here: `--dump` freezes, `--check` compares.
 
 | gate | script | what it pins |
 |---|---|---|
 | A1 | `a1_a2_sem.py --check` | SEM structural laws vs closed form |
 | A2 | `a1_a2_sem.py` | SEM draws bit-identical to SOURCE |
 | A3 | `a3_da_parity.py` | DA `(GX, G)` bit-identical to SOURCE |
-| A4 | `a4_copsens_parity.py` | CopSens bounds + intermediates vs SOURCE |
+| A4 | `a4_partial_r2_net_regression.py` | `partial_r2_net` bounds + intermediates vs a frozen dump |
 | A5 | `a5_njobs_exactness.py` | `n_jobs` changes nothing but wall clock |
 | A6-A8, A11-A14 | `a6_a14_pipeline.py` | perf fairness, status, JAX≡FD, config, recipe, cost, memory |
 | A9 | `a6_a14_pipeline.py --full` | the estimand is the CAUSAL one (needs 1.2M draws) |
@@ -28,9 +29,9 @@ under SOURCE's own `.venv`, then `--check` under this repo's `.venv`.
 
 `select_domnist_budgets.py` picks `gamma`, `epsilon` and `epsilon_iv` by POPULATION
 coverage and writes `artifacts/domnist-budget_report.json`. DEMOTED to a sanity
-check: it targets the copsens backend, whose latent-space `gamma` no oracle could
-certify. The `partial_r2_net` backend the pipeline now runs consumes oracle
-`gamma* = bias_sq/sigma_sq` directly, and A27 gates membership.
+check: the pipeline consumes oracle `gamma* = bias_sq/sigma_sq` directly (the
+`partial_r2_net` ball is the Lemma-2 ball in function space) and A27 gates
+membership, so nothing here needs a coverage-selected budget.
 
 Three sequential legs at one target coverage `X` (`--target-coverage`, or
 `do_mnist.target_coverage`; 0.95 or 0.99):
@@ -58,13 +59,14 @@ an inert budget and a `DA+PI` ceiling below target.
 
 ```bash
 SRC=../doMNIST/symmetry4CausalBoundsDoMNIST
-$SRC/.venv/bin/python scripts/a1_a2_sem.py       --source /tmp/a2.npz
-$SRC/.venv/bin/python scripts/a3_da_parity.py    --source /tmp/a3.npz
-$SRC/.venv/bin/python scripts/a4_copsens_parity.py --source /tmp/a4
+$SRC/.venv/bin/python scripts/a1_a2_sem.py    --source /tmp/a2.npz
+$SRC/.venv/bin/python scripts/a3_da_parity.py --source /tmp/a3.npz
 
-uv run python scripts/a1_a2_sem.py         --check /tmp/a2.npz
-uv run python scripts/a3_da_parity.py      --check /tmp/a3.npz
-uv run python scripts/a4_copsens_parity.py --check /tmp/a4
+uv run python scripts/a1_a2_sem.py    --check /tmp/a2.npz
+uv run python scripts/a3_da_parity.py --check /tmp/a3.npz
+
+uv run python scripts/a4_partial_r2_net_regression.py --dump  ~/scratch/a4
+uv run python scripts/a4_partial_r2_net_regression.py --check ~/scratch/a4
 ```
 
 ## A10

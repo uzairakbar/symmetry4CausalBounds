@@ -276,7 +276,6 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         epsilon: float,
         n_pi: int = 60_000,
         n_queries: int = 512,
-        n_components: int = 32,
         net: str = "domnist-fast",
         unfrozen_layers: int = DOMNIST_CONFIG.unfrozen_layers,
         **kwargs,
@@ -284,7 +283,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         self.augmentation = augmentation
         self.gamma, self.epsilon = gamma, epsilon
         self.n_pi, self.n_queries = n_pi, n_queries
-        self.n_components, self.net = n_components, net
+        self.net = net
         self.unfrozen_layers = unfrozen_layers
         self.toggles = dict(
             calibrate=kwargs.get("calibrate", False),

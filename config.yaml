@@ -55,15 +55,13 @@ simulation:
 #     n_queries: 512                  # interventional evaluation set, drawn from the
 #                                     # HELD-OUT images
 #     sweep_samples: 10               # digit exemplars on the query x-axis
-#     n_components: 32                # latent dimension of the CopSens factor model
 #     net: domnist-fast
 #     unfrozen_layers: 1              # partial_r2_net refit depth l. 1 = the 257-param
 #                                     # head (SLSQP); 2 adds the ~74k-param fc1 (slow
 #                                     # augmented-Lagrangian path, correctness runs only)
 #     gamma: 0.067                    # = oracle gamma* = bias_sq/sigma_sq (calibrated):
 #                                     # the partial_r2_net ball is the Lemma-2 ball in
-#                                     # function space, so gamma* is PRINCIPLED here --
-#                                     # unlike the retired CopSens latent-space budget.
+#                                     # function space, so gamma* is PRINCIPLED here.
 #     epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
 #                                     # not estimable. The true value is 0 for this
 #                                     # augmentation (+-10 deg cannot turn a 2 into a 5,
@@ -146,4 +144,4 @@ hyperparameters:
     optimizer: adam
     betas: [0.7, 0.9]
     onecycle: true      # OneCycleLR
-    loss: mse           # Brier: proper for the MEAN, which is what CopSens consumes
+    loss: mse           # Brier: proper for the MEAN, which is what the PI backend wants
