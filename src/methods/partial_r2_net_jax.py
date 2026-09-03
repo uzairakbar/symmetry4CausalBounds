@@ -62,7 +62,8 @@ def build_terms(model):
     Returns:
         (objective, r2, extra, gram, band): jitted callables; the first three and
         the last are value_and_grad wrt theta, gram maps (theta, v) -> S v.
-        `band` is None unless the model matches means (Lem. 2).
+        `band` is the SIGNED level defect m(theta), None unless the model
+        matches means (Lem. 2).
     """
     shapes = tuple(model.head_shapes_)
     link = LINKS[model.link_name]
@@ -112,16 +113,20 @@ def build_terms(model):
 
         extra_vg = jax.jit(jax.value_and_grad(iv))
 
-    # Lem. 2's slice, as a SQUARED deviation so the two-sided band |m| <= tau is
-    # ONE inequality m^2 <= tau^2 in the existing (value_and_grad, budget)
-    # protocol: one JAX pass per theta, and the augmented-Lagrangian path (which
-    # takes inequalities only) needs no new case.
+    # Lem. 2's slice, SIGNED: m(theta) = mean_n h_theta - ybar. The two-sided band
+    # |m| <= tau then enters as the PAIR (m <= tau, -m <= tau), both LINEAR in m,
+    # rather than the one inequality m^2 <= tau^2. Squaring is what made the
+    # encoding ill-conditioned: SLSQP meets a constraint to an absolute tolerance
+    # d on the constraint VALUE, and on m^2 that d reappears in |m| as d/(2 tau) --
+    # unbounded as the slab thins. Linear in m, d stays d. (`_Negated` supplies the
+    # second entry; the augmented-Lagrangian path takes inequalities and so needs
+    # no new case either way.)
     band_vg = None
     if getattr(model, "mean_match", False):
         ybar = float(model.ybar_)
 
         def band(theta):
-            return (jnp.mean(link(_index(theta, phi, shapes))) - ybar) ** 2
+            return jnp.mean(link(_index(theta, phi, shapes))) - ybar
 
         band_vg = jax.jit(jax.value_and_grad(band))
 

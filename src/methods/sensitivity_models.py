@@ -586,6 +586,12 @@ class IntersectionMixin:
             status = np.where(empty, SolveStatus.INFEASIBLE, status)
 
         self.query_status = status.astype(int)
+        # diagnostics ride along from the branches; the WORSE of the two is the
+        # honest reading for the intersection, since a starved branch starves the
+        # intersection. Without this the nets' backtrack gate silently skips the
+        # two intersection methods, which are the ones with the most constraints.
+        parts = [self.baseline.query_diagnostics, self.augmented.query_diagnostics]
+        self.query_diagnostics = None if any(p is None for p in parts) else np.maximum(*parts)
         return np.column_stack([lower, upper])
 
 

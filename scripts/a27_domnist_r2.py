@@ -21,6 +21,7 @@ bug -- read the floor/budget pair it logs).
 |m(theta_c)|, so `--band-se 0.146` is the leg that drives theta_c out of the band
 and exercises `_band_anchor`'s constrained branch; production runs never take it.
     python scripts/a27_domnist_r2.py --polish-compare        # single vs full polish widths
+    python scripts/a27_domnist_r2.py --compare-off          # what the band costs and moves
 """
 
 import argparse
@@ -37,7 +38,6 @@ from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry  # noqa: E402
 from src.experiments.do_mnist import NESTED_IN, Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.methods.partial_r2_net import (  # noqa: E402
-    LINK_SLOPES,
     MEAN_BAND_SE,
     PartialR2Net,
     head_index,
@@ -113,7 +113,7 @@ def fixture(n_samples, n_pi, n_queries):
     return nets, X[keep], GX[keep], y[keep], G[keep], flat.fit_transform(Q_img), h_star
 
 
-def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers, n_jobs=N_JOBS):
+def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers, n_jobs=N_JOBS, mean_match=True):
     """{method: (bounds, status, model)} for the six PI variants, wall-clock logged."""
     builders = MethodRegistry.build_methods(
         ["PI", "DA+PI", "PI+INV", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"],
@@ -123,6 +123,7 @@ def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers, n_jobs=N_JOBS):
         calibrate=True,
         clipy=True,
         n_jobs=n_jobs,
+        mean_match=mean_match,
         backend="partial_r2_net",
         outcome_models=nets,
         unfrozen_layers=unfrozen_layers,
@@ -246,25 +247,42 @@ def gate_gradients(nets, X, GX, y, G):
     _fd_check("index", lambda t: objective(t, phi_q), index_np, theta, coords)
     _fd_check("E_inv", inv._get_terms()[2], inv._extra_value, theta, coords)
     _fd_check("R_iv", iv._get_terms()[2], iv._extra_value, theta, coords)
-    if band_vg is not None:  # Lem. 2's band, squared -- the numpy mirror is signed
-        _fd_check("E_mean", band_vg, lambda t: pi.mean_value(t) ** 2, theta, coords)
+    if band_vg is not None:  # Lem. 2's band; both sides are the SIGNED defect m
+        _fd_check("E_mean", band_vg, pi.mean_value, theta, coords)
 
 
 def gate_band(results, label, n_pi):
     """Lem. 2's slab: the right width, enforced on acceptance, and actually
     travelled in (a slab too thin to move in shows up as every start backtracking
-    onto the anchor -- the silent-narrowing failure mode)."""
+    onto the anchor -- the silent-narrowing failure mode).
+
+    Written so that DELETING the band clause from `PartialR2Net._feasible` makes
+    this fail. That is a real hazard: the obvious "shift the level far out and
+    check it is rejected" probe is answered by the R^2 BALL long before the band
+    is consulted, and passes a model with no band at all.
+    """
     for name, (_, _, model) in results.items():
         branch = getattr(model, "augmented", model)
         if branch._tau is None:
             check(f"A27 {label} {name}: band is on", False)
             continue
 
-        want = MEAN_BAND_SE * np.sqrt(branch.sigma2_ * (1.0 + branch.gamma) / n_pi)
+        # from the sensitivity model's own bound on Var(U + xi) (see MEAN_BAND_SE),
+        # written out rather than read back from `_band_tau` -- and via the BUDGET,
+        # so the `calibrate=False` units are covered too
+        budget = branch.scale**2 * branch.gamma
+        want = MEAN_BAND_SE * np.sqrt((branch.sigma2_ + budget) / n_pi)
         check(
-            f"A27 {label} {name}: tau == 2 sigma sqrt(1+gamma)/sqrt(n)",
+            f"A27 {label} {name}: tau == {MEAN_BAND_SE} sqrt((sigma^2 + b_r2)/n)",
             abs(branch._tau - want) < 1e-12,
             f"{branch._tau:.5g}",
+        )
+        # tau must MOVE with the budget: a tau that ignored gamma would pass the
+        # identity above at the single gamma this fixture runs at
+        check(
+            f"A27 {label} {name}: tau grows with the budget",
+            branch._band_tau(4.0 * branch.gamma + 1.0) > branch._tau,
+            f"{branch._tau:.5g} -> {branch._band_tau(4.0 * branch.gamma + 1.0):.5g}",
         )
 
         if branch._ctx is None:  # _prepare bailed: every query INFEASIBLE, no anchor
@@ -278,21 +296,27 @@ def gate_band(results, label, n_pi):
             f"|m| {abs(branch.mean_value(anchor)):.4g} vs tau {branch._tau:.4g}",
         )
 
-        # a pure level shift past the slab must be REJECTED: that is the check
-        # every accepted candidate passes, so gate it directly
-        outside = anchor.copy()
-        outside[-1] += (
-            10.0
-            * branch._tau
-            / max(np.mean(LINK_SLOPES[branch.link_name](head_index(anchor, branch.phi_, branch.head_shapes_))), 1e-9)
+        # Step along grad m so the LEVEL moves and little else: m(anchor + t g/|g|^2)
+        # ~ m(anchor) + t, so aim just past the slab. Deliberately NOT a big shift --
+        # the point is that the ball still accepts this point, so the only thing that
+        # can reject it is the band.
+        gradient = np.asarray(branch._get_terms()[4](anchor)[1], dtype=float)
+        scale = float(gradient @ gradient)
+        target = np.sign(branch.mean_value(anchor) or 1.0) * 1.5 * branch._tau
+        outside = anchor + ((target - branch.mean_value(anchor)) / max(scale, 1e-30)) * gradient
+        check(
+            f"A27 {label} {name}: the shifted point clears the ball on its own",
+            branch.r2_value(outside) <= branch._ctx["b_r2"] * (1 + 1e-6) + 1e-9,
+            f"E_r2 {branch.r2_value(outside):.4g} vs budget {branch._ctx['b_r2']:.4g}",
         )
         check(
             f"A27 {label} {name}: a level shift past tau is rejected",
-            not branch._feasible(outside, branch._ctx["b_r2"], branch._ctx["budget"]),
-            f"|m| {abs(branch.mean_value(outside)):.4g}",
+            not branch._feasible(outside, branch._ctx["b_r2"], None),
+            f"|m| {abs(branch.mean_value(outside)):.4g} vs tau {branch._tau:.4g}",
         )
 
         diagnostics = getattr(model, "query_diagnostics", None)
+        check(f"A27 {label} {name}: backtrack diagnostics reported", diagnostics is not None and len(diagnostics) > 0)
         if diagnostics is not None and len(diagnostics):
             fraction = float(np.mean(diagnostics[:, 0]))
             check(f"A27 {label} {name}: starts backtracked to the anchor < 50%", fraction < 0.5, f"{fraction:.1%}")
@@ -319,7 +343,35 @@ def polish_compare(nets, X, GX, y, G, Q):
         print(f"  polish-compare {name}: max |width(full) - width(single)| = {delta:.3e} (tau {model._tau:.4g})")
 
 
-def main(micro=False, polish=False):
+# The band-on and band-off solves differ in more than the feasible set: the anchor,
+# the floor point, the directed starts (tangent-projected only under the band) and,
+# for PI/DA+PI, the polish policy all move with it. So the widths are two HEURISTIC
+# optima of nested sets, not two exact ones, and band-on coming out slightly wider
+# means the band-OFF solve was the looser of the two -- informative about the old
+# path, not a violated monotonicity. Only a gap past this is worth a look.
+BAND_COMPARE_TOL = 0.02
+
+
+def compare_off(nets, X, GX, y, G, Q, jobs, results_on):
+    """What the band actually costs and moves, measured rather than asserted: the
+    same fixture solved with `mean_match=False`. PLAN v2 SS4f asked for this next to
+    the per-solve timings."""
+    print("== the same l=1 fixture with mean matching OFF ==")
+    results_off = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=1, n_jobs=jobs, mean_match=False)
+    for name, (bounds_off, _, _) in results_off.items():
+        bounds_on = results_on[name][0]
+        width_on = float(np.nanmean(bounds_on[:, 1] - bounds_on[:, 0]))
+        width_off = float(np.nanmean(bounds_off[:, 1] - bounds_off[:, 0]))
+        print(f"  band cost {name:12s} width {width_off:.4f} (off) -> {width_on:.4f} (on)")
+        check(
+            f"A27 l1 {name}: band-on and band-off widths agree to {BAND_COMPARE_TOL}",
+            width_on <= width_off + BAND_COMPARE_TOL,
+            f"{width_off:.4f} -> {width_on:.4f}",
+            hard=False,
+        )
+
+
+def main(micro=False, polish=False, compare=False):
     sizes = MICRO if micro else (N_SAMPLES, N_PI, N_QUERIES)
     sizes_l2 = MICRO_L2 if micro else (L2_SAMPLES, L2_PI, L2_QUERIES)
     print(
@@ -336,12 +388,15 @@ def main(micro=False, polish=False):
     gate_gradients(nets, X, GX, y, G)
     if polish:
         polish_compare(nets, X, GX, y, G, Q)
+    if compare:
+        compare_off(nets, X, GX, y, G, Q, jobs, results)
 
     print(f"== l=2 at n={sizes_l2[0]:,} n_pi={sizes_l2[1]:,} q={sizes_l2[2]} (correctness only; AL path) ==")
     nets, X, GX, y, G, Q, h_star = fixture(*sizes_l2)
     results = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=2, n_jobs=jobs)
     gate_statuses(results, "l2")
     gate_nesting(results, "l2")
+    gate_band(results, "l2", sizes_l2[1])  # the AL path has its own band plumbing
     for name, (bounds, _, _) in results.items():
         finite = np.isfinite(bounds).all(axis=1)
         ordered = bool((bounds[finite, 0] <= bounds[finite, 1] + 1e-12).all())
@@ -357,6 +412,7 @@ if __name__ == "__main__":
     parser.add_argument("--micro", action="store_true", help="4k/512/4 fixture (PLAN v2 C4)")
     parser.add_argument("--band-se", type=float, default=None, help="override MEAN_BAND_SE BEFORE any fit")
     parser.add_argument("--polish-compare", action="store_true", help="single vs full polish widths")
+    parser.add_argument("--compare-off", action="store_true", help="also solve l=1 with mean_match=False")
     args = parser.parse_args()
     if args.band_se is not None:
         # BEFORE the fits: tau, the anchor and the floor cache are all built from
@@ -365,4 +421,4 @@ if __name__ == "__main__":
 
         _pr2.MEAN_BAND_SE = MEAN_BAND_SE = args.band_se
         print(f"MEAN_BAND_SE overridden to {args.band_se}")
-    sys.exit(main(micro=args.micro, polish=args.polish_compare))
+    sys.exit(main(micro=args.micro, polish=args.polish_compare, compare=args.compare_off))

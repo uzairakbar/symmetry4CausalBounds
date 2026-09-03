@@ -20,7 +20,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
 | A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
-| A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`) |
+| A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`, `--compare-off`) |
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
 
@@ -37,15 +37,27 @@ reproduces the pre-change digest byte-for-byte, which is what pins the old path.
 The linear backend enforces the slice EXACTLY (it eliminates the intercept by
 centring). The `partial_r2_net` backend cannot: the constraint is nonlinear in the
 head weights and the solver backtracks along segments, so it enforces a BAND
-`|mean_n h - ybar| <= tau` with `tau = 2 sigma_hat sqrt(1 + gamma) / sqrt(n_pi)` --
-two standard errors of the level under the sensitivity model's own bound on
-`Var(U + xi)` (see `MEAN_BAND_SE`). The band is a live constraint, so PI/DA+PI
-take the full multi-start polish there; `a27 --polish-compare` at production scale
-is what would license flipping `SINGLE_POLISH_WITH_BAND` back on.
+`|mean_n h - ybar| <= tau` with `tau = 2 sqrt((sigma_hat^2 + b_r2) / n_pi)`, where
+`b_r2` is the ball's own budget -- two standard errors of the level under the
+sensitivity model's own bound on `Var(U + xi)` (see `MEAN_BAND_SE`; the second term
+is the budget, not `sigma_hat^2 gamma`, so raw budgets get the right units). It
+enters as the PAIR `(m <= tau, -m <= tau)`, linear in `m`; the squared form
+`m^2 <= tau^2` is ill-conditioned as the slab thins. The band is a live constraint,
+so PI/DA+PI take the full multi-start polish there; `a27 --polish-compare` at
+production scale is what would license flipping `SINGLE_POLISH_WITH_BAND` back on.
 
 `a27 --micro --band-se 0.146` is the leg that drives `theta_c` out of the band and
 so exercises the slab anchor; run it after any change to the band, because a slab
 too thin to travel in narrows the bounds SILENTLY rather than erroring.
+`a27 --compare-off` solves the same fixture with `mean_match: false` and prints
+what the band cost. Note the two runs differ in anchor, starts and polish policy as
+well as in the feasible set, so their widths are two heuristic optima of nested
+sets: band-on coming out slightly wider says the band-OFF solve was the looser one.
+
+`gate_band` is written so that deleting the band clause from `_feasible` makes it
+FAIL (checked 2026-09-03: 6/6 methods). Keep that property -- the obvious probe,
+shifting the level far out and checking it is rejected, is answered by the R^2 ball
+long before the band is consulted and passes a model with no band at all.
 
 do-MNIST gates were run at `--micro` scale only for this change. Before trusting
 the full figures, re-run at full scale: `a27`, `a27 --polish-compare`, `a5`,

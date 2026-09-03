@@ -46,14 +46,17 @@ POLISH_MAXITER = 80
 # only known to the sampling error of the level, so it enters as a BAND rather
 # than an equality:
 #
-#     tau = MEAN_BAND_SE * sigma_hat * sqrt(1 + gamma) / sqrt(n)
+#     tau = MEAN_BAND_SE * sqrt((sigma_hat^2 + b_r2) / n),   b_r2 = the BALL BUDGET
 #
-# sqrt(Var(U + xi) / n) is the standard error of the level, and Lem. 2's own proof
-# bounds Var(E[U|X]) <= sigma^2 gamma (the (**)-(::) chain of SS.F.9), so
-# sigma_hat^2 (1 + gamma) is the sensitivity model's OWN bound on Var(U + xi):
-# the band is "MEAN_BAND_SE standard errors" for ANY dataset and budget, not just
-# at do-MNIST's small gamma*. h_* misses the empirical slice by the same
-# quantity, so at 2 SE it stays band-feasible w.p. ~95% per fit.
+# sqrt(Var(U + xi) / n) is the standard error of the level. SS.F.9 splits
+# Var(U + xi) = a + c + sigma_xi^2, where total variance gives a + sigma_xi^2 =
+# E[Var(Y|X)] <= sigma^2 and the (**)-(::) chain gives c = Var(E[U|X]) <= b_r2 --
+# the ball's own budget. So sigma_hat^2 + b_r2 is the sensitivity model's OWN
+# bound on Var(U + xi) and the band is "MEAN_BAND_SE standard errors" for ANY
+# dataset and budget. Note it is b_r2, NOT sigma_hat^2 gamma: the two agree only
+# when `calibrate` is on, and under raw budgets sigma_hat^2 (1 + gamma) would
+# TIGHTEN a narrowing constraint by the wrong units. h_* misses the empirical
+# slice by the same quantity, so at 2 SE it stays band-feasible w.p. ~95% per fit.
 #
 # An EQUALITY would also break the solver: `_to_feasible` backtracks along the
 # SEGMENT to the anchor, and the segment between two points of a curved slice
@@ -65,15 +68,24 @@ MEAN_BAND_SE = 2.0
 # polish under a live constraint is what silently narrowed PI+INV once). Flip
 # only on full-scale evidence: `a27 --polish-compare` prints the width difference.
 SINGLE_POLISH_WITH_BAND = False
-# The slab anchor is solved against a slightly TIGHTER band than tau. SLSQP meets
-# the SQUARED constraint m^2 <= tau^2 to its own tolerance, and that slop reappears
-# in |m| divided by 2 tau -- for a thin slab it lands the anchor a hair OUTSIDE the
-# band, `_to_feasible` then backtracks every start onto it, rejects them all, and
-# the whole query reports FAILURE (seen at `a27 --micro --band-se 0.146`, where
-# |m| 0.003288 vs tau 0.003287 cost 1 query in 4 on five of six methods). Anchoring
-# in the interior costs a 1% narrower slab in the floor it reports and nothing at
-# production tau, where theta_c is inside the band and this path never runs.
+# The slab anchor is solved against a slightly TIGHTER band than tau. The anchor is
+# the one point every start may backtrack onto, so an anchor a hair OUTSIDE the band
+# makes `_to_feasible` reject every start and the whole query report FAILURE -- seen
+# at `a27 --micro --band-se 0.146` (|m| 0.003288 vs tau 0.003287) as 1 query in 4
+# lost on five of six methods, with DA+PI's width silently narrowed 0.999 -> 0.332.
+# The margin is belt to the braces of the post-solve check below, which is what
+# actually guarantees the anchor is inside; it costs a 1% narrower slab in the floor
+# it reports, and nothing at production tau, where theta_c is inside the band and
+# this path never runs at all.
 BAND_ANCHOR_MARGIN = 0.01
+# A directed start is dropped when projecting it onto the slab costs it all but
+# this fraction of its d'Sd: such a query moves only by moving the LEVEL, so no
+# along-slab excursion exists, and sizing a step on ~0 would fling the start out
+# to a guaranteed full backtrack. Anchor plus jitters is the honest fallback.
+QUAD_DEGENERATE = 1e-6
+# A start keeping less than this fraction of its excursion after the backtrack
+# counts as collapsed onto the anchor, for the diagnostic `a27` gates on.
+BACKTRACK_KEPT_MIN = 1e-3
 N_EXTRA_STARTS = 3
 JITTER = 0.05
 FLOOR_STARTS = 6
@@ -178,6 +190,25 @@ class _Cached:
 
     def grad(self, v):
         return self._eval(v)[1]
+
+
+class _Negated:
+    """(-f, -grad f) for a value_and_grad callable.
+
+    Turns a signed constraint `f <= B` into `-f <= B`, so a two-sided band
+    |f| <= B is the PAIR [(f, B), (_Negated(f), B)] in the (value_and_grad,
+    budget) protocol both solver paths already take -- no new case anywhere, and
+    both entries stay LINEAR in f.
+    """
+
+    __slots__ = ("vg",)
+
+    def __init__(self, value_and_grad):
+        self.vg = value_and_grad
+
+    def __call__(self, theta):
+        value, grad = self.vg(theta)
+        return -float(value), -np.asarray(grad, dtype=float)
 
 
 def _minimize_slsqp(fun_vg, x0, cons, maxiter=MAXITER):
@@ -290,6 +321,8 @@ class PartialR2Net(BoundedSA):
         self.seed = seed
         self._ctx = None
         self._tau = None  # Lem. 2 band half-width; per-gamma, set in _prepare
+        self._band_grad = None  # grad m at the anchor; per-chunk, set in _begin_chunk
+        self._band_lift = None  # S^+ grad m for the deep path; filled lazily
         self._terms = None  # jitted (objective, r2, extra, gram, band); fit-state only
         self._kernels = None  # (objective, cons, cons_np) at the CURRENT budgets
         super().__init__(
@@ -355,9 +388,6 @@ class PartialR2Net(BoundedSA):
         design = np.column_stack([self.phi_, np.ones(len(self.phi_))])
         weighted = slope[:, None] * design
         self._S_pinv = np.linalg.pinv(weighted.T @ weighted / len(weighted))
-        # grad of the LEVEL at theta_c: the directed starts are projected onto its
-        # tangent so they travel along the slab instead of straight out of it
-        self._band_grad = (slope[:, None] * design).mean(axis=0)
 
     def _precompute(self, X, y, **kwargs):
         """Constrained variants cache their constraint features here."""
@@ -425,19 +455,22 @@ class PartialR2Net(BoundedSA):
 
     def _band_tau(self, gamma):
         """Half-width of Lem. 2's slab at this budget; None when mean matching is
-        off. See MEAN_BAND_SE for the derivation of the sqrt(1 + gamma) factor."""
+        off. See MEAN_BAND_SE for the derivation -- the second term is the BALL
+        BUDGET, which is sigma_hat^2 gamma only when `calibrate` is on."""
         if not self.mean_match:
             return None
-        variance = self.sigma2_ * (1.0 + max(float(gamma), 0.0))
+        variance = self.sigma2_ + self._r2_budget(gamma)
         return float(MEAN_BAND_SE * np.sqrt(variance / len(self.y_)))
 
-    def _band_cons(self):
-        """The band as ONE inequality m^2 <= tau^2, in the (value_and_grad,
-        budget) protocol both solver paths already take."""
-        if self._tau is None:
+    def _band_cons(self, tau=None):
+        """|m| <= tau as the PAIR (m <= tau, -m <= tau) -- two entries LINEAR in
+        m, not one squared inequality (see `_Negated`). `tau` defaults to the
+        band in force; pass a tighter one to solve strictly inside it."""
+        tau = self._tau if tau is None else tau
+        if tau is None:
             return []
         band_vg = self._get_terms()[4]
-        return [(band_vg, self._tau**2)]
+        return [(band_vg, tau), (_Negated(band_vg), tau)]
 
     def _band_anchor(self, gamma):
         """(anchor, E_r2 floor) for this budget.
@@ -456,7 +489,9 @@ class PartialR2Net(BoundedSA):
         if self._tau is None:
             return self.theta_c_, self.r2_floor_
 
-        key = float(gamma)
+        # keyed on tau as well as gamma: `MEAN_BAND_SE` is a module knob and the
+        # floor program sets its own tau, so gamma alone does not identify the slab
+        key = (float(gamma), float(self._tau))
         if key in self._band_cache:
             return self._band_cache[key]
 
@@ -465,8 +500,8 @@ class PartialR2Net(BoundedSA):
             self._band_cache[key] = (self.theta_c_, self.r2_floor_)
             return self._band_cache[key]
 
-        r2_vg, band_vg = self._get_terms()[1], self._get_terms()[4]
-        cons = [(band_vg, ((1.0 - BAND_ANCHOR_MARGIN) * self._tau) ** 2)]
+        r2_vg = self._get_terms()[1]
+        cons = self._band_cons((1.0 - BAND_ANCHOR_MARGIN) * self._tau)
         rng = np.random.default_rng(self.seed + 2)
         jitter = JITTER * float(np.sqrt(np.mean(self.theta_c_**2)))
         best, at = np.inf, None
@@ -527,8 +562,17 @@ class PartialR2Net(BoundedSA):
     def _floor_point(self, gamma, n_starts=FLOOR_STARTS):
         """(floor, argmin): the argmin doubles as the feasible ANCHOR the query
         solves start from and backtrack to -- theta_c itself can sit outside the
-        extra constraint."""
-        key = (float(gamma), int(n_starts))
+        extra constraint.
+
+        Sets `_tau` itself rather than trusting a caller to have done it: this is
+        PUBLIC through `constraint_floor`, and budget selection calls that BEFORE
+        any predict (`select_domnist_budgets.py`). Measured without the band the
+        floor under-reports (11% on a toy), and the cached argmin -- reused as the
+        anchor by the next `_prepare` -- can be outside the slab, which turns every
+        query into FAILURE. The key carries tau for the same reason.
+        """
+        self._tau = self._band_tau(gamma)
+        key = (float(gamma), int(n_starts), self._tau)
         cached = getattr(self, "_floor_cache", None)
         if cached is None:
             cached = self._floor_cache = {}
@@ -540,7 +584,12 @@ class PartialR2Net(BoundedSA):
         # candidate, so a floor measured without the band would under-report and
         # let an infeasible budget through
         cons = [(r2_vg, self._r2_budget(gamma))] + self._band_cons()
-        anchor, _ = self._band_anchor(gamma)
+        anchor, r2_floor = self._band_anchor(gamma)
+        if not np.isfinite(r2_floor):
+            # no point in ball ^ slab could be exhibited, so no floor is attainable
+            # either; seeding on the band-infeasible theta_c would report one anyway
+            cached[key] = (np.inf, anchor)
+            return cached[key]
         rng = np.random.default_rng(self.seed + 1)
         jitter = JITTER * float(np.sqrt(np.mean(self.theta_c_**2)))
         best, at = self._extra_value(anchor), anchor
@@ -604,24 +653,39 @@ class PartialR2Net(BoundedSA):
         from the seed so l=2 payloads stay small.
         """
         anchor = self._ctx["anchor"]
-        starts = [anchor]
+        directed = []
         if self._S_pinv is not None:
-            direction = self._S_pinv @ np.append(phi_q, 1.0)
-            if self._tau is not None:
-                # travel ALONG the slab: subtract the S-orthogonal component of
-                # the level gradient, so the directed pair moves the query
-                # without moving the mean. `quad` below still equals d'Sd after
-                # this (the cross terms cancel) -- do not "fix" that line.
-                lift = self._S_pinv @ self._band_grad
-                denominator = float(self._band_grad @ lift)
-                if denominator > EPS:
-                    direction = direction - (float(self._band_grad @ direction) / denominator) * lift
-            quad = float(direction @ np.append(phi_q, 1.0))  # = d'Sd for psd S
-            step = 0.9 * np.sqrt(self._ctx["b_r2"] / max(quad, EPS))
-            starts += [anchor + step * direction, anchor - step * direction]
+            phi_tilde = np.append(phi_q, 1.0)
+            direction = self._S_pinv @ phi_tilde
+            quad = float(direction @ phi_tilde)  # = d'Sd for psd S
+            if self._band_grad is not None:
+                direction = self._along_slab(direction, self._S_pinv @ self._band_grad)
+                # still d'Sd after the projection (the cross terms cancel), so the
+                # plain dot stays right -- do not "fix" this line
+                along = float(direction @ phi_tilde)
+                quad = along if along > QUAD_DEGENERATE * quad else None
+            if quad is not None:
+                step = 0.9 * np.sqrt(self._ctx["b_r2"] / max(quad, EPS))
+                directed = [anchor + step * direction, anchor - step * direction]
         rng = np.random.default_rng(seed)
         jitter = JITTER * float(np.sqrt(np.mean(self.theta_c_**2)))
-        return starts + [anchor + jitter * rng.standard_normal(anchor.size) for _ in range(N_EXTRA_STARTS)]
+        return [anchor] + directed + [anchor + jitter * rng.standard_normal(anchor.size) for _ in range(N_EXTRA_STARTS)]
+
+    def _along_slab(self, direction, lift):
+        """`direction` with the level-moving component removed in the S metric:
+        d - (g'd / g'S^+g) S^+g for g = grad m(anchor), lift = S^+ g.
+
+        Travelling ALONG the slab is what stops the directed pair from being
+        backtracked straight onto the anchor. Returns `direction` unchanged when
+        the lift degenerates (g in the null space of S^+: the level cannot be moved
+        in this metric either, so there is nothing to project out).
+        """
+        if lift is None:
+            return direction
+        denominator = float(self._band_grad @ lift)
+        if denominator <= EPS:
+            return direction
+        return direction - (float(self._band_grad @ direction) / denominator) * lift
 
     def _directed_deep(self, cache, gram, b_r2):
         """Directed pair for deep heads, where the dense S^+ is unaffordable.
@@ -638,7 +702,24 @@ class PartialR2Net(BoundedSA):
         norm = float(np.linalg.norm(gradient))
         if norm < EPS:
             return []
-        direction = _cg(lambda v: np.asarray(gram(anchor, v), dtype=float) + 1e-10 * v, gradient / norm)
+
+        def matvec(v):
+            return np.asarray(gram(anchor, v), dtype=float) + 1e-10 * v
+
+        direction = _cg(matvec, gradient / norm)
+
+        if self._band_grad is not None:
+            # same tangent projection the shallow path gets, with S^+ g by CG. The
+            # lift depends on the anchor only, so one solve serves the whole chunk;
+            # without it the deep starts leave the slab and are backtracked back
+            # onto the anchor, which narrows the bounds without erroring.
+            if self._band_lift is None:
+                band_norm = float(np.linalg.norm(self._band_grad))
+                if band_norm > EPS:
+                    self._band_lift = _cg(matvec, self._band_grad / band_norm) / band_norm
+            direction = self._along_slab(direction, self._band_lift)
+            if float(np.linalg.norm(direction)) < EPS:
+                return []  # the query moves only by moving the level
 
         # double until the ball is left, then bisect back inside ~0.9 of it
         quad = float(direction @ np.asarray(gram(anchor, direction), dtype=float))
@@ -657,15 +738,17 @@ class PartialR2Net(BoundedSA):
         return [anchor + lo * direction, anchor - lo * direction]
 
     def _to_feasible(self, x, b_r2, budget):
-        """A final iterate can sit a hair outside tolerance (iteration cap). Pull
-        it back along the segment to the strictly feasible anchor -- the excursion
-        survives almost whole -- rather than discarding the whole solve. None when
-        even the anchor fails (then the query is honestly FAILURE)."""
+        """(point, kept) -- a final iterate can sit a hair outside tolerance
+        (iteration cap), so pull it back along the segment to the strictly feasible
+        anchor rather than discarding the whole solve. `kept` is the fraction of
+        the excursion that survived: 1.0 untouched, 0.0 collapsed onto the anchor.
+        (None, 0.0) when even the anchor fails -- then the query is honestly
+        FAILURE."""
         if self._feasible(x, b_r2, budget):
-            return x
+            return x, 1.0
         anchor = self._ctx["anchor"]
         if not self._feasible(anchor, b_r2, budget):
-            return None
+            return None, 0.0
         lo, hi = 0.0, 1.0
         for _ in range(25):
             mid = 0.5 * (lo + hi)
@@ -673,7 +756,7 @@ class PartialR2Net(BoundedSA):
                 lo = mid
             else:
                 hi = mid
-        return anchor + lo * (x - anchor) if lo > 0.0 else anchor
+        return (anchor + lo * (x - anchor) if lo > 0.0 else anchor), lo
 
     def _worker_view(self):
         """Picklable snapshot: drop the torch net and the jitted terms; the solve
@@ -687,11 +770,18 @@ class PartialR2Net(BoundedSA):
         """Bind the jitted terms to the CURRENT budgets, once per chunk."""
         if self._kernels is not None:
             return
-        objective, r2_vg, extra_vg, gram, _ = self._get_terms()
+        objective, r2_vg, extra_vg, gram, band_vg = self._get_terms()
         cons = [(r2_vg, self._ctx["b_r2"])] + self._band_cons()
         if extra_vg is not None:
             cons.append((extra_vg, self._ctx["budget"]))
         self._kernels = (objective, cons, gram)
+        # grad of the LEVEL, taken AT THE ANCHOR the starts actually leave from --
+        # not at theta_c, which is a different point whenever `_band_anchor` had to
+        # solve for the slab (`--band-se 0.146`) or the extra budget moved it.
+        # Anchor-only, so one evaluation per chunk serves every query; taken from
+        # the jitted term so it is exact for deep heads too.
+        self._band_grad = None if band_vg is None else np.asarray(band_vg(self._ctx["anchor"])[1], dtype=float)
+        self._band_lift = None  # S^+ grad, filled lazily by the deep path
 
     def _solve_single(self, payload):
         """(lower, upper, status) for one query: multi-start solve on both signs of
@@ -717,12 +807,14 @@ class PartialR2Net(BoundedSA):
         candidates = []
         anchored = 0
         for theta0 in starts:
-            x = self._to_feasible(theta0, b_r2, budget)
+            x, kept = self._to_feasible(theta0, b_r2, budget)
             if x is not None:
-                # a start that backtracks all the way to the anchor carried no
-                # excursion: counted, so a band too thin to travel in is visible
-                # as a number rather than as quietly narrower bounds
-                anchored += int(np.array_equal(x, self._ctx["anchor"]))
+                # a start whose excursion did not survive the backtrack carried
+                # nothing: counted, so a band too thin to travel in is visible as a
+                # number rather than as quietly narrower bounds. `kept` rather than
+                # an identity test -- a backtrack to 1e-12 of the way out is a
+                # collapse too, and `np.array_equal` would miss it.
+                anchored += int(kept < BACKTRACK_KEPT_MIN)
                 candidates.append((cache.val(x), x))
 
         best = [np.inf, -np.inf]
@@ -758,7 +850,7 @@ class PartialR2Net(BoundedSA):
                         x, _ = self._minimize(fun_vg, theta0, cons, maxiter=maxiter)
                         # any backtracked iterate is a feasible inner point,
                         # wherever the solver stopped -- runaways just backtrack
-                        x = self._to_feasible(x, b_r2, budget)
+                        x = self._to_feasible(x, b_r2, budget)[0]
                         if x is not None:
                             values.append(cache.val(x))
                     except Exception as exc:  # a lost polish costs width, not validity
@@ -789,8 +881,10 @@ class RecentredInvPartialR2Net(PartialR2Net):
     Realizability at unfrozen_layers=1 is empirical: a shallow refit could contain
     no near-invariant function, in which case all-INFEASIBLE is the honest answer,
     not a bug. Measured at l=1, gamma*, n_pi=6k the DA-trunk head DOES reach the
-    slice (floor 0.004 < eps^2 0.01) -- read the floor/budget pair logged per
-    predict before touching the budget either way.
+    slice (floor 0.004 < eps^2 0.01), but that was measured BEFORE mean matching:
+    the floor is now over the ball intersected with Lem. 2's slab, so it can only
+    have risen. Read the floor/budget pair logged per predict -- not this number --
+    before touching the budget either way.
     """
 
     def __init__(self, gamma=None, epsilon=None, **kwargs):
