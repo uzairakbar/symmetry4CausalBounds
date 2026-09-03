@@ -51,6 +51,7 @@ class BoundedSA(SA):
         gamma=None,
         epsilon=0.0,
         pad=False,
+        pad_epsilon=None,
         calibrate=False,
         clipy=True,
         n_jobs=1,
@@ -61,6 +62,17 @@ class BoundedSA(SA):
 
         self.epsilon = epsilon
         self.pad = pad
+        # Thm. 3.A's epsilon and the PI+INV constraint's epsilon are DIFFERENT
+        # NORMS of the same defect W = h_*(X) - h_*(X~). SS3.1 constrains
+        # E_inv(h) = E|W|^2 <= eps^2 (an L2 budget); SS2.4 defines eps-approximate
+        # T-invariance as sup_{x,tau} |W| <= eps, and Thm. 3.A's proof uses that
+        # pointwise bound (|eta| <= eps a.s.). An L2 bound implies no pointwise
+        # one, so padding by the constraint's epsilon is NOT what Thm. 3.A asks
+        # for -- measured on the optical device, RMS 0.210 against a sup of 1.230.
+        # `pad_epsilon` carries the padding budget separately. None keeps the old
+        # behaviour (pad by `epsilon`); pass the sup-side budget to get the
+        # guarantee the theorem actually states.
+        self.pad_epsilon = pad_epsilon
         self.calibrate = calibrate
         self.clipy = clipy
         self.n_jobs = n_jobs
@@ -79,7 +91,7 @@ class BoundedSA(SA):
     def _predict(self, X, gamma=None, epsilon=None, **kwargs):
         gamma = self.gamma if gamma is None else gamma
         if epsilon is not None:
-            self.epsilon = epsilon  # constraint RHS and padding both read it
+            self.epsilon = epsilon  # the CONSTRAINT RHS; `pad_epsilon` is separate
         return self._finalize(self._raw_bounds(X, gamma))
 
     def _raw_bounds(self, X, gamma):
@@ -121,10 +133,16 @@ class BoundedSA(SA):
         self.query_diagnostics = solved[:, 3:] if solved.shape[1] > 3 else None
         return solved[:, :2]
 
+    @property
+    def pad_amount(self) -> float:
+        """Thm. 3.A's epsilon: `pad_epsilon` when supplied, else the constraint's
+        own (L2) epsilon -- see `__init__` for why those are not the same thing."""
+        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon)
+
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
         if self.pad:
-            bounds = bounds + np.array([-self.epsilon, self.epsilon])
+            bounds = bounds + np.array([-self.pad_amount, self.pad_amount])
         if self.clipy:
             bounds = np.clip(bounds, self.y_min, self.y_max)
         return bounds
@@ -153,6 +171,7 @@ class PartialR2(BoundedSA):
         gamma=None,
         epsilon=0.0,
         pad=False,
+        pad_epsilon=None,
         calibrate=False,
         clipy=True,
         n_jobs=1,
@@ -182,6 +201,7 @@ class PartialR2(BoundedSA):
             gamma=gamma,
             epsilon=epsilon,
             pad=pad,
+            pad_epsilon=pad_epsilon,
             calibrate=calibrate,
             clipy=clipy,
             n_jobs=n_jobs,

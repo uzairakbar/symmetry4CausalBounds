@@ -61,12 +61,20 @@ class OpticalDeviceConfig:
 
     gamma: float = 2**-1.5
     # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
-    # Asm. C.3's epsilon is meant to be -- a bound on |W| for the DA in force. The
-    # published 2**-2 was below the measured eps* once the ground truth carried its
-    # intercept, and a budget under eps* excludes h_* from the PI+INV set, which
-    # costs VALIDITY, not just width. A float pins it instead (and `a30` gates it).
+    # SS3.1's epsilon is -- the constraint E_inv(h) <= eps^2 evaluated at h_*, for
+    # the DA in force. Whether the published 2**-2 clears it DEPENDS on that DA
+    # (measured: eps* = 0.2121 under `rotation > gaussian-noise`, which config.yaml
+    # ships, but 0.2600 under `all`), and a budget below eps* excludes h_* from the
+    # PI+INV set, which costs VALIDITY, not just width. Measuring it removes the
+    # dependence on which augmentation someone uncomments. A float pins it instead.
     epsilon: float | None = None
     query_epsilon: float | None = None
+    # Thm. 3.A's epsilon, a POINTWISE budget on the same defect (SS2.4 states it as
+    # a sup; SS3.1's `epsilon` above is an L2 budget on it). None = measured. These
+    # are NOT interchangeable: on this device the L2 budget is 0.212 and the
+    # pointwise one 0.691 (the q0.99; the raw sup is 1.23), so padding by the
+    # former understates Thm. 3.A's own requirement ~3x. See `epsilon_pad_star`.
+    pad_epsilon: float | None = None
     epsilon_true: float | None = None
     test_fraction: float = 0.1
     dataset_index: int = 8
@@ -448,6 +456,7 @@ class MethodRegistry:
         epsilon: float,
         calibrate: bool = False,
         pad: bool = False,
+        pad_epsilon: float | None = None,
         clipy: bool = True,
         epsilon_iv: float | None = None,
         n_jobs: int = 1,
@@ -466,7 +475,11 @@ class MethodRegistry:
             method_names: List of method names to build
             gamma: Confounding budget gamma (Asm. 2)
             epsilon: Invariance error epsilon = ||W|| over the full
-                augmentation (§3.1, Thm. 3.A); oracle `epsilon_star`
+                augmentation; the §3.1 CONSTRAINT budget, oracle `epsilon_star`
+            pad_epsilon: Thm. 3.A's epsilon, a POINTWISE budget on the same W
+                (§2.4 states it as a sup). None pads by `epsilon` instead, which
+                is an L2 quantity standing in for a sup -- see `BoundedSA`.
+                Oracle `epsilon_pad_star`.
             calibrate: Scale budgets by the noise level sigma (paper)
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range
@@ -505,7 +518,14 @@ class MethodRegistry:
             # SOCP and quietly report numbers from a model nobody asked for
             raise ValueError(f"unknown backend {backend!r}; valid: 'partial_r2', 'partial_r2_net'.")
 
-        common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs, mean_match=mean_match)
+        common = dict(
+            epsilon=epsilon,
+            pad_epsilon=pad_epsilon,
+            calibrate=calibrate,
+            clipy=clipy,
+            n_jobs=n_jobs,
+            mean_match=mean_match,
+        )
         iv_common = dict(common, epsilon_iv=epsilon_iv)
 
         all_builders = {

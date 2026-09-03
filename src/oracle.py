@@ -17,6 +17,12 @@ from numpy.typing import NDArray
 from src.methods.regression import LeastSquaresClosedForm as OLS
 
 CALIBRATION_SAMPLES: int = 2048
+# `epsilon_pad_star`: how many augmentation realisations to pool, which quantile of
+# |W| to take, and the stream they are drawn from. A quantile rather than the sup
+# because a DA with a Gaussian component has no finite sup; see the function.
+PAD_DRAWS: int = 20
+PAD_QUANTILE: float = 0.99
+PAD_SEED: int = 0
 STRENGTH_BRACKET: tuple = (0.0, 1e3)
 STRENGTH_TOLERANCE: float = 1e-9
 STRENGTH_DOUBLINGS: int = 20  # bracket expansions before declaring the target unreachable
@@ -162,6 +168,55 @@ def epsilon_star(
     """
     w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
     return float(np.sqrt(np.mean(w**2)))
+
+
+def epsilon_pad_star(
+    sem,
+    da,
+    X: NDArray | None = None,
+    features: Callable | None = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+    draws: int = PAD_DRAWS,
+    quantile: float = PAD_QUANTILE,
+    seed: int | None = PAD_SEED,
+    **augment_kwargs,
+) -> float:
+    """Thm. 3.A's epsilon: a POINTWISE budget on W, not `epsilon_star`'s RMS.
+
+    SS2.4 defines eps-approximate T-invariance by sup_{x,tau} |h_*(x) - h_*(tau x)|
+    <= eps, and Thm. 3.A's proof carries that bound pointwise (|eta| <= eps a.s.).
+    `epsilon_star` is the L2 norm of the same W: right for the SS3.1 constraint
+    E_inv(h) <= eps^2, and no bound at all on the sup (measured on the optical
+    device: RMS 0.210 against a sup of 1.230 over the same draws).
+
+    Returns the `quantile` of |W| pooled over `draws` augmentation realisations.
+    A quantile and not the sup, because under a DA with a Gaussian component the
+    sup is INFINITE -- X~ = X + s std(X) G is unbounded, so no finite eps makes
+    h_* eps-approximately T-invariant in the SS2.4 sense, and Thm. 3.A's a.s.
+    conclusion is unreachable. What this budget buys is the same statement with
+    "a.s." weakened to "with probability >= `quantile` per query". For a purely
+    deterministic (permutation) DA the orbit is finite and `quantile=1.0` is the
+    exact sup, so nothing is given up there.
+
+    The draws are advanced explicitly: `_invariance_signal` restores the RNG on
+    exit, so a bare loop would evaluate the SAME realisation every time.
+    """
+    features = features or _identity
+    with preserve_rng():
+        if seed is not None:
+            np.random.seed(seed)
+        if X is None:
+            X, _ = sem(N=n_samples)
+        pooled = []
+        for draw in range(max(int(draws), 1)):
+            # a fresh stream per draw, INSIDE the preserved block: the callee
+            # rolls the global state back, so distinct realisations must come
+            # from distinct seeds rather than from consecutive calls
+            if seed is not None:
+                np.random.seed(seed + draw)
+            w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
+            pooled.append(np.abs(w))
+    return float(np.quantile(np.concatenate(pooled), quantile))
 
 
 def invariance_error(
