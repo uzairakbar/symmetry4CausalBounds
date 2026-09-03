@@ -23,6 +23,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`, `--compare-off`) |
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
+| A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), PI+INV budget >= measured eps*, lazy data load |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
@@ -63,6 +64,29 @@ do-MNIST gates were run at `--micro` scale only for this change. Before trusting
 the full figures, re-run at full scale: `a27`, `a27 --polish-compare`, `a5`,
 `a4 --dump`/`--check` (the band moves the frozen numbers), `a6_a14_pipeline.py`
 and `smoke_do_mnist.py`. Expect the PI family to be ~2x slower per query.
+
+## The optical estimand (A30)
+
+The optical ground truth is FITTED, not declared, so it is the paper's `h_*` only
+if it is fitted in the paper's hypothesis class. Two consequences the code now
+carries explicitly:
+
+- **The fit keeps its intercept.** Asm. 1 closes the class under constant shifts
+  and Lem. 2's set lives on `E[h(X)] = E[Y]`; the intercept-free fit sat 0.333 off
+  that slice (8.6 SE of the level) and was excluded from its own identified set.
+  `bias_sq` is projected onto `span(phi, 1)` for the same reason -- measuring
+  `gamma*` over one class while solving over another is not a rounding error.
+  Restoring it moved `bias_sq` 0.40088 -> 0.402549 and `gamma*` 0.66911 -> 0.673778.
+- **The invariance budget is measured, not declared.** `OpticalDeviceConfig.epsilon
+  = None` means "use the measured `eps*` (+ `EPS_TOL`)", which is what Asm. C.3's
+  epsilon is: a bound on `|W|` for the DA in force. The published `2**-2 = 0.25`
+  is BELOW the measured `eps* = 0.2603`, and a budget under `eps*` excludes `h_*`
+  from the PI+INV set -- a validity loss, not a tighter interval. Set a float to
+  pin a number instead; `a30` gates the relation either way.
+
+A30's pinch-query leg is the one to keep: at `phi(x) = mean(phi)` Cor. 3 collapses
+the interval to `{ybar}`, so that single query -- not the coverage average over the
+pool, which stayed at 1.000 throughout -- is what a dropped intercept shows up in.
 
 ## Budget selection
 
