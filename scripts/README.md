@@ -23,7 +23,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`, `--compare-off`) |
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
-| A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), PI+INV budget >= measured eps*, lazy data load |
+| A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
@@ -77,16 +77,49 @@ carries explicitly:
   `bias_sq` is projected onto `span(phi, 1)` for the same reason -- measuring
   `gamma*` over one class while solving over another is not a rounding error.
   Restoring it moved `bias_sq` 0.40088 -> 0.402549 and `gamma*` 0.66911 -> 0.673778.
-- **The invariance budget is measured, not declared.** `OpticalDeviceConfig.epsilon
-  = None` means "use the measured `eps*` (+ `EPS_TOL`)", which is what Asm. C.3's
-  epsilon is: a bound on `|W|` for the DA in force. The published `2**-2 = 0.25`
-  is BELOW the measured `eps* = 0.2603`, and a budget under `eps*` excludes `h_*`
-  from the PI+INV set -- a validity loss, not a tighter interval. Set a float to
-  pin a number instead; `a30` gates the relation either way.
+- **`sigma_sq` is the whole conditional spread.** It used to be `1 - bias_sq`, i.e.
+  `E[Var(U|X)]` alone, dropping the exogenous noise. That understates `sigma^2` and
+  so OVERSTATES `gamma* = bias_sq/sigma^2`, leaving the "tightest gamma keeping
+  `h_*` inside" loose: 1.8 % on the shipped device (`gamma*` 0.6738 -> 0.6619),
+  801x on experiment 6.
+- **The invariance budget is measured, not declared -- in BOTH its norms.** The
+  paper carries two epsilons for the same defect `W = h_*(X) - h_*(X~)`: SS3.1
+  constrains `E_inv(h) <= eps^2` (L2), while SS2.4 defines eps-approximate
+  T-invariance by `sup |W| <= eps` and Thm. 3.A's proof uses THAT one pointwise.
+  `epsilon_star` is the L2 norm, so it is right for the constraint and no bound at
+  all for the pad -- measured here, RMS 0.212 against a sup of 1.230.
+  `OpticalDeviceConfig.epsilon = None` takes the measured L2 budget;
+  `pad_epsilon = None` takes `oracle.epsilon_pad_star`, a high quantile of `|W|`.
+  A quantile and not the sup because under a DA with a Gaussian component the sup
+  is INFINITE, so no finite epsilon makes `h_*` eps-approximately T-invariant in
+  the SS2.4 sense: what the budget buys is Thm. 3.A with "a.s." weakened to "with
+  probability >= the quantile". Whether the published `2**-2` clears the L2 budget
+  DEPENDS on the augmentation (measured `eps*`: 0.2121 for `rotation >
+  gaussian-noise`, which `config.yaml` ships, 0.2600 for `all`) -- which is the
+  reason to measure it rather than declare it. Floats still pin either budget.
+- **`gamma` stays DECLARED.** Deliberately unlike `epsilon`: `gamma` is an
+  assumption about unobserved confounding, the one quantity the data cannot report,
+  and reading it off the oracle would make the sensitivity analysis circular. The
+  consequence to read the query panel with is that its `gamma = 2**-1.5 = 0.354`
+  sits below `gamma* = 0.662`, so `h_*` is genuinely outside the identified set
+  there and PI+INV misses it on a minority of queries -- the assumption being
+  violated, which is what the gamma sweep and Thm. 1's `gamma_min` exist to locate.
+- **The oracle is pooled over seeded DA draws.** For a fixed-pool SEM the rows
+  never change, so a single augmentation draw is not the population quantity the
+  figures annotate. This matters most for `rho`: Thm. 1's plotted threshold has
+  `d ln / d ln rho ~ -8` where this device sits, so a 3 % draw wobble moves the
+  annotation 20 %.
 
 A30's pinch-query leg is the one to keep: at `phi(x) = mean(phi)` Cor. 3 collapses
 the interval to `{ybar}`, so that single query -- not the coverage average over the
 pool, which stayed at 1.000 throughout -- is what a dropped intercept shows up in.
+It discriminates only UNPADDED, though: Thm. 3.A's pad is four times the defect.
+
+`a30` gates the CONFIGURED budgets, across every augmentation the repo can run --
+not a hard-coded orchestrator. Keep it that way: pinning `epsilon = 2**-3` must
+make it fail (checked 2026-09-03, 8 checks across 3 augmentations), and an earlier
+version that tested `_epsilon_budget(None)` against `measured_epsilon_star()` was
+asserting `x + EPS_TOL >= x` and passed that pin happily.
 
 ## Budget selection
 
