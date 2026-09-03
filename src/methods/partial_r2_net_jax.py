@@ -49,7 +49,7 @@ def _index(theta, phi, shapes):
 
 
 def build_terms(model):
-    """(objective, r2, extra, gram) jitted terms for one fitted model.
+    """(objective, r2, extra, gram, band) jitted terms for one fitted model.
 
     objective(theta, phi_q) is the INDEX at one query -- phi_q is traced, not
     static, so one compile serves every query. r2/extra close over the cached
@@ -60,8 +60,9 @@ def build_terms(model):
         model: a fitted PartialR2Net (or subclass)
 
     Returns:
-        (objective, r2, extra, gram): jitted callables; the first three are
-        value_and_grad wrt theta, gram maps (theta, v) -> S v.
+        (objective, r2, extra, gram, band): jitted callables; the first three and
+        the last are value_and_grad wrt theta, gram maps (theta, v) -> S v.
+        `band` is None unless the model matches means (Lem. 2).
     """
     shapes = tuple(model.head_shapes_)
     link = LINKS[model.link_name]
@@ -111,4 +112,17 @@ def build_terms(model):
 
         extra_vg = jax.jit(jax.value_and_grad(iv))
 
-    return objective, r2_vg, extra_vg, gram
+    # Lem. 2's slice, as a SQUARED deviation so the two-sided band |m| <= tau is
+    # ONE inequality m^2 <= tau^2 in the existing (value_and_grad, budget)
+    # protocol: one JAX pass per theta, and the augmented-Lagrangian path (which
+    # takes inequalities only) needs no new case.
+    band_vg = None
+    if getattr(model, "mean_match", False):
+        ybar = float(model.ybar_)
+
+        def band(theta):
+            return (jnp.mean(link(_index(theta, phi, shapes))) - ybar) ** 2
+
+        band_vg = jax.jit(jax.value_and_grad(band))
+
+    return objective, r2_vg, extra_vg, gram, band_vg

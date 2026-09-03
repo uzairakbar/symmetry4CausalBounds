@@ -68,6 +68,7 @@ class BoundedSA(SA):
         # H_X = {h : E[h(X)] = E[Y]}. False keeps the pre-2026-09 geometry.
         self.mean_match = mean_match
         self.query_status = None  # per-query SolveStatus, set on every predict
+        self.query_diagnostics = None  # optional per-query extras, set on predict
         self.y_min = -np.inf
         self.y_max = np.inf
 
@@ -114,6 +115,10 @@ class BoundedSA(SA):
 
         solved = np.asarray(solved, dtype=float)
         self.query_status = solved[:, 2].astype(int)
+        # a subclass may append per-query diagnostics after the status; they ride
+        # back from the workers with the bounds instead of being lost with the
+        # worker's copy of `self` (the nets' backtrack counters do this)
+        self.query_diagnostics = solved[:, 3:] if solved.shape[1] > 3 else None
         return solved[:, :2]
 
     def _finalize(self, bounds):

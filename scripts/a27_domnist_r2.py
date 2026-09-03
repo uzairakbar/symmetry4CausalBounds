@@ -14,8 +14,16 @@ is an open empirical question (all-INFEASIBLE there is honest behaviour, not a
 bug -- read the floor/budget pair it logs).
 
     python scripts/a27_domnist_r2.py
+    python scripts/a27_domnist_r2.py --micro                 # 4k/512/4, minutes
+    python scripts/a27_domnist_r2.py --micro --band-se 0.146 # forces the slab anchor
+
+0.146 is the largest MEAN_BAND_SE that puts tau BELOW the micro fixture's own
+|m(theta_c)|, so `--band-se 0.146` is the leg that drives theta_c out of the band
+and exercises `_band_anchor`'s constrained branch; production runs never take it.
+    python scripts/a27_domnist_r2.py --polish-compare        # single vs full polish widths
 """
 
+import argparse
 import os
 import sys
 import time
@@ -28,13 +36,25 @@ from src.data_augmentors.do_mnist import DoMNISTDA  # noqa: E402
 from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry  # noqa: E402
 from src.experiments.do_mnist import NESTED_IN, Flatten  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.methods.partial_r2_net import PartialR2Net, head_index  # noqa: E402
+from src.methods.partial_r2_net import (  # noqa: E402
+    LINK_SLOPES,
+    MEAN_BAND_SE,
+    PartialR2Net,
+    head_index,
+)
 from src.methods.regression import GradientDescentERM  # noqa: E402
 from src.methods.sensitivity_models import SolveStatus  # noqa: E402
 from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
 N_SAMPLES, N_PI, N_QUERIES = 60_000, 6_000, 32
 L2_SAMPLES, L2_PI, L2_QUERIES = 20_000, 2_000, 4
+# --micro: the only do-MNIST scale this refactor is allowed to run (PLAN v2 C4).
+# Small enough to finish in minutes, large enough to exercise every path.
+MICRO = (4_000, 512, 4)
+MICRO_L2 = (2_000, 256, 1)
+# micro runs SERIAL: with 4 queries the loky workers spend more time importing
+# torch and JIT-compiling the jitted terms than they save on the solves
+MICRO_JOBS = 1
 GAMMA_STAR = 0.010000000000000002 / 0.15  # bias_sq / sigma_sq, sem/do_mnist.py
 EPSILON, EPSILON_IV = 0.1, 0.1
 # Numeric slack for the nesting check. Child subset-of parent holds EXACTLY at the
@@ -93,7 +113,7 @@ def fixture(n_samples, n_pi, n_queries):
     return nets, X[keep], GX[keep], y[keep], G[keep], flat.fit_transform(Q_img), h_star
 
 
-def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers):
+def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers, n_jobs=N_JOBS):
     """{method: (bounds, status, model)} for the six PI variants, wall-clock logged."""
     builders = MethodRegistry.build_methods(
         ["PI", "DA+PI", "PI+INV", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"],
@@ -102,7 +122,7 @@ def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers):
         epsilon_iv=EPSILON_IV,
         calibrate=True,
         clipy=True,
-        n_jobs=N_JOBS,
+        n_jobs=n_jobs,
         backend="partial_r2_net",
         outcome_models=nets,
         unfrozen_layers=unfrozen_layers,
@@ -151,7 +171,11 @@ def gate_nesting(results, label):
         # exactly, so the numeric check below only ever measures solver noise.
         # For intersections the DA BRANCH is the one sharing the parent's ball.
         branch = getattr(child_model, "augmented", child_model)
-        same_ball = branch.gamma == base_model.gamma and branch.sigma2_ == base_model.sigma2_
+        # the SLAB is part of the set too: same ball + same band => the child's
+        # feasible set really is a subset, whatever the extra constraint does
+        same_ball = (
+            branch.gamma == base_model.gamma and branch.sigma2_ == base_model.sigma2_ and branch._tau == base_model._tau
+        )
         check(f"A27 {label} {name} in {parent}: same ball", same_ball, hard=name not in EXEMPT)
         both = np.isfinite(child).all(axis=1) & np.isfinite(base).all(axis=1)
         if not both.any():
@@ -217,25 +241,105 @@ def gate_gradients(nets, X, GX, y, G):
     def index_np(t):
         return head_index(t, phi_q[None, :], pi.head_shapes_)[0]
 
-    objective, r2_vg, _, _ = pi._get_terms()
+    objective, r2_vg, _, _, band_vg = pi._get_terms()
     _fd_check("E_r2", r2_vg, pi.r2_value, theta, coords)
     _fd_check("index", lambda t: objective(t, phi_q), index_np, theta, coords)
     _fd_check("E_inv", inv._get_terms()[2], inv._extra_value, theta, coords)
     _fd_check("R_iv", iv._get_terms()[2], iv._extra_value, theta, coords)
+    if band_vg is not None:  # Lem. 2's band, squared -- the numpy mirror is signed
+        _fd_check("E_mean", band_vg, lambda t: pi.mean_value(t) ** 2, theta, coords)
 
 
-def main():
-    print(f"== l=1 at n={N_SAMPLES:,} n_pi={N_PI:,} q={N_QUERIES} gamma*={GAMMA_STAR:.4f} ==")
-    nets, X, GX, y, G, Q, h_star = fixture(N_SAMPLES, N_PI, N_QUERIES)
-    results = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=1)
+def gate_band(results, label, n_pi):
+    """Lem. 2's slab: the right width, enforced on acceptance, and actually
+    travelled in (a slab too thin to move in shows up as every start backtracking
+    onto the anchor -- the silent-narrowing failure mode)."""
+    for name, (_, _, model) in results.items():
+        branch = getattr(model, "augmented", model)
+        if branch._tau is None:
+            check(f"A27 {label} {name}: band is on", False)
+            continue
+
+        want = MEAN_BAND_SE * np.sqrt(branch.sigma2_ * (1.0 + branch.gamma) / n_pi)
+        check(
+            f"A27 {label} {name}: tau == 2 sigma sqrt(1+gamma)/sqrt(n)",
+            abs(branch._tau - want) < 1e-12,
+            f"{branch._tau:.5g}",
+        )
+
+        if branch._ctx is None:  # _prepare bailed: every query INFEASIBLE, no anchor
+            check(f"A27 {label} {name}: an anchor was prepared", False)
+            continue
+
+        anchor = branch._ctx["anchor"]
+        check(
+            f"A27 {label} {name}: the anchor is band-feasible",
+            abs(branch.mean_value(anchor)) <= branch._tau * (1 + 1e-6) + 1e-9,
+            f"|m| {abs(branch.mean_value(anchor)):.4g} vs tau {branch._tau:.4g}",
+        )
+
+        # a pure level shift past the slab must be REJECTED: that is the check
+        # every accepted candidate passes, so gate it directly
+        outside = anchor.copy()
+        outside[-1] += (
+            10.0
+            * branch._tau
+            / max(np.mean(LINK_SLOPES[branch.link_name](head_index(anchor, branch.phi_, branch.head_shapes_))), 1e-9)
+        )
+        check(
+            f"A27 {label} {name}: a level shift past tau is rejected",
+            not branch._feasible(outside, branch._ctx["b_r2"], branch._ctx["budget"]),
+            f"|m| {abs(branch.mean_value(outside)):.4g}",
+        )
+
+        diagnostics = getattr(model, "query_diagnostics", None)
+        if diagnostics is not None and len(diagnostics):
+            fraction = float(np.mean(diagnostics[:, 0]))
+            check(f"A27 {label} {name}: starts backtracked to the anchor < 50%", fraction < 0.5, f"{fraction:.1%}")
+
+
+def polish_compare(nets, X, GX, y, G, Q):
+    """Single-polish vs full multi-start widths at the CURRENT tau, for the two
+    programs whose only extra constraint is the band. `<= 1e-3` everywhere is what
+    would license SINGLE_POLISH_WITH_BAND; measure it at production scale, never
+    on a micro fixture where the band is inert."""
+    import src.methods.partial_r2_net as pr2
+
+    for name, design, net in (("PI", X, "X"), ("DA+PI", GX, "GX")):
+        model = PartialR2Net(
+            gamma=GAMMA_STAR, epsilon=EPSILON, calibrate=True, outcome_model=nets[net], n_jobs=N_JOBS
+        ).fit(design, y)
+        full = model.predict(Q)
+        try:  # same feasible set, fewer polish solves -- the only thing that moves
+            pr2.SINGLE_POLISH_WITH_BAND = True
+            single = model.predict(Q)
+        finally:
+            pr2.SINGLE_POLISH_WITH_BAND = False
+        delta = float(np.nanmax(np.abs((full[:, 1] - full[:, 0]) - (single[:, 1] - single[:, 0]))))
+        print(f"  polish-compare {name}: max |width(full) - width(single)| = {delta:.3e} (tau {model._tau:.4g})")
+
+
+def main(micro=False, polish=False):
+    sizes = MICRO if micro else (N_SAMPLES, N_PI, N_QUERIES)
+    sizes_l2 = MICRO_L2 if micro else (L2_SAMPLES, L2_PI, L2_QUERIES)
+    print(
+        f"== l=1 at n={sizes[0]:,} n_pi={sizes[1]:,} q={sizes[2]} gamma*={GAMMA_STAR:.4f} "
+        f"MEAN_BAND_SE={MEAN_BAND_SE} =="
+    )
+    nets, X, GX, y, G, Q, h_star = fixture(*sizes)
+    jobs = MICRO_JOBS if micro else N_JOBS
+    results = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=1, n_jobs=jobs)
     gate_statuses(results, "l1")
     gate_nesting(results, "l1")
     gate_membership(results, h_star, "l1")
+    gate_band(results, "l1", sizes[1])
     gate_gradients(nets, X, GX, y, G)
+    if polish:
+        polish_compare(nets, X, GX, y, G, Q)
 
-    print(f"== l=2 at n={L2_SAMPLES:,} n_pi={L2_PI:,} q={L2_QUERIES} (correctness only; AL path) ==")
-    nets, X, GX, y, G, Q, h_star = fixture(L2_SAMPLES, L2_PI, L2_QUERIES)
-    results = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=2)
+    print(f"== l=2 at n={sizes_l2[0]:,} n_pi={sizes_l2[1]:,} q={sizes_l2[2]} (correctness only; AL path) ==")
+    nets, X, GX, y, G, Q, h_star = fixture(*sizes_l2)
+    results = fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers=2, n_jobs=jobs)
     gate_statuses(results, "l2")
     gate_nesting(results, "l2")
     for name, (bounds, _, _) in results.items():
@@ -249,4 +353,16 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--micro", action="store_true", help="4k/512/4 fixture (PLAN v2 C4)")
+    parser.add_argument("--band-se", type=float, default=None, help="override MEAN_BAND_SE BEFORE any fit")
+    parser.add_argument("--polish-compare", action="store_true", help="single vs full polish widths")
+    args = parser.parse_args()
+    if args.band_se is not None:
+        # BEFORE the fits: tau, the anchor and the floor cache are all built from
+        # it, so a post-fit override would leave a band-infeasible anchor behind
+        import src.methods.partial_r2_net as _pr2
+
+        _pr2.MEAN_BAND_SE = MEAN_BAND_SE = args.band_se
+        print(f"MEAN_BAND_SE overridden to {args.band_se}")
+    sys.exit(main(micro=args.micro, polish=args.polish_compare))

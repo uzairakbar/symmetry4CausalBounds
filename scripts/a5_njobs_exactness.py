@@ -4,8 +4,10 @@ Queries are independent and nothing warm-starts across them, so serial and
 parallel bounds are bit-identical -- not merely close.
 
     python scripts/a5_njobs_exactness.py
+    python scripts/a5_njobs_exactness.py --micro   # 4k/512/8, minutes (PLAN v2 C4)
 """
 
+import argparse
 import os
 import sys
 import time
@@ -27,6 +29,7 @@ from src.methods.regression import GradientDescentERM  # noqa: E402
 from src.sem.do_mnist import DoMNISTSEM  # noqa: E402
 
 N_SAMPLES, N_PI, N_QUERIES, N_JOBS = 40_000, 5_000, 128, 16
+MICRO = (4_000, 512, 8, 4)
 FAIL = []
 
 
@@ -36,7 +39,8 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def main():
+def main(micro=False):
+    n_samples, n_pi, n_queries, n_jobs = MICRO if micro else (N_SAMPLES, N_PI, N_QUERIES, N_JOBS)
     set_seed(42)
     sem = DoMNISTSEM(
         seed=42,
@@ -47,7 +51,7 @@ def main():
         eta=DOMNIST_CONFIG.eta,
     )
     flat = Flatten()
-    X_img, y, _ = sem.sample_paired(N_SAMPLES, seed=42)
+    X_img, y, _ = sem.sample_paired(n_samples, seed=42)
     GX_img, G = DoMNISTDA()(X_img)
     X, GX = flat.fit_transform(X_img), flat.fit_transform(GX_img)
 
@@ -55,9 +59,9 @@ def main():
         "X": GradientDescentERM().fit(X, y, init_seed=42, epochs=1),
         "GX": GradientDescentERM().fit(GX, y, init_seed=42, epochs=1),
     }
-    keep = np.random.default_rng(42).choice(len(X), N_PI, replace=False)
+    keep = np.random.default_rng(42).choice(len(X), n_pi, replace=False)
     X, GX, y, G = X[keep], GX[keep], y[keep], G[keep]
-    Q = X[:N_QUERIES]
+    Q = X[:n_queries]
 
     common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
 
@@ -80,7 +84,7 @@ def main():
         bounds_serial, status_serial = serial.predict(Q), serial.query_status.copy()
         t_serial = time.perf_counter() - start
 
-        parallel = build(N_JOBS)
+        parallel = build(n_jobs)
         start = time.perf_counter()
         bounds_parallel, status_parallel = (parallel.predict(Q), parallel.query_status.copy())
         t_parallel = time.perf_counter() - start
@@ -97,4 +101,6 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--micro", action="store_true", help="4k/512/8 fixture (PLAN v2 C4)")
+    sys.exit(main(micro=parser.parse_args().micro))
