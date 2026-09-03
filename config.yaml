@@ -3,7 +3,11 @@ defaults:
     calibrate: true    # scale budgets by noise sigma (paper); false = raw gamma
     pad: true          # eps-pad DA+ intervals (Thm. 3)
     clipy: true         # clip intervals to observed outcome range
-    mean_match: true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y].
+    mean_match: true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y],
+                        # i.e. the covariance ball around the WITH-INTERCEPT erm.
+                        # Exact on the linear backend (the intercept is eliminated
+                        # by centring); a 2-SE band on the do-MNIST nets, where the
+                        # constraint is nonlinear (see MEAN_BAND_SE).
                         # false = the pre-2026-09 uncentred, intercept-free ball.
     n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
