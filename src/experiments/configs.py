@@ -60,8 +60,13 @@ class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
 
     gamma: float = 2**-1.5
-    epsilon: float = 2**-2
-    query_epsilon: float = 2**-2
+    # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
+    # Asm. C.3's epsilon is meant to be -- a bound on |W| for the DA in force. The
+    # published 2**-2 was below the measured eps* once the ground truth carried its
+    # intercept, and a budget under eps* excludes h_* from the PI+INV set, which
+    # costs VALIDITY, not just width. A float pins it instead (and `a30` gates it).
+    epsilon: float | None = None
+    query_epsilon: float | None = None
     epsilon_true: float | None = None
     test_fraction: float = 0.1
     dataset_index: int = 8

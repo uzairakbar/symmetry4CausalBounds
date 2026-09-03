@@ -40,7 +40,21 @@ class OpticalDeviceSEM(SEM):
             dataset[experiment] = np.genfromtxt(f"{directory}/{file_name}", delimiter=" ")
         return dataset
 
-    _DATASET: dict[int, NDArray] = load_dataset.__func__()
+    _DATASET: dict[int, NDArray] | None = None  # filled on first use, not on import
+
+    @classmethod
+    def dataset(cls) -> dict[int, NDArray]:
+        """The cached pool, loaded on FIRST USE.
+
+        `load_dataset` downloads from a remote when the directory is missing, so
+        binding it at class-definition time made merely importing this module --
+        or anything that transitively imports it -- reach for the network. It also
+        made the module unimportable in a fresh checkout with no network, which is
+        how a worktree of an earlier commit fails.
+        """
+        if cls._DATASET is None:
+            cls._DATASET = cls.load_dataset()
+        return cls._DATASET
 
     def __init__(self, experiment: int = 0, center: bool = True, ground_truth: str = "polynomial"):
         experiment_data = self.get_experiment_data(experiment)
@@ -55,11 +69,11 @@ class OpticalDeviceSEM(SEM):
 
         best_degree = 1
         if ground_truth == "linear":
-            W_XY, features, epsilon = fit_ground_truth_f(X, y, C, 1)
+            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, 1)
         elif ground_truth == "polynomial":
             best_degree, _ = select_best_degree(X, y, C, max_degree=MAX_PLOYNOMIAL_DEGREE)
             logger.info(f"Experiment {experiment} polynomial degree: {best_degree}")
-            W_XY, features, epsilon = fit_ground_truth_f(X, y, C, best_degree)
+            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, best_degree)
         else:
             raise ValueError(f"Ground truth {ground_truth} model not supported/implemented.")
 
@@ -75,15 +89,29 @@ class OpticalDeviceSEM(SEM):
         # f_new(X) = f_old(X) / sigma
         self.y = y / noise_scale
         self.W_XY = W_XY / noise_scale
+        self.b_XY = b_XY / noise_scale
         self.X = X
         self.C = C
         self.poly_degree = best_degree
 
         # 4. Normalized variances. Var(xi_new) = Var(xi_old) / sigma^2 = 1.0
-        # Bias lives in the feature space PI is fit on, i.e. phi(X), not X.
+        # Bias lives in the feature space PI is fit on, i.e. phi(X), not X -- and
+        # in the class Asm. 1 actually describes, which is closed under constant
+        # shifts, so the projection is onto span(phi, 1) and NOT span(phi). Same
+        # class the solver searches under `mean_match`; measuring gamma* over one
+        # class while solving over another is what let h_* fall out of the set.
         Phi = features.fit_transform(self.X)
-        xi_hat = Phi @ np.linalg.pinv(Phi) @ (epsilon * self.C)
+        design = np.column_stack([Phi, np.ones(len(Phi))])
+        xi_hat = design @ np.linalg.pinv(design) @ (epsilon * self.C)
         self._bias_sq = float(np.var(xi_hat) / (noise_scale**2))
+
+    def f(self, X) -> NDArray:
+        """Ground truth on the FEATURE space: f(phi) = phi W + b.
+
+        `X` is already phi(x) at every call site. The intercept is part of the
+        estimand (see `fit_ground_truth_f`); without it h_* is off Lem. 2's slice.
+        """
+        return X @ self.W_XY + self.b_XY
 
     @property
     def bias_sq(self) -> float:
@@ -103,8 +131,8 @@ class OpticalDeviceSEM(SEM):
 
     @classmethod
     def get_experiment_data(cls, n: int) -> NDArray:
-        return cls._DATASET[n]
+        return cls.dataset()[n]
 
     @classmethod
     def num_experiments(cls) -> int:
-        return len(cls._DATASET)
+        return len(cls.dataset())

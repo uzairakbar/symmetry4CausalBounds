@@ -46,7 +46,11 @@ METHODS = ["PI", "DA+PI"]
 # Recorded under `mean_match: true`. Giving the noise-ratio fits their intercept
 # (Lem. 2's class) moved them from 0.4493541624 / 0.2784036752 by +0.00045 /
 # +0.00049 -- rho alone, 0.1-0.2 %, invisible on the figure but not silent.
-VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2788961493
+# Then restoring the optical GROUND TRUTH's intercept moved the optical line again,
+# 0.2788961493 -> 0.2769650206 (-0.7 %): gamma* is now measured over span(phi, 1),
+# the same class the solver searches, so bias_sq went 0.40088 -> 0.402549. The sim
+# line does not move -- its SEM never dropped an intercept.
+VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2769650206
 VLINE_RTOL = 1e-6
 # The optical pin belongs to the PUBLISHED optical configuration. Trying another
 # ground truth or dataset index legitimately moves the line (measured: a linear

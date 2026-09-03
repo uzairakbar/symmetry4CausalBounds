@@ -39,7 +39,18 @@ def fit_ground_truth_f(
     y,
     C,  # treatment, outcome, confounder variables
     best_degree: int,  # X polynomial features degree
-) -> tuple[NDArray, PolynomialFeatures, float]:
+) -> tuple[NDArray, float, PolynomialFeatures, float]:
+    """(W, b, features, epsilon) for the ground truth f(x) = phi(x) W + b.
+
+    The INTERCEPT is returned, not discarded. Asm. 1's base clause closes the
+    hypothesis class under constant shifts, and Lem. 2's set lives on the slice
+    H_X = {h : E[h(X)] = E[Y]}; a ground truth fitted without a free intercept is
+    not on that slice and is therefore not in the identified set the solver
+    searches. `phi` here excludes the bias column (`include_bias=False`) and, for
+    degree >= 2, its squared terms have nonzero mean even on centred X -- so the
+    intercept is not a formality: dropping it moved h_* off the slice by 0.333 on
+    the published optical experiment, more than eight standard errors of the level.
+    """
     features = PolynomialFeatures(best_degree, include_bias=False)
     X_features = features.fit_transform(X)
 
@@ -52,5 +63,7 @@ def fit_ground_truth_f(
     y_deconfounded = y - epsilon * C
 
     # fit f(X) = y - epsilon * C
-    f = LinearRegression().fit(X_features, y_deconfounded).coef_.reshape(-1, 1)
-    return f, features, epsilon
+    deconfounded = LinearRegression().fit(X_features, y_deconfounded)
+    f = deconfounded.coef_.reshape(-1, 1)
+    b = float(np.asarray(deconfounded.intercept_).ravel()[0])
+    return f, b, features, epsilon
