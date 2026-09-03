@@ -3,6 +3,8 @@ defaults:
     calibrate: true    # scale budgets by noise sigma (paper); false = raw gamma
     pad: true          # eps-pad DA+ intervals (Thm. 3)
     clipy: true         # clip intervals to observed outcome range
+    mean_match: true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y].
+                        # false = the pre-2026-09 uncentred, intercept-free ball.
     n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budget is not a toggle: it is the oracle ||E[W#|Z-tilde]||

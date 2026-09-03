@@ -54,6 +54,7 @@ class BoundedSA(SA):
         calibrate=False,
         clipy=True,
         n_jobs=1,
+        mean_match=True,
     ):
         if gamma is None:
             raise ValueError("gamma must be explicitly provided")
@@ -63,6 +64,9 @@ class BoundedSA(SA):
         self.calibrate = calibrate
         self.clipy = clipy
         self.n_jobs = n_jobs
+        # Lem. 2: the identified set lives on the mean-matched slice
+        # H_X = {h : E[h(X)] = E[Y]}. False keeps the pre-2026-09 geometry.
+        self.mean_match = mean_match
         self.query_status = None  # per-query SolveStatus, set on every predict
         self.y_min = -np.inf
         self.y_max = np.inf
@@ -147,6 +151,7 @@ class PartialR2(BoundedSA):
         calibrate=False,
         clipy=True,
         n_jobs=1,
+        mean_match=True,
     ):
         self._supports_closed_form = True
 
@@ -163,7 +168,15 @@ class PartialR2(BoundedSA):
         self.N_samples = 0
         self.sigma_sq = 1.0  # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
 
-        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
+        super().__init__(
+            gamma=gamma,
+            epsilon=epsilon,
+            pad=pad,
+            calibrate=calibrate,
+            clipy=clipy,
+            n_jobs=n_jobs,
+            mean_match=mean_match,
+        )
 
     # ------------------------------------------------------------------ fit
 
@@ -538,6 +551,7 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             calibrate=self.calibrate,
             clipy=self.clipy,
             n_jobs=self.n_jobs,
+            mean_match=self.mean_match,
         )
 
     def _fit_branches(self, X, y, GX, G):
@@ -580,6 +594,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             calibrate=self.calibrate,
             clipy=self.clipy,
             n_jobs=self.n_jobs,
+            mean_match=self.mean_match,
         )
 
     def _fit_branches(self, X, y, GX, G):

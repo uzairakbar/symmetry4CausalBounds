@@ -363,7 +363,17 @@ PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
 
 
 def _partial_r2_net_builders(
-    method_names, gamma, epsilon, epsilon_iv, calibrate, pad, clipy, n_jobs, outcome_models, unfrozen_layers
+    method_names,
+    gamma,
+    epsilon,
+    epsilon_iv,
+    calibrate,
+    pad,
+    clipy,
+    n_jobs,
+    mean_match,
+    outcome_models,
+    unfrozen_layers,
 ):
     """partial_r2_net backend (App. D, (P2)). Every method refits the last
     `unfrozen_layers` layers of a PREFIT outcome net, so only the constraint set
@@ -374,6 +384,7 @@ def _partial_r2_net_builders(
         calibrate=calibrate,
         clipy=clipy,
         n_jobs=n_jobs,
+        mean_match=mean_match,
     )
 
     def net(key):
@@ -435,6 +446,7 @@ class MethodRegistry:
         clipy: bool = True,
         epsilon_iv: float | None = None,
         n_jobs: int = 1,
+        mean_match: bool = True,
         backend: Literal["partial_r2", "partial_r2_net"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         unfrozen_layers: int = 1,
@@ -457,6 +469,8 @@ class MethodRegistry:
                 + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
                 pointwise eps that Thm. 3.A requires.
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
+            mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
+                (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
                 'partial_r2_net' the do-MNIST last-l-layer refit (same Lemma-2
                 gamma units, so oracle gamma* is principled).
@@ -476,6 +490,7 @@ class MethodRegistry:
                 pad=pad,
                 clipy=clipy,
                 n_jobs=n_jobs,
+                mean_match=mean_match,
                 outcome_models=outcome_models,
                 unfrozen_layers=unfrozen_layers,
             )
@@ -485,7 +500,7 @@ class MethodRegistry:
             # SOCP and quietly report numbers from a model nobody asked for
             raise ValueError(f"unknown backend {backend!r}; valid: 'partial_r2', 'partial_r2_net'.")
 
-        common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
+        common = dict(epsilon=epsilon, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs, mean_match=mean_match)
         iv_common = dict(common, epsilon_iv=epsilon_iv)
 
         all_builders = {
@@ -534,7 +549,7 @@ DATASET_KEYS: dict[str, set] = {
     },
 }
 
-TOGGLE_KEYS: set = {"calibrate", "pad", "clipy", "n_jobs"}
+TOGGLE_KEYS: set = {"calibrate", "pad", "clipy", "n_jobs", "mean_match"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {

@@ -243,6 +243,7 @@ class PartialR2Net(BoundedSA):
         calibrate=False,
         clipy=True,
         n_jobs=1,
+        mean_match=True,
         link="probit",
         unfrozen_layers=1,
         outcome_model=None,
@@ -257,7 +258,15 @@ class PartialR2Net(BoundedSA):
         self._ctx = None
         self._terms = None  # jitted (objective, r2, extra); fit-state only
         self._kernels = None  # (objective, cons, cons_np) at the CURRENT budgets
-        super().__init__(gamma=gamma, epsilon=epsilon, pad=pad, calibrate=calibrate, clipy=clipy, n_jobs=n_jobs)
+        super().__init__(
+            gamma=gamma,
+            epsilon=epsilon,
+            pad=pad,
+            calibrate=calibrate,
+            clipy=clipy,
+            n_jobs=n_jobs,
+            mean_match=mean_match,
+        )
 
     # ------------------------------------------------------------------- fit
 
@@ -719,6 +728,7 @@ class IntersectedPartialR2Net(IntersectionMixin, PartialR2Net):
             calibrate=self.calibrate,
             clipy=self.clipy,
             n_jobs=self.n_jobs,
+            mean_match=self.mean_match,
             link=self.link_name,
             unfrozen_layers=self.unfrozen_layers,
             seed=self.seed,

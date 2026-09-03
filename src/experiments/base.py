@@ -114,6 +114,7 @@ class BaseExperimentRunner(ABC):
         calibrate: bool = False,
         pad: bool = False,
         clipy: bool = True,
+        mean_match: bool = True,
         **kwargs,
     ):
         if seed >= 0:
@@ -125,10 +126,14 @@ class BaseExperimentRunner(ABC):
         self.sweep_samples = sweep_samples
         self.methods = methods
         self.hyperparameters = hyperparameters
-        # toggles: needed here only to report oracle parameters in matching units
+        # toggles: needed here only to report oracle parameters in matching units.
+        # `mean_match` is EXPLICIT, not swallowed by **kwargs: the floor guard and
+        # the oracle must use the same geometry as the solver, and a silent default
+        # would be a lie the gates cannot see.
         self.calibrate = calibrate
         self.pad = pad
         self.clipy = clipy
+        self.mean_match = mean_match
 
     @abstractmethod
     def run(self, desc: str):
