@@ -303,7 +303,15 @@ class GammaRatioStrategy(GenericParamSweep):
 
     @property
     def vlines(self):
-        """Also mark the Thm. 1 threshold, as a ratio of gamma* (PLAN 6)."""
+        """Also mark the Thm. 1 threshold, as a ratio of gamma*.
+
+        `thm1_gamma_min` inverts the TIGHT ceiling of App. F.1, so the line is
+        the exact budget below which DA can lose h_*, not a sufficient bound.
+
+        Thm. 1 assumes a T-invariant h_*. Where the DA is only approximately
+        invariant (eps* > 0, e.g. optical) the governing statement is Thm. 3.A's
+        eps-padding instead, and this line is a reference, not a prediction.
+        """
         ratios = []
         for j in range(self.n_experiments):
             oracle = self.get_oracle(j)

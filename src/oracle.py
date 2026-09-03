@@ -305,13 +305,81 @@ def eps_iv_star(
 # =============================================================================
 
 
+def _thm1_r_base(oracle: "OracleParameters", gamma: float, calibrate: bool) -> float:
+    """Radius of the BASELINE ball: sigma sqrt(gamma) calibrated (paper), else
+    sqrt(gamma) -- with raw budgets the budget IS the squared radius. No rho."""
+    gamma = max(float(gamma), 0.0)
+    if not calibrate:
+        return float(np.sqrt(gamma))
+    return float(np.sqrt(float(oracle.sigma_sq) * gamma))
+
+
+def _thm1_r_da(oracle: "OracleParameters", gamma: float, calibrate: bool) -> float:
+    """Radius of the POST-DA ball: sigma-tilde sqrt(gamma) = sigma sqrt(rho gamma)
+    calibrated, else sqrt(gamma). The only radius that needs rho -- callers guard it."""
+    gamma = max(float(gamma), 0.0)
+    if not calibrate:
+        return float(np.sqrt(gamma))
+    return float(np.sqrt(float(oracle.sigma_sq) * float(oracle.rho) * gamma))
+
+
+def thm1_eps_ceiling(oracle: "OracleParameters", gamma: float, calibrate: bool = False) -> float:
+    """
+    eps+ of Thm. 1: the largest approximation error of the BASELINE set at which
+    DA still cannot lose h_* (App. F.1).
+
+        eps+ = ( sqrt(C^2 + r_DA^2) - r_base )^2,      C^2 = sigma^2 (rho - 1)
+
+    with C^2 = sigma-tilde^2 - sigma^2 the information the DA gives up (Lem. 4:
+    A^2 = B^2 + C^2 for the pre-/post-DA bias magnitudes A, B). In the paper's
+    calibrated units this is the statement of Thm. 1,
+
+        eps+ = sigma^2 ( sqrt(rho - 1 + gamma rho) - sqrt(gamma) )^2,
+
+    and with raw budgets (r_base = r_DA = sqrt(gamma)),
+
+        eps+ = ( sqrt(gamma + sigma^2 (rho - 1)) - sqrt(gamma) )^2.
+
+    TIGHT, not merely sufficient: for A >= r_base every step of the F.1 chain
+    (eps <= eps+  =>  A^2 <= C^2 + r_DA^2  =>  B^2 <= r_DA^2) is reversible, so
+    eps <= eps+ is EQUIVALENT to post-DA membership h_* in H_pi-tilde, Eq. (dagger).
+    """
+    rho = oracle.rho
+    if rho is None or not np.isfinite(rho):
+        logger.warning("rho unavailable; Thm. 1 ceiling is undefined.")
+        return float("nan")
+
+    r_base = _thm1_r_base(oracle, gamma, calibrate)
+    r_da = _thm1_r_da(oracle, gamma, calibrate)
+    c_sq = float(oracle.sigma_sq) * (float(rho) - 1.0)
+    return float((np.sqrt(max(c_sq + r_da**2, 0.0)) - r_base) ** 2)
+
+
+def thm1_eps_valid(oracle: "OracleParameters", gamma: float, calibrate: bool = False) -> float:
+    """
+    Approximation error of the BASELINE set, App. F.1 Eq. (*): for a ball of
+    radius r_base around h_erm, E^-(H_pi) = (A - r_base)_+^2 with A = ||h_erm - h_*||.
+
+    The left-hand side of Thm. 1's hypothesis; `thm1_gamma_min` is exactly where
+    it meets `thm1_eps_ceiling`. Needs no rho -- it is a statement about the
+    BASELINE set alone, and stays defined when the DA's noise ratio does not.
+    """
+    r_base = _thm1_r_base(oracle, gamma, calibrate)
+    return float(max(0.0, np.sqrt(max(float(oracle.bias_sq), 0.0)) - r_base) ** 2)
+
+
 def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float:
     """
     Smallest gamma at which the DA+PI set still contains h_* (Thm. 1), i.e. the
-    budget the augmentation buys back. Below gamma* by an amount set by rho.
+    budget the augmentation buys back.
 
-    calibrated:   sqrt(gamma_min) = max(0, sqrt(gamma*) - (rho - 1)/sqrt(rho))
-    uncalibrated: gamma_min       = max(0, bias^2 - sigma^2 (rho - 1))
+    The inversion of `thm1_eps_ceiling`: eps_valid(gamma) <= eps+(gamma) reduces
+    to Eq. (dagger) B^2 <= r_DA^2 with B^2 = bias^2 - sigma^2 (rho - 1), giving
+
+    calibrated:   gamma_min = max(0, (gamma* - (rho - 1)) / rho)
+    uncalibrated: gamma_min = max(0, bias^2 - sigma^2 (rho - 1))
+
+    Both are gamma* at rho = 1 and decrease as the DA gives up more information.
     """
     rho = oracle.rho
     if rho is None or not np.isfinite(rho):
@@ -319,8 +387,7 @@ def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float
         return float(oracle.gamma_star)
 
     if calibrate:
-        slack = (rho - 1.0) / np.sqrt(rho)
-        return float(max(0.0, np.sqrt(oracle.gamma_star) - slack) ** 2)
+        return float(max(0.0, (oracle.gamma_star - (rho - 1.0)) / rho))
 
     return float(max(0.0, oracle.bias_sq - oracle.sigma_sq * (rho - 1.0)))
 
