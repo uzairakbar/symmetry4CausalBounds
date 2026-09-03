@@ -48,7 +48,9 @@ class OracleMixin:
                 features=features,
             )
 
-        oracle = compute_oracle_parameters(sem=sem, da=da, features=features, calibrate=self.calibrate)
+        oracle = compute_oracle_parameters(
+            sem=sem, da=da, features=features, calibrate=self.calibrate, mean_match=self.mean_match
+        )
         logger.info(f"Oracle parameters: {oracle}")
         return oracle
 
@@ -399,7 +401,7 @@ class ExpansionStrategy(GenericParamSweep):
         # measured expansion in the space the methods fit in. The spectrum is
         # TRUNCATED: this axis is exactly where Sigma_GX goes ill-conditioned, so
         # the raw pinv reads ~23% high at the top of the grid (see SPECTRUM_KEEP).
-        rho = rho_hat(data.X, data.GX, data.y)
+        rho = rho_hat(data.X, data.GX, data.y, intercept=self.mean_match)
         trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
         self._measured[(experiment_index, float(param))] = rho * trace_S
         logger.info(

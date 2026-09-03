@@ -267,6 +267,7 @@ def eps_iv_star(
     X: NDArray | None = None,
     features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
+    mean_match: bool = False,
 ) -> tuple:
     """
     The IV budget: || E-hat[W# | Z-tilde] || / sqrt(N).
@@ -288,7 +289,12 @@ def eps_iv_star(
 
     # W#: what the augmented design cannot explain. The -f(Phi(GX)) term is
     # exactly linear in Phi(GX), so OLS absorbs it and this is the part of
-    # f(Phi(X)) unreachable from the augmented data.
+    # f(Phi(X)) unreachable from the augmented data. Under `mean_match` the
+    # class carries an intercept, so the constant is part of what the design
+    # explains and W# is the residual AFTER removing it (Lem. 2's H_X).
+    if mean_match:
+        Phi = Phi - Phi.mean(axis=0)
+        w = w - np.mean(w)
     W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
     eps_rms = float(np.sqrt(np.mean(W_sharp**2)))
 
@@ -410,8 +416,14 @@ def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> flo
 # =============================================================================
 
 
-def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) -> float | None:
-    """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1)."""
+def _noise_ratio(
+    sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES, mean_match: bool = False
+) -> float | None:
+    """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1).
+
+    `mean_match` takes the post-DA MMSE over Lem. 2's class (free intercept), the
+    same class the solver's sigma-tilde-hat comes from.
+    """
     sigma_sq = sem.sigma_sq
     if sigma_sq <= 0.0:
         return None
@@ -421,7 +433,8 @@ def _noise_ratio(sem, da, X, y, features, n_samples: int = CALIBRATION_SAMPLES) 
             X, y = sem(N=n_samples)
         GX, _ = da(X)
         Phi = features(GX)
-        residuals = y.flatten() - Phi @ OLS().fit(Phi, y).solution.flatten()
+        fit = OLS(fit_intercept=mean_match).fit(Phi, y)
+        residuals = y.flatten() - fit.predict(Phi).flatten()
 
     return float(np.mean(residuals**2) / sigma_sq)
 
@@ -435,6 +448,7 @@ def compute_oracle_parameters(
     calibrate: bool = False,
     n_samples: int = CALIBRATION_SAMPLES,
     strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR,
+    mean_match: bool = False,
 ) -> OracleParameters:
     """Oracle parameters for one (SEM, DA) pair, in the given budget units."""
     features = features or _identity
@@ -443,7 +457,7 @@ def compute_oracle_parameters(
         with preserve_rng():
             X, y = sem(N=n_samples)
 
-    iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples)
+    iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
 
     return OracleParameters(
         gamma_star=gamma_star(sem, calibrate=calibrate, strategy=strategy),
@@ -451,7 +465,7 @@ def compute_oracle_parameters(
         gamma_z_star=gamma_z_star(sem, da, X=X, features=features, calibrate=calibrate),
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
-        rho=_noise_ratio(sem, da, X, y, features, n_samples),
+        rho=_noise_ratio(sem, da, X, y, features, n_samples, mean_match=mean_match),
         eps_iv_star=iv_budget,
         eps_rms=eps_rms,
         eta=eta,

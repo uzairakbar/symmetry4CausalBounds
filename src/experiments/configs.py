@@ -505,9 +505,11 @@ class MethodRegistry:
 
         all_builders = {
             "ATE": lambda: None,  # ATE computed analytically
-            "ERM": lambda: ERM(),
-            "DA+ERM": lambda: ERM(),
-            "DA+IV": lambda: IV(),
+            # Lem. 2's centre is the ERM over a class with a free intercept, so
+            # under `mean_match` the plotted point estimators carry one too
+            "ERM": lambda: ERM(fit_intercept=mean_match),
+            "DA+ERM": lambda: ERM(fit_intercept=mean_match),
+            "DA+IV": lambda: IV(fit_intercept=mean_match),
             "PI+INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
             "PI": lambda: PartialR2(gamma=gamma, pad=False, **common),
             # baseline PI+IV has a null instrument, so it reduces to PI and

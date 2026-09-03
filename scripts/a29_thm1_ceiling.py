@@ -43,7 +43,10 @@ METHODS = ["PI", "DA+PI"]
 # thm1_gamma_min / gamma* on the POPULATION oracle -- i.e. the number the figure
 # actually draws. Deterministic given the seeds. DELIBERATE geometry changes move
 # these; update the constant in the same commit and say so in the message.
-VLINE_SIM, VLINE_OPTICAL = 0.4493541624, 0.2784036752
+# Recorded under `mean_match: true`. Giving the noise-ratio fits their intercept
+# (Lem. 2's class) moved them from 0.4493541624 / 0.2784036752 by +0.00045 /
+# +0.00049 -- rho alone, 0.1-0.2 %, invisible on the figure but not silent.
+VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2788961493
 VLINE_RTOL = 1e-6
 # The optical pin belongs to the PUBLISHED optical configuration. Trying another
 # ground truth or dataset index legitimately moves the line (measured: a linear

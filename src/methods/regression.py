@@ -6,16 +6,30 @@ from src.methods.abstract import pointEstimator
 
 
 class LeastSquaresClosedForm(pointEstimator):
-    """Closed-form least squares regression."""
+    """Closed-form least squares regression.
+
+    `fit_intercept` is what makes this the ERM of Lem. 2's hypothesis class: the
+    lemma centres the identified set on argmin over a class closed under constant
+    shifts, so under `mean_match` the plotted ERM must carry an intercept too, or
+    it is no longer the centre of the ball drawn around it. Default False keeps
+    the internal callers (sigma-hat, the PI centre, the floor) on the plain fit
+    they already centre themselves.
+    """
+
+    def __init__(self, fit_intercept: bool = False):
+        self.fit_intercept = fit_intercept
+        super().__init__()
 
     def _fit(self, X, y, **kwargs):
         """Fit using closed-form solution. Ignores extra kwargs."""
-        self._W = np.linalg.pinv(X) @ y
+        self._mu = X.mean(axis=0) if self.fit_intercept else np.zeros(X.shape[1])
+        self._offset = float(np.mean(y)) if self.fit_intercept else 0.0
+        self._W = np.linalg.pinv(X - self._mu) @ (np.asarray(y) - self._offset)
         return self
 
     def _predict(self, X, **kwargs):
         """Predict outcomes. Ignores extra kwargs."""
-        return X @ self._W
+        return (X - self._mu) @ self._W + self._offset
 
 
 class LeastSquaresIterative(pointEstimator):
@@ -37,21 +51,28 @@ class LeastSquaresIterative(pointEstimator):
 
 
 class TwoStageLeastSquaresIV(pointEstimator):
-    def __init__(self, **kwargs):
+    def __init__(self, fit_intercept: bool = False, **kwargs):
+        self.fit_intercept = fit_intercept
         super().__init__(**kwargs)
 
     def _fit(self, X, y, Z, **kwargs):
+        # both stages centre together, so the intercept is eliminated once and
+        # restored at predict time (same convention as LeastSquaresClosedForm)
+        self._mu = X.mean(axis=0) if self.fit_intercept else np.zeros(X.shape[1])
+        offset = float(np.mean(y)) if self.fit_intercept else 0.0
+        Zc = Z - Z.mean(axis=0) if self.fit_intercept else Z
 
-        S1 = LeastSquaresClosedForm().fit(Z, X).solution
-        Xhat = Z @ S1
+        S1 = LeastSquaresClosedForm().fit(Zc, X - self._mu).solution
+        Xhat = Zc @ S1
 
-        S2 = LeastSquaresIterative().fit(Xhat, y).solution
+        S2 = LeastSquaresIterative().fit(Xhat, np.asarray(y) - offset).solution
         self._W = S2
+        self._offset = offset
 
         return self
 
     def _predict(self, X, **kwargs):
-        return X @ self._W
+        return (X - self._mu) @ self._W + self._offset
 
 
 class GradientDescentERM(pointEstimator):

@@ -198,7 +198,7 @@ def coverage(
     return float(np.mean(np.where(np.isnan(estimate).any(axis=1), False, covered)))
 
 
-def rho_hat(X: NDArray, GX: NDArray, y: NDArray) -> float:
+def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> float:
     """
     Information-loss factor rho = sigma-tilde^2 / sigma^2 measured on a sample:
     MSE of OLS on GX over MSE of OLS on X. >= 1 by the DPI.
@@ -207,13 +207,20 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray) -> float:
         X: Original data in the feature space the methods use
         GX: Augmented data in the same space
         y: Outcomes
+        intercept: fit with a free intercept, i.e. take the MMSE over Lem. 2's
+            hypothesis class rather than over the intercept-free one. Its sibling
+            `trace_S_over_k` already centres, so `mean_match` runs make the two
+            factors of the trS axis consistent.
 
     Returns:
         rho_hat, or NaN if the baseline MSE vanishes
     """
+    target = y.flatten() - (np.mean(y) if intercept else 0.0)
 
     def mse(A):
-        residuals = y.flatten() - A @ np.linalg.lstsq(A, y.flatten(), rcond=None)[0]
+        if intercept:
+            A = A - A.mean(axis=0)
+        residuals = target - A @ np.linalg.lstsq(A, target, rcond=None)[0]
         return float(np.mean(residuals**2))
 
     denominator = mse(X)
