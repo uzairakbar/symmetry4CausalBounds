@@ -341,7 +341,7 @@ class EpsilonRatioStrategy(GenericParamSweep):
     param_key = "epsilon"
 
     def __init__(self, **kwargs):
-        # scoped to this sweep only; never leaks into trS/n/m/perf/scatter
+        # scoped to this sweep only; never leaks into trS/n/m/perf
         kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE
         super().__init__(**kwargs)
 

@@ -34,7 +34,6 @@ __all__ = [
     "STATUS_CATEGORIES",
     # Plotting
     "create_sweep_plot",
-    "create_scatter_plot",
     "create_perf_plot",
     "create_query_sweep_plot",
     "create_panel_plot",

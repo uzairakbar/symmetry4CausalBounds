@@ -11,7 +11,7 @@ defaults:
 
 # `experiment:` selects what to run. Omitted n_samples/n_experiments/
 # sweep_samples fall back to DatasetDefaults, omitted `methods` to the full
-# registry (configs.py). sweep/scatter/perf are validated but not yet wired.
+# registry (configs.py). sweep/perf are validated but not yet wired.
 
 # # ---
 simulation:
@@ -39,9 +39,6 @@ simulation:
             # informativeness = (trS, worst_error)
             param:  [epsilon, gamma, trS, n, m]
             metric: [coverage, approx_error, worst_error, width]
-        scatter:
-            param:  [n, m]
-            metric: [[width, coverage], [approx_error, width]]
         perf:
             metric: [wall_clock, seed_var]
 
@@ -117,9 +114,6 @@ optical_device:
             # informativeness = (trS, worst_error)
             param:  [epsilon, gamma, trS, n, m]
             metric: [coverage, approx_error, worst_error, width]
-        scatter:
-            param:  [n, m]
-            metric: [[width, coverage], [approx_error, width]]
         perf:
             metric: [wall_clock, seed_var]
 

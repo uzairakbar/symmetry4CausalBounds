@@ -20,7 +20,6 @@ from src.experiments.configs import (
     FLOOR_GUARD_R,
     METRIC_SPECS,
     PARAM_SPECS,
-    SCATTER_SE_CROSSHAIRS,
 )
 from src.experiments.utils import fit_model, save, set_seed
 from src.experiments.utils.constants import (
@@ -32,7 +31,6 @@ from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
 from src.experiments.utils.plotting import (
     create_perf_plot,
     create_query_sweep_plot,
-    create_scatter_plot,
     create_sweep_plot,
 )
 from src.methods.abstract import pointEstimator as Regressor
@@ -456,7 +454,7 @@ class ExperimentOrchestrator(ABC):
         self.name = experiment_name
         self.registry = method_registry
         self.kwargs = kwargs
-        self._sweep_cache = {}  # (param) -> (x, results, statuses), reused by scatter
+        self._sweep_cache = {}  # (param) -> (x, results, statuses), memo per param
         self._sweep_vlines = {}  # (param) -> measured reference x positions
 
     @abstractmethod
@@ -487,8 +485,6 @@ class ExperimentOrchestrator(ABC):
             self._run_query_sweep()
         if plan.sweep:
             self._run_sweeps(plan.sweep)
-        if plan.scatter:
-            self._run_scatter(plan.scatter)
         if plan.perf:
             self._run_perf(plan.perf)
 
@@ -499,7 +495,7 @@ class ExperimentOrchestrator(ABC):
         return clean_kwargs
 
     def sweep_record(self, param: str):
-        """Run (or reuse) one param sweep. Cached so scatter shares the compute."""
+        """Run (or reuse) one param sweep, memoised per parameter."""
         if param in self._sweep_cache:
             return self._sweep_cache[param]
 
@@ -600,37 +596,6 @@ class ExperimentOrchestrator(ABC):
 
         save(record, "perf", self.name, "pkl", subdir=SUBDIR_PERF)
         create_perf_plot(record, overlay_metrics=overlay, experiment=self.name)
-
-    def _run_scatter(self, scatter_spec):
-        """Trade-off scatters. Reuses the cached sweep records; no extra compute."""
-        n_experiments = self.kwargs["n_experiments"]
-        crosshairs = SCATTER_SE_CROSSHAIRS and n_experiments >= 2
-        if SCATTER_SE_CROSSHAIRS and not crosshairs:
-            logger.warning(f"n_experiments={n_experiments}: SE is undefined, scatter crosshairs hidden.")
-
-        for param in scatter_spec.param:
-            x_values, results, _ = self.sweep_record(param)
-
-            for metric_x, metric_y in scatter_spec.metric:
-                spec_x, spec_y = METRIC_SPECS[metric_x], METRIC_SPECS[metric_y]
-                # a degenerate ATE on either axis pins a corner and squashes the rest
-                keep = spec_x.include_ate and spec_y.include_ate
-                create_scatter_plot(
-                    {n: r for n, r in results.items() if keep or n != "ATE"},
-                    x_values,
-                    metric_x=spec_x.key,
-                    metric_y=spec_y.key,
-                    xlabel=spec_x.ylabel,
-                    ylabel=spec_y.ylabel,
-                    param_label=PARAM_SPECS[param].xlabel,
-                    # METRIC_SPECS stays the single home of per-metric scale policy,
-                    # as the sweep already treats it
-                    xscale=spec_x.yscale,
-                    yscale=spec_y.yscale,
-                    experiment=self.name,
-                    fname=f"scatter_{param}_{metric_x}_vs_{metric_y}",
-                    crosshairs=crosshairs,
-                )
 
     def _run_query_sweep(self):
         """Query sweep + panel. The panel is a query-space view, so it is

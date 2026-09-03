@@ -154,9 +154,6 @@ FLOOR_GUARD_R: float = 2  # 9.0
 # is 0. Below the floor, calibrate_da_epsilon clamps and the sweep goes flat.
 ROBUSTNESS_EPSILON_TRUE: float = 2**-1
 
-# SE crosshairs on scatter plots (needs n_experiments >= 2)
-SCATTER_SE_CROSSHAIRS: bool = True
-
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
 # The near-null eigendirections of Sigma_GX are noise and 1/w blows them up, so the
 # untruncated estimate is inflated exactly where the DA is strongest. Measured on the
@@ -258,12 +255,6 @@ class SweepSpec:
 
 
 @dataclass(frozen=True)
-class ScatterSpec:
-    param: tuple[str, ...]
-    metric: tuple[tuple[str, str], ...]  # (x-metric, y-metric) pairs
-
-
-@dataclass(frozen=True)
 class PerfSpec:
     metric: tuple[str, ...]  # overlay series; bar always drawn
 
@@ -274,7 +265,6 @@ class ExperimentPlan:
 
     query: bool = False
     sweep: SweepSpec | None = None
-    scatter: ScatterSpec | None = None
     perf: PerfSpec | None = None
 
 
@@ -293,7 +283,7 @@ def _check_values(values, allowed, where: str) -> tuple:
 def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
     """Parse+validate the `experiment:` block. Unknown keys are a hard error."""
     block = dict(block or {})
-    _reject_unknown(block, {"query", "sweep", "scatter", "perf"}, "experiment")
+    _reject_unknown(block, {"query", "sweep", "perf"}, "experiment")
 
     sweep_metrics = {k for k, v in METRIC_SPECS.items() if not v.perf_only}
     perf_metrics = {k for k, v in METRIC_SPECS.items() if v.perf_only}
@@ -306,19 +296,6 @@ def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
             metric=_check_values(sweep.get("metric", ()), sweep_metrics, "experiment.sweep.metric"),
         )
 
-    scatter = block.get("scatter")
-    if scatter is not None:
-        _reject_unknown(scatter, {"param", "metric"}, "experiment.scatter")
-        pairs = []
-        for pair in scatter.get("metric", ()):
-            if len(pair) != 2:
-                raise ValueError(f"experiment.scatter.metric entries must be pairs, got {pair}.")
-            pairs.append(_check_values(pair, sweep_metrics, "experiment.scatter.metric"))
-        scatter = ScatterSpec(
-            param=_check_values(scatter.get("param", ()), PARAM_SPECS, "experiment.scatter.param"),
-            metric=tuple(pairs),
-        )
-
     perf = block.get("perf")
     if perf is not None:
         # `param` is meaningless for perf (1-point sweep); accepted and ignored
@@ -328,7 +305,6 @@ def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
     return ExperimentPlan(
         query=bool(block.get("query", False)),
         sweep=sweep,
-        scatter=scatter,
         perf=perf,
     )
 

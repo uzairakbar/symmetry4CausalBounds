@@ -17,7 +17,6 @@ ARTIFACTS_DIRECTORY: str = "artifacts"
 # One subfolder per experiment type, so artifacts/<dataset>/ stays navigable
 SUBDIR_QUERY: str = "query"
 SUBDIR_SWEEP: str = "sweep"
-SUBDIR_SCATTER: str = "scatter"
 SUBDIR_PERF: str = "perf"
 
 # Plotting style
@@ -120,11 +119,11 @@ PANEL_CONFIGS = {
 }
 
 
-# Per-plot rescale/clip overrides for the sweep/scatter/perf figures. Keyed
-# experiment -> plot id, where the id is the `fname` base.py already builds:
-# '<param>_<metric>' (base.py:533), 'scatter_<param>_<mx>_vs_<my>' (base.py:627),
-# 'perf' (base.py:601). No '_sweep' suffix on the id -- plotting.py appends that when
-# writing the file, so 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
+# Per-plot rescale/clip overrides for the sweep/perf figures. Keyed
+# experiment -> plot id, where the id is the `fname` the orchestrator builds:
+# '<param>_<metric>' (`_run_sweeps`) and 'perf' (`_run_perf`). No '_sweep' suffix on
+# the id -- plotting.py appends that when writing the file, so
+# 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
 # '*' applies to every experiment; a named entry wins key by key.
 #   xlim/ylim      (lo, hi); None on either end keeps the automatic edge
 #   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not

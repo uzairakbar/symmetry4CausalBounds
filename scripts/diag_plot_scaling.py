@@ -1,4 +1,4 @@
-"""Diagnose the sweep/scatter/perf rescale rules: what do they pick, and on what?
+"""Diagnose the sweep/perf rescale rules: what do they pick, and on what?
 
 Prints the resolved scale / linear_width / limits for every checked-in sweep pkl, so
 PLOT_CONFIGS entries get chosen from measurements rather than guesses, then renders
@@ -148,18 +148,6 @@ def render():
                 experiment=DIAG_EXPERIMENT,
                 fname=f"{name}_{yscale}",
             )
-        record = {k: {"a": v, "b": v} for k, v in y_results.items()}
-        plotting.create_scatter_plot(
-            record,
-            x,
-            metric_x="a",
-            metric_y="b",
-            xlabel="a",
-            ylabel="b",
-            experiment=DIAG_EXPERIMENT,
-            fname=f"scatter_{name}",
-            crosshairs=True,
-        )
         print(f"  {name:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
 
     perf = {
@@ -214,8 +202,6 @@ def stale_ids():
             if spec.perf_only:
                 continue
             valid.add(f"{param}_{metric}")
-            for other in METRIC_SPECS:
-                valid.add(f"scatter_{param}_{metric}_vs_{other}")
 
     stale = [
         f"{experiment}.{plot_id}"

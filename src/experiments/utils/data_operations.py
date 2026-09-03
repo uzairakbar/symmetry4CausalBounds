@@ -133,7 +133,7 @@ def save(
         fname: Filename without extension
         experiment: Experiment name for organizing artifacts
         format: File format ('pkl', 'json', 'tex', or plot format)
-        subdir: experiment-type folder ('query'/'sweep'/'scatter'/'perf'),
+        subdir: experiment-type folder ('query'/'sweep'/'perf'),
             so one run's output does not pile into a single directory
         **kwargs: Additional arguments for format-specific saving
     """
