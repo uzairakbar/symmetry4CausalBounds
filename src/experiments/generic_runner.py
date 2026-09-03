@@ -48,8 +48,14 @@ class OracleMixin:
                 features=features,
             )
 
+        # a recorded SEM is estimated on its OWN rows, not on a bootstrap of them
+        # (see `SEM.pool`): the optical pool is 1000 rows and CALIBRATION_SAMPLES
+        # is 2048, so the default draw resampled with replacement and made every
+        # oracle number wobble with the RNG state for nothing
+        pool = getattr(sem, "pool", None)
+        X, y = pool if pool is not None else (None, None)
         oracle = compute_oracle_parameters(
-            sem=sem, da=da, features=features, calibrate=self.calibrate, mean_match=self.mean_match
+            sem=sem, da=da, X=X, y=y, features=features, calibrate=self.calibrate, mean_match=self.mean_match
         )
         logger.info(f"Oracle parameters: {oracle}")
         return oracle

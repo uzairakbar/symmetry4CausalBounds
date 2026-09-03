@@ -50,7 +50,14 @@ METHODS = ["PI", "DA+PI"]
 # 0.2788961493 -> 0.2769650206 (-0.7 %): gamma* is now measured over span(phi, 1),
 # the same class the solver searches, so bias_sq went 0.40088 -> 0.402549. The sim
 # line does not move -- its SEM never dropped an intercept.
-VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2769650206
+# Reading the optical oracle off the device's OWN 1000 rows instead of a 2048-row
+# bootstrap of them then moved it again, 0.2769650206 -> 0.2208095226. That is a
+# 20 % move from a 3 % move in rho (1.4106 -> 1.4570), and it is the FORMULA, not
+# the estimate, that amplifies: gamma_min/gamma* = (gamma* - (rho - 1)) / (rho
+# gamma*) has a numerator that differences two similar numbers, so near
+# rho - 1 ~ gamma* the annotation is a badly conditioned function of rho. Worth
+# knowing before reading anything into where this line lands on the optical panel.
+VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2208095226
 VLINE_RTOL = 1e-6
 # The optical pin belongs to the PUBLISHED optical configuration. Trying another
 # ground truth or dataset index legitimately moves the line (measured: a linear

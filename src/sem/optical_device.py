@@ -122,10 +122,20 @@ class OpticalDeviceSEM(SEM):
         # Var(xi) = 1 after normalization
         return 1.0 - self._bias_sq
 
+    @property
+    def pool(self) -> tuple[NDArray, NDArray]:
+        """The recorded rows themselves -- see `SEM.pool`."""
+        return self.X, self.y
+
     def sample(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
         N_max, M = self.X.shape
         indices = np.arange(N_max)
         replace = N_max < N
+        if replace:
+            # not an error -- the sweeps legitimately ask for more rows than the
+            # device recorded -- but the draw is then a BOOTSTRAP, so anything
+            # read off it carries resampling noise on top of the device's own
+            logger.debug(f"OpticalDeviceSEM: {N} rows requested from a pool of {N_max}; resampling with replacement.")
         sampled = np.random.choice(indices, N, replace)
         return self.X[sampled], self.y[sampled]
 

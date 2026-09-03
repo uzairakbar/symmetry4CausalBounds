@@ -96,8 +96,12 @@ simulation:
 
 optical_device:
     seed: 42
-    n_samples: 1_000
-    n_experiments: 8
+    n_samples: 1_000    # the device recorded exactly this many rows; ask for more
+                        # and the SEM resamples them WITH REPLACEMENT
+    n_experiments: 8    # replicates of the SAME device (`dataset_index` is fixed),
+                        # so the error bars are over the DRAW -- resampling and the
+                        # DA realisation -- not over devices. The oracle itself is
+                        # read off the whole pool and does not move between them.
     sweep_samples: 32
     methods:
         # - ATE
