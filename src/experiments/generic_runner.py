@@ -132,7 +132,15 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         if getattr(self, "G", None) is None or np.size(self.G) == 0:
             return budget
         try:
-            floor = constraint_floor(self.GX, self.y, self.default_gamma, kind="iv", Z=self.G, calibrate=self.calibrate)
+            floor = constraint_floor(
+                self.GX,
+                self.y,
+                self.default_gamma,
+                kind="iv",
+                Z=self.G,
+                calibrate=self.calibrate,
+                mean_match=self.mean_match,
+            )
         except Exception as error:
             logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")
             return budget

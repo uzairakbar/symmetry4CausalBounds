@@ -166,6 +166,11 @@ class PartialR2(BoundedSA):
         self.R_constraint = None
         self.h_erm = None
         self.N_samples = 0
+        # Lem. 2 slice: the design mean and the outcome mean that eliminate the
+        # intercept. Zero / 0.0 under `mean_match=False`, where the ball is the
+        # old uncentred second-moment one.
+        self.mu_ = None
+        self.y_offset_ = 0.0
         self.sigma_sq = 1.0  # MMSE; sigma^2 (or sigma-tilde^2 on post-DA data)
 
         super().__init__(
@@ -180,16 +185,45 @@ class PartialR2(BoundedSA):
 
     # ------------------------------------------------------------------ fit
 
+    def _centre(self, X, y, **kwargs):
+        """Move to Lem. 2's coordinates: (X - mu, y - ybar), the slice
+        H_X = {h : E_n[h(X)] = E_n[Y]} with the intercept ELIMINATED rather than
+        carried as a free coordinate.
+
+        On the slice the second moment of X(h - h_erm) IS its variance, so the
+        SOCP ball becomes the paper's COVARIANCE ball and `h_erm` the
+        with-intercept ERM -- the centre Lem. 2 names. Bounds are returned on the
+        original outcome scale by adding `y_offset_` back (Cor. 3).
+
+        `GX` rides along with the SAME mu, so the invariance constraint
+        `|| (GX - X) h ||` is untouched (the two intercepts cancel); `Z` and the
+        clipping limits stay on their raw scales.
+        """
+        if not self.mean_match:
+            self.mu_ = np.zeros(X.shape[1])
+            self.y_offset_ = 0.0
+            return X, y, kwargs
+
+        self.mu_ = X.mean(axis=0)
+        self.y_offset_ = float(np.mean(y))
+        GX = kwargs.get("GX")
+        if GX is not None:
+            kwargs = {**kwargs, "GX": np.asarray(GX).reshape(len(X), -1) - self.mu_}
+        return X - self.mu_, np.asarray(y) - self.y_offset_, kwargs
+
     def _fit(self, X, y, **kwargs):
         self.N_samples = len(X)
+
+        # observable outcome limits (clipy) -- on the RAW outcome scale, which is
+        # the scale `_finalize` clips on and the scale bounds come back in
+        self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
+
+        X, y, kwargs = self._centre(X, y, **kwargs)
         self.h_erm = OLS().fit(X, y).solution.flatten()
 
         # noise level: sigma^2 = min MSE. Fit on post-DA data => sigma-tilde^2.
         residuals = y.flatten() - X @ self.h_erm
         self.sigma_sq = float(np.mean(residuals**2))
-
-        # observable outcome limits (clipy)
-        self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
 
         # || X(h - h_erm) || = || R(h - h_erm) || for X = QR: solve on M x M
         _, R = np.linalg.qr(X)
@@ -244,19 +278,23 @@ class PartialR2(BoundedSA):
     def _raw_bounds(self, X, gamma):
         """Closed-form shortcut, else the generic chunked solve."""
         if CLOSED_FORM_SOLUTION and self._supports_closed_form:
+            # Cor. 3 on the slice: h_erm(x) +- s sqrt(gamma) ||g_x||, with the
+            # representer norm the Mahalanobis length of the CENTRED query
             radius = self.scale * np.sqrt(gamma)
+            X = X - self.mu_
             mahalanobis_sq = np.maximum(0, np.sum((X @ self.invSigmaX) * X, axis=1))
             margins = radius * np.sqrt(mahalanobis_sq)
-            centers = X @ self.h_erm
+            centers = X @ self.h_erm + self.y_offset_
             self.query_status = np.full(len(X), SolveStatus.OK, dtype=int)
             return np.column_stack([centers - margins, centers + margins])
 
         return super()._raw_bounds(X, gamma)
 
     def _prepare(self, X, gamma):
-        """One DPP parameter set for the whole batch; queries are the rows of X."""
+        """One DPP parameter set for the whole batch; queries are the rows of X,
+        in the same centred coordinates the ball was fitted in."""
         self._set_solver_parameters(gamma)
-        return list(X)
+        return list(X - self.mu_)
 
     def _solve_single(self, x):
         """(lower, upper, status); bounds are NaN on any non-OK status."""
@@ -293,7 +331,8 @@ class PartialR2(BoundedSA):
 
         lower, status_lo = solve_prob(self.min_problem)
         upper, status_hi = solve_prob(self.max_problem)
-        return lower, upper, max(status_lo, status_hi)
+        # back to the outcome scale: the eliminated intercept is ybar - mu' h
+        return lower + self.y_offset_, upper + self.y_offset_, max(status_lo, status_hi)
 
 
 def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
@@ -333,7 +372,7 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
     return float(np.linalg.norm(B @ u - c))
 
 
-def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False):
+def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False, mean_match=True):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
     Returned SQUARED, matching `PartialR2Net._budget()`, so the smallest admissible
@@ -353,12 +392,22 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False
         GX: augmented design, required for `inv`
         Z: instrument, required for `iv`
         calibrate: scale the radius by sigma-hat, as the fitted model does
+        mean_match: measure the floor over the SAME ball the model solves on --
+            Lem. 2's covariance ball. A floor from the other geometry would make
+            the budget guard lie in both directions.
 
     Returns:
         floor in squared budget units
     """
     design = np.asarray(design)
     N, M = design.shape
+
+    if mean_match:
+        mu = design.mean(axis=0)
+        design = design - mu
+        y = np.asarray(y) - np.mean(y)
+        if GX is not None:
+            GX = np.asarray(GX) - mu
 
     h_erm = OLS().fit(design, y).solution.flatten()
     residuals = np.asarray(y).flatten() - design @ h_erm

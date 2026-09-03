@@ -306,7 +306,13 @@ class ParamSweepRunner(BaseExperimentRunner):
             return budget
         try:
             floor = constraint_floor(
-                design, data.y, self.fit_gamma(experiment_index), kind=kind, calibrate=self.calibrate, **extra
+                design,
+                data.y,
+                self.fit_gamma(experiment_index),
+                kind=kind,
+                calibrate=self.calibrate,
+                mean_match=self.mean_match,
+                **extra,
             )
         except Exception as error:  # never let a diagnostic break a run
             logger.warning(f"{label}: constraint floor unavailable ({error}); budget left at the oracle value.")

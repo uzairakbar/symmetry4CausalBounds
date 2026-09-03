@@ -21,6 +21,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
 | A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, JAX≡FD, l=2 path |
+| A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;

@@ -39,20 +39,52 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False):
+def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False, mean_match=True):
+    """Independent reference for `constraint_floor`, solved by cvxpy.
+
+    `mean_match=True` states Lem. 2 EXPLICITLY where production eliminates it: the
+    hypothesis carries a free intercept coordinate and the slice
+    E_n[h(X)] = E_n[Y] is an equality constraint, rather than being folded into
+    centred coordinates. Same set, different parameterisation and different
+    solver -- which is what makes it a reference and not a re-run.
+    """
     design = np.asarray(design)
+    y = np.asarray(y)
     N, M = design.shape
-    h_erm = OLS().fit(design, y).solution.flatten()
-    resid = np.asarray(y).flatten() - design @ h_erm
-    scale = float(np.sqrt(np.mean(resid**2))) if calibrate else 1.0
-    delta = np.sqrt(N) * scale * np.sqrt(gamma)
-    A, b = inv_constraint_terms(design, GX) if kind == "inv" else iv_constraint_terms(design, y, Z)
-    _, R = np.linalg.qr(design)
-    h = cp.Variable(M)
-    problem = cp.Problem(
-        cp.Minimize(cp.norm(cp.Constant(A) @ h - cp.Constant(b), 2)),
-        [cp.norm(cp.Constant(R) @ (h - cp.Constant(h_erm)), 2) <= delta],
-    )
+
+    if not mean_match:
+        h_erm = OLS().fit(design, y).solution.flatten()
+        resid = y.flatten() - design @ h_erm
+        scale = float(np.sqrt(np.mean(resid**2))) if calibrate else 1.0
+        delta = np.sqrt(N) * scale * np.sqrt(gamma)
+        A, b = inv_constraint_terms(design, GX) if kind == "inv" else iv_constraint_terms(design, y, Z)
+        _, R = np.linalg.qr(design)
+        h = cp.Variable(M)
+        constraints = [cp.norm(cp.Constant(R) @ (h - cp.Constant(h_erm)), 2) <= delta]
+    else:
+        mu, ybar = design.mean(axis=0), float(np.mean(y))
+        centred, y_centred = design - mu, y - ybar
+        # the constraint terms are the production ones on the slice; only the
+        # GEOMETRY (ball + equality) is restated in the explicit parameterisation
+        if kind == "inv":
+            A, b = inv_constraint_terms(centred, np.asarray(GX) - mu)
+        else:
+            A, b = iv_constraint_terms(centred, y_centred, Z)
+
+        augmented = np.hstack([design, np.ones((N, 1))])
+        h1_erm = np.linalg.lstsq(augmented, y.flatten(), rcond=None)[0]
+        resid = y.flatten() - augmented @ h1_erm
+        scale = float(np.sqrt(np.mean(resid**2))) if calibrate else 1.0
+        delta = np.sqrt(N) * scale * np.sqrt(gamma)
+        _, R = np.linalg.qr(augmented)
+        h1 = cp.Variable(M + 1)
+        h = h1[:M]
+        constraints = [
+            cp.norm(cp.Constant(R) @ (h1 - cp.Constant(h1_erm)), 2) <= delta,
+            cp.Constant(augmented.mean(axis=0)) @ h1 == ybar,
+        ]
+
+    problem = cp.Problem(cp.Minimize(cp.norm(cp.Constant(A) @ h - cp.Constant(b), 2)), constraints)
     for solver in (cp.CLARABEL, cp.ECOS):
         try:
             problem.solve(solver=solver, verbose=False)
@@ -90,20 +122,22 @@ def sim_runner(steps=12):
 
 def a25_closed_form():
     runner = sim_runner(steps=4)
-    worst = 0.0
-    for knob in runner.get_param_range():
-        data = SweepData.coerce(runner.generate_data(0, knob))
-        for gamma in (0.05, 0.505):
-            for kind, kw in (("inv", dict(GX=data.GX)), ("iv", dict(Z=data.G))):
-                design = data.X if kind == "inv" else data.GX
-                got = constraint_floor(design, data.y, gamma, kind=kind, **kw)
-                want = cvxpy_floor(design, data.y, gamma, kind, **kw)
-                # floors are SQUARED, so 1e-12 here is a 1e-6 budget, i.e. zero;
-                # a relative test there compares solver noise with solver noise
-                if abs(got - want) < 1e-11:
-                    continue
-                worst = max(worst, abs(got - want) / max(abs(want), 1e-300))
-    check("A25 closed-form floor == cvxpy", worst < 1e-4, f"worst rel {worst:.2e}")
+    for mean_match in (True, False):
+        worst = 0.0
+        for knob in runner.get_param_range():
+            data = SweepData.coerce(runner.generate_data(0, knob))
+            for gamma in (0.05, 0.505):
+                for kind, kw in (("inv", dict(GX=data.GX)), ("iv", dict(Z=data.G))):
+                    design = data.X if kind == "inv" else data.GX
+                    got = constraint_floor(design, data.y, gamma, kind=kind, mean_match=mean_match, **kw)
+                    want = cvxpy_floor(design, data.y, gamma, kind, mean_match=mean_match, **kw)
+                    # floors are SQUARED, so 1e-12 here is a 1e-6 budget, i.e. zero;
+                    # a relative test there compares solver noise with solver noise
+                    if abs(got - want) < 1e-11:
+                        continue
+                    worst = max(worst, abs(got - want) / max(abs(want), 1e-300))
+        label = "on the Lem. 2 slice" if mean_match else "uncentred"
+        check(f"A25 closed-form floor == cvxpy, {label}", worst < 1e-4, f"worst rel {worst:.2e}")
 
 
 # ------------------------------------------------- 2. no-op when already feasible
@@ -147,7 +181,9 @@ def a25_noop_when_feasible():
             raw = float(raw) + EPS_TOL
             kw = dict(GX=data.GX) if kind == "inv" else dict(Z=data.G)
             design = data.X if kind == "inv" else data.GX
-            floor = constraint_floor(design, data.y, gamma, kind=kind, calibrate=runner.calibrate, **kw)
+            floor = constraint_floor(
+                design, data.y, gamma, kind=kind, calibrate=runner.calibrate, mean_match=runner.mean_match, **kw
+            )
             got = fit(e, 0, data)
             if raw**2 >= floor:
                 seen_feasible = True
@@ -172,7 +208,9 @@ def a25_rescues_infeasible():
     for index, knob in enumerate(runner.get_param_range()):
         data = SweepData.coerce(runner.generate_data(0, index and knob or knob))
         gamma = runner.fit_gamma(0)
-        floor = constraint_floor(data.GX, data.y, gamma, kind="iv", Z=data.G, calibrate=runner.calibrate)
+        floor = constraint_floor(
+            data.GX, data.y, gamma, kind="iv", Z=data.G, calibrate=runner.calibrate, mean_match=runner.mean_match
+        )
         oracle_iv = float(getattr(runner.get_oracle(0), "eps_iv_star", 0.0)) + EPS_TOL
         guarded = runner.fit_epsilon_iv(0, index, data)
 

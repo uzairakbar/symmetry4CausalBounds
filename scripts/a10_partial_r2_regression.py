@@ -7,6 +7,9 @@ change and diff the json.
 
 `--dump out.npz` writes the raw arrays instead of digests, for cross-env
 comparison at a tolerance (digests only prove bit-equality).
+
+`--mean-match false` solves the pre-2026-09 uncentred geometry, which must
+reproduce the pre-mean-match digest byte-for-byte (see PLAN v2 C7).
 """
 
 import hashlib
@@ -23,6 +26,7 @@ from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 
 DUMP = None  # --dump swaps this for a dict; _digest then also stashes the raw arrays
+MEAN_MATCH = True  # --mean-match false restores the uncentred ball
 
 
 def _digest(a, key=None):
@@ -40,13 +44,12 @@ def direct_solves():
     GX = X + 0.2 * np.random.randn(*X.shape)
     Q = np.random.randn(60, 6)
 
+    common = dict(gamma=0.5, epsilon=0.3, mean_match=MEAN_MATCH)
     cases = {
-        "PI": lambda nj: sm.PartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y),
-        "PI+INV": lambda nj: sm.InvarianceConstrainedPartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y, GX=GX),
-        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(gamma=0.5, epsilon=0.3, epsilon_iv=0.2, n_jobs=nj).fit(
-            GX, y, Z=GX
-        ),
-        "PI&DA+PI": lambda nj: sm.IntersectedPartialR2(gamma=0.5, epsilon=0.3, n_jobs=nj).fit(X, y, GX=GX, G=GX),
+        "PI": lambda nj: sm.PartialR2(n_jobs=nj, **common).fit(X, y),
+        "PI+INV": lambda nj: sm.InvarianceConstrainedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX),
+        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(epsilon_iv=0.2, n_jobs=nj, **common).fit(GX, y, Z=GX),
+        "PI&DA+PI": lambda nj: sm.IntersectedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX, G=GX),
     }
     out = {}
     for name, build in cases.items():
@@ -74,6 +77,7 @@ def optical_sweep():
         calibrate=False,
         pad=False,
         clipy=True,
+        mean_match=MEAN_MATCH,
     )
     _, results, statuses = orchestrator.sweep_record("gamma")
     return {
@@ -93,6 +97,8 @@ def optical_sweep():
 if __name__ == "__main__":
     if "--dump" in sys.argv:
         DUMP = {}
+    if "--mean-match" in sys.argv:
+        MEAN_MATCH = sys.argv[sys.argv.index("--mean-match") + 1].strip().lower() not in ("false", "0", "no")
     digests = json.dumps({"direct": direct_solves(), "optical": optical_sweep()}, indent=1, sort_keys=True)
     if DUMP is not None:
         np.savez(sys.argv[sys.argv.index("--dump") + 1], **DUMP)
