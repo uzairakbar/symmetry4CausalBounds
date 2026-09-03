@@ -84,7 +84,7 @@ def a30_slice(sem, poly, Phi, y):
     )
 
 
-def a30_projection(sem, Phi):
+def a30_projection(sem, Phi, y):
     """(ii) gamma* is measured over span(phi, 1), and that is not span(phi)."""
 
     def bias_over(design):
@@ -121,6 +121,22 @@ def a30_projection(sem, Phi):
         "A30 (ii) bias_sq + the orthogonal remainder == Var(xi)",
         abs(np.mean(xi**2) - (np.mean(fitted**2) + np.mean(residual**2))) <= 1e-12,
         f"{np.mean(xi**2):.12f}",
+    )
+    # sigma^2 must be the WHOLE conditional spread: E[Var(U|X)] plus the exogenous
+    # noise. Asserting `sigma_sq == 1 - bias_sq` would gate nothing (that was the
+    # definition, and it silently dropped the second term); assert instead that the
+    # noise is really in there and that gamma* is the tight budget it is documented
+    # to be -- h_* inside the ball at gamma*, outside it just below.
+    exogenous = float(np.var(y - sem.f(Phi).ravel() - xi))
+    check(
+        "A30 (ii) sigma_sq carries the exogenous noise too",
+        abs(sem.sigma_sq - (1.0 - sem.bias_sq + exogenous)) <= 1e-12,
+        f"sigma_sq {sem.sigma_sq:.6f} = {1.0 - sem.bias_sq:.6f} + {exogenous:.6f}",
+    )
+    check(
+        "A30 (ii) dropping the exogenous noise would LOOSEN gamma*",
+        sem.bias_sq / sem.sigma_sq < sem.bias_sq / (1.0 - sem.bias_sq),
+        f"gamma* {sem.bias_sq / sem.sigma_sq:.4f} vs {sem.bias_sq / (1.0 - sem.bias_sq):.4f} without",
     )
 
 
@@ -279,7 +295,7 @@ def a30_lazy_load():
 if __name__ == "__main__":
     sem, poly, Phi, y = fixture()
     a30_slice(sem, poly, Phi, y)
-    a30_projection(sem, Phi)
+    a30_projection(sem, Phi, y)
     budgets = a30_budget()
     a30_membership(sem, poly, Phi, y, budgets)
     a30_lazy_load()

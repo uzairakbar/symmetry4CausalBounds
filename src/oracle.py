@@ -8,7 +8,7 @@ experiment scripts, which may or may not use them.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from loguru import logger
@@ -45,6 +45,37 @@ class OracleParameters:
     # SHELVED: eps* under the perturb convention (exactly-invariant components
     # excluded). Recorded, never consumed -- lets the padding choice be revisited.
     epsilon_star_pointwise: float | None = None
+
+
+# Draw-pooled fields and how they pool: a NORM pools in the square (an RMS of RMSs),
+# a ratio pools as a plain mean. The rest are functions of the SEM alone.
+_ORACLE_RMS_FIELDS = ("epsilon_star", "eps_iv_star", "eps_rms", "epsilon_star_pointwise")
+_ORACLE_MEAN_FIELDS = ("rho", "eta", "gamma_z_star")
+
+
+def pool_oracles(oracles: list[OracleParameters]) -> OracleParameters:
+    """One `OracleParameters` from several independent DA realisations.
+
+    Only worth doing for a SEM whose pool is FIXED: there every replicate sees the
+    same rows, so the sole randomness in `rho`/`eps*` is the augmentation draw, and
+    a single draw is not the population quantity the figures annotate. It matters
+    most for rho, because Thm. 1's plotted threshold
+    gamma_min/gamma* = (gamma* - (rho - 1)) / (rho gamma*) differences two similar
+    numbers in its numerator: near rho - 1 ~ gamma*, where the optical device sits,
+    d ln(threshold) / d ln rho is about -8, so a 3% draw-to-draw wobble in rho
+    becomes a 20% wobble in the annotation.
+    """
+    if len(oracles) == 1:
+        return oracles[0]
+
+    values = {}
+    for field in _ORACLE_RMS_FIELDS:
+        found = [getattr(o, field) for o in oracles if getattr(o, field) is not None]
+        values[field] = float(np.sqrt(np.mean(np.square(found)))) if found else None
+    for field in _ORACLE_MEAN_FIELDS:
+        found = [getattr(o, field) for o in oracles if getattr(o, field) is not None]
+        values[field] = float(np.mean(found)) if found else None
+    return replace(oracles[0], **values)
 
 
 @contextmanager

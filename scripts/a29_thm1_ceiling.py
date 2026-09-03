@@ -50,14 +50,21 @@ METHODS = ["PI", "DA+PI"]
 # 0.2788961493 -> 0.2769650206 (-0.7 %): gamma* is now measured over span(phi, 1),
 # the same class the solver searches, so bias_sq went 0.40088 -> 0.402549. The sim
 # line does not move -- its SEM never dropped an intercept.
-# Reading the optical oracle off the device's OWN 1000 rows instead of a 2048-row
-# bootstrap of them then moved it again, 0.2769650206 -> 0.2208095226. That is a
-# 20 % move from a 3 % move in rho (1.4106 -> 1.4570), and it is the FORMULA, not
-# the estimate, that amplifies: gamma_min/gamma* = (gamma* - (rho - 1)) / (rho
-# gamma*) has a numerator that differences two similar numbers, so near
-# rho - 1 ~ gamma* the annotation is a badly conditioned function of rho. Worth
-# knowing before reading anything into where this line lands on the optical panel.
-VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.2208095226
+# The optical line is a badly conditioned function of rho and must not be pinned
+# on a single augmentation draw. gamma_min/gamma* = (gamma* - (rho - 1)) /
+# (rho gamma*) differences two similar numbers in its numerator, and the optical
+# device sits near rho - 1 ~ gamma*, where d ln(line) / d ln rho is about -8: a 3 %
+# draw-to-draw wobble in rho moves the annotation 20 %. Pinned on one draw this
+# constant read 0.2208095226 (rho 1.4570) purely because the RNG stream happened to
+# realign -- a +2 sigma outlier against a draw SD of 0.03. `prepare_pair` now pools
+# ORACLE_POOL_DRAWS seeded draws for a fixed-pool SEM, which is what makes this
+# number the population quantity the figure claims to annotate rather than one
+# sample of it. The sim line is untouched throughout: that SEM draws fresh rows per
+# replicate, so it was already averaging, and its rho sits nowhere near the
+# ill-conditioned regime.
+# Finally, putting the exogenous noise into sigma^2 (it was E[Var(U|X)] only, so
+# gamma* was loose by 1.8 % here) moved it 0.2760702564 -> 0.3002509908.
+VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.3002509908
 VLINE_RTOL = 1e-6
 # The optical pin belongs to the PUBLISHED optical configuration. Trying another
 # ground truth or dataset index legitimately moves the line (measured: a linear
@@ -181,14 +188,21 @@ def sim_runner(n_experiments=8, sweep_samples=8):
     )
 
 
-def sample_quantities(data, W):
-    """(A^2, B^2, s^2, s~^2) on one draw: OLS on X and on GX, against the truth W."""
-    W = np.asarray(W).flatten()
+def sample_quantities(data, sem, mean_match=True):
+    """(A^2, B^2, s^2, s~^2) on one draw: OLS on X and on GX, against `sem.f`.
+
+    Measured in the class the SOLVER searches, which under `mean_match` carries a
+    free intercept (Lem. 2, Asm. 1's base clause) -- so `OLS(fit_intercept=True)`
+    and the truth read off `sem.f`, not off `sem.solution`. The optical ground
+    truth's intercept is not decoration: taking `solution` alone reports
+    A^2 = 0.5024 where the Lem. 2 geometry gives 0.4025 = `sem.bias_sq` exactly,
+    a 17% error in a number printed beside the pinned vline.
+    """
     out = []
     for design in (data.X, data.GX):
-        h_erm = OLS().fit(design, data.y).solution.flatten()
-        residual = data.y.flatten() - design @ h_erm
-        bias = design @ (h_erm - W)
+        h_erm = OLS(fit_intercept=mean_match).fit(design, data.y)
+        residual = data.y.flatten() - np.asarray(h_erm.predict(design)).flatten()
+        bias = np.asarray(h_erm.predict(design)).flatten() - np.asarray(sem.f(design)).flatten()
         out.append((float(np.mean(bias**2)), float(np.mean(residual**2))))
     (a_sq, s_sq), (b_sq, s_da_sq) = out
     return a_sq, b_sq, s_sq, s_da_sq
@@ -203,7 +217,7 @@ def a29_in_data():
     rows = []
     for j in range(runner.n_experiments):
         data = SweepData.coerce(runner.generate_data(j, knob))
-        a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j].solution)
+        a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j], runner.mean_match)
 
         # precondition: Lem. 4's identity, exact here (OLS Pythagoras + GX W = X W)
         drift = abs(b_sq - (a_sq - (s_da_sq - s_sq)))
@@ -274,7 +288,7 @@ def a29_optical_report(n_experiments=8):
         if j >= 2:  # the sample-fit report is illustrative; two draws make the point
             continue
         data = SweepData.coerce(runner.generate_data(j, knob))
-        a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j].solution)
+        a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j], runner.mean_match)
         r_emp = b_sq / (s_da_sq * (a_sq / s_sq))
         o = oracle_of(a_sq, s_sq, s_da_sq / s_sq, calibrate=True)
         eps = epsilon_star(runner.sems[j], runner.das[j], features=runner._features)

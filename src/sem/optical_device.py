@@ -57,7 +57,12 @@ class OpticalDeviceSEM(SEM):
         return cls._DATASET
 
     def __init__(self, experiment: int = 0, center: bool = True, ground_truth: str = "polynomial"):
-        experiment_data = self.get_experiment_data(experiment)
+        # a COPY: `get_experiment_data` hands back the shared class cache, and the
+        # centring below is in place. Without this, constructing a SEM mutates the
+        # pool every other SEM will be built from -- repeated construction drifts
+        # the fit, and a `center=False` SEM built after a `center=True` one gets
+        # silently centred data.
+        experiment_data = np.array(self.get_experiment_data(experiment), dtype=float, copy=True)
 
         if center:
             experiment_data -= experiment_data.mean(axis=0)
@@ -105,6 +110,17 @@ class OpticalDeviceSEM(SEM):
         xi_hat = design @ np.linalg.pinv(design) @ (epsilon * self.C)
         self._bias_sq = float(np.var(xi_hat) / (noise_scale**2))
 
+        # sigma^2 = E[Var(Y|X)] carries BOTH parts of the conditional spread: what
+        # the confounder leaves unexplained, E[Var(U|X)] = Var(U) - Var(E[U|X]) =
+        # 1 - bias_sq after the normalisation above, AND the exogenous noise -- the
+        # residual of the joint (phi, C) fit, which is the paper's xi. Dropping the
+        # second understates sigma^2 and so OVERSTATES gamma* = bias_sq/sigma^2,
+        # making the oracle budget loose rather than tight (it is documented as
+        # "tightest gamma keeping h_* inside"). Small on the shipped device (1.8%,
+        # gamma* 0.6738 -> 0.6619) and enormous where the device is noisy
+        # (experiment 6: 801x, gamma* 0.0510 -> 0.0001).
+        self._noise_sq = float(np.var(self.y.ravel() - self.f(Phi).ravel() - (epsilon / noise_scale) * self.C.ravel()))
+
     def f(self, X) -> NDArray:
         """Ground truth on the FEATURE space: f(phi) = phi W + b.
 
@@ -119,8 +135,9 @@ class OpticalDeviceSEM(SEM):
 
     @property
     def sigma_sq(self) -> float:
-        # Var(xi) = 1 after normalization
-        return 1.0 - self._bias_sq
+        # E[Var(U|X)] = 1 - bias_sq after the normalisation, PLUS the exogenous
+        # noise; see `_noise_sq`.
+        return 1.0 - self._bias_sq + self._noise_sq
 
     @property
     def pool(self) -> tuple[NDArray, NDArray]:

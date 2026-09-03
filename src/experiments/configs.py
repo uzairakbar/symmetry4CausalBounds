@@ -59,6 +59,18 @@ class SimulationConfig:
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
 
+    # DECLARED, not measured -- deliberately unlike `epsilon` below. gamma is the
+    # sensitivity parameter: an assumption about UNOBSERVED confounding, which is
+    # the one thing the data cannot report. Reading it off the oracle would make
+    # the analysis circular and would erase the point of the gamma sweep, whose
+    # whole content is how the interval behaves as the assumed budget crosses the
+    # true gamma*. epsilon is different in kind: it bounds |W| for a KNOWN
+    # augmentation, a quantity the analyst can simply compute.
+    # Consequence to read the query panel with: this gamma is 0.354 against a
+    # measured gamma* of 0.662, so h_* is NOT in the identified set there and
+    # PI+INV misses it on a minority of queries. That is the assumption being
+    # violated, not the solver failing -- it is what Thm. 1's gamma_min annotation
+    # on the gamma sweep exists to locate.
     gamma: float = 2**-1.5
     # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
     # SS3.1's epsilon is -- the constraint E_inv(h) <= eps^2 evaluated at h_*, for

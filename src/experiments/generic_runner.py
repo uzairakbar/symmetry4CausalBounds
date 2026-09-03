@@ -18,12 +18,18 @@ from src.oracle import (
     calibrate_da_epsilon,
     compute_oracle_parameters,
     epsilon_star,
+    pool_oracles,
     preserve_rng,
     thm1_gamma_min,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
 CRN_OFFSET: int = 10_000
+# `prepare_pair` pools this many seeded augmentation draws for a SEM with a fixed
+# pool -- see the comment there, and `oracle.pool_oracles` for why rho in
+# particular must not be a single draw.
+ORACLE_POOL_DRAWS: int = 8
+ORACLE_POOL_SEED: int = 0
 
 
 # =============================================================================
@@ -40,23 +46,45 @@ class OracleMixin:
     epsilon_true: float | None = None
 
     def prepare_pair(self, sem, da, features: Callable | None = None):
+        pool = getattr(sem, "pool", None)
         if self.epsilon_true is not None:
             calibrate_da_epsilon(
                 sem=sem,
                 da=da,
                 epsilon_target=self.epsilon_true,
+                X=None if pool is None else pool[0],  # the device's own rows, as below
                 features=features,
             )
 
-        # a recorded SEM is estimated on its OWN rows, not on a bootstrap of them
+        # A recorded SEM is estimated on its OWN rows, not on a bootstrap of them
         # (see `SEM.pool`): the optical pool is 1000 rows and CALIBRATION_SAMPLES
         # is 2048, so the default draw resampled with replacement and made every
-        # oracle number wobble with the RNG state for nothing
-        pool = getattr(sem, "pool", None)
+        # oracle number wobble with the RNG state for nothing.
+        #
+        # Fixing the rows leaves the AUGMENTATION draw as the only randomness, and
+        # one draw is not the population quantity the figures annotate -- so pool
+        # several, seeded (`_invariance_signal` restores the RNG on exit, hence a
+        # seed per draw rather than consecutive calls). A SEM that draws fresh rows
+        # every time already averages over replicates and is left alone.
         X, y = pool if pool is not None else (None, None)
-        oracle = compute_oracle_parameters(
-            sem=sem, da=da, X=X, y=y, features=features, calibrate=self.calibrate, mean_match=self.mean_match
-        )
+        draws = ORACLE_POOL_DRAWS if pool is not None else 1
+        with preserve_rng():
+            oracles = []
+            for draw in range(draws):
+                if pool is not None:
+                    np.random.seed(ORACLE_POOL_SEED + draw)
+                oracles.append(
+                    compute_oracle_parameters(
+                        sem=sem,
+                        da=da,
+                        X=X,
+                        y=y,
+                        features=features,
+                        calibrate=self.calibrate,
+                        mean_match=self.mean_match,
+                    )
+                )
+        oracle = pool_oracles(oracles)
         logger.info(f"Oracle parameters: {oracle}")
         return oracle
 
