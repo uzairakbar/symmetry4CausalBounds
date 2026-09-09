@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from loguru import logger
+from matplotlib.ticker import NullFormatter
 from numpy.typing import NDArray
 
 from .constants import (
@@ -181,6 +182,22 @@ def _rescale(
         ax.set_ylim(_pad(ax.yaxis, *y_limits))
 
 
+def _label_major_ticks_only(*axes):
+    """
+    Minor tick marks stay; their labels go.
+
+    A log scale installs a labelling minor formatter (matplotlib scale.py,
+    LogScale.set_default_locators_and_formatters) that writes 2, 3, 4, 6 x 10^k
+    whenever at most one major tick is in view and the span exceeds 0.4 decades,
+    which the ratio grids and the n sweep satisfy and the m sweep does not. The
+    figures then look uneven. Every figure calls this on every axes AFTER its last
+    set_xscale / set_yscale, because a later scale change reinstalls the formatter.
+    """
+    for ax in axes:
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.yaxis.set_minor_formatter(NullFormatter())
+
+
 def _get_method_color(method_name: str) -> str:
     """Get color for a method from the color palette."""
     palette = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4", "C5"])
@@ -319,6 +336,7 @@ def create_sweep_plot(
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
         # (trS opts out to linear on purpose), not a default to be second-guessed.
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
+        _label_major_ticks_only(plt.gca())
 
         # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds).
         # gamma sweeps append the Thm. 1 ratio last (generic_runner.py).
@@ -488,6 +506,7 @@ def create_query_sweep_plot(
     padding = 0.05 * max_mean
     plt.ylim([min_mean - padding, max_mean + padding])
     plt.xscale(xscale)
+    _label_major_ticks_only(plt.gca())
 
     # Legend
     if not hide_legend:
@@ -645,6 +664,7 @@ def create_panel_plot(
 
         if "ylim" in cfg:
             ax.set_ylim(cfg["ylim"])
+    _label_major_ticks_only(*axes.ravel())
 
     # === Legend ===
     ax_legend = axes[2, 1]
@@ -830,6 +850,7 @@ def create_perf_plot(
 
         if ax is not None and ax_cost is not None:
             fig.align_ylabels([ax, ax_cost])
+        _label_major_ticks_only(*fig.axes)  # fig.axes includes the twin
         fig.tight_layout()
         plt.show()
 
@@ -928,6 +949,7 @@ def create_digit_sweep_plot(
     ax.set_xticks(x)
     ax.set_xticklabels([])  # the thumbnails ARE the ticks
     ax.tick_params(labelsize=FS_TICK)
+    _label_major_ticks_only(ax)
 
     # thumbnails below the axis. The SEM renders RGB = [t,0,1-t]*grey, so the
     # background is exactly 0 and the ink mask doubles as the alpha channel --
