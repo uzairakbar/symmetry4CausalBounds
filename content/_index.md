@@ -45,14 +45,14 @@ Causal effects are generally not identifiable from observational data alone: hid
 
 <div class="figrow">
 <figure>
-<div class="hug-top-always" style="column-gap: 2rem;">
+<div class="hug-top-always" style="column-gap: 1rem;">
 <img class="dark-invert" loading="lazy" src="sem-graph.svg" alt="SEM with hidden confounding" style="height:185px">
 <img class="dark-invert" loading="lazy" src="intervention-graph.svg" alt="do(x) intervention" style="height:185px">
 </div>
 <figcaption><b>Figure 1:</b> The observational SEM with hidden confounding (left) and the intervention of interest (right).</figcaption>
 </figure>
 <figure>
-<div class="hug-top-always" style="column-gap: 2rem;">
+<div class="hug-top-always" style="column-gap: 1rem;">
   <img class="dark-invert" loading="lazy" src="pi-x.svg" alt="PI interval at a query point" style="max-height:200px">
   <img class="dark-invert" loading="lazy" src="pi-metrics.svg" alt="identified set with PI metrics" style="max-height:192.5px">
 </div>
@@ -66,7 +66,7 @@ Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of th
 
 <div class="figrow">
 <figure>
-<div class="hug-top-always">
+<div class="hug-top-always" style="column-gap: 1rem;">
 <img class="dark-invert" loading="lazy" src="da-graph.svg" alt="data augmentation graph" style="height:185px">
 <img class="dark-invert" loading="lazy" src="transformation-intervention-graph.svg" alt="soft intervention graph" style="height:185px">
 </div>
