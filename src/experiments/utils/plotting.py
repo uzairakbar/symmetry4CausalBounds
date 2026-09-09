@@ -13,6 +13,7 @@ from matplotlib.ticker import NullFormatter
 from numpy.typing import NDArray
 
 from .constants import (
+    _STYLE_KEYS,
     ALPHA_MAP,
     COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
@@ -50,6 +51,42 @@ def _plot_config(experiment: str, fname: str | None) -> dict[str, object]:
     if not fname:
         return {}
     return {**PLOT_CONFIGS.get("*", {}).get(fname, {}), **PLOT_CONFIGS.get(experiment, {}).get(fname, {})}
+
+
+def _style(cfg: dict[str, object], **given) -> dict[str, object]:
+    """
+    The five style keys (constants._STYLE_KEYS), resolved: the plot config wins
+    over the function's own argument, which wins over the default.
+
+    `legend` is three-valued: None leaves the function's `hide_legend` /
+    `legend_loc` in charge; False hides; True shows; a str or (x, y) tuple shows
+    at that loc.
+    """
+    return {key: cfg.get(key, given[key]) for key in _STYLE_KEYS}
+
+
+def _apply_style(ax, style: dict[str, object], xlabel: str, ylabel: str):
+    """
+    Axis labels and their major tick labels in their colours; a title only when
+    one is given. `plt.setp` on the tick labels is what `plt.xticks(**kwargs)`
+    does; ticks created later copy the first tick's properties.
+    """
+    ax.set_xlabel(xlabel, fontsize=FS_LABEL, color=style["x_color"])
+    plt.setp(ax.get_xticklabels(), fontsize=FS_TICK, color=style["x_color"])
+    ax.set_ylabel(ylabel, fontsize=FS_LABEL, color=style["y_color"])
+    plt.setp(ax.get_yticklabels(), fontsize=FS_TICK, color=style["y_color"])
+    if style["title"]:
+        ax.set_title(style["title"], fontsize=FS_LABEL, color=style["title_color"])
+
+
+def _legend_choice(style: dict[str, object], hide_legend: bool, legend_loc) -> tuple[bool, object]:
+    """(hide, loc) after the `legend` key; when it is None the arguments decide."""
+    legend = style["legend"]
+    if legend is None:
+        return hide_legend, legend_loc
+    if isinstance(legend, str | tuple):
+        return False, legend
+    return legend is False, legend_loc
 
 
 def _finite(*arrays) -> NDArray:
@@ -240,6 +277,10 @@ def create_sweep_plot(
     experiment: str = "simulation",
     fname: str | None = None,
     vlines: tuple[float, ...] = (),
+    legend: bool | str | tuple[float, float] | None = None,
+    x_color: str = "k",
+    title: str | None = None,
+    title_color: str = "k",
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
@@ -249,7 +290,10 @@ def create_sweep_plot(
     threshold, Thm. 1 threshold).
 
     Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
-    the mean lines -- see _rescale.
+    the mean lines -- see _rescale. The style keys `legend`, `x_color`, `y_color`,
+    `title`, `title_color` come from the same config entry, else from the arguments
+    of the same name (_style); `legend`, when given, overrides `hide_legend` and
+    `legend_loc`.
     """
     try:
         # derived HERE, not inside `if savefig`, so the config id and the filename
@@ -327,10 +371,8 @@ def create_sweep_plot(
                 plt.fill_between(x_values, low, high, color=color, alpha=0.2)
 
         # Formatting
-        plt.xlabel(xlabel, fontsize=FS_LABEL)
-        plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
-        plt.yticks(fontsize=FS_TICK, color=y_color)
-        plt.xticks(fontsize=FS_TICK)
+        style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
+        _apply_style(plt.gca(), style, xlabel, ylabel)
 
         # x keeps its exact [min, max]; padding it would visibly widen every sweep.
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
@@ -361,10 +403,7 @@ def create_sweep_plot(
                 )
 
         # Legend
-        if cfg.get("legend") is False:
-            hide_legend = True
-        if isinstance(cfg.get("legend"), (str, tuple)):
-            legend_loc = cfg["legend"]
+        hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
         if not hide_legend and plot_handles:
             # Reconstruct legend based on what actually plotted
             final_handles = []
@@ -420,6 +459,10 @@ def create_query_sweep_plot(
     hide_legend: bool = False,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
     experiment: str = "simulation",
+    legend: bool | str | tuple[float, float] | None = None,
+    x_color: str = "k",
+    title: str | None = None,
+    title_color: str = "k",
 ):
     """
     Create a query sweep plot showing predictions across treatment values.
@@ -440,8 +483,13 @@ def create_query_sweep_plot(
         hide_legend: Whether to hide legend
         hilight_ours: Whether to highlight our methods
         experiment: Experiment name for file organization
+        legend, x_color, title, title_color: style keys, see constants._STYLE_KEYS.
+            The orchestrator passes ANNOTATE_SWEEP_PLOT["pc12"] here;
+            PLOT_CONFIGS[experiment]["query"] wins over these arguments key by key.
     """
     legend_items = [item for item in (legend_items or []) if item in y_results]
+    cfg = _plot_config(experiment, "query")
+    style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
 
     # Setup plot
     plt.rcParams.update(RC_PARAMS)
@@ -497,10 +545,7 @@ def create_query_sweep_plot(
         plot_handles.append(handle)
 
     # Formatting
-    plt.xlabel(xlabel, fontsize=FS_LABEL)
-    plt.ylabel(ylabel, fontsize=FS_LABEL, color=y_color)
-    plt.yticks(fontsize=FS_TICK, color=y_color)
-    plt.xticks(fontsize=FS_TICK)
+    _apply_style(plt.gca(), style, xlabel, ylabel)
     plt.xlim([min(x_values), max(x_values)])
 
     padding = 0.05 * max_mean
@@ -509,6 +554,7 @@ def create_query_sweep_plot(
     _label_major_ticks_only(plt.gca())
 
     # Legend
+    hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
     if not hide_legend:
         labels = legend_items if legend_items else all_labels
         handles = [plot_handles[all_labels.index(item)] for item in labels]
@@ -725,6 +771,8 @@ def create_perf_plot(
     try:
         cfg = _plot_config(experiment, fname)
         bars = bool(cfg.get("bars", True))
+        # no function arguments here: the config keys or the defaults
+        style = _style(cfg, legend=None, x_color="k", y_color="k", title=None, title_color="k")
 
         plt.rcParams.update(RC_PARAMS)
 
@@ -845,8 +893,17 @@ def create_perf_plot(
 
         axis_for_labels.set_xticks(positions)
         axis_for_labels.set_xticklabels(
-            _apply_tex_highlighting(labels, hilight_ours), fontsize=FS_TICK, rotation=20, ha="right"
+            _apply_tex_highlighting(labels, hilight_ours),
+            fontsize=FS_TICK,
+            rotation=20,
+            ha="right",
+            color=style["x_color"],
         )
+        for axis in fig.axes:  # the bars, the cost axis and its twin
+            axis.yaxis.label.set_color(style["y_color"])
+            plt.setp(axis.get_yticklabels(), color=style["y_color"])
+        if style["title"]:
+            fig.axes[0].set_title(style["title"], fontsize=FS_LABEL, color=style["title_color"])
 
         if ax is not None and ax_cost is not None:
             fig.align_ylabels([ax, ax_cost])

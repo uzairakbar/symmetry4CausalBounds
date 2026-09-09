@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from src.experiments.utils.constants import _STYLE_KEYS, validate_plot_keys
 from src.methods.partial_r2_net import (
     IntersectedIVPartialR2Net,
     IntersectedPartialR2Net,
@@ -342,6 +343,15 @@ def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
 # PLOT ANNOTATIONS
 # =============================================================================
 
+# Keyword arguments of `create_query_sweep_plot`, per query-sweep id; 'pc12' is
+# the radial sweep the orchestrator plots (base.py `_plot_query_sweep`). Besides
+# `xlabel` and `xscale` every style key of constants._STYLE_KEYS is accepted:
+# `legend` (False / True / a matplotlib loc), `x_color`, `y_color`, `title`,
+# `title_color`. These apply to BOTH experiments; a per-experiment entry
+# `PLOT_CONFIGS[experiment]["query"]` (constants.py) wins over them key by key.
+# Example:
+#   "pc12": {"xlabel": r"$\vartheta$", "xscale": "linear",
+#            "title": r"radial sweep", "title_color": "tab:blue", "legend": "upper left"}
 ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
     "pc1": {
         "xlabel": r"$t$",
@@ -356,6 +366,8 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xscale": "linear",
     },
 }
+
+validate_plot_keys("ANNOTATE_SWEEP_PLOT", ANNOTATE_SWEEP_PLOT, {"xlabel", "xscale"} | _STYLE_KEYS)
 
 # =============================================================================
 # METHOD REGISTRY

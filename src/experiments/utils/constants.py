@@ -119,20 +119,59 @@ PANEL_CONFIGS = {
 }
 
 
-# Per-plot rescale/clip overrides for the sweep/perf figures. Keyed
+# Per-plot overrides for the sweep, perf and query-sweep figures. Keyed
 # experiment -> plot id, where the id is the `fname` the orchestrator builds:
-# '<param>_<metric>' (`_run_sweeps`) and 'perf' (`_run_perf`). No '_sweep' suffix on
-# the id -- plotting.py appends that when writing the file, so
+# '<param>_<metric>' (`_run_sweeps`), 'perf' (`_run_perf`) and 'query' (the
+# radial query sweep, `_plot_query_sweep`). No '_sweep' suffix on the id --
+# plotting.py appends that when writing the file, so
 # 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
-# '*' applies to every experiment; a named entry wins key by key.
+# '*' applies to every experiment; a named entry wins key by key, and both win
+# over the plot function's own arguments (the query sweep's come from
+# configs.ANNOTATE_SWEEP_PLOT).
 #   xlim/ylim      (lo, hi); None on either end keeps the automatic edge
 #   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
-#   legend         False hides it, True is automatic, a str is a matplotlib loc
 #   bars           perf only; False retires the stacked reliability bars
-_PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh", "legend"}
+# Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
+#   legend         False hides it, True shows it, a str or (x, y) tuple is a
+#                  matplotlib loc. Absent: the plot function's own default (on).
+#   x_color        colour of the x-axis label and its tick labels (default 'k')
+#   y_color        the same for the y-axis (default 'k')
+#   title          title text (TeX allowed); absent or empty means no title
+#   title_color    colour of the title (default 'k')
+# Examples:
+#   PLOT_CONFIGS["simulation"]["gamma_coverage"] = {"legend": False}
+#   PLOT_CONFIGS["*"]["gamma_coverage"] = {"y_color": "red"}
+#   PLOT_CONFIGS["optical_device"]["query"] = {"title": r"radial sweep", "title_color": "tab:blue"}
+_STYLE_KEYS: set = {"legend", "x_color", "y_color", "title", "title_color"}
+_PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh"} | _STYLE_KEYS
 _PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale"}) | {"bars"}  # categorical x
+_PLOT_KEYS_QUERY: set = set(_STYLE_KEYS)  # limits and scale come from ANNOTATE_SWEEP_PLOT
+
+
+def plot_keys_for(plot_id: str) -> set:
+    """The keys PLOT_CONFIGS accepts under this id."""
+    if plot_id == "perf":
+        return _PLOT_KEYS_PERF
+    if plot_id == "query":
+        return _PLOT_KEYS_QUERY
+    return _PLOT_KEYS
+
+
+def validate_plot_keys(name: str, table: dict[str, dict[str, Any]], allowed) -> None:
+    """
+    Raise at import on an unknown key, so a typo is never a silent no-op.
+
+    `allowed` is a set applied to every id, or a callable mapping the plot id to
+    its set (plot_keys_for).
+    """
+    for plot_id, cfg in table.items():
+        keys = allowed(plot_id) if callable(allowed) else allowed
+        bad = set(cfg) - keys
+        if bad:
+            raise ValueError(f"{name}[{plot_id!r}]: unknown key(s) {sorted(bad)}.")
+
 
 PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
     "*": {
@@ -140,8 +179,5 @@ PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
     },
 }
 
-for _exp, _plots in PLOT_CONFIGS.items():  # a typo must not be a silent no-op
-    for _id, _cfg in _plots.items():
-        _bad = set(_cfg) - (_PLOT_KEYS_PERF if _id == "perf" else _PLOT_KEYS)
-        if _bad:
-            raise ValueError(f"PLOT_CONFIGS[{_exp!r}][{_id!r}]: unknown key(s) {sorted(_bad)}.")
+for _exp, _plots in PLOT_CONFIGS.items():
+    validate_plot_keys(f"PLOT_CONFIGS[{_exp!r}]", _plots, plot_keys_for)
