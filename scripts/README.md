@@ -25,6 +25,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
 | A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k when calibrated, tr(S)/k under raw budgets (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
+| A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders the sweep and perf pdfs into DIR, except the gamma sweeps, whose Thm. 1 vline is measured at run time and needs `main.py`): major-only tick labels on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
