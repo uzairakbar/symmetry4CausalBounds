@@ -24,6 +24,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
+| A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k when calibrated, tr(S)/k under raw budgets (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
