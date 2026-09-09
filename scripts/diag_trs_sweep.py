@@ -1,9 +1,13 @@
 """Diagnose the simulation trS sweep: is the x-axis monotone in the knob?
 
-`ExpansionStrategy` plots the MEASURED expansion rho*tr(S)/k, whose two factors move
-in OPPOSITE directions with the knob. If the product folds back, the steps get
+`ExpansionStrategy` plots the MEASURED expansion: rho*tr(S)/k under calibrated
+budgets, tr(S)/k under raw budgets (rho := 1). The two factors move in OPPOSITE
+directions with the knob. If the calibrated product folds back, the steps get
 reordered along x and a monotonically-narrowing family renders as "width grows as x
-shrinks". The docstring asserts monotonicity; nothing checks it.
+shrinks". This is a diagnostic, not a gate: it builds `calibrate=False`, and its own
+`x=rho*trS` column uses the untruncated trace and no intercept. The `runner x`
+column is what the production runner stored for the step (tr(S)/k here, since the
+runner is uncalibrated); `a31_trs_axis.py` gates both conventions.
 
     python scripts/diag_trs_sweep.py
 """
@@ -54,7 +58,7 @@ def main():
 
     header = (
         f"{'knob':>9} {'rho':>8} {'trS/k@1.0':>10} {'trS/k@.999':>11} "
-        f"{'x=rho*trS':>10} " + " ".join(f"{m:>10}" for m in METHODS) + f" {'eps_iv':>9}"
+        f"{'x=rho*trS':>10} {'runner x':>10} " + " ".join(f"{m:>10}" for m in METHODS) + f" {'eps_iv':>9}"
     )
     print(header)
     print("-" * len(header))
@@ -68,6 +72,7 @@ def main():
         trs_full = trace_S_over_k(data.X, data.GX, keep=1.0)
         trs_trunc = trace_S_over_k(data.X, data.GX, keep=0.999)
         x = rho * trs_full
+        runner_x = runner._measured[(0, float(knob))]
 
         widths = {}
         for name in METHODS:
@@ -79,7 +84,7 @@ def main():
         rows.append((knob, rho, trs_full, trs_trunc, x, widths, eps_iv))
         print(
             f"{knob:9.4g} {rho:8.4f} {trs_full:10.5f} {trs_trunc:11.5f} "
-            f"{x:10.5f} " + " ".join(f"{widths[m]:10.5f}" for m in METHODS) + f" {eps_iv:9.6f}"
+            f"{x:10.5f} {runner_x:10.5f} " + " ".join(f"{widths[m]:10.5f}" for m in METHODS) + f" {eps_iv:9.6f}"
         )
 
     # --------------------------------------------------------------- verdicts

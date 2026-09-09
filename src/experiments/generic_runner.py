@@ -415,9 +415,15 @@ class EpsilonRatioStrategy(GenericParamSweep):
 class ExpansionStrategy(GenericParamSweep):
     """
     Informativeness: sweep the DA strength knob; the x-axis is the MEASURED
-    relative expansion rho * tr(S)/k (Prop. 2), post-poly, averaged over
-    experiments. Base data is fixed per experiment and the DA draws use common
-    random numbers, so the measured x moves monotonically with the knob.
+    relative expansion of Prop. 2, post-poly, averaged over experiments. Under
+    calibrated budgets that is rho * tr(S)/k. Under raw budgets both balls have
+    the radius sqrt(gamma) (sensitivity_models.py `scale`), so Prop. 2 holds
+    with rho = 1 and the axis is tr(S)/k; the label stays `rho tr(S)/k`. Base
+    data is fixed per experiment and the DA draws use common random numbers.
+    On both datasets tr(S)/k was measured to fall with the knob while rho rises,
+    so the calibrated product can fold back (it does on optical at full scale and
+    on the 4-step sim fixture of a31), which is why `create_sweep_plot` sorts
+    the (x, y) pairs before drawing.
     """
 
     param_key = "trS"
@@ -437,11 +443,17 @@ class ExpansionStrategy(GenericParamSweep):
         # the raw pinv reads ~23% high at the top of the grid (see SPECTRUM_KEEP).
         rho = rho_hat(data.X, data.GX, data.y, intercept=self.mean_match)
         trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-        self._measured[(experiment_index, float(param))] = rho * trace_S
+        # Raw budgets give both balls the radius sqrt(gamma) (sensitivity_models.py
+        # `scale`), so Prop. 2's rho is 1 there and the axis is tr(S)/k. Calibrated
+        # budgets carry sigma-tilde/sigma, i.e. the measured rho.
+        factor = rho if self.calibrate else 1.0
+        x = factor * trace_S
+        self._measured[(experiment_index, float(param))] = x
+        convention = "calibrated: x = rho tr(S)/k" if self.calibrate else "raw budgets: rho := 1, x = tr(S)/k"
         logger.info(
             f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
             f"(untruncated {trace_S_over_k(data.X, data.GX):.5f}) "
-            f"x {rho * trace_S:.5f}"
+            f"x {x:.5f} ({convention})"
         )
 
         # The knob IS the invariance-error driver, so a setup-time eps* is

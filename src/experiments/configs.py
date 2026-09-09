@@ -220,12 +220,16 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         data_constant=True,
     ),
     "trS": ParamSpec(
-        # knob grid; the x-axis actually plotted is the MEASURED expansion
+        # knob grid; the x-axis actually plotted is the MEASURED expansion:
+        # rho tr(S)/k under calibrated budgets, tr(S)/k under raw budgets (rho = 1
+        # there, see ExpansionStrategy). The label is the same in both cases.
         xlabel=r"$\rho \operatorname{tr}(\mathcal{S})/k$",
         # tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
-        # Optical never reaches x < 1 -- its permutations symmetrise rather
-        # than inflate the covariance, so Prop. 2 never holds for it.
+        # Calibrated, optical never reaches x < 1 -- its permutations symmetrise
+        # rather than inflate the covariance, so rho outgrows the trace and
+        # Prop. 2 never holds for it. Under raw budgets tr(S)/k <= 1 on every
+        # step of both datasets, so the 1.0 vline sits at or past the right edge.
         grid_fn=lambda dataset, n: (
             np.logspace(-1.5, 1.0, num=n) if dataset == "simulation" else np.linspace(0.01, 0.3, num=n)
         ),

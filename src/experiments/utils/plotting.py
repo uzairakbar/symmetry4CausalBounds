@@ -241,10 +241,12 @@ def create_sweep_plot(
         cfg = _plot_config(experiment, fname)
 
         # x can be MEASURED rather than a designed grid (trS plots the observed
-        # rho tr(S)/k), so it is not guaranteed ascending. matplotlib draws
-        # segments in array order, so an out-of-order x makes the line double
-        # back on itself and read as jitter. Reorder (x, y) pairs together; a
-        # no-op for the sweeps whose grid is already ascending.
+        # rho tr(S)/k when calibrated, tr(S)/k under raw budgets), so it is not
+        # guaranteed ascending. matplotlib draws segments in array order, so an
+        # out-of-order x makes the line double back on itself and read as
+        # jitter. This is the one sort on the sweep path: the runner and the
+        # pkls stay in knob order. Reorder (x, y) pairs together; a no-op for
+        # the sweeps whose grid is already ascending.
         x_values = np.asarray(x_values, dtype=float)
         order = np.argsort(x_values, kind="stable")
         if not np.array_equal(order, np.arange(len(x_values))):
