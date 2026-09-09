@@ -256,6 +256,10 @@ class ParamSweepRunner(BaseExperimentRunner):
         """Reference x positions; strategies may add measured thresholds."""
         return self.spec.vlines
 
+    def axis_record(self) -> dict[str, Any] | None:
+        """The factors behind a MEASURED x-axis, in knob order; None for a designed grid."""
+        return None
+
     # ------------------------------------------------------ per-experiment policy
 
     def fit_gamma(self, experiment_index: int) -> float:
@@ -467,6 +471,7 @@ class ExperimentOrchestrator(ABC):
         self.kwargs = kwargs
         self._sweep_cache = {}  # (param) -> (x, results, statuses), memo per param
         self._sweep_vlines = {}  # (param) -> measured reference x positions
+        self._sweep_axis = {}  # (param) -> factors behind a measured x, or None
 
     @abstractmethod
     def get_query_runner_cls(self) -> type[QuerySweepRunner]:
@@ -521,6 +526,7 @@ class ExperimentOrchestrator(ABC):
         record = runner.run(f"{param} sweep")
         self._sweep_cache[param] = record
         self._sweep_vlines[param] = runner.vlines
+        self._sweep_axis[param] = runner.axis_record()
         return record
 
     def _run_sweeps(self, sweep_spec):
@@ -531,6 +537,10 @@ class ExperimentOrchestrator(ABC):
             save(x_values, f"{param}_values", self.name, "pkl", subdir=SUBDIR_SWEEP)
             save(results, f"{param}_results", self.name, "pkl", subdir=SUBDIR_SWEEP)
             save(statuses, f"{param}_statuses", self.name, "pkl", subdir=SUBDIR_SWEEP)
+            # a measured axis also records its factors, so the figure can be
+            # re-rendered under the other budget convention without a rerun
+            if self._sweep_axis.get(param) is not None:
+                save(self._sweep_axis[param], f"{param}_axis", self.name, "pkl", subdir=SUBDIR_SWEEP)
 
             for metric in sweep_spec.metric:
                 metric_spec = METRIC_SPECS[metric]

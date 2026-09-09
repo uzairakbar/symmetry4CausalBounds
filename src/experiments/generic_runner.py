@@ -4,6 +4,7 @@ Eliminates duplication between simulation and optical device experiments.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -432,6 +433,7 @@ class ExpansionStrategy(GenericParamSweep):
         # knob -> DA call kwargs; dataset-specific
         self.augment_kwargs_fn = augment_kwargs_fn or (lambda s: {"scale": float(s)})
         self._measured = {}
+        self._factors = {}  # (experiment, knob) -> (rho, tr(S)/k)
         self._step_epsilon = {}
         super().__init__(**kwargs)
 
@@ -449,6 +451,7 @@ class ExpansionStrategy(GenericParamSweep):
         factor = rho if self.calibrate else 1.0
         x = factor * trace_S
         self._measured[(experiment_index, float(param))] = x
+        self._factors[(experiment_index, float(param))] = (rho, trace_S)
         convention = "calibrated: x = rho tr(S)/k" if self.calibrate else "raw budgets: rho := 1, x = tr(S)/k"
         logger.info(
             f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
@@ -481,6 +484,25 @@ class ExpansionStrategy(GenericParamSweep):
         # the knob drives eps*, but it can still land under the floor -- guard it
         # exactly as the base does, or this sweep alone bypasses the guard
         return self._floor_guard(per_step, data, "inv", experiment_index, "epsilon")
+
+    def axis_record(self) -> dict[str, Any]:
+        """
+        Both factors of the measured x, per (knob, experiment), in KNOB order like
+        the values pkl: `x == nanmean(rho * trS, 1)` when calibrated, `nanmean(trS, 1)`
+        otherwise, so the other convention is `nanmean` of the other product.
+        """
+        knob = np.asarray(self.get_param_range(), dtype=float)
+        nan_pair = (np.nan, np.nan)
+        factors = np.array(
+            [[self._factors.get((j, float(s)), nan_pair) for j in range(self.n_experiments)] for s in knob]
+        )
+        return {
+            "knob": knob,
+            "rho": factors[:, :, 0],
+            "trS": factors[:, :, 1],
+            "x": self.observed_x(knob),
+            "calibrate": bool(self.calibrate),
+        }
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:
         """Mean over experiments of the measured expansion."""
