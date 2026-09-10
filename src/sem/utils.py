@@ -39,8 +39,14 @@ def fit_ground_truth_f(
     y,
     C,  # treatment, outcome, confounder variables
     best_degree: int,  # X polynomial features degree
+    fit_intercept: bool = True,
 ) -> tuple[NDArray, float, PolynomialFeatures, float]:
     """(W, b, features, epsilon) for the ground truth f(x) = phi(x) W + b.
+
+    `fit_intercept=False` drops b (returned as 0.0): the target is then the
+    least-squares projection onto span(phi) alone, the intercept-free class the
+    solver searches under `mean_match=False`, so the ATE and the estimators live
+    in the same class either way.
 
     The INTERCEPT is returned, not discarded. Asm. 1's base clause closes the
     hypothesis class under constant shifts, and Lem. 2's set lives on the slice
@@ -63,7 +69,7 @@ def fit_ground_truth_f(
     y_deconfounded = y - epsilon * C
 
     # fit f(X) = y - epsilon * C
-    deconfounded = LinearRegression().fit(X_features, y_deconfounded)
+    deconfounded = LinearRegression(fit_intercept=fit_intercept).fit(X_features, y_deconfounded)
     f = deconfounded.coef_.reshape(-1, 1)
     b = float(np.asarray(deconfounded.intercept_).ravel()[0])
     return f, b, features, epsilon

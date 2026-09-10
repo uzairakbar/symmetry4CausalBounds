@@ -56,6 +56,20 @@ class SimulationConfig:
     test_fraction: float = 0.1
 
 
+# @dataclass(frozen=True)
+# class OpticalDeviceConfig:
+#     """Configuration for optical device experiments."""
+
+#     gamma: float = 2**-2
+#     epsilon: float = 2**-2
+#     query_epsilon: float = 2**-1.8
+#     pad_epsilon: float | None = 0.0
+#     epsilon_true: float | None = None
+#     test_fraction: float = 0.1
+#     dataset_index: int = 8
+#     ground_truth_model: Literal["linear", "polynomial"] = "polynomial"
+
+
 @dataclass(frozen=True)
 class OpticalDeviceConfig:
     """Configuration for optical device experiments."""
@@ -72,7 +86,7 @@ class OpticalDeviceConfig:
     # PI+INV misses it on a minority of queries. That is the assumption being
     # violated, not the solver failing -- it is what Thm. 1's gamma_min annotation
     # on the gamma sweep exists to locate.
-    gamma: float = 2**-1.5
+    gamma: float = 2**-2
     # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
     # SS3.1's epsilon is -- the constraint E_inv(h) <= eps^2 evaluated at h_*, for
     # the DA in force. Whether the published 2**-2 clears it DEPENDS on that DA
@@ -170,7 +184,7 @@ EPS_TOL: float = 2**-8
 #   r=16    1.000                DA+PI parity: inert, a duplicate column
 # The floor moves with gamma, n and the DA draw, so this is a RATIO, never an epsilon.
 # It stays ~3 orders of magnitude below eps_rms, so "guard" is not "loose".
-FLOOR_GUARD_R: float = 2  # 9.0
+FLOOR_GUARD_R: float = 9.0
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
 # true invariance error, so that eps/eps* is a meaningful ratio axis.
@@ -239,13 +253,20 @@ PARAM_SPECS: dict[str, ParamSpec] = {
     ),
     "n": ParamSpec(
         xlabel=r"$n$",
-        grid_fn=lambda dataset, n: np.array(
-            [128, 256, 512, 1024] if dataset == "simulation" else [128, 256, 512, 1000]  # 1000 = optical pool max
+        # grid_fn=lambda dataset, n: np.array(
+        #     [128, 256, 512, 1024] if dataset == "simulation" else [128, 256, 512, 1000]  # 1000 = optical pool max
+        # ),
+        grid_fn=lambda dataset, n: np.linspace(
+            128,
+            1024 if dataset == "simulation" else 1000,
+            16,
+            dtype=int,
         ),
     ),
     "m": ParamSpec(
         xlabel=r"Augmentation Folds ($m$)",
-        grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16, 32]),
+        # grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16]),
+        grid_fn=lambda dataset, n: np.arange(1, 16 + 1),
     ),
 }
 

@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 
 from src.data_augmentors.abstract import DataAugmenter as DA
 
-DA_STD: float = 1.0
+DA_STD: float = 2.0
 BASIS_SELECTOIN_PROBABILITY: float = 8.0 / 10.0
 
 

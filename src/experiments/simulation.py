@@ -12,7 +12,7 @@ from src.sem.simulation import LinearSimulationSEM as SEM
 EXPERIMENT_NAME = "simulation"
 
 # m-sweep holds n fixed here (PLAN 5.5)
-FOLD_SWEEP_SAMPLES: int = 512
+FOLD_SWEEP_SAMPLES: int = 128
 
 
 # =============================================================================

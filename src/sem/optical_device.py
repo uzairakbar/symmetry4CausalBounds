@@ -56,7 +56,16 @@ class OpticalDeviceSEM(SEM):
             cls._DATASET = cls.load_dataset()
         return cls._DATASET
 
-    def __init__(self, experiment: int = 0, center: bool = True, ground_truth: str = "polynomial"):
+    def __init__(
+        self,
+        experiment: int = 0,
+        center: bool = True,
+        ground_truth: str = "polynomial",
+        intercept: bool = True,
+    ):
+        # `intercept` mirrors the solver's `mean_match`: True fits f with a free
+        # intercept (Lem. 2's slice), False fits it over span(phi) alone so the
+        # target sits in the same intercept-free class as the estimators.
         # a COPY: `get_experiment_data` hands back the shared class cache, and the
         # centring below is in place. Without this, constructing a SEM mutates the
         # pool every other SEM will be built from -- repeated construction drifts
@@ -74,11 +83,11 @@ class OpticalDeviceSEM(SEM):
 
         best_degree = 1
         if ground_truth == "linear":
-            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, 1)
+            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, 1, fit_intercept=intercept)
         elif ground_truth == "polynomial":
             best_degree, _ = select_best_degree(X, y, C, max_degree=MAX_PLOYNOMIAL_DEGREE)
             logger.info(f"Experiment {experiment} polynomial degree: {best_degree}")
-            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, best_degree)
+            W_XY, b_XY, features, epsilon = fit_ground_truth_f(X, y, C, best_degree, fit_intercept=intercept)
         else:
             raise ValueError(f"Ground truth {ground_truth} model not supported/implemented.")
 
@@ -106,7 +115,7 @@ class OpticalDeviceSEM(SEM):
         # class the solver searches under `mean_match`; measuring gamma* over one
         # class while solving over another is what let h_* fall out of the set.
         Phi = features.fit_transform(self.X)
-        design = np.column_stack([Phi, np.ones(len(Phi))])
+        design = np.column_stack([Phi, np.ones(len(Phi))]) if intercept else Phi
         xi_hat = design @ np.linalg.pinv(design) @ (epsilon * self.C)
         self._bias_sq = float(np.var(xi_hat) / (noise_scale**2))
 
@@ -126,6 +135,7 @@ class OpticalDeviceSEM(SEM):
 
         `X` is already phi(x) at every call site. The intercept is part of the
         estimand (see `fit_ground_truth_f`); without it h_* is off Lem. 2's slice.
+        It is 0.0 when the SEM was built with `intercept=False`.
         """
         return X @ self.W_XY + self.b_XY
 

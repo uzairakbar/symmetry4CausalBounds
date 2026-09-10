@@ -17,7 +17,7 @@ from src.sem.optical_device import OpticalDeviceSEM as SEM
 EXPERIMENT_NAME = "optical_device"
 
 # m-sweep holds n fixed here (PLAN 5.5)
-FOLD_SWEEP_SAMPLES: int = 512
+FOLD_SWEEP_SAMPLES: int = 128
 # eps* is an RMS over one DA draw, so it carries draw noise; pool this many draws
 # (in the SQUARE, which is what an RMS averages) so the budget does not wobble
 # between runs. The X it is evaluated on is the WHOLE pool, not a resample of it:
@@ -79,7 +79,11 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
     def _sem_factory(self):
         """Factory for creating SEM instances."""
-        return SEM(experiment=OPTICAL_CONFIG.dataset_index, ground_truth=OPTICAL_CONFIG.ground_truth_model)
+        return SEM(
+            experiment=OPTICAL_CONFIG.dataset_index,
+            ground_truth=OPTICAL_CONFIG.ground_truth_model,
+            intercept=self.toggles["mean_match"],
+        )
 
     def _oracle_pieces(self):
         """(sem, da, features) for the budget estimators, built once."""

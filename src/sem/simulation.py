@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from src.sem.abstract import StructuralEquationModel as SEM
 
 OUTCOME_DIMENSION: int = 1
-TREATMENT_DIMENSION: int = 32
+TREATMENT_DIMENSION: int = 64
 OUTCOME_NOISE_STD: float = 0.1  # s: unconfoundable outcome noise
 MAX_GAMMA: float = 1.0 / OUTCOME_NOISE_STD**2
 

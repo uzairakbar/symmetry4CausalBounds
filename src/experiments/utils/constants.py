@@ -106,7 +106,7 @@ DEFAULT_NORMALIZE_ERROR: bool = False
 PANEL_CONFIGS = {
     "simulation": {
         0: {"scale": "asinh", "ylim": (0, 10.01), "linear_width": 0.25, "linthresh": 2.0},
-        1: {"scale": "asinh", "ylim": (0, 10.01), "linear_width": 0.25, "linthresh": 2.0},
+        1: {"scale": "asinh", "ylim": (0.1, 5), "linear_width": 1.0, "linthresh": 1.0},
         2: {"scale": "linear", "ylim": (0, 0.5), "linear_width": 1.0, "linthresh": 2.0},
         3: {"ylim": (-3, 3)},
     },

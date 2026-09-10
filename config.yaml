@@ -1,9 +1,9 @@
 # global toggles, overridable per experiment
 defaults:
-    calibrate: true    # scale budgets by noise sigma (paper); false = raw gamma
-    pad: true          # eps-pad DA+ intervals (Thm. 3)
-    clipy: true         # clip intervals to observed outcome range
-    mean_match: true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y],
+    calibrate: false #true #false #true #false #true    # scale budgets by noise sigma (paper); false = raw gamma
+    pad: true #false #true #true #false #true          # eps-pad DA+ intervals (Thm. 3)
+    clipy: false #false #true #false #true #false #true         # clip intervals to observed outcome range
+    mean_match: true #false #true #false #true #false #true #false #true #true #true #false #true #false #true #true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y],
                         # i.e. the covariance ball around the WITH-INTERCEPT erm.
                         # Exact on the linear backend (the intercept is eliminated
                         # by centring); a 2-SE band on the do-MNIST nets, where the
@@ -25,7 +25,7 @@ simulation:
     n_samples: 2_048
     kernel_dim: 0                   # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
     n_experiments: 8
-    sweep_samples: 32
+    sweep_samples: 128
     methods:
         # - ATE
         # - ERM
@@ -41,12 +41,14 @@ simulation:
     experiment:
         query: true                 # query sweep; panel ALWAYS generated
         sweep:
-            # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
-            # informativeness = (trS, worst_error)
+        #     # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
+        #     # informativeness = (trS, worst_error)
+            # param:  [n, m]
+            # metric: [coverage, approx_error, worst_error, width]
             param:  [epsilon, gamma, trS, n, m]
             metric: [coverage, approx_error, worst_error, width]
-        perf:
-            metric: [wall_clock, seed_var]
+        # perf:
+        #     metric: [wall_clock, seed_var]
 
 # do_mnist:
 #     seed: 42
@@ -102,7 +104,7 @@ optical_device:
                         # so the error bars are over the DRAW -- resampling and the
                         # DA realisation -- not over devices. The oracle itself is
                         # read off the whole pool and does not move between them.
-    sweep_samples: 32
+    sweep_samples: 128
     methods:
         # - ATE
         # - ERM
@@ -115,17 +117,19 @@ optical_device:
         - PI&DA+PI
         - PI&DA+PI+IV
     # augmentation: all
-    augmentation: rotation > gaussian-noise # rotation > gaussian
-    # augmentation: rotation > hflip > vflip > random-permutation
+    # augmentation: rotation > gaussian-noise # rotation > gaussian
+    augmentation: rotation > hflip > vflip > random-permutation
     experiment:
-        query: true                 # query sweep; panel ALWAYS generated
-        sweep:
-            # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
-            # informativeness = (trS, worst_error)
+        # query: true                 # query sweep; panel ALWAYS generated
+    #     sweep:
+    #         # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
+    #         # informativeness = (trS, worst_error)
+    #         # param:  [gamma]
+    #         # metric: [coverage, approx_error, worst_error, width]
             param:  [epsilon, gamma, trS, n, m]
             metric: [coverage, approx_error, worst_error, width]
-        perf:
-            metric: [wall_clock, seed_var]
+        # # perf:
+        # #     metric: [wall_clock, seed_var]
 
 # net training; reaches GradientDescentERM._fit via fit_model. The linear
 # experiments have no nets and ignore every key here.
