@@ -198,6 +198,24 @@ def coverage(
     return float(np.mean(np.where(np.isnan(estimate).any(axis=1), False, covered)))
 
 
+def sigma_sq_hat(X: NDArray, y: NDArray, intercept: bool = False) -> float:
+    """
+    MMSE of OLS on a sample: sigma-hat^2 on X, sigma-tilde-hat^2 on GX. The
+    noise level a ball fit on that design scales its radius by (`BoundedSA.scale`).
+
+    Args:
+        X: Design in the feature space the methods use
+        y: Outcomes
+        intercept: fit with a free intercept (Lem. 2's hypothesis class, the
+            `mean_match` geometry) rather than the intercept-free one
+    """
+    target = y.flatten() - (np.mean(y) if intercept else 0.0)
+    if intercept:
+        X = X - X.mean(axis=0)
+    residuals = target - X @ np.linalg.lstsq(X, target, rcond=None)[0]
+    return float(np.mean(residuals**2))
+
+
 def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> float:
     """
     Information-loss factor rho = sigma-tilde^2 / sigma^2 measured on a sample:
@@ -215,18 +233,10 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> flo
     Returns:
         rho_hat, or NaN if the baseline MSE vanishes
     """
-    target = y.flatten() - (np.mean(y) if intercept else 0.0)
-
-    def mse(A):
-        if intercept:
-            A = A - A.mean(axis=0)
-        residuals = target - A @ np.linalg.lstsq(A, target, rcond=None)[0]
-        return float(np.mean(residuals**2))
-
-    denominator = mse(X)
+    denominator = sigma_sq_hat(X, y, intercept=intercept)
     if denominator <= 0.0:
         return np.nan
-    return mse(GX) / denominator
+    return sigma_sq_hat(GX, y, intercept=intercept) / denominator
 
 
 # =============================================================================

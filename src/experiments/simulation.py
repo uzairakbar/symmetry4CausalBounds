@@ -87,6 +87,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     default_gamma=SIMULATION_CONFIG.gamma,
                     default_epsilon=SIMULATION_CONFIG.epsilon,
                     eps_tol=SIMULATION_CONFIG.eps_tol,
+                    raw_gamma=True,
                     **kwargs,
                 )
 

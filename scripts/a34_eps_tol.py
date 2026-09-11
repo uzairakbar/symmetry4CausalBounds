@@ -15,6 +15,11 @@ guards; the query sweeps read `eps_tol` (2**-8) from `SimulationConfig` and
         eps*, the default call 2**-5 over it, and the query runner's
         `default_epsilon` is the former.
 
+Both query runners also carry the raw declared gamma (`raw_gamma`): (ii) and (iii)
+check `runner.default_gamma == config gamma / sigma-hat^2` of the draw and that the
+fitted PI ball's radius `scale * sqrt(budget)` is sqrt(config gamma) (1.0 / 0.5),
+which is what the rescale exists for.
+
     python scripts/a34_eps_tol.py
 """
 
@@ -31,6 +36,8 @@ from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, OPTICAL_CONFIG, SIMU
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.experiments.utils.metrics import sigma_sq_hat  # noqa: E402
+from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
 
 QUERY_TOL = 2**-8
@@ -63,6 +70,26 @@ def query_runner(orch):
     return orch.get_query_runner_cls()(methods=orch.methods, **{**orch._get_clean_kwargs(), "n_experiments": 1})
 
 
+def check_raw_gamma(leg, runner, declared):
+    """The declared gamma is a raw squared radius: rescaled by 1/sigma-hat^2 of the
+    draw, so the PI ball's radius comes back to sqrt(declared)."""
+    sigma_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+    check(
+        f"{leg} runner.default_gamma == declared gamma / sigma-hat^2",
+        runner.raw_gamma and np.isclose(runner.default_gamma, declared / sigma_sq, rtol=1e-12),
+        f"{runner.default_gamma:.6g} vs {declared:.6g} / {sigma_sq:.6g}",
+    )
+    context = runner.setup_data()
+    model = runner.methods["PI"]()
+    fit_model(model=model, method_name="PI", X=context.X, y=context.y, GX=context.GX, G=context.G, da=context.da)
+    radius = model.scale * np.sqrt(model.budget(model.gamma))
+    check(
+        f"{leg} fitted PI radius == sqrt(declared gamma)",
+        np.isclose(radius, np.sqrt(declared), rtol=1e-6),
+        f"{radius:.6g} vs {np.sqrt(declared):.6g} (scale {model.scale:.6g}, budget {model.budget(model.gamma):.6g})",
+    )
+
+
 def leg_i():
     print("(i) configured values")
     check("(i) SimulationConfig.eps_tol == 2**-8", SIMULATION_CONFIG.eps_tol == QUERY_TOL)
@@ -76,6 +103,7 @@ def leg_ii():
     orch = SimulationOrchestrator(n_samples=256, kernel_dim=0, treatment_dim=32, **common())
     runner = query_runner(orch)
     check("(ii) runner.eps_tol == SIMULATION_CONFIG.eps_tol", runner.eps_tol == SIMULATION_CONFIG.eps_tol)
+    check_raw_gamma("(ii)", runner, SIMULATION_CONFIG.gamma)
 
     eps_iv_star = float(runner.oracle.eps_iv_star)
     floor = constraint_floor(
@@ -143,6 +171,7 @@ def leg_iii():
     runner = query_runner(orch)
     check("(iii) query runner default_epsilon == eps* + 2**-8", np.isclose(runner.default_epsilon, with_tol, rtol=1e-9))
     check("(iii) query runner eps_tol == OPTICAL_CONFIG.eps_tol", runner.eps_tol == OPTICAL_CONFIG.eps_tol)
+    check_raw_gamma("(iii)", runner, OPTICAL_CONFIG.gamma)
 
 
 if __name__ == "__main__":

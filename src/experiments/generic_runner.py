@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
 from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, TRS_XLABEL
 from src.experiments.utils import radial_sweep_pcs
-from src.experiments.utils.metrics import rho_hat, trace_S_over_k
+from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
 from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
@@ -108,12 +108,22 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
         eps_tol: float = EPS_TOL,
+        raw_gamma: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         # knife-edge tolerance on the oracle IV budget; the dataset configs set
         # it for the query sweep, the param sweeps keep EPS_TOL
         self.eps_tol = float(eps_tol)
+        # `raw_gamma`: the declared gamma is a RAW squared radius, the units the
+        # query panels were drawn in before sigma-hat entered every ball: the PI
+        # radius is sqrt(gamma), not sigma-hat sqrt(gamma). It is rescaled by
+        # 1 / sigma-hat^2 of the draw once the data exist, so the panels keep
+        # their old radii (1.0 on sim, 0.5 on optical). Query sweep only; the
+        # param sweeps solve at gamma* in the paper's units and never see this.
+        # This branch exists so the two panels can be compared side by side;
+        # merge or drop it on that comparison.
+        self.raw_gamma = bool(raw_gamma)
 
         # Create SEM and DA
         self.sem = sem_factory()
@@ -143,11 +153,20 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             self.X = self.X_raw
             self.GX = self.GX_raw
 
+        # a raw declared gamma into the paper's units: the solver's radius
+        # sigma-hat sqrt(gamma / sigma-hat^2) is back at sqrt(gamma)
+        if self.raw_gamma:
+            sigma_sq = sigma_sq_hat(self.X, self.y, intercept=self.mean_match)
+            if not np.isfinite(sigma_sq) or sigma_sq <= 0.0:
+                raise ValueError(f"raw_gamma: sigma-hat^2 of the draw is {sigma_sq!r}; cannot rescale gamma.")
+            self.default_gamma = default_gamma / sigma_sq
+            logger.info(f"query gamma {default_gamma:.4g} / sigma-hat^2 {sigma_sq:.4g} = {self.default_gamma:.4g}")
+
         # gamma/epsilon stay at the yaml defaults here (PLAN 7: the query sweep
         # never auto-sets them).
         if method_factory is not None:
             self.methods = method_factory(
-                gamma=default_gamma,
+                gamma=self.default_gamma,
                 epsilon=default_epsilon,
                 epsilon_iv=self.epsilon_iv,
                 rho=self.fit_rho(),

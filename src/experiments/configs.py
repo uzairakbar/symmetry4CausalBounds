@@ -49,6 +49,8 @@ from src.sem.simulation import TREATMENT_DIMENSION
 class SimulationConfig:
     """Configuration for simulation experiments."""
 
+    # query sweep: a RAW squared radius (the PI radius is sqrt(gamma) = 1.0); the
+    # query runner divides it by sigma-hat^2 of the draw (`raw_gamma`)
     gamma: float = 1.0
     epsilon: float = 2**-8
     # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5), which is
@@ -85,10 +87,12 @@ class OpticalDeviceConfig:
     # whole content is how the interval behaves as the assumed budget crosses the
     # true gamma*. epsilon is different in kind: it bounds |W| for a KNOWN
     # augmentation, a quantity the analyst can simply compute.
-    # Consequence to read the query panel with: this gamma is 0.354 against a
-    # measured gamma* of 0.662, so h_* is NOT in the identified set there and
-    # PI+INV misses it on a minority of queries. That is the assumption being
-    # violated, not the solver failing.
+    # Consequence to read the query panel with: this gamma is a RAW squared
+    # radius (PI radius sqrt(gamma) = 0.5; the query runner divides it by
+    # sigma-hat^2 of the draw, `raw_gamma`), about 0.41 in the paper's units
+    # against a measured gamma* of 0.662, so h_* is NOT in the identified set
+    # there and PI+INV misses it on a minority of queries. That is the
+    # assumption being violated, not the solver failing.
     gamma: float = 2**-2
     # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
     # SS3.1's epsilon is -- the constraint E_inv(h) <= eps^2 evaluated at h_*, for

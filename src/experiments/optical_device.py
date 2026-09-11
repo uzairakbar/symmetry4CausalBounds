@@ -168,6 +168,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     default_gamma=OPTICAL_CONFIG.gamma,
                     default_epsilon=self._epsilon_budget(OPTICAL_CONFIG.query_epsilon, tol=OPTICAL_CONFIG.eps_tol),
                     eps_tol=OPTICAL_CONFIG.eps_tol,
+                    raw_gamma=True,
                     **kwargs,
                 )
 
