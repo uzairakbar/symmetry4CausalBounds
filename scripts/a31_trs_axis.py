@@ -1,34 +1,40 @@
 """A31: the trS sweep's x-axis under both settings of the recalibrate toggle.
 
-`ExpansionStrategy` plots a MEASURED x: rho tr(S)/k under `recalibrate: true` and
-tr(S)/k under `recalibrate: false` (the label stays `rho tr(S)/k`). The runner and
-the pkls keep knob order; `create_sweep_plot` holds the one sort. Two experiments,
-a 4-step knob grid, both datasets, both toggles, through the production path
-(`sweep_record`, `_run_sweeps`), with a second runner recomputing the factors
-independently:
+`ExpansionStrategy` plots a MEASURED x for the ball in force: tr(S)/k under
+`recalibrate: true` (the recalibrated DA+ radius is sigma sqrt(gamma), so Prop. 2's
+ratio is tr(S)/k) and rho tr(S)/k under `recalibrate: false` (the radius carries
+sqrt(rho)). The label follows the factor (`TRS_XLABEL`), the runner and the pkls
+keep knob order, and `create_sweep_plot` holds the one sort, on the x it is given.
+Two experiments, a 4-step knob grid, both datasets, both toggles, through the
+production path (`sweep_record`, `_run_sweeps`), with a second runner recomputing
+the factors independently:
 
   (0)    `generate_data(j, knob)` is deterministic (common random numbers), so the
          recomputation in (i) measures the same draw;
-  (i)    every stored x is exactly rho * trS (recalibrated) or trS (not), with rho
+  (i)    every stored x is exactly trS (recalibrated) or rho * trS (not), with rho
          and trS recomputed by the gate on the runner's own data;
   (ii)   the returned x is the experiment mean in KNOB order, `trS_values.pkl` is
          bit-identical to it, and the width array is (n_steps, n_exp);
-  (iii)  not recalibrated: x is strictly monotone in the knob (falling on sim, rising on the
-         optical fixture, whose knob is the permutation probability), and on an unbootstrapped render the
-         DA+PI line carries `sort(x)` against the width means in that order, exactly,
-         and its CI band (the `fill_between` polygon in the line's colour) carries the
-         2.5/97.5 width percentiles in that same order, so a sorted line over an
-         unsorted band is caught;
-  (iv)   recalibrated: x is the mean of rho * trS and the fixture argsort is the
-         fold-back one ([3, 2, 0, 1] on sim, [0, 1, 2, 3] on optical), which the
-         other convention cannot produce;
-  (v)    the xlabel is `PARAM_SPECS["trS"].xlabel` and contains `\\rho` under BOTH
-         toggles, and no plotting error was swallowed;
+  (iii)  under BOTH toggles, on an unbootstrapped render the DA+PI line carries
+         `sort(x)` against the width means in that order, exactly, and its CI band
+         (the `fill_between` polygon in the line's colour) carries the 2.5/97.5
+         width percentiles in that same order, so a sorted line over an unsorted
+         band, or a sort on the other convention, is caught; recalibrated, the
+         tr(S)/k axis is strictly monotone in the knob (falling on sim, rising on
+         the optical fixture, whose knob is the permutation probability);
+  (iv)   x is the mean of the right product and the fixture argsort is the pinned
+         one per (dataset, toggle): the rho tr(S)/k product folds back on sim
+         ([3, 2, 0, 1]) where tr(S)/k does not ([3, 2, 1, 0]), so the two
+         conventions cannot be confused there;
+  (v)    the xlabel on the production render is `TRS_XLABEL[recalibrate]`, contains
+         `\\rho` iff not recalibrated, equals the runner's `xlabel`, and no plotting
+         error was swallowed;
   (vi)   exactly n_exp * n_steps `trS step` INFO lines, each with the stored x to
          5 decimals and the marker of its convention;
   (vii)  every spec vline inside the resolved xlim is drawn and none outside it;
-  (viii) `trS_axis.pkl` holds knob, rho, trS, x and the toggle in knob order, with
-         x equal to `trS_values.pkl` and to the mean of the right factor;
+  (viii) `trS_axis.pkl` holds knob, rho, trS, x, the toggle and the label in knob
+         order, with x equal to `trS_values.pkl` and to the mean of the right
+         factor, and the label equal to the one drawn;
   (ix)   the other sweeps write no axis record: the gamma runner returns None and
          `_run_sweeps` on the gamma grid writes no `gamma_axis.pkl`.
 
@@ -61,7 +67,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.configs import PARAM_SPECS, SweepSpec  # noqa: E402
+from src.experiments.configs import PARAM_SPECS, TRS_XLABEL, SweepSpec  # noqa: E402
 from src.experiments.generic_runner import SPECTRUM_KEEP  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
@@ -73,14 +79,18 @@ from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 METHODS = ["PI", "DA+PI"]
 N_EXP, N_STEPS = 2, 4
 LINE = re.compile(r"trS step (\S+): rho (\S+) tr\(S\)/k (\S+) \(untruncated (\S+)\) x (\S+)(.*)$")
-MARK = {True: "recalibrated: x = rho tr(S)/k", False: "inherited gamma: rho := 1, x = tr(S)/k"}
-# the rho tr(S)/k product folds back on the sim fixture (steps 0 and 1 swap); the
-# plain tr(S)/k axis is strictly monotone on both fixtures: falling on sim (argsort
-# [3, 2, 1, 0]), rising on optical since random-permutation honours p = s
-# (tr(S)/k 0.785 -> 1.015 on the 4-step grid, measured 2026-09-11)
-EXPECT_ARGSORT_CAL = {"simulation": [3, 2, 0, 1], "optical_device": [0, 1, 2, 3]}
-EXPECT_RAW_SIGN = {"simulation": -1, "optical_device": 1}
-AXIS_KEYS = {"knob", "rho", "trS", "x", "recalibrate"}
+MARK = {True: "recalibrated: x = tr(S)/k", False: "inherited gamma: x = rho tr(S)/k"}
+# argsort of the 4-step experiment mean per (dataset, toggle), measured 2026-09-11
+# at treatment_dim 32 on the shipped optical chain. tr(S)/k (recalibrated) is
+# strictly monotone on both fixtures: falling on sim, rising on optical since
+# random-permutation honours p = s (0.785 -> 1.015). rho tr(S)/k (inherited
+# gamma) folds back on sim, where steps 0 and 1 swap, and stays rising on optical.
+EXPECT_ARGSORT = {
+    "simulation": {True: [3, 2, 1, 0], False: [3, 2, 0, 1]},
+    "optical_device": {True: [0, 1, 2, 3], False: [0, 1, 2, 3]},
+}
+EXPECT_TRS_SIGN = {"simulation": -1, "optical_device": 1}
+AXIS_KEYS = {"knob", "rho", "trS", "x", "recalibrate", "xlabel"}
 TMPROOT = os.path.expanduser("~/scratch/tmp/a31")
 FAIL = []
 
@@ -158,6 +168,7 @@ def run_one(experiment, recalibrate):
     os.chdir(REPO)
     x = np.asarray(x)
     sweep_dir = f"{tmp}/artifacts/{experiment}/sweep"
+    want_label = TRS_XLABEL[recalibrate]
 
     runner = second_runner(orch, "trS")
     knobs = np.asarray(runner.get_param_range(), dtype=float)
@@ -182,7 +193,7 @@ def run_one(experiment, recalibrate):
             data = SweepData.coerce(runner.generate_data(j, knob))
             rho[i, j] = rho_hat(data.X, data.GX, data.y, intercept=runner.mean_match)
             trs[i, j] = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-            want = rho[i, j] * trs[i, j] if recalibrate else trs[i, j]
+            want = trs[i, j] if recalibrate else rho[i, j] * trs[i, j]
             got = runner._measured[(j, float(knob))]
             if got != want:
                 ok_i = False
@@ -209,7 +220,7 @@ def run_one(experiment, recalibrate):
     create_sweep_plot(
         x,
         {m: results[m]["interval_width"] for m in results},
-        xlabel=PARAM_SPECS["trS"].xlabel,
+        xlabel=want_label,
         ylabel="w",
         experiment=experiment,
         fname="trS_width",
@@ -220,47 +231,55 @@ def run_one(experiment, recalibrate):
     ax2 = plt.gcf().axes[0]
     lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
     order = np.argsort(x, kind="stable")
-    if not recalibrate:
-        # (iii) not recalibrated: monotone axis, sorted line, y reordered with x, and the CI band
-        # reordered with the line (the band is drawn from the same reordered array)
-        dec = bool((np.sign(np.diff(x)) == EXPECT_RAW_SIGN[experiment]).all())
-        xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None
-        yd = np.asarray(lines[0].get_ydata(), dtype=float) if len(lines) == 1 else None
-        xs_ok = xd is not None and np.array_equal(xd, np.sort(x))
-        ys_ok = yd is not None and np.array_equal(yd, np.nanmean(w, axis=1)[order])
-        band = band_edges(ax2, to_rgb(lines[0].get_color())) if len(lines) == 1 else None
-        band_ok = (
-            band is not None
-            and np.array_equal(band[0], np.sort(x))
-            and np.array_equal(band[1], np.nanpercentile(w, 2.5, axis=1)[order])
-            and np.array_equal(band[2], np.nanpercentile(w, 97.5, axis=1)[order])
-        )
-        check(
-            tag,
-            "(iii)",
-            dec and xs_ok and ys_ok and band_ok,
-            f"monotone ({'falling' if EXPECT_RAW_SIGN[experiment] < 0 else 'rising'}) {dec} "
-            f"xdata==sort(x) {xs_ok} ydata exact {ys_ok} band exact {band_ok}; "
-            f"xdata {None if xd is None else np.round(xd, 5).tolist()}",
-        )
-    else:
-        # (iv) recalibrated: the product, with its fixture fold-back
-        ok_iv = np.array_equal(x, np.nanmean(rho * trs, axis=1))
-        srt = order.tolist()
-        check(
-            tag,
-            "(iv)",
-            ok_iv and srt == EXPECT_ARGSORT_CAL[experiment],
-            f"x==mean(rho*trS) {ok_iv} argsort {srt} expected {EXPECT_ARGSORT_CAL[experiment]}",
-        )
+
+    # (iii) the sort is on the plotted x under both toggles: sorted line, y
+    # reordered with x, and the CI band reordered with the line (the band is
+    # drawn from the same reordered array); the tr(S)/k axis is monotone
+    xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None
+    yd = np.asarray(lines[0].get_ydata(), dtype=float) if len(lines) == 1 else None
+    xs_ok = xd is not None and np.array_equal(xd, np.sort(x))
+    ys_ok = yd is not None and np.array_equal(yd, np.nanmean(w, axis=1)[order])
+    band = band_edges(ax2, to_rgb(lines[0].get_color())) if len(lines) == 1 else None
+    band_ok = (
+        band is not None
+        and np.array_equal(band[0], np.sort(x))
+        and np.array_equal(band[1], np.nanpercentile(w, 2.5, axis=1)[order])
+        and np.array_equal(band[2], np.nanpercentile(w, 97.5, axis=1)[order])
+    )
+    mono = bool((np.sign(np.diff(x)) == EXPECT_TRS_SIGN[experiment]).all()) if recalibrate else True
+    mono_txt = (
+        f"monotone ({'falling' if EXPECT_TRS_SIGN[experiment] < 0 else 'rising'}) {mono} "
+        if recalibrate
+        else "monotone n/a (rho tr(S)/k may fold) "
+    )
+    check(
+        tag,
+        "(iii)",
+        mono and xs_ok and ys_ok and band_ok,
+        f"{mono_txt}xdata==sort(x) {xs_ok} ydata exact {ys_ok} band exact {band_ok}; "
+        f"xdata {None if xd is None else np.round(xd, 5).tolist()}",
+    )
+
+    # (iv) the right product, and the pinned argsort of this (dataset, toggle)
+    product = trs if recalibrate else rho * trs
+    ok_iv = np.array_equal(x, np.nanmean(product, axis=1))
+    srt = order.tolist()
+    expect = EXPECT_ARGSORT[experiment][recalibrate]
+    check(
+        tag,
+        "(iv)",
+        ok_iv and srt == expect,
+        f"x==mean({'trS' if recalibrate else 'rho*trS'}) {ok_iv} argsort {srt} expected {expect}",
+    )
 
     # (v) the label on the production render, and no swallowed plotting error
     lab = ax.get_xlabel()
     check(
         tag,
         "(v)",
-        lab == PARAM_SPECS["trS"].xlabel and r"\rho" in lab and not errors,
-        f"{lab!r} errors {len(errors)}" + (f": {errors[0][:120]}" if errors else ""),
+        lab == want_label and (r"\rho" in lab) == (not recalibrate) and runner.xlabel == lab and not errors,
+        f"{lab!r} runner.xlabel==label {runner.xlabel == lab} errors {len(errors)}"
+        + (f": {errors[0][:120]}" if errors else ""),
     )
 
     # (vi) the INFO lines against the stored x and the convention marker
@@ -314,15 +333,16 @@ def run_one(experiment, recalibrate):
         x_ok = keys_ok and np.array_equal(rec["x"], pkl)
         fac = None
         if shapes_ok:
-            fac = np.nanmean(rec["rho"] * rec["trS"], 1) if recalibrate else np.nanmean(rec["trS"], 1)
+            fac = np.nanmean(rec["trS"], 1) if recalibrate else np.nanmean(rec["rho"] * rec["trS"], 1)
         fac_ok = fac is not None and np.array_equal(fac, pkl)
         cal_ok = keys_ok and rec["recalibrate"] == recalibrate
+        lab_ok = keys_ok and rec["xlabel"] == lab
         check(
             tag,
             "(viii)",
-            keys_ok and shapes_ok and knob_ok and x_ok and fac_ok and cal_ok,
+            keys_ok and shapes_ok and knob_ok and x_ok and fac_ok and cal_ok and lab_ok,
             f"keys {keys_ok} shapes {shapes_ok} knob==grid {knob_ok} x==values {x_ok} "
-            f"factors==x {fac_ok} recalibrate {cal_ok}",
+            f"factors==x {fac_ok} recalibrate {cal_ok} xlabel==drawn {lab_ok}",
         )
 
     # (ix) no axis record on a designed grid: runner level, then file level on sim raw
