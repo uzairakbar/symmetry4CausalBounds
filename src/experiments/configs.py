@@ -217,13 +217,38 @@ FLOOR_GUARD_R: float = 9.0
 # band does not swallow (per-experiment 0.84-0.97 at 2^-6), a slope and not a
 # cliff; 4 slips under 0.8 and 6 is a failure mode. The price is DA+PI 1.37x
 # PI wide at eps = eps*.
-# The optical device has no knob under the shipped permutation chain: the
-# sweep warns and keeps eps* 0.254, so the constant is inert there and stays
-# at the old value. With a gaussian-noise term the raw half-width (~2.5) is
-# several std of h* (~0.7), so a dip is not reachable there either.
+# The optical device has no knob under the configured permutation chain, so
+# the sweep appends gaussian-noise (ROBUSTNESS_AUGMENTATION) and tunes its
+# strength. Measured there (seed 42, same toggles, 2 exp, 8 steps unless
+# noted; std(h*) 0.72 on the pool; logs ~/scratch/tmp/impl_v7/logs/optical/runs/):
+#   eps*   strength   DA+PI at 2^-6   min DA+PI+IV   DA+PI/PI width at r = 1
+#   0.5-3  0.74-2.65  1.000           1.000          0.72-1.05
+#   4      3.10       0.980           0.962          1.28   (4 exp, 16 steps; flat on seed 7)
+#   5      3.49       0.962           0.952          1.50   (4 exp, 16 steps; seeds 7 / 1: 0.98 / 0.97)
+#   6      3.85       0.958           0.952          1.73   (4 exp, 16 steps)
+#   8      4.47       0.960           0.955          2.17
+# The dip is capped by the device, not by eps*: the unpadded DA+PI half-width
+# stops shrinking at 1.6 from eps* 3 on, and 96% of the pool's h* lie within
+# 1.6 of its mean, so DA+PI coverage cannot fall below ~0.96 at any eps* (5, 6
+# and 8 all sit on that floor). 5 is the smallest value whose dip shows on
+# every draw seen (4 is flat on seed 7). It is 7 std of h* and noise 3.5x the
+# pixel std, so the DA+ERM centre is mostly the pool mean: a faint dip, the
+# top tail of h*, not the sim's slope. Every DA+ line stays above 0.95. The
+# tuner solves on one draw; the pooled oracle (8 draws) reads 4.88 for it.
 ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
     "simulation": 3.0,
-    "optical_device": 2**-1,
+    "optical_device": 5.0,
+}
+
+# The DA chain the robustness sweep runs under, where it differs from the
+# configured one. None = the configured chain. Optical: config.yaml ships a
+# permutation-only chain with no strength knob (eps* pinned at 0.254, every DA+
+# coverage line flat at 1.0), so the sweep, and ONLY it, appends gaussian-noise
+# and retunes its strength to the constant above; the query panel and the other
+# sweeps read config.yaml. Applied in EpsilonRatioStrategy.
+ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
+    "simulation": None,
+    "optical_device": "rotation > hflip > vflip > random-permutation > gaussian-noise",
 }
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.

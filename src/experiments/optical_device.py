@@ -144,9 +144,10 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             return float(configured)
         return self.measured_epsilon_pad() + EPS_TOL
 
-    def _da_factory(self, sem=None):
-        """Factory for creating DA instances."""
-        return DA(self.augmentation)
+    def _da_factory(self, sem=None, augmentation: str | None = None):
+        """Factory for creating DA instances. `augmentation` overrides the
+        configured chain; only the robustness sweep passes one."""
+        return DA(self.augmentation if augmentation is None else augmentation)
 
     def _poly_factory(self):
         """Factory for creating polynomial transformer."""

@@ -4,6 +4,7 @@ Eliminates duplication between simulation and optical device experiments.
 """
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -11,7 +12,14 @@ from loguru import logger
 from sklearn.model_selection import train_test_split
 
 from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
-from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, TRS_XLABEL
+from src.experiments.configs import (
+    EPS_TOL,
+    FLOOR_GUARD_R,
+    ROBUSTNESS_AUGMENTATION,
+    ROBUSTNESS_EPSILON_TRUE,
+    SPECTRUM_KEEP,
+    TRS_XLABEL,
+)
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
 from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
@@ -392,14 +400,20 @@ class EpsilonRatioStrategy(GenericParamSweep):
 
     This is the ONLY sweep that recalibrates the DA (to
     ROBUSTNESS_EPSILON_TRUE[experiment_name]), so that eps* > 0 makes the ratio
-    axis meaningful.
+    axis meaningful, and the only one that swaps the configured DA chain for
+    ROBUSTNESS_AUGMENTATION[experiment_name] where that is set (optical: the
+    configured chain has no knob to tune).
     """
 
     param_key = "epsilon"
 
     def __init__(self, **kwargs):
-        # scoped to this sweep only; never leaks into trS/n/m/perf
-        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[kwargs.get("experiment_name", "simulation")]
+        # scoped to this sweep only; never leaks into trS/n/m/perf or the query panel
+        name = kwargs.get("experiment_name", "simulation")
+        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[name]
+        chain = ROBUSTNESS_AUGMENTATION[name]
+        if chain is not None:
+            kwargs["da_factory"] = partial(kwargs["da_factory"], augmentation=chain)
         super().__init__(**kwargs)
 
         if not self.pad:
