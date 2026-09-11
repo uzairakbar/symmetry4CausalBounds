@@ -9,8 +9,9 @@ and `perf/perf.pkl` when present. No experiment is run.
 
   (a) every re-rendered figure (each sweep param x metric, the query sweep, the
       perf figure with its twin axis): zero non-empty minor tick labels on every
-      axes, both axes, and at least one minor tick mark on every log axis; no
-      plotting error was swallowed;
+      axes, both axes, at least one minor tick mark on every log axis, and at
+      least two major ticks inside the view on every axis; no plotting error
+      was swallowed;
   (b) `legend`: False removes the legend artist, a loc string places it, True
       shows it over a `hide_legend=True` argument, and the argument still hides
       it when the key is absent;
@@ -87,17 +88,21 @@ def same_colour(a, b):
 
 
 # ------------------------------------------------------------------ inspection
-def minor_report(fig):
-    """(non-empty minor labels over all axes, log axes without a minor mark, log axes)."""
+def tick_report(fig):
+    """(non-empty minor labels over all axes, log axes without a minor mark, log axes,
+    minimum count of in-view major ticks over all axes)."""
     fig.canvas.draw()
-    labels, bare, n_log = 0, 0, 0
+    labels, bare, n_log, fewest = 0, 0, 0, None
     for ax in fig.axes:
         for axis, scale in ((ax.xaxis, ax.get_xscale()), (ax.yaxis, ax.get_yscale())):
             labels += sum(bool(t.get_text()) for t in axis.get_minorticklabels())
             if scale == "log":
                 n_log += 1
                 bare += len(axis.get_minorticklocs()) == 0
-    return labels, bare, n_log
+            lo, hi = sorted(axis.get_view_interval())
+            majors = int(sum(lo <= t <= hi for t in axis.get_majorticklocs()))
+            fewest = majors if fewest is None else min(fewest, majors)
+    return labels, bare, n_log, 0 if fewest is None else fewest
 
 
 def style_report(ax):
@@ -201,19 +206,21 @@ def row_a(artifacts, experiments, save):
             x, results = load(f"{sweep_dir}/{param}_values.pkl"), load(f"{sweep_dir}/{param}_results.pkl")
             metrics = [m for m, spec in METRIC_SPECS.items() if not spec.perf_only]
             labels = bare = n_log = 0
+            fewest = None
             before = len(_errors)
             for metric in metrics:
                 fig = render_sweep(experiment, param, metric, x, results, save)
-                a, b, c = minor_report(fig)
+                a, b, c, d = tick_report(fig)
                 labels, bare, n_log = labels + a, bare + b, n_log + c
+                fewest = d if fewest is None else min(fewest, d)
                 plt.close("all")
                 n_fig += 1
             check(
                 "(a)",
                 f"{experiment} {param}",
-                labels == 0 and bare == 0 and len(_errors) == before,
+                labels == 0 and bare == 0 and fewest >= 2 and len(_errors) == before,
                 f"{len(metrics)} figures: minor labels {labels}, log axes without marks {bare}/{n_log}, "
-                f"errors {len(_errors) - before}",
+                f"fewest majors in view {fewest}, errors {len(_errors) - before}",
             )
 
         query = f"{artifacts}/{experiment}/query"
@@ -222,14 +229,14 @@ def row_a(artifacts, experiments, save):
             fig = render_query(
                 experiment, load(f"{query}/treatment_values.pkl"), load(f"{query}/outcome_values.pkl"), False
             )
-            labels, bare, n_log = minor_report(fig)
+            labels, bare, n_log, fewest = tick_report(fig)
             plt.close("all")
             n_fig += 1
             check(
                 "(a)",
                 f"{experiment} query",
-                labels == 0 and bare == 0 and len(_errors) == before,
-                f"minor labels {labels}, log axes without marks {bare}/{n_log}",
+                labels == 0 and bare == 0 and fewest >= 2 and len(_errors) == before,
+                f"minor labels {labels}, log axes without marks {bare}/{n_log}, fewest majors in view {fewest}",
             )
         else:
             print(f"  {experiment}: no query pkls")
@@ -238,15 +245,16 @@ def row_a(artifacts, experiments, save):
         if os.path.exists(perf):
             before = len(_errors)
             fig = render_perf(experiment, load(perf), save)
-            labels, bare, n_log = minor_report(fig)
+            labels, bare, n_log, fewest = tick_report(fig)
             n_axes = len(fig.axes)
             plt.close("all")
             n_fig += 1
             check(
                 "(a)",
                 f"{experiment} perf",
-                labels == 0 and bare == 0 and n_log >= 1 and len(_errors) == before,
-                f"{n_axes} axes (twin included): minor labels {labels}, log axes without marks {bare}/{n_log}",
+                labels == 0 and bare == 0 and n_log >= 1 and fewest >= 2 and len(_errors) == before,
+                f"{n_axes} axes (twin included): minor labels {labels}, log axes without marks {bare}/{n_log}, "
+                f"fewest majors in view {fewest}",
             )
         else:
             print(f"  {experiment}: no perf.pkl")
@@ -524,9 +532,12 @@ def row_h():
         del PANEL_CONFIGS[SYNTHETIC]
     ok = bool(captured) and len(_errors) == before
     if ok:
-        labels, bare, n_log = minor_report(captured[0])
-        ok = labels == 0 and bare == 0 and n_log >= 6
-        detail = f"{len(captured[0].axes)} axes, minor labels {labels}, log axes without marks {bare}/{n_log}"
+        labels, bare, n_log, fewest = tick_report(captured[0])
+        ok = labels == 0 and bare == 0 and n_log >= 6 and fewest >= 2
+        detail = (
+            f"{len(captured[0].axes)} axes, minor labels {labels}, log axes without marks {bare}/{n_log}, "
+            f"fewest majors in view {fewest}"
+        )
     else:
         detail = "panel did not render"
     plt.close("all")
@@ -536,7 +547,7 @@ def row_h():
     digits = {"PI": np.stack([np.full((5, m), 0.2), np.full((5, m), 0.8)], -1), "ERM": np.full((5, m), 0.5)}
     before = len(_errors)
     plotting.create_digit_sweep_plot(exemplars, digits, labels=[0, 1, 2, 3, 4], experiment=SYNTHETIC, savefig=False)
-    labels, bare, n_log = minor_report(plt.gcf())
+    labels, bare, n_log, _ = tick_report(plt.gcf())  # its x ticks are the thumbnails, not counted
     plt.close("all")
     check("(h)", "digit sweep (synthetic)", labels == 0 and len(_errors) == before, f"minor labels {labels}")
 

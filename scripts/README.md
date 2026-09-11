@@ -25,11 +25,12 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, optical reported as a reference |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
 | A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k when calibrated, tr(S)/k under raw budgets (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
-| A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders every sweep and perf pdf into DIR): major-only tick labels on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
+| A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders every sweep and perf pdf into DIR): major-only tick labels and at least two in-view major ticks on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
 | A33 | `a33_gamma_vline.py` | gamma sweep annotation: no strategy overrides the spec vlines, one unlabelled line per in-view reference and no text, `generic_runner` free of `thm1_gamma_min`, `sweep_record` stores the spec constant |
 | A34 | `a34_eps_tol.py` | query sweep tolerance: `eps_tol` 2**-8 from `SimulationConfig` / `OpticalDeviceConfig` reaches the query runners' IV and optical budgets, the param sweeps and floor guards keep `EPS_TOL` 2**-5 |
 | A35 | `a35_sim_dim.py` | simulation `treatment_dim`: optional yaml key with the `DatasetDefaults` fallback (the SEM's 32), validated as a positive int, required by `SimulationOrchestrator`, reaches the SEM draw and the DA, and every script states it |
 | A36 | `a36_trs_knob.py` | optical trS knob: `RandomPermutation` honours p (bit-identical at the default p = 1, identity rows kept under p < 1), p = s, grid `linspace(0.2, 0.99)`, tr(S)/k rising and pinned on the shipped-chain fixture |
+| A37 | `a37_major_ticks.py` | at least two labelled major ticks on every axis: the (1, 2, 5) log fallback with plain labels on the n sweep (200, 500, 1000), every sweep param on both datasets, the query sweep and the perf figure, on synthetic inputs |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
