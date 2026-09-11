@@ -18,14 +18,17 @@ experiment. Three legs:
         (the function has no y-scale argument; y is a linear `plt.ylim`), and
         `create_perf_plot` on a record in `_run_perf`'s schema: >= 2 in-view
         majors on every axis, zero non-empty minor labels (a32's property);
-  (iv)  every param on both datasets: xlim == (x.min(), x.max()) exactly (no
-        top-tail clip on the x grid, no pad), and the reference lines drawn are
-        exactly the spec's values inside the grid: r = 1 on gamma and epsilon,
-        1.0 on the sim trS grid, none on the optical one (0.2..0.99);
+  (iv)  every param on both datasets: xlim == `_pad(x.min(), x.max(), X_MARGIN)`
+        (no top-tail clip on the x grid, the 2 % margin only), both grid
+        endpoints strictly inside it, and the reference lines drawn are exactly
+        the spec's values inside xlim (the code's own gate), each strictly
+        inside it: r = 1 on gamma and epsilon, 1.0 on both trS grids (the
+        optical knob grid ends at 0.99 and 1.0 sits in its margin);
   (v)   the gamma sweep from `<artifacts>/<dataset>/sweep/gamma_{values,results}.pkl`
         when present (`--artifacts DIR`, default the repo's `artifacts/`; read
-        only): the grid ends at r = 1, xlim is its exact [min, max], and the
-        r = 1 line is drawn. Skipped, not failed, without the pkls.
+        only): the grid ends at r = 1, xlim is the margined [min, max], and the
+        r = 1 line is drawn strictly inside it. Skipped, not failed, without the
+        pkls.
 
     MPLBACKEND=Agg python scripts/a37_major_ticks.py [--artifacts DIR]
 """
@@ -89,6 +92,16 @@ def in_view_labels(axis):
         if lo <= loc <= hi:
             out.append(plain(tick.label1.get_text()))
     return out
+
+
+def margined(ax, x):
+    """The xlim `_rescale` sets: the exact grid plus X_MARGIN in transformed space."""
+    return plotting._pad(ax.xaxis, float(x.min()), float(x.max()), frac=plotting.X_MARGIN)
+
+
+def inside(ax, values):
+    lo, hi = ax.get_xlim()
+    return all(lo < v < hi for v in values)
 
 
 def drawn_vlines(ax):
@@ -217,15 +230,20 @@ def leg_iv():
         for param in PARAM_SPECS:
             x = PARAM_SPECS[param].grid_fn(dataset, 16)
             ax = render_sweep(dataset, param)
-            exact = (float(x.min()), float(x.max()))
+            want_lim = margined(ax, x)
             check(
-                f"(iv) {dataset} {param}: xlim == (x.min(), x.max())",
-                ax.get_xlim() == exact,
-                f"{ax.get_xlim()} vs {exact}",
+                f"(iv) {dataset} {param}: xlim == margined (x.min(), x.max())",
+                np.allclose(ax.get_xlim(), want_lim, rtol=1e-12, atol=0) and inside(ax, (x.min(), x.max())),
+                f"{np.round(ax.get_xlim(), 6).tolist()} vs {np.round(want_lim, 6).tolist()}",
             )
-            want = [v for v in PARAM_SPECS[param].vlines if exact[0] <= v <= exact[1]]
+            lo, hi = ax.get_xlim()
+            want = [v for v in PARAM_SPECS[param].vlines if lo <= v <= hi]
             drawn = drawn_vlines(ax)
-            check(f"(iv) {dataset} {param}: reference lines drawn == {want}", drawn == want, f"{drawn}")
+            check(
+                f"(iv) {dataset} {param}: reference lines drawn == {want}, inside xlim",
+                drawn == want and inside(ax, drawn),
+                f"{drawn}",
+            )
             plt.close("all")
 
 
@@ -244,11 +262,19 @@ def leg_v(artifacts):
         key = METRIC_SPECS["width"].key
         y = {name: rec[key] for name, rec in record.items() if name != "ATE"}
         ax = render_sweep(dataset, "gamma", x=x, y=y)
-        exact = (float(x.min()), float(x.max()))
-        check(f"(v) {dataset} gamma pkl: grid ends at r = 1", np.isclose(exact[1], 1.0), f"x.max() {exact[1]}")
-        check(f"(v) {dataset} gamma pkl: xlim == (x.min(), x.max())", ax.get_xlim() == exact, f"{ax.get_xlim()}")
+        check(f"(v) {dataset} gamma pkl: grid ends at r = 1", np.isclose(x.max(), 1.0), f"x.max() {x.max()}")
+        want_lim = margined(ax, x)
+        check(
+            f"(v) {dataset} gamma pkl: xlim == margined (x.min(), x.max())",
+            np.allclose(ax.get_xlim(), want_lim, rtol=1e-12, atol=0) and inside(ax, (x.min(), x.max())),
+            f"{np.round(ax.get_xlim(), 6).tolist()} vs {np.round(want_lim, 6).tolist()}",
+        )
         drawn = drawn_vlines(ax)
-        check(f"(v) {dataset} gamma pkl: the r = 1 line is drawn", drawn == [1.0], f"{drawn}")
+        check(
+            f"(v) {dataset} gamma pkl: the r = 1 line is drawn inside xlim",
+            drawn == [1.0] and inside(ax, drawn),
+            f"{drawn}",
+        )
         plt.close("all")
 
 

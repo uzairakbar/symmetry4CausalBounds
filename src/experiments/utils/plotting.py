@@ -39,8 +39,11 @@ PlotScale = Literal["linear", "log", "symlog", "asinh"]
 
 # clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
 # large is the runaway. A symmetric floor crops the TIGHTEST method, which is the
-# result. x is a grid: every point is the result, so it keeps its exact [min, max].
+# result. x is a grid: every point is the result, so it is never clipped; it gets
+# X_MARGIN of its transformed span on each side, enough to lift the r = 1 line off
+# the frame, too little to read as widening (the 5 % `_pad` did).
 CLIP_PERCENTILE: float = 98.0
+X_MARGIN: float = 0.02
 # asinh knee, as a fraction of the upper limit. PANEL_CONFIGS' own ylim/linear_width.
 LINEAR_WIDTH_RATIO: float = 40.0
 # promote linear -> log past this dynamic range. Fires on nothing today; a guard.
@@ -105,7 +108,7 @@ def _limits(series: list[NDArray], clip: bool = True) -> tuple[float, float] | N
     Point estimates only -- CI bands and SE crosshairs are deliberately excluded and
     left to clip against the frame. `clip=False` is the exact pooled [min, max]:
     the x grid, whose last point (r = 1, n = 1024, m = 16) the clip used to drop
-    along with the r = 1 reference line.
+    along with the r = 1 reference line (`_rescale` adds the X_MARGIN).
     """
     pooled = _finite(*series)
     if not len(pooled):
@@ -208,7 +211,8 @@ def _rescale(
     promote_x: bool = True,
 ):
     """Limits -> cfg -> scale -> pad -> set. Limits never depend on the scale.
-    x is exact (a grid), y is top-clipped (see CLIP_PERCENTILE)."""
+    x is the exact grid plus X_MARGIN (5 % when `pad_x`), y is top-clipped
+    (see CLIP_PERCENTILE)."""
     x_limits = _apply_cfg_limits(_limits(x_series, clip=False), cfg.get("xlim"), "xlim")
     y_limits = _apply_cfg_limits(_limits(y_series), cfg.get("ylim"), "ylim")
 
@@ -218,7 +222,7 @@ def _rescale(
     ax.set_yscale(yscale, **y_kwargs)
 
     if x_limits:
-        ax.set_xlim(_pad(ax.xaxis, *x_limits) if pad_x else x_limits)
+        ax.set_xlim(_pad(ax.xaxis, *x_limits, frac=0.05 if pad_x else X_MARGIN))
     if y_limits:
         ax.set_ylim(_pad(ax.yaxis, *y_limits))
 
@@ -415,9 +419,9 @@ def create_sweep_plot(
         style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
         _apply_style(plt.gca(), style, xlabel, ylabel)
 
-        # x keeps its exact [min, max] (_limits clip=False, no pad): the grid's
-        # last point and the r = 1 reference line stay in view, and padding
-        # would visibly widen every sweep.
+        # x is the exact grid plus a 2 % margin (_limits clip=False, X_MARGIN):
+        # the grid's last point and the r = 1 reference line stay in view and
+        # off the frame; the 5 % pad would visibly widen every sweep.
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
         # (trS opts out to linear on purpose), not a default to be second-guessed.
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
