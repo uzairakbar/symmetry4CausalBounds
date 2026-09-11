@@ -40,6 +40,7 @@ def main():
         n_experiments=1,
         sweep_samples=N_STEPS,
         kernel_dim=0,
+        treatment_dim=32,
         methods=METHODS,
         hyperparameters={},
         n_jobs=8,

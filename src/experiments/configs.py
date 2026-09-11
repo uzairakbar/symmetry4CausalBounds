@@ -38,6 +38,7 @@ from src.methods.sensitivity_models import (
 from src.methods.sensitivity_models import (
     PartialR2,
 )
+from src.sem.simulation import TREATMENT_DIMENSION
 
 # =============================================================================
 # EXPERIMENT PARAMETERS
@@ -156,10 +157,12 @@ class DatasetDefaults:
     n_samples: int
     n_experiments: int
     sweep_samples: int
+    # simulation only: the SEM's treatment dimension. None = the dataset has no such key.
+    treatment_dim: int | None = None
 
 
 DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
-    "simulation": DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32),
+    "simulation": DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32, treatment_dim=TREATMENT_DIMENSION),
     "optical_device": DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
     # sweep_samples = the 10 digit exemplars on the query x-axis
     "do_mnist": DatasetDefaults(n_samples=1_200_000, n_experiments=1, sweep_samples=10),
@@ -612,7 +615,16 @@ class MethodRegistry:
 
 # keys a dataset block may carry besides `experiment` and the global toggles
 DATASET_KEYS: dict[str, set] = {
-    "simulation": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation", "kernel_dim"},
+    "simulation": {
+        "seed",
+        "n_samples",
+        "n_experiments",
+        "sweep_samples",
+        "methods",
+        "augmentation",
+        "kernel_dim",
+        "treatment_dim",
+    },
     "optical_device": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation"},
     "do_mnist": {
         "seed",
@@ -664,6 +676,11 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     defaults = DATASET_DEFAULTS[name]
     for key in ("n_samples", "n_experiments", "sweep_samples"):
         block.setdefault(key, getattr(defaults, key))
+    if defaults.treatment_dim is not None:
+        block.setdefault("treatment_dim", defaults.treatment_dim)
+        dim = block["treatment_dim"]
+        if isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0:
+            raise ValueError(f"config.{name}.treatment_dim must be a positive int; got {dim!r}.")
     block.setdefault("methods", list(ALL_METHODS))
     # a stale method name (e.g. an old underscore spelling) must be a config
     # error here, not silently filtered out of the run by the registry

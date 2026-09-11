@@ -102,7 +102,7 @@ def build(experiment, calibrate):
         mean_match=True,
     )
     if experiment == "simulation":
-        return SimulationOrchestrator(n_samples=2048, kernel_dim=0, **common)
+        return SimulationOrchestrator(n_samples=2048, kernel_dim=0, treatment_dim=32, **common)
     return OpticalOrchestrator(n_samples=1000, augmentation="rotation > gaussian-noise", **common)
 
 

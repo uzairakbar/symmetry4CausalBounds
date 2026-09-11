@@ -73,7 +73,7 @@ def leg_i():
 def leg_ii():
     print("(ii) sim query runner vs param sweep runner")
     set_seed(42)
-    orch = SimulationOrchestrator(n_samples=256, kernel_dim=0, **common())
+    orch = SimulationOrchestrator(n_samples=256, kernel_dim=0, treatment_dim=32, **common())
     runner = query_runner(orch)
     check("(ii) runner.eps_tol == SIMULATION_CONFIG.eps_tol", runner.eps_tol == SIMULATION_CONFIG.eps_tol)
 

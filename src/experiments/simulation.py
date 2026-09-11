@@ -23,15 +23,17 @@ FOLD_SWEEP_SAMPLES: int = 128
 class SimulationOrchestrator(ExperimentOrchestrator):
     """Orchestrator for simulation experiments."""
 
-    def __init__(self, kernel_dim: int, **kwargs):
+    def __init__(self, kernel_dim: int, treatment_dim: int, **kwargs):
         """
         Initialize simulation orchestrator.
 
         Args:
             kernel_dim: Dimensionality of DA kernel
+            treatment_dim: SEM treatment dimension (the root yaml's `treatment_dim`)
             **kwargs: Other experiment parameters
         """
         self.kernel_dim = kernel_dim
+        self.treatment_dim = int(treatment_dim)
         self.toggles = dict(
             calibrate=kwargs.get("calibrate", False),
             pad=kwargs.get("pad", False),
@@ -53,7 +55,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
     def _sem_factory(self):
         """Factory for creating SEM instances."""
-        return SEM(gamma=SIMULATION_CONFIG.gamma_true)
+        return SEM(treatment_dimension=self.treatment_dim, gamma=SIMULATION_CONFIG.gamma_true)
 
     def _da_factory(self, sem):
         """

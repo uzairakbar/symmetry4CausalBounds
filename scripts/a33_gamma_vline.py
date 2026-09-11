@@ -115,6 +115,7 @@ def leg_iv():
         n_experiments=1,
         sweep_samples=3,
         kernel_dim=0,
+        treatment_dim=32,
         methods=["PI"],
         hyperparameters={},
         n_jobs=1,

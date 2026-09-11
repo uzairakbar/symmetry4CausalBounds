@@ -138,6 +138,7 @@ def sim_runner(n_experiments=8, sweep_samples=8):
         n_experiments=n_experiments,
         sweep_samples=sweep_samples,
         kernel_dim=0,
+        treatment_dim=32,
         methods=METHODS,
         hyperparameters={},
         n_jobs=1,

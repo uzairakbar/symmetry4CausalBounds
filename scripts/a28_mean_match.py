@@ -339,6 +339,7 @@ def leg_v():
             n_experiments=2,
             sweep_samples=8,
             kernel_dim=0,
+            treatment_dim=32,
             methods=methods,
             hyperparameters={},
             n_jobs=-1,
