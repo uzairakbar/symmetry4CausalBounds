@@ -14,7 +14,7 @@ from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QueryS
 from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, TRS_XLABEL
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, trace_S_over_k
-from src.methods.sensitivity_models import constraint_floor
+from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
     epsilon_star,
@@ -513,6 +513,57 @@ class ExpansionStrategy(GenericParamSweep):
         )
 
 
+class RecalibrationStrategy(GenericParamSweep):
+    """
+    Recalibration: sweep t in [0, 1], the post-DA budget of SS4.2
+    gamma~ = gamma ((1 - t) + t / rho), from the inherited gamma (t = 0) to
+    gamma/rho (t = 1); the continuous version of the `recalibrate` toggle.
+
+    x is the MEASURED ratio gamma~/gamma = (1 - t) + t/rho_j averaged over
+    experiments (each has its own rho_hat of its fit sample), so it runs from
+    1/rho (fully recalibrated) up to 1 and `create_sweep_plot` sorts it. Data
+    is constant: models are fit ONCE per experiment at the configured toggle
+    and only re-solved through the predict-time knob, like the gamma sweep.
+    Baselines have rho = 1 and ignore it.
+    """
+
+    param_key = "recalibrate"
+
+    def __init__(self, **kwargs):
+        self._rho = {}  # experiment -> rho_hat of the fit sample
+        super().__init__(**kwargs)
+
+    def generate_data(self, experiment_index: int, param) -> SweepData:
+        data = self._sweep_data(experiment_index)
+        self._rho[experiment_index] = self._finite(
+            rho_hat(data.X, data.GX, data.y, intercept=self.mean_match), 1.0, "rho_hat"
+        )
+        return data
+
+    def fit_rho(self, experiment_index: int, data=None) -> float:
+        # the models solve at the rho the axis is drawn with
+        if experiment_index in self._rho:
+            return self._rho[experiment_index]
+        return super().fit_rho(experiment_index, data)
+
+    def get_predict_kwargs(self, param, experiment_index: int):
+        return {"recalibrate": float(param)}
+
+    def _rho_array(self) -> np.ndarray:
+        return np.array([self._rho.get(j, np.nan) for j in range(self.n_experiments)], dtype=float)
+
+    def observed_x(self, param_values: np.ndarray) -> np.ndarray:
+        """Mean over experiments of gamma~/gamma = (1 - t) + t/rho_j, through the
+        solver's own `recalibrated_gamma` so a sample rho_j < 1 reads as 1 here too."""
+        rho = self._rho_array()
+        return np.array([np.nanmean([recalibrated_gamma(1.0, r, t) for r in rho]) for t in param_values])
+
+    def axis_record(self) -> dict[str, Any]:
+        """The knob, the per-experiment rho behind x, x in knob order, and the label."""
+        knob = np.asarray(self.get_param_range(), dtype=float)
+        return {"knob": knob, "rho": self._rho_array(), "x": self.observed_x(knob), "xlabel": self.xlabel}
+
+
 class SampleSizeStrategy(GenericParamSweep):
     """
     Sweep n. The base sample and the test set are drawn ONCE per experiment and
@@ -583,4 +634,5 @@ STRATEGIES: dict[str, type] = {
     "trS": ExpansionStrategy,
     "n": SampleSizeStrategy,
     "m": FoldStrategy,
+    "recalibrate": RecalibrationStrategy,
 }

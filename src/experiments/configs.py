@@ -291,6 +291,20 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         # grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16]),
         grid_fn=lambda dataset, n: np.arange(1, 16 + 1),
     ),
+    "recalibrate": ParamSpec(
+        # the continuous `recalibrate` knob t in [0, 1] (SS4.2): the DA+ methods
+        # solve at gamma~ = gamma ((1 - t) + t / rho), from the inherited gamma
+        # (t = 0) to gamma/rho (t = 1). The x-axis actually plotted is the
+        # MEASURED ratio gamma~/gamma averaged over experiments (each has its own
+        # rho_hat), so it runs from 1/rho up to 1 (see RecalibrationStrategy).
+        # Same name as the toggle in `defaults:`, different yaml namespace, as
+        # `gamma` is.
+        xlabel=r"$\tilde{\gamma} / \gamma$",
+        grid_fn=lambda dataset, n: np.linspace(0.0, 1.0, num=n),
+        xscale="linear",
+        include_ate=False,
+        data_constant=True,
+    ),
 }
 
 

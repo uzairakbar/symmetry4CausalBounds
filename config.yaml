@@ -43,7 +43,8 @@ simulation:
         query: true                 # query sweep; panel ALWAYS generated
         sweep:
         #     # validity = (gamma, approx_error), robustness = (epsilon, approx_error),
-        #     # informativeness = (trS, worst_error)
+        #     # informativeness = (trS, worst_error),
+        #     # recalibration = (recalibrate, width): gamma~/gamma from 1/rho to 1 (SS4.2)
             # param:  [n, m]
             # metric: [coverage, approx_error, worst_error, width]
             param:  [epsilon, gamma, trS, n, m]
