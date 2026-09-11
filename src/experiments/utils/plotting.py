@@ -37,8 +37,9 @@ from .data_operations import bootstrap, save
 
 PlotScale = Literal["linear", "log", "symlog", "asinh"]
 
-# clip the top tail of the pooled means. Errors/widths: small is the signal, large is
-# the runaway. A symmetric floor crops the TIGHTEST method, which is the result.
+# clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
+# large is the runaway. A symmetric floor crops the TIGHTEST method, which is the
+# result. x is a grid: every point is the result, so it keeps its exact [min, max].
 CLIP_PERCENTILE: float = 98.0
 # asinh knee, as a fraction of the upper limit. PANEL_CONFIGS' own ylim/linear_width.
 LINEAR_WIDTH_RATIO: float = 40.0
@@ -97,18 +98,20 @@ def _finite(*arrays) -> NDArray:
     return values[np.isfinite(values)]
 
 
-def _limits(series: list[NDArray]) -> tuple[float, float] | None:
+def _limits(series: list[NDArray], clip: bool = True) -> tuple[float, float] | None:
     """
     Clip the top tail of the pooled means, then guarantee no series goes blank.
 
     Point estimates only -- CI bands and SE crosshairs are deliberately excluded and
-    left to clip against the frame.
+    left to clip against the frame. `clip=False` is the exact pooled [min, max]:
+    the x grid, whose last point (r = 1, n = 1024, m = 16) the clip used to drop
+    along with the r = 1 reference line.
     """
     pooled = _finite(*series)
     if not len(pooled):
         return None
 
-    lo, hi = float(pooled.min()), float(np.percentile(pooled, CLIP_PERCENTILE))
+    lo, hi = float(pooled.min()), float(np.percentile(pooled, CLIP_PERCENTILE) if clip else pooled.max())
     # a series may lose points, it can never vanish
     for values in series:
         finite = _finite(values)
@@ -204,8 +207,9 @@ def _rescale(
     pad_x: bool = True,
     promote_x: bool = True,
 ):
-    """Limits -> cfg -> scale -> pad -> set. Limits never depend on the scale."""
-    x_limits = _apply_cfg_limits(_limits(x_series), cfg.get("xlim"), "xlim")
+    """Limits -> cfg -> scale -> pad -> set. Limits never depend on the scale.
+    x is exact (a grid), y is top-clipped (see CLIP_PERCENTILE)."""
+    x_limits = _apply_cfg_limits(_limits(x_series, clip=False), cfg.get("xlim"), "xlim")
     y_limits = _apply_cfg_limits(_limits(y_series), cfg.get("ylim"), "ylim")
 
     xscale, x_kwargs = _resolve_scale(xscale, _finite(*x_series), cfg, "x", x_limits, promote=promote_x)
@@ -245,8 +249,8 @@ def _at_least_two_major_ticks(*axes, skip_x=()):
     Every axis shows at least two labelled major ticks, or the reader cannot
     size the scale.
 
-    A log axis spanning under a decade (the n sweep: 128..1024, clipped to
-    (128, 1006) or (128, 982)) holds at most one decade tick, so the default
+    A log axis spanning under a decade (the n sweep: 128..1024 on sim,
+    128..1000 on optical) holds at most one decade tick, so the default
     LogLocator leaves zero or one major in view. Where fewer than two majors fall
     inside the view interval, a log axis gets a LogLocator on (1, 2, 5) x 10^k
     with plain-number labels (LogFormatterSciNotation labels only one of the (1,
@@ -411,7 +415,9 @@ def create_sweep_plot(
         style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
         _apply_style(plt.gca(), style, xlabel, ylabel)
 
-        # x keeps its exact [min, max]; padding it would visibly widen every sweep.
+        # x keeps its exact [min, max] (_limits clip=False, no pad): the grid's
+        # last point and the r = 1 reference line stay in view, and padding
+        # would visibly widen every sweep.
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
         # (trS opts out to linear on purpose), not a default to be second-guessed.
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)

@@ -11,18 +11,28 @@ experiment. Three legs:
         major tick LOCATIONS inside the view (matplotlib keeps Text objects for
         out-of-view ticks, so labels are not what is counted), no plotting error
         swallowed. Fails without the helper on n (0 or 1 majors);
-  (ii)  the n sweep: the in-view majors are exactly [200, 500] on optical (its
-        98th-percentile clip ends at 982) and [200, 500, 1000] on sim, and their
-        label texts, stripped of `$\\mathdefault{...}$`, read 200, 500 (, 1000);
+  (ii)  the n sweep: the in-view majors are exactly [200, 500, 1000] on both
+        datasets (x runs to the grid's last point, 1024 / 1000), and their label
+        texts, stripped of `$\\mathdefault{...}$`, read 200, 500, 1000;
   (iii) `create_query_sweep_plot` on synthetic positive angles with a log x scale
         (the function has no y-scale argument; y is a linear `plt.ylim`), and
         `create_perf_plot` on a record in `_run_perf`'s schema: >= 2 in-view
-        majors on every axis, zero non-empty minor labels (a32's property).
+        majors on every axis, zero non-empty minor labels (a32's property);
+  (iv)  every param on both datasets: xlim == (x.min(), x.max()) exactly (no
+        top-tail clip on the x grid, no pad), and the reference lines drawn are
+        exactly the spec's values inside the grid: r = 1 on gamma and epsilon,
+        1.0 on the sim trS grid, none on the optical one (0.2..0.99);
+  (v)   the gamma sweep from `<artifacts>/<dataset>/sweep/gamma_{values,results}.pkl`
+        when present (`--artifacts DIR`, default the repo's `artifacts/`; read
+        only): the grid ends at r = 1, xlim is its exact [min, max], and the
+        r = 1 line is drawn. Skipped, not failed, without the pkls.
 
-    MPLBACKEND=Agg python scripts/a37_major_ticks.py
+    MPLBACKEND=Agg python scripts/a37_major_ticks.py [--artifacts DIR]
 """
 
+import argparse
 import os
+import pickle
 import re
 import sys
 
@@ -40,7 +50,7 @@ from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
 
 DATASETS = ("simulation", "optical_device")
-EXPECT_N_MAJORS = {"simulation": [200.0, 500.0, 1000.0], "optical_device": [200.0, 500.0]}
+EXPECT_N_MAJORS = {"simulation": [200.0, 500.0, 1000.0], "optical_device": [200.0, 500.0, 1000.0]}
 FAIL = []
 _errors = []
 logger.add(lambda m: _errors.append(m), level="ERROR")
@@ -81,10 +91,22 @@ def in_view_labels(axis):
     return out
 
 
-def render_sweep(dataset, param, seed=0):
+def drawn_vlines(ax):
+    """x of every axvline on the axes (two points at one x); the data lines have 16."""
+    out = []
+    for line in ax.lines:
+        xdata = np.asarray(line.get_xdata(), dtype=float)
+        if len(xdata) == 2 and xdata[0] == xdata[1]:
+            out.append(float(xdata[0]))
+    return out
+
+
+def render_sweep(dataset, param, seed=0, x=None, y=None):
     rng = np.random.default_rng(seed)
-    x = PARAM_SPECS[param].grid_fn(dataset, 16)
-    y = {"PI": 1.0 + 0.3 * rng.random((16, 3)), "DA+PI": 0.8 + 0.3 * rng.random((16, 3))}
+    if x is None:
+        x = PARAM_SPECS[param].grid_fn(dataset, 16)
+    if y is None:
+        y = {"PI": 1.0 + 0.3 * rng.random((len(x), 3)), "DA+PI": 0.8 + 0.3 * rng.random((len(x), 3))}
     plt.close("all")
     plotting.create_sweep_plot(
         x,
@@ -189,9 +211,55 @@ def leg_iii():
     plt.close("all")
 
 
+def leg_iv():
+    print("(iv) x keeps its exact [min, max]; the in-grid reference lines are drawn")
+    for dataset in DATASETS:
+        for param in PARAM_SPECS:
+            x = PARAM_SPECS[param].grid_fn(dataset, 16)
+            ax = render_sweep(dataset, param)
+            exact = (float(x.min()), float(x.max()))
+            check(
+                f"(iv) {dataset} {param}: xlim == (x.min(), x.max())",
+                ax.get_xlim() == exact,
+                f"{ax.get_xlim()} vs {exact}",
+            )
+            want = [v for v in PARAM_SPECS[param].vlines if exact[0] <= v <= exact[1]]
+            drawn = drawn_vlines(ax)
+            check(f"(iv) {dataset} {param}: reference lines drawn == {want}", drawn == want, f"{drawn}")
+            plt.close("all")
+
+
+def leg_v(artifacts):
+    print(f"(v) the gamma sweep pkls under {artifacts}")
+    for dataset in DATASETS:
+        values = f"{artifacts}/{dataset}/sweep/gamma_values.pkl"
+        results = f"{artifacts}/{dataset}/sweep/gamma_results.pkl"
+        if not (os.path.exists(values) and os.path.exists(results)):
+            print(f"      {dataset}: no gamma pkls, skipped")
+            continue
+        with open(values, "rb") as fh:
+            x = np.asarray(pickle.load(fh), dtype=float)  # noqa: S301 - our own artifacts
+        with open(results, "rb") as fh:
+            record = pickle.load(fh)  # noqa: S301 - our own artifacts
+        key = METRIC_SPECS["width"].key
+        y = {name: rec[key] for name, rec in record.items() if name != "ATE"}
+        ax = render_sweep(dataset, "gamma", x=x, y=y)
+        exact = (float(x.min()), float(x.max()))
+        check(f"(v) {dataset} gamma pkl: grid ends at r = 1", np.isclose(exact[1], 1.0), f"x.max() {exact[1]}")
+        check(f"(v) {dataset} gamma pkl: xlim == (x.min(), x.max())", ax.get_xlim() == exact, f"{ax.get_xlim()}")
+        drawn = drawn_vlines(ax)
+        check(f"(v) {dataset} gamma pkl: the r = 1 line is drawn", drawn == [1.0], f"{drawn}")
+        plt.close("all")
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--artifacts", default=os.path.join(REPO, "artifacts"))
+    args = parser.parse_args()
     leg_i()
     leg_ii()
     leg_iii()
+    leg_iv()
+    leg_v(os.path.expanduser(args.artifacts))
     print(f"\n{'A37 ALL PASS' if not FAIL else 'A37 FAILURES: ' + ', '.join(FAIL)}")
     sys.exit(bool(FAIL))
