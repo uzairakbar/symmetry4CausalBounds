@@ -9,6 +9,9 @@ from src.data_augmentors.abstract import DataAugmenter as DA
 from src.data_augmentors.utils import BernoulliStandardScaler
 
 P = 0.5
+# random-permutation's own default. 1.0 keeps the shipped chain bit-identical:
+# every row was permuted before this class honoured p.
+P_RANDOM_PERMUTATION = 1.0
 NOISE_COEFF = np.sqrt(0.01)
 
 
@@ -63,9 +66,16 @@ class Permutation(DA):
 
 
 class RandomPermutation(Permutation):
-    """Random permutation augmentation."""
+    """Random permutation augmentation. Each row is permuted with probability p;
+    an unpermuted row carries the identity permutation in G."""
 
-    def __call__(self, X, **kwargs):
+    def __init__(self, p=P_RANDOM_PERMUTATION):
+        super().__init__(p=p)
+
+    def __call__(self, X, p: float | None = None, **kwargs):
+        if p is not None:
+            self.p = p
+
         N, M = X.shape
         permutation_vector = np.arange(M, dtype=int)
 
@@ -81,6 +91,13 @@ class RandomPermutation(Permutation):
 
         # Standardize
         G = (G - G.mean(axis=1)[:, np.newaxis]) / G.std(axis=1)[:, np.newaxis]
+
+        # drawn only under p < 1, so p = 1 leaves the RNG stream as it was
+        if self.p < 1.0:
+            keep = np.random.random(N) >= self.p
+            GX[keep] = X[keep]
+            identity = np.arange(M, dtype=float)
+            G[keep] = (identity - identity.mean()) / identity.std()
         return GX, G
 
     @property
