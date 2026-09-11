@@ -717,6 +717,15 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     if isinstance(n_jobs, bool) or not isinstance(n_jobs, int) or n_jobs == 0:
         raise ValueError(f"config.{name}.n_jobs must be a non-zero int (1 = serial, -1 = all cores); got {n_jobs!r}.")
 
+    # the toggle is bool-only: the trS factor and label key on it, and a float
+    # here would solve the ball in between under the recalibrated label. The
+    # solver's predict-time knob (`recalibrate=t`, the sweep) is a different thing.
+    recalibrate = block.get("recalibrate", True)
+    if not isinstance(recalibrate, bool):
+        raise ValueError(
+            f"config.{name}.recalibrate must be a bool (true = gamma/rho, false = gamma); got {recalibrate!r}."
+        )
+
     defaults = DATASET_DEFAULTS[name]
     for key in ("n_samples", "n_experiments", "sweep_samples"):
         block.setdefault(key, getattr(defaults, key))

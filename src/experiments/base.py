@@ -582,7 +582,7 @@ class ExperimentOrchestrator(ABC):
                     },
                     experiment=self.name,
                     fname=f"{param}_{metric}",
-                    xlabel=self._sweep_xlabel.get(param, PARAM_SPECS[param].xlabel),
+                    xlabel=self._sweep_xlabel[param],
                     ylabel=metric_spec.ylabel,
                     xscale=PARAM_SPECS[param].xscale,
                     yscale=metric_spec.yscale,

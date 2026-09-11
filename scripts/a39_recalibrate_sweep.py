@@ -8,10 +8,11 @@ up to 1 (t = 0). One sim experiment, 5 steps, PI / DA+PI / PI&DA+PI:
 
   (i)    spec: data-constant, linear, no vline, the grid's endpoints are exactly 0 and 1;
   (ii)   production run (`ParamSweepRunner.run`, the models captured) under the toggles
-         in config.yaml: PI widths bit-identical across steps, DA+PI narrower at every
+         in config.yaml: one `build_models` and one `generate_data` call per experiment
+         (fit once), PI widths bit-identical across steps, DA+PI narrower at every
          later t per query and strictly in the mean at t = 1, `PI&DA+PI` == max/min of
          PI and DA+PI at every step, and the hand re-solve at each t reproduces the
-         recorded widths;
+         recorded widths exactly;
   (ii')  identity leg (`pad=False, clipy=False`): width(t)/width(0) == sqrt((1 - t) + t/rho_hat)
          per query at every t (rtol 1e-6, rho_hat recomputed here), so the endpoints'
          ratio is sqrt(rho_hat);
@@ -25,8 +26,9 @@ up to 1 (t = 0). One sim experiment, 5 steps, PI / DA+PI / PI&DA+PI:
          the t = 1 bounds a `recalibrate: true` run's, at the same gamma* on the same
          draw (PI bit-identical as the anchor), rtol 1e-6;
   (vi)   plumbing: `param: [recalibrate]` parses, a recipe-shaped block with the toggle
-         AND the sweep resolves through main.py's steps, both orchestrators resolve the
-         strategy, and it takes no `augment_kwargs_fn` or `n_samples_override`.
+         AND the sweep resolves through main.py's steps, the yaml toggle is bool-only
+         (`recalibrate: 0.5` rejected), both orchestrators resolve the strategy, and it
+         takes no `augment_kwargs_fn` or `n_samples_override`.
 
 `--optical` adds one optical experiment (5 steps) through (ii) and (iii). Writes only
 into a fresh directory under `~/scratch/tmp/a39/`, removed when it passes. Nothing
@@ -118,14 +120,21 @@ def production_run(orch):
     every t by hand. Returns (runner, x, results, ts, data, models, bounds[name][i])."""
     runner = runner_for(orch, "recalibrate")
     captured = {}
-    original = runner.build_models
+    calls = {"build_models": 0, "generate_data": 0}
+    original_build, original_generate = runner.build_models, runner.generate_data
 
     def build_models(j, i, data):
-        models = original(j, i, data)
+        calls["build_models"] += 1
+        models = original_build(j, i, data)
         captured[j] = (data, models)
         return models
 
+    def generate_data(j, param):
+        calls["generate_data"] += 1
+        return original_generate(j, param)
+
     runner.build_models = build_models
+    runner.generate_data = generate_data
     t0 = time.perf_counter()
     x, results, statuses = runner.run("recalibrate sweep")
     elapsed = time.perf_counter() - t0
@@ -143,6 +152,11 @@ def production_run(orch):
     orch._sweep_axis["recalibrate"] = runner.axis_record()
     orch._sweep_xlabel["recalibrate"] = runner.xlabel
     print(f"      sweep {elapsed:.1f}s, {len(data.X_test)} queries, rho_hat {runner._rho[0]:.6f}")
+    check(
+        "(ii) fit once: one build_models and one generate_data call per experiment",
+        calls == {"build_models": runner.n_experiments, "generate_data": runner.n_experiments},
+        f"{calls} for {len(ts)} steps",
+    )
     return runner, np.asarray(x, dtype=float), results, ts, data, models, bounds
 
 
@@ -194,12 +208,13 @@ def leg_ii(experiment, toggles, label):
         worst = max(worst, float(np.nanmax(np.abs(got - want))))
     check(f"(ii) {label} PI&DA+PI == max/min of PI and DA+PI at every step", worst <= 1e-9, f"max |d| {worst:.2e}")
     # the hand re-solve reproduces the record: the loop solved the same models at the same t
+    # `interval_width` is the plain mean width (DEFAULT_NORMALIZE_ERROR is off),
+    # so the hand re-solve must reproduce the record exactly, no factor allowed
     hand = np.array([np.nanmean(width(bounds["DA+PI"][i])) for i in range(len(ts))])
-    scale = hand[0] / w_da[0] if w_da[0] else 1.0  # interval_width may be normalised
     check(
         f"(ii) {label} hand re-solve at each t reproduces the recorded DA+PI widths",
-        np.allclose(hand / scale, w_da, rtol=1e-9),
-        f"scale {scale:.6g}",
+        np.allclose(hand, w_da, rtol=1e-9),
+        f"max rel |d| {float(np.max(np.abs(hand / w_da - 1.0))):.2e}",
     )
     return orch, runner, x, results, ts, data, models, bounds
 
@@ -391,6 +406,20 @@ def leg_vi(sim_orch):
         "(vi) a recipe with the toggle AND the sweep resolves through main.py's steps",
         block.get("recalibrate") is False and plan.sweep.param == ("recalibrate", "gamma"),
         f"recalibrate {block.get('recalibrate')!r} param {plan.sweep.param}",
+    )
+    for bad in (0.5, 1, "yes", "true"):
+        try:
+            resolve_dataset_block("simulation", {"seed": 42, "kernel_dim": 0, "recalibrate": bad})
+            rejected = False
+        except ValueError:
+            rejected = True
+        check(f"(vi) the yaml toggle `recalibrate: {bad!r}` is rejected (bool only)", rejected)
+    check(
+        "(vi) the yaml toggle accepts both bools",
+        all(
+            resolve_dataset_block("simulation", {"seed": 42, "kernel_dim": 0, "recalibrate": v})["recalibrate"] is v
+            for v in (True, False)
+        ),
     )
     cls = sim_orch.get_sweep_runner_cls("recalibrate")
     check("(vi) SimulationOrchestrator resolves the strategy", issubclass(cls, RecalibrationStrategy))
