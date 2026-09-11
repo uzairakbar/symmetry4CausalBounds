@@ -15,11 +15,13 @@ the factors independently:
          and trS recomputed by the gate on the runner's own data;
   (ii)   the returned x is the experiment mean in KNOB order, `trS_values.pkl` is
          bit-identical to it, and the width array is (n_steps, n_exp);
-  (iii)  under BOTH toggles, on an unbootstrapped render the DA+PI line carries
-         `sort(x)` against the width means in that order, exactly, and its CI band
-         (the `fill_between` polygon in the line's colour) carries the 2.5/97.5
-         width percentiles in that same order, so a sorted line over an unsorted
-         band, or a sort on the other convention, is caught; recalibrated, the
+  (iii)  under BOTH toggles, the PRODUCTION render from `_run_sweeps` (bootstrapped,
+         so only x is pinnable there) draws the DA+PI line and its CI band on
+         `sort(x)`, the plotted quantity, and on an unbootstrapped render the line
+         carries `sort(x)` against the width means in that order, exactly, and the
+         band (the `fill_between` polygon in the line's colour) the 2.5/97.5 width
+         percentiles in that same order, so a sorted line over an unsorted band, or
+         a production sort on the other convention, is caught; recalibrated, the
          tr(S)/k axis is strictly monotone in the knob (falling on sim, rising on
          the optical fixture, whose knob is the permutation probability);
   (iv)   x is the mean of the right product and the fixture argsort is the pinned
@@ -234,7 +236,18 @@ def run_one(experiment, recalibrate):
 
     # (iii) the sort is on the plotted x under both toggles: sorted line, y
     # reordered with x, and the CI band reordered with the line (the band is
-    # drawn from the same reordered array); the tr(S)/k axis is monotone
+    # drawn from the same reordered array); the tr(S)/k axis is monotone.
+    # First on the production render itself: a sort on the other product
+    # would double the drawn line back under the plotted label.
+    prod = [ln for ln in ax.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
+    prod_x = np.asarray(prod[0].get_xdata(), dtype=float) if len(prod) == 1 else None
+    prod_band = band_edges(ax, to_rgb(prod[0].get_color())) if len(prod) == 1 else None
+    prod_ok = (
+        prod_x is not None
+        and np.array_equal(prod_x, np.sort(x))
+        and prod_band is not None
+        and np.array_equal(prod_band[0], np.sort(x))
+    )
     xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None
     yd = np.asarray(lines[0].get_ydata(), dtype=float) if len(lines) == 1 else None
     xs_ok = xd is not None and np.array_equal(xd, np.sort(x))
@@ -255,9 +268,9 @@ def run_one(experiment, recalibrate):
     check(
         tag,
         "(iii)",
-        mono and xs_ok and ys_ok and band_ok,
-        f"{mono_txt}xdata==sort(x) {xs_ok} ydata exact {ys_ok} band exact {band_ok}; "
-        f"xdata {None if xd is None else np.round(xd, 5).tolist()}",
+        mono and prod_ok and xs_ok and ys_ok and band_ok,
+        f"{mono_txt}production line+band on sort(x) {prod_ok} xdata==sort(x) {xs_ok} ydata exact {ys_ok} "
+        f"band exact {band_ok}; production xdata {None if prod_x is None else np.round(prod_x, 5).tolist()}",
     )
 
     # (iv) the right product, and the pinned argsort of this (dataset, toggle)
