@@ -74,7 +74,7 @@ def optical_sweep():
         hyperparameters={},
         n_jobs=1,
         augmentation="rotation > hflip > vflip > gaussian-noise",
-        calibrate=False,
+        recalibrate=True,
         pad=False,
         clipy=True,
         mean_match=MEAN_MATCH,

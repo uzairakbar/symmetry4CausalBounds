@@ -63,7 +63,7 @@ def main(micro=False):
     X, GX, y, G = X[keep], GX[keep], y[keep], G[keep]
     Q = X[:n_queries]
 
-    common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
+    common = dict(gamma=0.1, clipy=True, unfrozen_layers=1)
 
     cases = {
         "PI": lambda nj: PartialR2Net(outcome_model=nets["X"], n_jobs=nj, **common).fit(X, y),

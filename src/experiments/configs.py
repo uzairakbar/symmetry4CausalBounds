@@ -199,7 +199,7 @@ FLOOR_GUARD_R: float = 9.0
 # MUST clear the optical eps* floor: the strength knob drives only the gaussian
 # noise, so permutations hold eps* at ~0.239 even at strength 0. 0.5 sits at
 # strength ~0.87 there (2.1x the floor) and ~0.084 on simulation, whose floor
-# is 0. Below the floor, calibrate_da_epsilon clamps and the sweep goes flat.
+# is 0. Below the floor, recalibrated_da_epsilon clamps and the sweep goes flat.
 ROBUSTNESS_EPSILON_TRUE: float = 2**-1
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
@@ -244,8 +244,8 @@ PARAM_SPECS: dict[str, ParamSpec] = {
     ),
     "trS": ParamSpec(
         # knob grid; the x-axis actually plotted is the MEASURED expansion:
-        # rho tr(S)/k under calibrated budgets, tr(S)/k under raw budgets (rho = 1
-        # there, see ExpansionStrategy). The label is the same in both cases.
+        # rho tr(S)/k under `recalibrate: true`, tr(S)/k otherwise (see
+        # ExpansionStrategy). The label is the same in both cases.
         xlabel=r"$\rho \operatorname{tr}(\mathcal{S})/k$",
         # sim: tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
@@ -441,11 +441,12 @@ def _partial_r2_net_builders(
     gamma,
     epsilon,
     epsilon_iv,
-    calibrate,
+    recalibrate,
     pad,
     clipy,
     n_jobs,
     mean_match,
+    rho,
     outcome_models,
     unfrozen_layers,
 ):
@@ -455,11 +456,14 @@ def _partial_r2_net_builders(
     common = dict(
         link=DOMNIST_CONFIG.link,
         unfrozen_layers=unfrozen_layers,
-        calibrate=calibrate,
+        recalibrate=recalibrate,
         clipy=clipy,
         n_jobs=n_jobs,
         mean_match=mean_match,
     )
+    # the standalone DA+ balls carry the step's rho; the intersections read
+    # theirs off their two branches (`IntersectedPartialR2Net.rho`)
+    da_common = dict(common, rho=rho)
 
     def net(key):
         if outcome_models is None:
@@ -476,14 +480,14 @@ def _partial_r2_net_builders(
         "ERM": lambda: net("X"),  # the prefit net, not a fresh one
         "DA+ERM": lambda: net("GX"),
         "PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
-        "DA+PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **common),
+        "DA+PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **da_common),
         # recentred on the post-DA measure: from an X-centred ball the invariant
         # slice is out of reach at any reasonable eps
         "PI+INV": lambda: RecentredInvPartialR2Net(
             gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **common
         ),
         "DA+PI+IV": lambda: IVConstrainedPartialR2Net(
-            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad, outcome_model=net("GX"), **common
+            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad, outcome_model=net("GX"), **da_common
         ),
         # `pad` reaches the DA branch only (Cor. 1)
         "PI&DA+PI": lambda: IntersectedPartialR2Net(
@@ -515,13 +519,14 @@ class MethodRegistry:
         method_names: list[str],
         gamma: float,
         epsilon: float,
-        calibrate: bool = False,
+        recalibrate: bool = True,
         pad: bool = False,
         pad_epsilon: float | None = None,
         clipy: bool = True,
         epsilon_iv: float | None = None,
         n_jobs: int = 1,
         mean_match: bool = True,
+        rho: float = 1.0,
         backend: Literal["partial_r2", "partial_r2_net"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         unfrozen_layers: int = 1,
@@ -534,14 +539,19 @@ class MethodRegistry:
 
         Args:
             method_names: List of method names to build
-            gamma: Confounding budget gamma (Asm. 2)
+            gamma: Confounding budget gamma (Asm. 2), in the paper's sigma-scaled
+                units: every ball has the radius sigma-hat sqrt(gamma)
             epsilon: Invariance error epsilon = ||W|| over the full
                 augmentation; the §3.1 CONSTRAINT budget, oracle `epsilon_star`
             pad_epsilon: Thm. 3.A's epsilon, a POINTWISE budget on the same W
                 (§2.4 states it as a sup). None pads by `epsilon` instead, which
                 is an L2 quantity standing in for a sup -- see `BoundedSA`.
                 Oracle `epsilon_pad_star`.
-            calibrate: Scale budgets by the noise level sigma (paper)
+            recalibrate: solve the DA+ balls at the recalibrated budget gamma/rho
+                (SS4.2); False keeps the inherited gamma. A float in [0, 1]
+                interpolates linearly (the recalibrate sweep).
+            rho: the DA draw's information-loss factor sigma~^2/sigma^2, reaching
+                the standalone DA+ balls only; the intersections measure their own
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range
             epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
@@ -565,11 +575,12 @@ class MethodRegistry:
                 gamma=gamma,
                 epsilon=epsilon,
                 epsilon_iv=epsilon_iv,
-                calibrate=calibrate,
+                recalibrate=recalibrate,
                 pad=pad,
                 clipy=clipy,
                 n_jobs=n_jobs,
                 mean_match=mean_match,
+                rho=rho,
                 outcome_models=outcome_models,
                 unfrozen_layers=unfrozen_layers,
             )
@@ -582,12 +593,16 @@ class MethodRegistry:
         common = dict(
             epsilon=epsilon,
             pad_epsilon=pad_epsilon,
-            calibrate=calibrate,
+            recalibrate=recalibrate,
             clipy=clipy,
             n_jobs=n_jobs,
             mean_match=mean_match,
         )
         iv_common = dict(common, epsilon_iv=epsilon_iv)
+        # the standalone DA+ balls carry the step's rho; the intersections read
+        # theirs off their two branches (`IntersectedPartialR2.rho`)
+        da_common = dict(common, rho=rho)
+        da_iv_common = dict(iv_common, rho=rho)
 
         all_builders = {
             "ATE": lambda: None,  # ATE computed analytically
@@ -601,8 +616,8 @@ class MethodRegistry:
             # baseline PI+IV has a null instrument, so it reduces to PI and
             # never reads the IV budget
             "PI+IV": lambda: IVPartialR2(gamma=gamma, pad=False, **common),
-            "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **common),
-            "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **iv_common),
+            "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **da_common),
+            "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_iv_common),
             "PI&DA+PI": lambda: IntPartialR2(gamma=gamma, pad=pad, **common),
             "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
         }
@@ -646,7 +661,7 @@ DATASET_KEYS: dict[str, set] = {
     },
 }
 
-TOGGLE_KEYS: set = {"calibrate", "pad", "clipy", "n_jobs", "mean_match"}
+TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {

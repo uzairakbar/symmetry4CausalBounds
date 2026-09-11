@@ -53,9 +53,8 @@ POLISH_MAXITER = 80
 # E[Var(Y|X)] <= sigma^2 and the (**)-(::) chain gives c = Var(E[U|X]) <= b_r2 --
 # the ball's own budget. So sigma_hat^2 + b_r2 is the sensitivity model's OWN
 # bound on Var(U + xi) and the band is "MEAN_BAND_SE standard errors" for ANY
-# dataset and budget. Note it is b_r2, NOT sigma_hat^2 gamma: the two agree only
-# when `calibrate` is on, and under raw budgets sigma_hat^2 (1 + gamma) would
-# TIGHTEN a narrowing constraint by the wrong units. h_* misses the empirical
+# dataset and budget. Note it is b_r2 = sigma_hat^2 gamma~, the RECALIBRATED
+# budget the ball is solved at, not sigma_hat^2 gamma. h_* misses the empirical
 # slice by the same quantity, so at 2 SE it stays band-feasible w.p. ~95% per fit.
 #
 # An EQUALITY would also break the solver: `_to_feasible` backtracks along the
@@ -304,10 +303,11 @@ class PartialR2Net(BoundedSA):
         gamma=None,
         epsilon=0.0,
         pad=False,
-        calibrate=False,
+        recalibrate=True,
         clipy=True,
         n_jobs=1,
         mean_match=True,
+        rho=1.0,
         link="probit",
         unfrozen_layers=1,
         outcome_model=None,
@@ -329,10 +329,11 @@ class PartialR2Net(BoundedSA):
             gamma=gamma,
             epsilon=epsilon,
             pad=pad,
-            calibrate=calibrate,
+            recalibrate=recalibrate,
             clipy=clipy,
             n_jobs=n_jobs,
             mean_match=mean_match,
+            rho=rho,
         )
 
     # ------------------------------------------------------------------- fit
@@ -446,17 +447,18 @@ class PartialR2Net(BoundedSA):
 
     @property
     def scale(self):
-        """s: sigma-hat if calibrated (paper), else 1 (raw budgets). Identical role
-        to PartialR2.scale; sigma-hat^2 is the ERM net's MSE on the n_pi rows."""
-        return float(np.sqrt(self.sigma2_)) if self.calibrate else 1.0
+        """s = sigma-hat, the ERM net's MSE on the n_pi rows. Identical role to
+        PartialR2.scale."""
+        return float(np.sqrt(self.sigma2_))
 
     def _r2_budget(self, gamma):
-        return self.scale**2 * max(float(gamma), 0.0)
+        """The ball's budget in E_r2 units: sigma-hat^2 gamma~ (`BoundedSA.budget`)."""
+        return self.scale**2 * max(self.budget(gamma), 0.0)
 
     def _band_tau(self, gamma):
         """Half-width of Lem. 2's slab at this budget; None when mean matching is
         off. See MEAN_BAND_SE for the derivation -- the second term is the BALL
-        BUDGET, which is sigma_hat^2 gamma only when `calibrate` is on."""
+        BUDGET, i.e. the recalibrated one."""
         if not self.mean_match:
             return None
         variance = self.sigma2_ + self._r2_budget(gamma)
@@ -969,7 +971,8 @@ class IntersectedPartialR2Net(IntersectionMixin, PartialR2Net):
             gamma=self.gamma,
             epsilon=self.epsilon,
             pad=pad,
-            calibrate=self.calibrate,
+            recalibrate=self.recalibrate,
+            rho=1.0,  # the DA branch's factor is set once both branches are fitted
             clipy=self.clipy,
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
@@ -988,16 +991,23 @@ class IntersectedPartialR2Net(IntersectionMixin, PartialR2Net):
             raise ValueError("GX (augmented treatment) required")
         GX = np.asarray(GX).reshape(len(GX), -1)
         self._fit_branches(X, y, GX, G)
+        # rho known once both noise levels are; the DA branch solves at gamma~
+        self.augmented.rho = self.rho
 
         self.sigma2_ = self.baseline.sigma2_
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
         logger.info(f"{type(self).__name__}: rho (GX/X noise ratio) {self.rho:.4f}")
         return self
 
-    @property
+    # keeps the base setter; see IntersectedPartialR2.rho
+    @BoundedSA.rho.getter
     def rho(self):
-        """Information-loss factor sigma-tilde^2 / sigma^2 on the nets' MSE."""
-        return self.augmented.sigma2_ / self.baseline.sigma2_
+        """Information-loss factor sigma-tilde^2 / sigma^2 on the nets' MSE, read
+        off the two fitted branches; the constructor's value until then."""
+        baseline, augmented = getattr(self, "baseline", None), getattr(self, "augmented", None)
+        if baseline is None or augmented is None:
+            return self._rho
+        return augmented.sigma2_ / baseline.sigma2_
 
 
 class IntersectedIVPartialR2Net(IntersectedPartialR2Net):

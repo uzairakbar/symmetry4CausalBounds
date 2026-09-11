@@ -135,7 +135,7 @@ def leg_iv():
         methods=["PI", "DA+PI"],
         hyperparameters={},
         n_jobs=1,
-        calibrate=False,
+        recalibrate=False,
         pad=False,
         clipy=False,
         mean_match=True,

@@ -80,7 +80,6 @@ def build(nets, X_pi, GX_pi, y_pi, G_pi):
     can never mask a moved bound. The clipped run is compared separately."""
     common = dict(
         gamma=GAMMA,
-        calibrate=True,
         clipy=False,
         pad=False,
         n_jobs=N_JOBS,
@@ -116,7 +115,6 @@ def dump(stem):
     bounds = {name: np.asarray(model.predict(Q, gamma=GAMMA)) for name, model in models.items()}
     clipped = PartialR2Net(
         gamma=GAMMA,
-        calibrate=True,
         clipy=True,
         n_jobs=N_JOBS,
         link=DOMNIST_CONFIG.link,
@@ -172,7 +170,6 @@ def check(stem):
     # the clipy delta must be exactly a clip to [y_min, y_max], nothing else
     clipped = PartialR2Net(
         gamma=GAMMA,
-        calibrate=True,
         clipy=True,
         n_jobs=N_JOBS,
         link=DOMNIST_CONFIG.link,

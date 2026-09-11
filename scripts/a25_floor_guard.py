@@ -39,8 +39,10 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False, mean_match=True):
-    """Independent reference for `constraint_floor`, solved by cvxpy.
+def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, mean_match=True):
+    """Independent reference for `constraint_floor`, solved by cvxpy. `gamma` is
+    the budget the ball is solved at (sigma-hat sqrt(gamma) radius); pass the
+    recalibrated one for a DA ball.
 
     `mean_match=True` states Lem. 2 EXPLICITLY where production eliminates it: the
     hypothesis carries a free intercept coordinate and the slice
@@ -55,7 +57,7 @@ def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False, mean_m
     if not mean_match:
         h_erm = OLS().fit(design, y).solution.flatten()
         resid = y.flatten() - design @ h_erm
-        scale = float(np.sqrt(np.mean(resid**2))) if calibrate else 1.0
+        scale = float(np.sqrt(np.mean(resid**2)))
         delta = np.sqrt(N) * scale * np.sqrt(gamma)
         A, b = inv_constraint_terms(design, GX) if kind == "inv" else iv_constraint_terms(design, y, Z)
         _, R = np.linalg.qr(design)
@@ -74,7 +76,7 @@ def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, calibrate=False, mean_m
         augmented = np.hstack([design, np.ones((N, 1))])
         h1_erm = np.linalg.lstsq(augmented, y.flatten(), rcond=None)[0]
         resid = y.flatten() - augmented @ h1_erm
-        scale = float(np.sqrt(np.mean(resid**2))) if calibrate else 1.0
+        scale = float(np.sqrt(np.mean(resid**2)))
         delta = np.sqrt(N) * scale * np.sqrt(gamma)
         _, R = np.linalg.qr(augmented)
         h1 = cp.Variable(M + 1)
@@ -107,7 +109,7 @@ def sim_runner(steps=12):
         methods=METHODS,
         hyperparameters={},
         n_jobs=8,
-        calibrate=False,
+        recalibrate=True,
         pad=False,
         clipy=True,
     )
@@ -156,7 +158,7 @@ def a25_noop_when_feasible():
         methods=METHODS,
         hyperparameters={},
         n_jobs=1,
-        calibrate=False,
+        recalibrate=True,
         pad=False,
         clipy=True,
         augmentation="rotation > hflip > vflip > gaussian-noise",
@@ -182,9 +184,9 @@ def a25_noop_when_feasible():
             raw = float(raw) + EPS_TOL
             kw = dict(GX=data.GX) if kind == "inv" else dict(Z=data.G)
             design = data.X if kind == "inv" else data.GX
-            floor = constraint_floor(
-                design, data.y, gamma, kind=kind, calibrate=runner.calibrate, mean_match=runner.mean_match, **kw
-            )
+            if kind == "iv":  # the DA ball is recalibrated, as in `_floor_guard`
+                kw.update(rho=runner.fit_rho(e, data), recalibrate=runner.recalibrate)
+            floor = constraint_floor(design, data.y, gamma, kind=kind, mean_match=runner.mean_match, **kw)
             got = fit(e, 0, data)
             if raw**2 >= floor:
                 seen_feasible = True
@@ -210,7 +212,14 @@ def a25_rescues_infeasible():
         data = SweepData.coerce(runner.generate_data(0, index and knob or knob))
         gamma = runner.fit_gamma(0)
         floor = constraint_floor(
-            data.GX, data.y, gamma, kind="iv", Z=data.G, calibrate=runner.calibrate, mean_match=runner.mean_match
+            data.GX,
+            data.y,
+            gamma,
+            kind="iv",
+            Z=data.G,
+            mean_match=runner.mean_match,
+            rho=runner.fit_rho(0, data),
+            recalibrate=runner.recalibrate,
         )
         oracle_iv = float(getattr(runner.get_oracle(0), "eps_iv_star", 0.0)) + EPS_TOL
         guarded = runner.fit_epsilon_iv(0, index, data)

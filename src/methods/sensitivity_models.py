@@ -1,8 +1,9 @@
 """
 Partial identification / sensitivity models.
 
-Uniform signature: gamma (budget), epsilon (invariance error), pad (Thm. 3.A),
-calibrate (paper's sigma-scaled budgets), clipy (clip to observed y range).
+Uniform signature: gamma (budget, in the paper's sigma-scaled units), epsilon
+(invariance error), pad (Thm. 3.A), recalibrate (post-DA budget gamma/rho, SS4.2),
+clipy (clip to observed y range).
 """
 
 from enum import IntEnum
@@ -34,6 +35,16 @@ def _solve_chunk(view, chunk):
     return [view._solve_single(payload) for payload in chunk]
 
 
+def recalibrated_gamma(gamma, rho, t) -> float:
+    """The post-DA budget, SS4.2: gamma~ = gamma ((1 - t) + t / rho).
+
+    t = 1 scales the inherited gamma down to gamma/rho, the budget the DA's
+    information loss rho = sigma~^2/sigma^2 leaves on the augmented data; t = 0
+    keeps gamma. Linear in between, which is what the recalibrate sweep plots.
+    """
+    return float(gamma) * ((1.0 - float(t)) + float(t) / float(rho))
+
+
 class BoundedSA(SA):
     """
     Contract every PI method honours: per-query status, chunk-parallel solve,
@@ -52,10 +63,11 @@ class BoundedSA(SA):
         epsilon=0.0,
         pad=False,
         pad_epsilon=None,
-        calibrate=False,
+        recalibrate=True,
         clipy=True,
         n_jobs=1,
         mean_match=True,
+        rho=1.0,
     ):
         if gamma is None:
             raise ValueError("gamma must be explicitly provided")
@@ -73,7 +85,13 @@ class BoundedSA(SA):
         # behaviour (pad by `epsilon`); pass the sup-side budget to get the
         # guarantee the theorem actually states.
         self.pad_epsilon = pad_epsilon
-        self.calibrate = calibrate
+        # SS4.2: the ball a DA+ method solves is gamma~ = gamma ((1 - t) + t / rho)
+        # with t = `recalibrate` in [0, 1] and rho the information-loss factor
+        # sigma~^2/sigma^2 of the DA it was fit on. Baselines keep rho = 1, so
+        # t is a no-op on them. The radius is ALWAYS sigma-hat sqrt(gamma~): gamma
+        # is in the paper's sigma-scaled units, on every method.
+        self.rho = rho
+        self.recalibrate = recalibrate
         self.clipy = clipy
         self.n_jobs = n_jobs
         # Lem. 2: the identified set lives on the mean-matched slice
@@ -86,12 +104,45 @@ class BoundedSA(SA):
 
         super().__init__(gamma)
 
+    # ------------------------------------------------------------- budget
+
+    @property
+    def rho(self) -> float:
+        """Information-loss factor sigma~^2/sigma^2 of the data this ball was fit
+        on; 1 for a baseline. Intersections read it off their two branches."""
+        return self._rho
+
+    @rho.setter
+    def rho(self, rho):
+        rho = float(rho)
+        if not np.isfinite(rho) or rho <= 0.0:
+            raise ValueError(f"rho must be a positive finite float; got {rho!r}")
+        self._rho = rho
+
+    @property
+    def recalibrate(self) -> float:
+        """t in [0, 1]: 0 keeps the inherited gamma, 1 solves at gamma/rho."""
+        return self._recalibrate
+
+    @recalibrate.setter
+    def recalibrate(self, t):
+        t = float(t)
+        if not np.isfinite(t) or not 0.0 <= t <= 1.0:
+            raise ValueError(f"recalibrate must lie in [0, 1]; got {t!r}")
+        self._recalibrate = t
+
+    def budget(self, gamma) -> float:
+        """The budget actually solved at: `recalibrated_gamma(gamma, rho, t)`."""
+        return recalibrated_gamma(gamma, self.rho, self.recalibrate)
+
     # ------------------------------------------------------------- predict
 
-    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
+    def _predict(self, X, gamma=None, epsilon=None, recalibrate=None, **kwargs):
         gamma = self.gamma if gamma is None else gamma
         if epsilon is not None:
             self.epsilon = epsilon  # the CONSTRAINT RHS; `pad_epsilon` is separate
+        if recalibrate is not None:
+            self.recalibrate = recalibrate  # swept at predict time, like gamma
         return self._finalize(self._raw_bounds(X, gamma))
 
     def _raw_bounds(self, X, gamma):
@@ -172,10 +223,11 @@ class PartialR2(BoundedSA):
         epsilon=0.0,
         pad=False,
         pad_epsilon=None,
-        calibrate=False,
+        recalibrate=True,
         clipy=True,
         n_jobs=1,
         mean_match=True,
+        rho=1.0,
     ):
         self._supports_closed_form = True
 
@@ -202,10 +254,11 @@ class PartialR2(BoundedSA):
             epsilon=epsilon,
             pad=pad,
             pad_epsilon=pad_epsilon,
-            calibrate=calibrate,
+            recalibrate=recalibrate,
             clipy=clipy,
             n_jobs=n_jobs,
             mean_match=mean_match,
+            rho=rho,
         )
 
     # ------------------------------------------------------------------ fit
@@ -273,8 +326,8 @@ class PartialR2(BoundedSA):
 
     @property
     def scale(self):
-        """s: sigma if calibrated (paper), else 1 (raw budgets)."""
-        return float(np.sqrt(self.sigma_sq)) if self.calibrate else 1.0
+        """s = sigma-hat: the MMSE of the data this ball was fit on (paper's units)."""
+        return float(np.sqrt(self.sigma_sq))
 
     # -------------------------------------------------------------- solver
 
@@ -296,16 +349,16 @@ class PartialR2(BoundedSA):
         self.max_problem = cp.Problem(cp.Maximize(cost), constraints)
 
     def _set_solver_parameters(self, gamma):
-        self.radius_param.value = self.scale * np.sqrt(gamma)
+        self.radius_param.value = self.scale * np.sqrt(self.budget(gamma))
 
     # ------------------------------------------------------------- predict
 
     def _raw_bounds(self, X, gamma):
         """Closed-form shortcut, else the generic chunked solve."""
         if CLOSED_FORM_SOLUTION and self._supports_closed_form:
-            # Cor. 3 on the slice: h_erm(x) +- s sqrt(gamma) ||g_x||, with the
+            # Cor. 3 on the slice: h_erm(x) +- s sqrt(gamma~) ||g_x||, with the
             # representer norm the Mahalanobis length of the CENTRED query
-            radius = self.scale * np.sqrt(gamma)
+            radius = self.scale * np.sqrt(self.budget(gamma))
             X = X - self.mu_
             mahalanobis_sq = np.maximum(0, np.sum((X @ self.invSigmaX) * X, axis=1))
             margins = radius * np.sqrt(mahalanobis_sq)
@@ -397,7 +450,7 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
     return float(np.linalg.norm(B @ u - c))
 
 
-def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False, mean_match=True):
+def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True, rho=1.0, recalibrate=True):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
     Returned SQUARED, matching `PartialR2Net._budget()`, so the smallest admissible
@@ -416,10 +469,12 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False
         kind: 'inv' (PI+INV) or 'iv' (DA+PI+IV)
         GX: augmented design, required for `inv`
         Z: instrument, required for `iv`
-        calibrate: scale the radius by sigma-hat, as the fitted model does
         mean_match: measure the floor over the SAME ball the model solves on --
             Lem. 2's covariance ball. A floor from the other geometry would make
             the budget guard lie in both directions.
+        rho, recalibrate: the DA ball's factor and toggle, so the floor is over
+            the recalibrated budget the fitted model actually solves at
+            (`BoundedSA.budget`). Leave both at their defaults for a baseline.
 
     Returns:
         floor in squared budget units
@@ -436,8 +491,8 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, calibrate=False
 
     h_erm = OLS().fit(design, y).solution.flatten()
     residuals = np.asarray(y).flatten() - design @ h_erm
-    scale = float(np.sqrt(np.mean(residuals**2))) if calibrate else 1.0
-    delta = np.sqrt(N) * scale * np.sqrt(max(float(gamma), 0.0))
+    scale = float(np.sqrt(np.mean(residuals**2)))
+    delta = np.sqrt(N) * scale * np.sqrt(max(recalibrated_gamma(gamma, rho, recalibrate), 0.0))
 
     if kind == "inv":
         if GX is None:
@@ -517,9 +572,8 @@ class InvarianceConstrainedPartialR2(PartialR2):
 class InstrumentalVariablePartialR2(PartialR2):
     """PI + leaky IV constraint (Asm. 3). Null/empty Z falls back to baseline PI."""
 
-    def __init__(self, gamma=None, gamma_z=0.0, rho=1.0, epsilon_iv=None, **kwargs):
+    def __init__(self, gamma=None, gamma_z=0.0, epsilon_iv=None, **kwargs):
         self.gamma_z = gamma_z
-        self.rho = rho
         # epsilon_iv: the IV budget ||E[W#|Z-tilde]|| (oracle `eps_iv_star`).
         # Distinct from `epsilon`, whose only role in this class is the +/-eps
         # padding: padding validity is pointwise (Thm. 3.A Jensen step), the IV
@@ -542,8 +596,8 @@ class InstrumentalVariablePartialR2(PartialR2):
     @property
     def iv_bound(self):
         """sqrt of the budget on Var(E[Y - h|Z]) = ||E[W#|Z-tilde]||."""
-        # calibrated: s is the *pre*-DA sigma = sqrt(sigma_sq / rho); else 1
-        s = float(np.sqrt(self.sigma_sq / self.rho)) if self.calibrate else 1.0
+        # s is the *pre*-DA sigma = sqrt(sigma_sq / rho)
+        s = float(np.sqrt(self.sigma_sq / self.rho))
         return self.epsilon_iv + s * np.sqrt(self.gamma_z)
 
     def _precompute_matrices(self, X, y, Z=None, **kwargs):
@@ -584,10 +638,13 @@ class IntersectionMixin:
     fact about h_*(x), not a geometric one.
     """
 
-    def _predict(self, X, gamma=None, epsilon=None, **kwargs):
+    def _predict(self, X, gamma=None, epsilon=None, recalibrate=None, **kwargs):
         if epsilon is not None:
             self.epsilon = epsilon
-        branch_kwargs = dict(gamma=gamma, epsilon=epsilon, **kwargs)
+        if recalibrate is not None:
+            self.recalibrate = recalibrate
+        # both branches see t; it is inert on the baseline (rho = 1)
+        branch_kwargs = dict(gamma=gamma, epsilon=epsilon, recalibrate=recalibrate, **kwargs)
         lower_base, upper_base = self.baseline.predict(X, **branch_kwargs).T
         lower_da, upper_da = self.augmented.predict(X, **branch_kwargs).T
 
@@ -624,11 +681,14 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
         self.augmented = None
 
     def _branch(self, pad):
+        # rho = 1 at construction: the DA branch's factor is only known once
+        # both branches are fitted (`_fit_branches` sets it)
         return PartialR2(
             gamma=self.gamma,
             epsilon=self.epsilon,
             pad=pad,
-            calibrate=self.calibrate,
+            recalibrate=self.recalibrate,
+            rho=1.0,
             clipy=self.clipy,
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
@@ -637,6 +697,8 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
     def _fit_branches(self, X, y, GX, G):
         self.baseline = self._branch(pad=False).fit(X, y)
         self.augmented = self._branch(pad=self.pad).fit(GX, y)
+        # rho known once both noise levels are; the DA branch solves at gamma~
+        self.augmented.rho = self.rho
 
     def _fit(self, X, y, GX=None, G=None, **kwargs):
         if GX is None:
@@ -649,10 +711,16 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
         return self
 
-    @property
+    # the base setter stays (a bare @property would drop it and `__init__`'s
+    # assignment would raise); the getter reads the branches once they exist
+    @BoundedSA.rho.getter
     def rho(self):
-        """Information-loss factor sigma-tilde^2 / sigma^2 (>= 1 by DPI)."""
-        return self.augmented.sigma_sq / self.baseline.sigma_sq
+        """Information-loss factor sigma-tilde^2 / sigma^2 (>= 1 by DPI), read off
+        the two fitted branches; the constructor's value until then."""
+        baseline, augmented = getattr(self, "baseline", None), getattr(self, "augmented", None)
+        if baseline is None or augmented is None:
+            return self._rho
+        return augmented.sigma_sq / baseline.sigma_sq
 
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
@@ -663,15 +731,15 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         self.epsilon_iv = epsilon_iv
         super().__init__(**kwargs)
 
-    def _branch(self, pad, rho=1.0):
+    def _branch(self, pad):
         return InstrumentalVariablePartialR2(
             gamma=self.gamma,
             gamma_z=self.gamma_z,
-            rho=rho,
             epsilon=self.epsilon,
             epsilon_iv=self.epsilon_iv,
             pad=pad,
-            calibrate=self.calibrate,
+            recalibrate=self.recalibrate,
+            rho=1.0,
             clipy=self.clipy,
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
@@ -681,5 +749,6 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         # baseline sees no instrument => reduces to PI
         self.baseline = self._branch(pad=False).fit(X, y, Z=None)
         self.augmented = self._branch(pad=self.pad).fit(GX, y, Z=G)
-        # rho known once both noise levels are: threshold is a cvx Parameter
+        # rho known once both noise levels are: the ball and the IV threshold are
+        # cvx Parameters, set at predict
         self.augmented.rho = self.rho

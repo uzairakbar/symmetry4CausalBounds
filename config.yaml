@@ -1,6 +1,6 @@
 # global toggles, overridable per experiment
 defaults:
-    calibrate: false #true #false #true #false #true    # scale budgets by noise sigma (paper); false = raw gamma
+    recalibrate: true   # scale the post-DA budget to gamma/rho (SS4.2); false keeps the inherited gamma
     pad: true #false #true #true #false #true          # eps-pad DA+ intervals (Thm. 3)
     clipy: false #false #true #false #true #false #true         # clip intervals to observed outcome range
     mean_match: true #false #true #false #true #false #true #false #true #true #true #false #true #false #true #true    # Lem. 2: solve on the mean-matched slice E[h(X)] = E[Y],
@@ -65,7 +65,7 @@ simulation:
 #     unfrozen_layers: 1              # partial_r2_net refit depth l. 1 = the 257-param
 #                                     # head (SLSQP); 2 adds the ~74k-param fc1 (slow
 #                                     # augmented-Lagrangian path, correctness runs only)
-#     gamma: 0.067                    # = oracle gamma* = bias_sq/sigma_sq (calibrated):
+#     gamma: 0.067                    # = oracle gamma* = bias_sq/sigma_sq (paper units):
 #                                     # the partial_r2_net ball is the Lemma-2 ball in
 #                                     # function space, so gamma* is PRINCIPLED here.
 #     epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
@@ -89,7 +89,7 @@ simulation:
 #         - DA+PI+IV
 #         - PI&DA+PI
 #         - PI&DA+PI+IV
-#     calibrate: true                 # budgets scaled by sigma-hat^2 = the ERM net's MSE
+#     recalibrate: false              # inherited gamma: the block's gamma is already gamma*
 #     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
 #                                     # bit-identical to n_jobs=1.
 #     experiment:

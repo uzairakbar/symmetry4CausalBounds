@@ -16,11 +16,11 @@ from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, trace_S_over_k
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import (
-    calibrate_da_epsilon,
     compute_oracle_parameters,
     epsilon_star,
     pool_oracles,
     preserve_rng,
+    recalibrated_da_epsilon,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -48,7 +48,7 @@ class OracleMixin:
     def prepare_pair(self, sem, da, features: Callable | None = None):
         pool = getattr(sem, "pool", None)
         if self.epsilon_true is not None:
-            calibrate_da_epsilon(
+            recalibrated_da_epsilon(
                 sem=sem,
                 da=da,
                 epsilon_target=self.epsilon_true,
@@ -80,7 +80,6 @@ class OracleMixin:
                         X=X,
                         y=y,
                         features=features,
-                        calibrate=self.calibrate,
                         mean_match=self.mean_match,
                     )
                 )
@@ -151,6 +150,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 gamma=default_gamma,
                 epsilon=default_epsilon,
                 epsilon_iv=self.epsilon_iv,
+                rho=self.fit_rho(),
             )
 
     def _load_data(self):
@@ -158,6 +158,14 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         X_raw, y = self.sem(N=self.n_samples)
         GX_raw, G = self.da(X_raw)
         return X_raw, GX_raw, y, G
+
+    def fit_rho(self) -> float:
+        """rho_hat of the one draw, as `ParamSweepRunner.fit_rho` (SS4.2)."""
+        rho = rho_hat(self.X, self.GX, self.y, intercept=self.mean_match)
+        if not np.isfinite(rho):
+            logger.warning("rho_hat not computable; falling back to 1.")
+            return 1.0
+        return float(rho)
 
     @property
     def epsilon_iv(self) -> float:
@@ -178,8 +186,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 self.default_gamma,
                 kind="iv",
                 Z=self.G,
-                calibrate=self.calibrate,
                 mean_match=self.mean_match,
+                rho=self.fit_rho(),
+                recalibrate=self.recalibrate,
             )
         except Exception as error:
             logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")
@@ -397,15 +406,15 @@ class EpsilonRatioStrategy(GenericParamSweep):
 class ExpansionStrategy(GenericParamSweep):
     """
     Informativeness: sweep the DA strength knob; the x-axis is the MEASURED
-    relative expansion of Prop. 2, post-poly, averaged over experiments. Under
-    calibrated budgets that is rho * tr(S)/k. Under raw budgets both balls have
-    the radius sqrt(gamma) (sensitivity_models.py `scale`), so Prop. 2 holds
-    with rho = 1 and the axis is tr(S)/k; the label stays `rho tr(S)/k`. Base
+    relative expansion of Prop. 2, post-poly, averaged over experiments: the
+    factor `rho if recalibrate else 1.0` times tr(S)/k, and the label stays
+    `rho tr(S)/k`. That keeps the axis of the shipped toggle; the factor and
+    label that follow the recalibrated mechanism are the next change. Base
     data is fixed per experiment and the DA draws use common random numbers.
     On both datasets tr(S)/k was measured to fall with the knob while rho rises,
-    so the calibrated product can fold back (it does on optical at full scale and
-    on the 4-step sim fixture of a31), which is why `create_sweep_plot` sorts
-    the (x, y) pairs before drawing.
+    so the product can fold back (it does on optical at full scale and on the
+    4-step sim fixture of a31), which is why `create_sweep_plot` sorts the
+    (x, y) pairs before drawing.
     """
 
     param_key = "trS"
@@ -426,14 +435,11 @@ class ExpansionStrategy(GenericParamSweep):
         # the raw pinv reads ~23% high at the top of the grid (see SPECTRUM_KEEP).
         rho = rho_hat(data.X, data.GX, data.y, intercept=self.mean_match)
         trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-        # Raw budgets give both balls the radius sqrt(gamma) (sensitivity_models.py
-        # `scale`), so Prop. 2's rho is 1 there and the axis is tr(S)/k. Calibrated
-        # budgets carry sigma-tilde/sigma, i.e. the measured rho.
-        factor = rho if self.calibrate else 1.0
+        factor = rho if self.recalibrate else 1.0
         x = factor * trace_S
         self._measured[(experiment_index, float(param))] = x
         self._factors[(experiment_index, float(param))] = (rho, trace_S)
-        convention = "calibrated: x = rho tr(S)/k" if self.calibrate else "raw budgets: rho := 1, x = tr(S)/k"
+        convention = "recalibrated: x = rho tr(S)/k" if self.recalibrate else "inherited gamma: rho := 1, x = tr(S)/k"
         logger.info(
             f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
             f"(untruncated {trace_S_over_k(data.X, data.GX):.5f}) "
@@ -469,7 +475,7 @@ class ExpansionStrategy(GenericParamSweep):
     def axis_record(self) -> dict[str, Any]:
         """
         Both factors of the measured x, per (knob, experiment), in KNOB order like
-        the values pkl: `x == nanmean(rho * trS, 1)` when calibrated, `nanmean(trS, 1)`
+        the values pkl: `x == nanmean(rho * trS, 1)` when recalibrated, `nanmean(trS, 1)`
         otherwise, so the other convention is `nanmean` of the other product.
         """
         knob = np.asarray(self.get_param_range(), dtype=float)
@@ -482,7 +488,7 @@ class ExpansionStrategy(GenericParamSweep):
             "rho": factors[:, :, 0],
             "trS": factors[:, :, 1],
             "x": self.observed_x(knob),
-            "calibrate": bool(self.calibrate),
+            "recalibrate": bool(self.recalibrate),
         }
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:

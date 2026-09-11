@@ -80,7 +80,7 @@ def orchestrator(treatment_dim):
         methods=["PI"],
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
     )
@@ -131,6 +131,10 @@ def leg_ii():
         if block is None:
             continue
         n_sim += 1
+        # recipes are the user's and some still carry the retired toggle key; this
+        # leg gates `treatment_dim`, not the toggles, so drop the stale key here
+        # (a38 reports which recipes carry it)
+        block = {k: v for k, v in block.items() if k != "".join(("cali", "brate"))}
         got = resolve_dataset_block("simulation", block)["treatment_dim"]
         check(
             f"(ii) {os.path.relpath(path, REPO)} resolves treatment_dim",

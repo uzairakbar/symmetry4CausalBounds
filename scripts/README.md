@@ -16,7 +16,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A5 | `a5_njobs_exactness.py` | `n_jobs` changes nothing but wall clock (`--micro` for a 4k/512/8 fixture) |
 | A6-A8, A11-A14 | `a6_a14_pipeline.py` | perf fairness, status, JAX≡FD, config, recipe, cost, memory |
 | A9 | `a6_a14_pipeline.py --full` | the estimand is the CAUSAL one (needs 1.2M draws) |
-| A10 | `a10_partial_r2_regression.py` | `PartialR2` unchanged by the `BoundedSA` hoist |
+| A10 | `a10_partial_r2_regression.py` | `PartialR2` digest; every bound moved with the sigma-scaled ball (see A10 below) |
 | A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
 | A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
@@ -24,7 +24,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, optical reported as a reference |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
-| A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k when calibrated, tr(S)/k under raw budgets (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
+| A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k under `recalibrate: true`, tr(S)/k under `false` (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
 | A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders every sweep and perf pdf into DIR): major-only tick labels and at least two in-view major ticks on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
 | A33 | `a33_gamma_vline.py` | gamma sweep annotation: no strategy overrides the spec vlines, one unlabelled line per in-view reference and no text, `generic_runner` free of `thm1_gamma_min`, `sweep_record` stores the spec constant |
 | A34 | `a34_eps_tol.py` | query sweep tolerance: `eps_tol` 2**-8 from `SimulationConfig` / `OpticalDeviceConfig` reaches the query runners' IV and optical budgets, the param sweeps and floor guards keep `EPS_TOL` 2**-5 |
@@ -154,7 +154,7 @@ python scripts/select_domnist_budgets.py --smoke    # 60k / 6k / 2k, minutes
 python scripts/a24_budget_selection.py artifacts/domnist-budget_report_smoke.json
 ```
 
-Budgets are conditional on every setting the report records (`pad`, `calibrate`,
+Budgets are conditional on every setting the report records (`pad`, `recalibrate`,
 `n_pi`, `net`, ...). Change one and they are stale. Read `warnings[]` first: it flags
 an inert budget and a `DA+PI` ceiling below target.
 
@@ -189,7 +189,8 @@ What pins the OLD geometry now is the toggle, not an older commit:
 python scripts/a10_partial_r2_regression.py --mean-match false > /tmp/off.json
 ```
 
-`off.json` is byte-identical to the digest of the last pre-mean-match commit
-(checked 2026-09-03 against `purge the scatter experiment type`), so diffing
-against it separates a regression in the shared code path from the intended
-change of geometry.
+`off.json` was byte-identical to the digest of the last pre-mean-match commit
+(checked 2026-09-03 against `purge the scatter experiment type`). That identity
+no longer holds: since the `recalibrate` toggle replaced the old sigma toggle every ball has the
+sigma-scaled radius, so every digest moved (checked 2026-09-11). Diff two trees
+that both carry the sigma-scaled ball; `a38` pins the mechanism itself.

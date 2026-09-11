@@ -30,7 +30,7 @@ STRENGTH_DOUBLINGS: int = 20  # bracket expansions before declaring the target u
 
 @dataclass(frozen=True)
 class OracleParameters:
-    """Oracle values; `calibrate` fixes the units of gamma_star."""
+    """Oracle values; gamma_star is in the paper's sigma-scaled units, bias^2/sigma^2."""
 
     gamma_star: float
     epsilon_star: float
@@ -121,17 +121,16 @@ class GammaStarStrategy(ABC):
     """Selection strategy for the confounding budget gamma*."""
 
     @abstractmethod
-    def __call__(self, sem, calibrate: bool = False) -> float:
+    def __call__(self, sem) -> float:
         pass
 
 
 class ValidityForBaselinePI(GammaStarStrategy):
-    """Tightest gamma keeping h_* inside the baseline PI set (Lem. 2)."""
+    """Tightest gamma keeping h_* inside the baseline PI set (Lem. 2), in the
+    paper's units: bias^2 / sigma^2."""
 
-    def __call__(self, sem, calibrate: bool = False) -> float:
+    def __call__(self, sem) -> float:
         bias_sq = sem.bias_sq
-        if not calibrate:
-            return float(bias_sq)
         sigma_sq = sem.sigma_sq
         if sigma_sq <= 0.0:
             logger.warning("sigma^2 = 0 (fully confounded): gamma* is unbounded.")
@@ -142,8 +141,8 @@ class ValidityForBaselinePI(GammaStarStrategy):
 DEFAULT_GAMMA_STAR = ValidityForBaselinePI()
 
 
-def gamma_star(sem, calibrate: bool = False, strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR) -> float:
-    return strategy(sem, calibrate=calibrate)
+def gamma_star(sem, strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR) -> float:
+    return strategy(sem)
 
 
 # =============================================================================
@@ -278,7 +277,7 @@ def invariance_error(
     return float(np.sqrt(np.mean(residuals**2)))
 
 
-def calibrate_da_epsilon(
+def recalibrated_da_epsilon(
     sem,
     da,
     epsilon_target: float,
@@ -287,8 +286,8 @@ def calibrate_da_epsilon(
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
-    Inverse of `epsilon_star`: set the DA strength knob achieving
-    `epsilon_target`. Returns the achieved eps*.
+    Inverse of `epsilon_star`: set the DA strength knob so the recalibrated DA
+    achieves `epsilon_target`. Returns the achieved eps*.
     """
     if epsilon_target < 0.0:
         raise ValueError("`epsilon_target` must be non-negative.")
@@ -397,25 +396,20 @@ def eps_iv_star(
 # =============================================================================
 
 
-def _thm1_r_base(oracle: "OracleParameters", gamma: float, calibrate: bool) -> float:
-    """Radius of the BASELINE ball: sigma sqrt(gamma) calibrated (paper), else
-    sqrt(gamma) -- with raw budgets the budget IS the squared radius. No rho."""
+def _thm1_r_base(oracle: "OracleParameters", gamma: float) -> float:
+    """Radius of the BASELINE ball, sigma sqrt(gamma) (paper's units). No rho."""
     gamma = max(float(gamma), 0.0)
-    if not calibrate:
-        return float(np.sqrt(gamma))
     return float(np.sqrt(float(oracle.sigma_sq) * gamma))
 
 
-def _thm1_r_da(oracle: "OracleParameters", gamma: float, calibrate: bool) -> float:
-    """Radius of the POST-DA ball: sigma-tilde sqrt(gamma) = sigma sqrt(rho gamma)
-    calibrated, else sqrt(gamma). The only radius that needs rho -- callers guard it."""
+def _thm1_r_da(oracle: "OracleParameters", gamma: float) -> float:
+    """Radius of the POST-DA ball at the inherited gamma: sigma-tilde sqrt(gamma)
+    = sigma sqrt(rho gamma). The only radius that needs rho -- callers guard it."""
     gamma = max(float(gamma), 0.0)
-    if not calibrate:
-        return float(np.sqrt(gamma))
     return float(np.sqrt(float(oracle.sigma_sq) * float(oracle.rho) * gamma))
 
 
-def thm1_eps_ceiling(oracle: "OracleParameters", gamma: float, calibrate: bool = False) -> float:
+def thm1_eps_ceiling(oracle: "OracleParameters", gamma: float) -> float:
     """
     eps+ of Thm. 1: the largest approximation error of the BASELINE set at which
     DA still cannot lose h_* (App. F.1).
@@ -424,13 +418,9 @@ def thm1_eps_ceiling(oracle: "OracleParameters", gamma: float, calibrate: bool =
 
     with C^2 = sigma-tilde^2 - sigma^2 the information the DA gives up (Lem. 4:
     A^2 = B^2 + C^2 for the pre-/post-DA bias magnitudes A, B). In the paper's
-    calibrated units this is the statement of Thm. 1,
+    units this is the statement of Thm. 1,
 
-        eps+ = sigma^2 ( sqrt(rho - 1 + gamma rho) - sqrt(gamma) )^2,
-
-    and with raw budgets (r_base = r_DA = sqrt(gamma)),
-
-        eps+ = ( sqrt(gamma + sigma^2 (rho - 1)) - sqrt(gamma) )^2.
+        eps+ = sigma^2 ( sqrt(rho - 1 + gamma rho) - sqrt(gamma) )^2.
 
     TIGHT, not merely sufficient: for A >= r_base every step of the F.1 chain
     (eps <= eps+  =>  A^2 <= C^2 + r_DA^2  =>  B^2 <= r_DA^2) is reversible, so
@@ -441,13 +431,13 @@ def thm1_eps_ceiling(oracle: "OracleParameters", gamma: float, calibrate: bool =
         logger.warning("rho unavailable; Thm. 1 ceiling is undefined.")
         return float("nan")
 
-    r_base = _thm1_r_base(oracle, gamma, calibrate)
-    r_da = _thm1_r_da(oracle, gamma, calibrate)
+    r_base = _thm1_r_base(oracle, gamma)
+    r_da = _thm1_r_da(oracle, gamma)
     c_sq = float(oracle.sigma_sq) * (float(rho) - 1.0)
     return float((np.sqrt(max(c_sq + r_da**2, 0.0)) - r_base) ** 2)
 
 
-def thm1_eps_valid(oracle: "OracleParameters", gamma: float, calibrate: bool = False) -> float:
+def thm1_eps_valid(oracle: "OracleParameters", gamma: float) -> float:
     """
     Approximation error of the BASELINE set, App. F.1 Eq. (*): for a ball of
     radius r_base around h_erm, E^-(H_pi) = (A - r_base)_+^2 with A = ||h_erm - h_*||.
@@ -456,11 +446,11 @@ def thm1_eps_valid(oracle: "OracleParameters", gamma: float, calibrate: bool = F
     it meets `thm1_eps_ceiling`. Needs no rho -- it is a statement about the
     BASELINE set alone, and stays defined when the DA's noise ratio does not.
     """
-    r_base = _thm1_r_base(oracle, gamma, calibrate)
+    r_base = _thm1_r_base(oracle, gamma)
     return float(max(0.0, np.sqrt(max(float(oracle.bias_sq), 0.0)) - r_base) ** 2)
 
 
-def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float:
+def thm1_gamma_min(oracle: "OracleParameters") -> float:
     """
     Smallest gamma at which the DA+PI set still contains h_* (Thm. 1), i.e. the
     budget the augmentation buys back.
@@ -468,20 +458,16 @@ def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float
     The inversion of `thm1_eps_ceiling`: eps_valid(gamma) <= eps+(gamma) reduces
     to Eq. (dagger) B^2 <= r_DA^2 with B^2 = bias^2 - sigma^2 (rho - 1), giving
 
-    calibrated:   gamma_min = max(0, (gamma* - (rho - 1)) / rho)
-    uncalibrated: gamma_min = max(0, bias^2 - sigma^2 (rho - 1))
+        gamma_min = max(0, (gamma* - (rho - 1)) / rho),
 
-    Both are gamma* at rho = 1 and decrease as the DA gives up more information.
+    gamma* at rho = 1 and decreasing as the DA gives up more information.
     """
     rho = oracle.rho
     if rho is None or not np.isfinite(rho):
         logger.warning("rho unavailable; Thm. 1 threshold falls back to gamma*.")
         return float(oracle.gamma_star)
 
-    if calibrate:
-        return float(max(0.0, (oracle.gamma_star - (rho - 1.0)) / rho))
-
-    return float(max(0.0, oracle.bias_sq - oracle.sigma_sq * (rho - 1.0)))
+    return float(max(0.0, (oracle.gamma_star - (rho - 1.0)) / rho))
 
 
 # =============================================================================
@@ -489,7 +475,7 @@ def thm1_gamma_min(oracle: "OracleParameters", calibrate: bool = False) -> float
 # =============================================================================
 
 
-def gamma_z_star(sem, da, X=None, features=None, calibrate: bool = False) -> float | None:
+def gamma_z_star(sem, da, X=None, features=None) -> float | None:
     """
     Oracle IV budget (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
     Not implemented: no experiment uses instruments.
@@ -531,12 +517,11 @@ def compute_oracle_parameters(
     X: NDArray | None = None,
     y: NDArray | None = None,
     features: Callable | None = None,
-    calibrate: bool = False,
     n_samples: int = CALIBRATION_SAMPLES,
     strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR,
     mean_match: bool = False,
 ) -> OracleParameters:
-    """Oracle parameters for one (SEM, DA) pair, in the given budget units."""
+    """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units."""
     features = features or _identity
 
     if X is None:
@@ -546,9 +531,9 @@ def compute_oracle_parameters(
     iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
 
     return OracleParameters(
-        gamma_star=gamma_star(sem, calibrate=calibrate, strategy=strategy),
+        gamma_star=gamma_star(sem, strategy=strategy),
         epsilon_star=epsilon_star(sem, da, X=X, features=features),
-        gamma_z_star=gamma_z_star(sem, da, X=X, features=features, calibrate=calibrate),
+        gamma_z_star=gamma_z_star(sem, da, X=X, features=features),
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
         rho=_noise_ratio(sem, da, X, y, features, n_samples, mean_match=mean_match),

@@ -10,6 +10,10 @@ Three legs:
   3. a report on optical, where the DA is not T-invariant, so Thm. 1's premise
      fails and the threshold is a reference rather than a prediction.
 
+Every budget is in the paper's units (gamma* = bias^2/sigma^2, radius
+sigma sqrt(gamma)); the DA+PI ball at the INHERITED gamma is the one Thm. 1
+speaks about.
+
     python scripts/a29_thm1_ceiling.py
 """
 
@@ -44,20 +48,18 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def old_gamma_min(oracle, calibrate):
+def old_gamma_min(oracle):
     """The pre-2026-09 threshold: inversion of the SUFFICIENT ceiling
     sigma^2 (rho - 1)^2 / rho. Kept here as the reference the new one must
     dominate -- it is the only place this formula still exists."""
     rho = oracle.rho
-    if calibrate:
-        return float(max(0.0, np.sqrt(oracle.gamma_star) - (rho - 1.0) / np.sqrt(rho)) ** 2)
-    return float(max(0.0, oracle.bias_sq - oracle.sigma_sq * (rho - 1.0)))
+    return float(max(0.0, np.sqrt(oracle.gamma_star) - (rho - 1.0) / np.sqrt(rho)) ** 2)
 
 
-def oracle_of(bias_sq, sigma_sq, rho, calibrate):
-    """An OracleParameters carrying gamma* in the units `calibrate` implies."""
+def oracle_of(bias_sq, sigma_sq, rho):
+    """An OracleParameters carrying gamma* = bias^2/sigma^2."""
     return OracleParameters(
-        gamma_star=float(bias_sq / sigma_sq if calibrate else bias_sq),
+        gamma_star=float(bias_sq / sigma_sq),
         epsilon_star=0.0,
         gamma_z_star=None,
         bias_sq=float(bias_sq),
@@ -75,56 +77,43 @@ def a29_closed_forms():
     sigma_sq = rng.uniform(0.05, 4.0, N_RANDOM)
     rho = 1.0 + rng.exponential(0.5, N_RANDOM)
 
-    for calibrate in (True, False):
-        worst_tight = worst_bracket = 0.0
-        over_star = over_old = 0
-        for b, s, r in zip(bias_sq, sigma_sq, rho, strict=True):
-            o = oracle_of(b, s, r, calibrate)
-            g_min = thm1_gamma_min(o, calibrate)
-            over_star += g_min > o.gamma_star + 1e-12
-            over_old += g_min > old_gamma_min(o, calibrate) + 1e-12
-            if g_min <= 0.0:
-                continue
-            # tight: at gamma_min the hypothesis of Thm. 1 holds with equality.
-            # Scaled by the natural size of a squared bias, NOT by the ceiling
-            # itself: eps+ legitimately goes to 0 as rho -> 1, and a relative
-            # test there compares cancellation noise with cancellation noise.
-            valid, ceiling = thm1_eps_valid(o, g_min, calibrate), thm1_eps_ceiling(o, g_min, calibrate)
-            worst_tight = max(worst_tight, abs(valid - ceiling) / max(1.0, b))
-            # and it is a THRESHOLD: eps_valid <= eps+ iff gamma >= gamma_min
-            for factor, want in ((0.5, False), (2.0, True)):
-                g = g_min * factor
-                holds = thm1_eps_valid(o, g, calibrate) <= thm1_eps_ceiling(o, g, calibrate) + 1e-15
-                worst_bracket += float(holds != want)
+    worst_tight = worst_bracket = 0.0
+    over_star = over_old = 0
+    for b, s, r in zip(bias_sq, sigma_sq, rho, strict=True):
+        o = oracle_of(b, s, r)
+        g_min = thm1_gamma_min(o)
+        over_star += g_min > o.gamma_star + 1e-12
+        over_old += g_min > old_gamma_min(o) + 1e-12
+        if g_min <= 0.0:
+            continue
+        # tight: at gamma_min the hypothesis of Thm. 1 holds with equality.
+        # Scaled by the natural size of a squared bias, NOT by the ceiling
+        # itself: eps+ legitimately goes to 0 as rho -> 1, and a relative
+        # test there compares cancellation noise with cancellation noise.
+        valid, ceiling = thm1_eps_valid(o, g_min), thm1_eps_ceiling(o, g_min)
+        worst_tight = max(worst_tight, abs(valid - ceiling) / max(1.0, b))
+        # and it is a THRESHOLD: eps_valid <= eps+ iff gamma >= gamma_min
+        for factor, want in ((0.5, False), (2.0, True)):
+            g = g_min * factor
+            holds = thm1_eps_valid(o, g) <= thm1_eps_ceiling(o, g) + 1e-15
+            worst_bracket += float(holds != want)
 
-        label = "calibrated" if calibrate else "raw"
-        check(f"A29 {label}: eps_valid == eps+ at gamma_min", worst_tight < 1e-12, f"worst {worst_tight:.2e}")
-        check(f"A29 {label}: gamma_min <= gamma*", over_star == 0, f"{over_star} violations")
-        check(f"A29 {label}: gamma_min <= old threshold", over_old == 0, f"{over_old} violations")
-        check(f"A29 {label}: the bracket brackets", worst_bracket == 0, f"{int(worst_bracket)} violations")
+    check("A29: eps_valid == eps+ at gamma_min", worst_tight < 1e-12, f"worst {worst_tight:.2e}")
+    check("A29: gamma_min <= gamma*", over_star == 0, f"{over_star} violations")
+    check("A29: gamma_min <= old threshold", over_old == 0, f"{over_old} violations")
+    check("A29: the bracket brackets", worst_bracket == 0, f"{int(worst_bracket)} violations")
 
     # rho unavailable: eps_valid does not need it, the other two degrade gracefully
     blind = OracleParameters(gamma_star=0.8, epsilon_star=0.0, gamma_z_star=None, bias_sq=0.4, sigma_sq=0.5, rho=None)
-    for calibrate in (True, False):
-        label = "calibrated" if calibrate else "raw"
-        r_base = np.sqrt(blind.sigma_sq * 0.3) if calibrate else np.sqrt(0.3)
-        want = max(0.0, np.sqrt(blind.bias_sq) - r_base) ** 2
-        check(
-            f"A29 {label}: eps_valid is defined without rho", abs(thm1_eps_valid(blind, 0.3, calibrate) - want) < 1e-15
-        )
-        check(f"A29 {label}: eps+ is nan without rho", np.isnan(thm1_eps_ceiling(blind, 0.3, calibrate)))
-        check(
-            f"A29 {label}: gamma_min falls back to gamma* without rho",
-            thm1_gamma_min(blind, calibrate) == blind.gamma_star,
-        )
+    r_base = np.sqrt(blind.sigma_sq * 0.3)
+    want = max(0.0, np.sqrt(blind.bias_sq) - r_base) ** 2
+    check("A29: eps_valid is defined without rho", abs(thm1_eps_valid(blind, 0.3) - want) < 1e-15)
+    check("A29: eps+ is nan without rho", np.isnan(thm1_eps_ceiling(blind, 0.3)))
+    check("A29: gamma_min falls back to gamma* without rho", thm1_gamma_min(blind) == blind.gamma_star)
 
     # rho = 1: the DA gives up nothing, so it buys back nothing
-    for calibrate in (True, False):
-        o = oracle_of(0.7, 0.9, 1.0, calibrate)
-        check(
-            f"A29 {'calibrated' if calibrate else 'raw'}: rho = 1 => gamma_min == gamma*",
-            abs(thm1_gamma_min(o, calibrate) - o.gamma_star) < 1e-12,
-        )
+    o = oracle_of(0.7, 0.9, 1.0)
+    check("A29: rho = 1 => gamma_min == gamma*", abs(thm1_gamma_min(o) - o.gamma_star) < 1e-12)
 
 
 # ------------------------------------------- 2. the changed line, in the data
@@ -142,7 +131,7 @@ def sim_runner(n_experiments=8, sweep_samples=8):
         methods=METHODS,
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
     )
@@ -190,23 +179,21 @@ def a29_in_data():
 
         gamma_star_sample = a_sq / s_sq
         r_emp = b_sq / (s_da_sq * gamma_star_sample)
-        o = oracle_of(a_sq, s_sq, s_da_sq / s_sq, calibrate=True)
+        o = oracle_of(a_sq, s_sq, s_da_sq / s_sq)
 
-        got = thm1_gamma_min(o, True) / o.gamma_star
+        got = thm1_gamma_min(o) / o.gamma_star
         check(
-            f"A29 sim exp {j}: calibrated gamma_min == the fitted transition",
+            f"A29 sim exp {j}: gamma_min == the fitted transition",
             abs(got - r_emp) <= 1e-10,
-            f"{got:.6f} vs {r_emp:.6f} (old formula {old_gamma_min(o, True) / o.gamma_star:.6f})",
+            f"{got:.6f} vs {r_emp:.6f} (old formula {old_gamma_min(o) / o.gamma_star:.6f})",
         )
-        got_raw = thm1_gamma_min(oracle_of(a_sq, s_sq, s_da_sq / s_sq, calibrate=False), False)
-        check(f"A29 sim exp {j}: raw gamma_min == B^2", abs(got_raw - b_sq) <= 1e-10, f"{got_raw:.6g} vs {b_sq:.6g}")
 
         population = runner.get_oracle(j)
         rows.append(
             (
                 r_emp,
-                thm1_gamma_min(population, True) / population.gamma_star,
-                old_gamma_min(population, True) / population.gamma_star,
+                thm1_gamma_min(population) / population.gamma_star,
+                old_gamma_min(population) / population.gamma_star,
             )
         )
 
@@ -233,7 +220,7 @@ def a29_optical_report(n_experiments=8):
         methods=METHODS,
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
         augmentation="rotation > gaussian-noise",
@@ -247,18 +234,18 @@ def a29_optical_report(n_experiments=8):
     new, old = [], []
     for j in range(n_experiments):
         population = runner.get_oracle(j)
-        new.append(thm1_gamma_min(population, True) / population.gamma_star)
-        old.append(old_gamma_min(population, True) / population.gamma_star)
+        new.append(thm1_gamma_min(population) / population.gamma_star)
+        old.append(old_gamma_min(population) / population.gamma_star)
         if j >= 2:  # the sample-fit report is illustrative; two draws make the point
             continue
         data = SweepData.coerce(runner.generate_data(j, knob))
         a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j], runner.mean_match)
         r_emp = b_sq / (s_da_sq * (a_sq / s_sq))
-        o = oracle_of(a_sq, s_sq, s_da_sq / s_sq, calibrate=True)
+        o = oracle_of(a_sq, s_sq, s_da_sq / s_sq)
         eps = epsilon_star(runner.sems[j], runner.das[j], features=runner._features)
         print(
             f"  report: optical exp {j} SAMPLE-FIT (not the population threshold): r_emp {r_emp:.4f} vs "
-            f"new {thm1_gamma_min(o, True) / o.gamma_star:.4f} old {old_gamma_min(o, True) / o.gamma_star:.4f} "
+            f"new {thm1_gamma_min(o) / o.gamma_star:.4f} old {old_gamma_min(o) / o.gamma_star:.4f} "
             f"| rho {s_da_sq / s_sq:.4f} eps* {eps:.4f}"
         )
     print(

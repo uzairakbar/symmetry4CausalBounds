@@ -1,13 +1,13 @@
 """Diagnose the simulation trS sweep: is the x-axis monotone in the knob?
 
-`ExpansionStrategy` plots the MEASURED expansion: rho*tr(S)/k under calibrated
-budgets, tr(S)/k under raw budgets (rho := 1). The two factors move in OPPOSITE
-directions with the knob. If the calibrated product folds back, the steps get
-reordered along x and a monotonically-narrowing family renders as "width grows as x
-shrinks". This is a diagnostic, not a gate: it builds `calibrate=False`, and its own
-`x=rho*trS` column uses the untruncated trace and no intercept. The `runner x`
-column is what the production runner stored for the step (tr(S)/k here, since the
-runner is uncalibrated); `a31_trs_axis.py` gates both conventions.
+`ExpansionStrategy` plots the MEASURED expansion: rho*tr(S)/k under
+`recalibrate: true`, tr(S)/k otherwise (rho := 1). The two factors move in OPPOSITE
+directions with the knob. If the product folds back, the steps get reordered along
+x and a monotonically-narrowing family renders as "width grows as x shrinks". This
+is a diagnostic, not a gate: it builds `recalibrate=False`, and its own `x=rho*trS`
+column uses the untruncated trace and no intercept. The `runner x` column is what
+the production runner stored for the step (tr(S)/k here, since the runner is not
+recalibrated); `a31_trs_axis.py` gates both conventions.
 
     python scripts/diag_trs_sweep.py
 """
@@ -44,7 +44,7 @@ def main():
         methods=METHODS,
         hyperparameters={},
         n_jobs=8,
-        calibrate=False,
+        recalibrate=False,
         pad=False,
         clipy=True,
     )

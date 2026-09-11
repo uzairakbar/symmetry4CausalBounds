@@ -251,7 +251,7 @@ def a30_membership(sem, poly, Phi, y, budgets):
     queries = np.vstack([Phi[:200], Phi.mean(axis=0, keepdims=True)])
     truth = sem.f(queries).ravel()
 
-    common = dict(calibrate=True, clipy=True, n_jobs=1)
+    common = dict(clipy=True, n_jobs=1)
     for name, model in (
         ("PI", PartialR2(gamma=gamma_star, pad=False, **common)),
         ("PI+INV", InvarianceConstrainedPartialR2(gamma=gamma_star, epsilon=budget, pad=False, **common)),

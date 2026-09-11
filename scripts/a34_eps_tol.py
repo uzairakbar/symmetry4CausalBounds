@@ -51,7 +51,7 @@ def common(**extra):
         methods=["PI", "DA+PI"],
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
         mean_match=True,
@@ -84,8 +84,9 @@ def leg_ii():
         runner.default_gamma,
         kind="iv",
         Z=runner.G,
-        calibrate=runner.calibrate,
         mean_match=runner.mean_match,
+        rho=runner.fit_rho(),
+        recalibrate=runner.recalibrate,
     )
     query_budget = eps_iv_star + QUERY_TOL
     query_feasible = query_budget**2 >= floor

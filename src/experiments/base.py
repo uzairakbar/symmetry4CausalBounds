@@ -27,7 +27,7 @@ from src.experiments.utils.constants import (
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
 )
-from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
+from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries, rho_hat
 from src.experiments.utils.plotting import (
     create_perf_plot,
     create_query_sweep_plot,
@@ -111,7 +111,7 @@ class BaseExperimentRunner(ABC):
         sweep_samples: int,
         methods: dict[str, ModelBuilder],
         hyperparameters: dict[str, Any] | None = None,
-        calibrate: bool = False,
+        recalibrate: bool = True,
         pad: bool = False,
         clipy: bool = True,
         mean_match: bool = True,
@@ -126,11 +126,11 @@ class BaseExperimentRunner(ABC):
         self.sweep_samples = sweep_samples
         self.methods = methods
         self.hyperparameters = hyperparameters
-        # toggles: needed here only to report oracle parameters in matching units.
-        # `mean_match` is EXPLICIT, not swallowed by **kwargs: the floor guard and
-        # the oracle must use the same geometry as the solver, and a silent default
-        # would be a lie the gates cannot see.
-        self.calibrate = calibrate
+        # toggles: `recalibrate` and `mean_match` are EXPLICIT, not swallowed by
+        # **kwargs: the floor guard must measure the ball the solver actually uses
+        # (recalibrated budget, Lem. 2 geometry), and a silent default would be a
+        # lie the gates cannot see.
+        self.recalibrate = recalibrate
         self.pad = pad
         self.clipy = clipy
         self.mean_match = mean_match
@@ -277,9 +277,18 @@ class ParamSweepRunner(BaseExperimentRunner):
         budget = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*") + EPS_TOL
         return self._floor_guard(budget, data, "inv", experiment_index, "epsilon")
 
+    def fit_rho(self, experiment_index: int, data=None) -> float:
+        """Information-loss factor of this step's DA draw, rho_hat = sigma~^2/sigma^2
+        on the fit sample (the ratio of the two in-class MMSEs, SS4.2). The DA+
+        methods solve at gamma~ = gamma ((1 - t) + t / rho) with t = `recalibrate`;
+        the intersections compute the same ratio from their own two branches."""
+        if data is None or getattr(data, "GX", None) is None:
+            return 1.0
+        return self._finite(rho_hat(data.X, data.GX, data.y, intercept=self.mean_match), 1.0, "rho_hat")
+
     def _finite(self, value, fallback, name: str) -> float:
         if value is None or not np.isfinite(value):
-            logger.warning(f"{name} not computable; falling back to yaml default.")
+            logger.warning(f"{name} not computable; falling back to {float(fallback):g}.")
             return float(fallback)
         return float(value)
 
@@ -289,7 +298,7 @@ class ParamSweepRunner(BaseExperimentRunner):
         A budget under the constraint's own attainable floor is not a tighter
         bound, it is NO bound: `_prepare` returns all-INFEASIBLE and the method
         drops out of the sweep entirely. Measured on the simulation trS grid, the
-        oracle IV budget (EPS_TOL, 0.0039) is below the floor at 5 of 12 steps.
+        oracle IV budget (EPS_TOL) was below the floor at 5 of 12 steps.
 
         The trigger is `budget^2 < floor`, i.e. actual infeasibility -- NOT
         `budget^2 < FLOOR_GUARD_R * floor`. Those differ: a budget in
@@ -308,13 +317,16 @@ class ParamSweepRunner(BaseExperimentRunner):
         extra = {"GX": getattr(data, "GX", None)} if kind == "inv" else {"Z": getattr(data, "G", None)}
         if design is None or next(iter(extra.values())) is None:
             return budget
+        # the DA ball ('iv': DA+PI+IV fits on GX) is recalibrated; the baseline
+        # ball ('inv': PI+INV fits on X) is not
+        if kind == "iv":
+            extra.update(rho=self.fit_rho(experiment_index, data), recalibrate=self.recalibrate)
         try:
             floor = constraint_floor(
                 design,
                 data.y,
                 self.fit_gamma(experiment_index),
                 kind=kind,
-                calibrate=self.calibrate,
                 mean_match=self.mean_match,
                 **extra,
             )
@@ -355,6 +367,7 @@ class ParamSweepRunner(BaseExperimentRunner):
                 gamma=gamma,
                 epsilon=epsilon,
                 epsilon_iv=self.fit_epsilon_iv(experiment_index, step_index, data),
+                rho=self.fit_rho(experiment_index, data),
                 **self.method_kwargs(experiment_index),
             )
             if self.method_factory
@@ -485,9 +498,15 @@ class ExperimentOrchestrator(ABC):
 
     @abstractmethod
     def build_methods(
-        self, gamma: float, epsilon: float, epsilon_iv: float | None = None, n_jobs: int | None = None
+        self,
+        gamma: float,
+        epsilon: float,
+        epsilon_iv: float | None = None,
+        n_jobs: int | None = None,
+        rho: float = 1.0,
     ) -> dict[str, Any]:
-        """Build methods at explicit budgets (per-experiment ParamPolicy)."""
+        """Build methods at explicit budgets (per-experiment ParamPolicy); `rho`
+        is the step's information-loss factor for the DA+ balls."""
         pass
 
     @property

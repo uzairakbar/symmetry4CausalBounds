@@ -1,27 +1,27 @@
-"""A31: the trS sweep's x-axis under both budget conventions.
+"""A31: the trS sweep's x-axis under both settings of the recalibrate toggle.
 
-`ExpansionStrategy` plots a MEASURED x: rho tr(S)/k under calibrated budgets and,
-under raw budgets, tr(S)/k (both balls then have the radius sqrt(gamma), so Prop. 2
-holds with rho = 1; the label stays `rho tr(S)/k`). The runner and the pkls keep
-knob order; `create_sweep_plot` holds the one sort. Two experiments, a 4-step knob
-grid, both datasets, both toggles, through the production path (`sweep_record`,
-`_run_sweeps`), with a second runner recomputing the factors independently:
+`ExpansionStrategy` plots a MEASURED x: rho tr(S)/k under `recalibrate: true` and
+tr(S)/k under `recalibrate: false` (the label stays `rho tr(S)/k`). The runner and
+the pkls keep knob order; `create_sweep_plot` holds the one sort. Two experiments,
+a 4-step knob grid, both datasets, both toggles, through the production path
+(`sweep_record`, `_run_sweeps`), with a second runner recomputing the factors
+independently:
 
   (0)    `generate_data(j, knob)` is deterministic (common random numbers), so the
          recomputation in (i) measures the same draw;
-  (i)    every stored x is exactly rho * trS (calibrated) or trS (raw), with rho
+  (i)    every stored x is exactly rho * trS (recalibrated) or trS (not), with rho
          and trS recomputed by the gate on the runner's own data;
   (ii)   the returned x is the experiment mean in KNOB order, `trS_values.pkl` is
          bit-identical to it, and the width array is (n_steps, n_exp);
-  (iii)  raw: x is strictly monotone in the knob (falling on sim, rising on the
+  (iii)  not recalibrated: x is strictly monotone in the knob (falling on sim, rising on the
          optical fixture, whose knob is the permutation probability), and on an unbootstrapped render the
          DA+PI line carries `sort(x)` against the width means in that order, exactly,
          and its CI band (the `fill_between` polygon in the line's colour) carries the
          2.5/97.5 width percentiles in that same order, so a sorted line over an
          unsorted band is caught;
-  (iv)   calibrated: x is the mean of rho * trS and the fixture argsort is the
+  (iv)   recalibrated: x is the mean of rho * trS and the fixture argsort is the
          fold-back one ([3, 2, 0, 1] on sim, [0, 1, 2, 3] on optical), which the
-         raw convention cannot produce;
+         other convention cannot produce;
   (v)    the xlabel is `PARAM_SPECS["trS"].xlabel` and contains `\\rho` under BOTH
          toggles, and no plotting error was swallowed;
   (vi)   exactly n_exp * n_steps `trS step` INFO lines, each with the stored x to
@@ -73,14 +73,14 @@ from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 METHODS = ["PI", "DA+PI"]
 N_EXP, N_STEPS = 2, 4
 LINE = re.compile(r"trS step (\S+): rho (\S+) tr\(S\)/k (\S+) \(untruncated (\S+)\) x (\S+)(.*)$")
-MARK = {True: "calibrated: x = rho tr(S)/k", False: "raw budgets: rho := 1, x = tr(S)/k"}
-# the calibrated product folds back on the sim fixture (steps 0 and 1 swap); the
-# raw axis is strictly monotone on both fixtures: falling on sim (argsort
+MARK = {True: "recalibrated: x = rho tr(S)/k", False: "inherited gamma: rho := 1, x = tr(S)/k"}
+# the rho tr(S)/k product folds back on the sim fixture (steps 0 and 1 swap); the
+# plain tr(S)/k axis is strictly monotone on both fixtures: falling on sim (argsort
 # [3, 2, 1, 0]), rising on optical since random-permutation honours p = s
 # (tr(S)/k 0.785 -> 1.015 on the 4-step grid, measured 2026-09-11)
 EXPECT_ARGSORT_CAL = {"simulation": [3, 2, 0, 1], "optical_device": [0, 1, 2, 3]}
 EXPECT_RAW_SIGN = {"simulation": -1, "optical_device": 1}
-AXIS_KEYS = {"knob", "rho", "trS", "x", "calibrate"}
+AXIS_KEYS = {"knob", "rho", "trS", "x", "recalibrate"}
 TMPROOT = os.path.expanduser("~/scratch/tmp/a31")
 FAIL = []
 
@@ -91,7 +91,7 @@ def check(tag, row, ok, detail=""):
         FAIL.append(f"{tag} {row} {detail}")
 
 
-def build(experiment, calibrate):
+def build(experiment, recalibrate):
     set_seed(42)
     common = dict(
         seed=42,
@@ -100,7 +100,7 @@ def build(experiment, calibrate):
         methods=METHODS,
         hyperparameters={},
         n_jobs=4,
-        calibrate=calibrate,
+        recalibrate=recalibrate,
         pad=False,
         clipy=True,
         mean_match=True,
@@ -137,18 +137,18 @@ def vline_positions(ax):
     ]
 
 
-def run_one(experiment, calibrate):
-    tag = f"[{experiment} calibrate={calibrate}]"
+def run_one(experiment, recalibrate):
+    tag = f"[{experiment} recalibrate={recalibrate}]"
     print(f"\n===== {tag}")
     n_fail_before = len(FAIL)
     captured, errors = [], []
     sink = logger.add(lambda m: captured.append(m.record["message"]), level="INFO")
     err_sink = logger.add(lambda m: errors.append(m.record["message"]), level="ERROR")
-    orch = build(experiment, calibrate)
+    orch = build(experiment, recalibrate)
     t0 = time.perf_counter()
     x, results, _ = orch.sweep_record("trS")
     t_sweep = time.perf_counter() - t0
-    tmp = tempfile.mkdtemp(prefix=f"{experiment}_{'cal' if calibrate else 'raw'}_", dir=TMPROOT)
+    tmp = tempfile.mkdtemp(prefix=f"{experiment}_{'recal' if recalibrate else 'inh'}_", dir=TMPROOT)
     os.chdir(tmp)
     plt.close("all")
     orch._run_sweeps(SweepSpec(param=("trS",), metric=("width",)))
@@ -182,7 +182,7 @@ def run_one(experiment, calibrate):
             data = SweepData.coerce(runner.generate_data(j, knob))
             rho[i, j] = rho_hat(data.X, data.GX, data.y, intercept=runner.mean_match)
             trs[i, j] = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-            want = rho[i, j] * trs[i, j] if calibrate else trs[i, j]
+            want = rho[i, j] * trs[i, j] if recalibrate else trs[i, j]
             got = runner._measured[(j, float(knob))]
             if got != want:
                 ok_i = False
@@ -220,8 +220,8 @@ def run_one(experiment, calibrate):
     ax2 = plt.gcf().axes[0]
     lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
     order = np.argsort(x, kind="stable")
-    if not calibrate:
-        # (iii) raw: monotone axis, sorted line, y reordered with x, and the CI band
+    if not recalibrate:
+        # (iii) not recalibrated: monotone axis, sorted line, y reordered with x, and the CI band
         # reordered with the line (the band is drawn from the same reordered array)
         dec = bool((np.sign(np.diff(x)) == EXPECT_RAW_SIGN[experiment]).all())
         xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None
@@ -244,7 +244,7 @@ def run_one(experiment, calibrate):
             f"xdata {None if xd is None else np.round(xd, 5).tolist()}",
         )
     else:
-        # (iv) calibrated: the product, with its fixture fold-back
+        # (iv) recalibrated: the product, with its fixture fold-back
         ok_iv = np.array_equal(x, np.nanmean(rho * trs, axis=1))
         srt = order.tolist()
         check(
@@ -276,7 +276,7 @@ def run_one(experiment, calibrate):
         if abs(round(want, 5) - xf) > 1e-5:
             ok_vi = False
             det_vi.append(f"log x {xf} vs measured {want:.5f}")
-        if not tail.strip().endswith(f"({MARK[calibrate]})"):
+        if not tail.strip().endswith(f"({MARK[recalibrate]})"):
             ok_vi = False
             det_vi.append(f"marker missing/wrong: {tail.strip()!r}")
     check(tag, "(vi)", ok_vi, f"{len(rows)} lines (want {N_EXP * N_STEPS}); " + "; ".join(det_vi[:2]))
@@ -314,19 +314,19 @@ def run_one(experiment, calibrate):
         x_ok = keys_ok and np.array_equal(rec["x"], pkl)
         fac = None
         if shapes_ok:
-            fac = np.nanmean(rec["rho"] * rec["trS"], 1) if calibrate else np.nanmean(rec["trS"], 1)
+            fac = np.nanmean(rec["rho"] * rec["trS"], 1) if recalibrate else np.nanmean(rec["trS"], 1)
         fac_ok = fac is not None and np.array_equal(fac, pkl)
-        cal_ok = keys_ok and rec["calibrate"] == calibrate
+        cal_ok = keys_ok and rec["recalibrate"] == recalibrate
         check(
             tag,
             "(viii)",
             keys_ok and shapes_ok and knob_ok and x_ok and fac_ok and cal_ok,
             f"keys {keys_ok} shapes {shapes_ok} knob==grid {knob_ok} x==values {x_ok} "
-            f"factors==x {fac_ok} calibrate {cal_ok}",
+            f"factors==x {fac_ok} recalibrate {cal_ok}",
         )
 
     # (ix) no axis record on a designed grid: runner level, then file level on sim raw
-    if experiment == "simulation" and not calibrate:
+    if experiment == "simulation" and not recalibrate:
         gamma_runner = second_runner(orch, "gamma", param_grid_override=[1.0])
         r_ok = hasattr(gamma_runner, "axis_record") and gamma_runner.axis_record() is None
         os.chdir(tmp)
@@ -353,8 +353,8 @@ def main():
     experiments = sys.argv[1:] or ["simulation", "optical_device"]
     os.makedirs(TMPROOT, exist_ok=True)
     for experiment in experiments:
-        for calibrate in (True, False):
-            run_one(experiment, calibrate)
+        for recalibrate in (True, False):
+            run_one(experiment, recalibrate)
     print("\nRESULT:", "ALL PASS" if not FAIL else f"{len(FAIL)} FAIL")
     for f in FAIL:
         print("  ", f)

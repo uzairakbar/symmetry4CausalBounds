@@ -6,8 +6,9 @@ intercept (centred design and outcome, bounds shifted back by ybar); this gate
 restates it EXPLICITLY -- a free intercept coordinate plus an equality
 constraint -- and checks the two agree, query by query.
 
-  (i)   classes == the explicit cvxpy reference, both calibrations, and n_jobs
-        1 == 4 bit-identically;
+  (i)   classes == the explicit cvxpy reference (sigma-scaled ball at the
+        inherited gamma; the recalibrated ball is a38's), and n_jobs 1 == 4
+        bit-identically;
   (ii)  the closed-form shortcut == the SOCP == Cor. 3 by hand;
   (iii) the returned optimum really sits on the slice;
   (iv)  `constraint_floor` == the explicit floor (the budget guard must measure
@@ -74,7 +75,7 @@ def optical_fixture():
         methods=["PI", "DA+PI"],
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
         augmentation="rotation > gaussian-noise",
@@ -92,19 +93,20 @@ def optical_fixture():
 # --------------------------------------------------- the explicit L1 reference
 
 
-def _ball(design, y, gamma, calibrate):
-    """(R, h1_erm, delta, D, ybar) for the explicit parameterisation on [X, 1]."""
+def _ball(design, y, gamma):
+    """(R, h1_erm, delta, D, ybar) for the explicit parameterisation on [X, 1];
+    the radius is sigma-hat sqrt(gamma), the paper's units."""
     design, y = np.asarray(design), np.asarray(y).flatten()
     N = len(design)
     D = np.hstack([design, np.ones((N, 1))])
     h1_erm = np.linalg.lstsq(D, y, rcond=None)[0]
     residual = y - D @ h1_erm
-    scale = float(np.sqrt(np.mean(residual**2))) if calibrate else 1.0
+    scale = float(np.sqrt(np.mean(residual**2)))
     _, R = np.linalg.qr(D)
     return R, h1_erm, np.sqrt(N) * scale * np.sqrt(max(gamma, 0.0)), D, float(np.mean(y))
 
 
-def l1_bounds(design, y, queries, gamma, *, calibrate, kind=None, GX=None, Z=None, epsilon=None, want_h=False):
+def l1_bounds(design, y, queries, gamma, *, kind=None, GX=None, Z=None, epsilon=None, want_h=False):
     """min/max h(x) over Lem. 2's set, stated explicitly: an intercept coordinate
     and the equality mean_n([X, 1]) h = ybar, solved by cvxpy.
 
@@ -113,7 +115,7 @@ def l1_bounds(design, y, queries, gamma, *, calibrate, kind=None, GX=None, Z=Non
     """
     design = np.asarray(design)
     N, M = design.shape
-    R, h1_erm, delta, D, ybar = _ball(design, y, gamma, calibrate)
+    R, h1_erm, delta, D, ybar = _ball(design, y, gamma)
     mu = design.mean(axis=0)
     centred = design - mu
 
@@ -159,73 +161,72 @@ def l1_bounds(design, y, queries, gamma, *, calibrate, kind=None, GX=None, Z=Non
 def leg_i():
     for shift, label in ((1.5, "shifted design"), (0.0, "a10's own draw")):
         X, GX, y, Q = a10_fixture(shift)
-        for calibrate in (True, False):
-            tag = f"{label}, calibrate={calibrate}"
-            # clipy=False: this leg compares the BALL, and `_finalize`'s clip to
-            # the observed y range would otherwise mask (or fake) an agreement.
-            # The clip itself is unchanged code, exercised by a10 and the runs.
-            common = dict(gamma=GAMMA, epsilon=EPSILON, calibrate=calibrate, mean_match=True, clipy=False)
-            # every fixture array is bound as a default: ruff B023, and the
-            # builders are called later in the loop body
-            cases = {
-                "PI": (
-                    lambda nj, c=common, X=X, y=y: sm.PartialR2(n_jobs=nj, **c).fit(X, y),
-                    dict(design=X, y=y),
+        tag = label
+        # clipy=False: this leg compares the BALL, and `_finalize`'s clip to
+        # the observed y range would otherwise mask (or fake) an agreement.
+        # The clip itself is unchanged code, exercised by a10 and the runs.
+        # recalibrate=False: the reference states every ball at GAMMA; the
+        # intersections' recalibrated DA branch (gamma/rho) is a38's.
+        common = dict(gamma=GAMMA, epsilon=EPSILON, recalibrate=False, mean_match=True, clipy=False)
+        # every fixture array is bound as a default: ruff B023, and the
+        # builders are called later in the loop body
+        cases = {
+            "PI": (
+                lambda nj, c=common, X=X, y=y: sm.PartialR2(n_jobs=nj, **c).fit(X, y),
+                dict(design=X, y=y),
+            ),
+            "PI+INV": (
+                lambda nj, c=common, X=X, y=y, GX=GX: sm.InvarianceConstrainedPartialR2(n_jobs=nj, **c).fit(
+                    X, y, GX=GX
                 ),
-                "PI+INV": (
-                    lambda nj, c=common, X=X, y=y, GX=GX: sm.InvarianceConstrainedPartialR2(n_jobs=nj, **c).fit(
-                        X, y, GX=GX
-                    ),
-                    dict(design=X, y=y, kind="inv", GX=GX, epsilon=EPSILON),
-                ),
-                "PI+IV(null Z)": (
-                    lambda nj, c=common, X=X, y=y: sm.InstrumentalVariablePartialR2(
-                        epsilon_iv=EPSILON_IV, n_jobs=nj, **c
-                    ).fit(X, y, Z=None),
-                    dict(design=X, y=y),
-                ),
-                "DA+PI+IV": (
-                    lambda nj, c=common, y=y, GX=GX: sm.InstrumentalVariablePartialR2(
-                        epsilon_iv=EPSILON_IV, n_jobs=nj, **c
-                    ).fit(GX, y, Z=GX),
-                    dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV),
-                ),
-            }
-            for name, (build, reference_kw) in cases.items():
-                model = build(1)
-                got = model.predict(Q)
-                want = l1_bounds(queries=Q, gamma=GAMMA, calibrate=calibrate, **reference_kw)
-                finite = np.isfinite(got).all() and np.isfinite(want).all()
-                check(f"A28 (i) {name} [{tag}]: both sides solved", finite)
-                if finite:
-                    delta = float(np.abs(got - want).max())
-                    check(f"A28 (i) {name} [{tag}]: == explicit reference", delta <= BOUND_TOL, f"max |d| {delta:.2e}")
-                parallel = build(4).predict(Q)
-                check(f"A28 (i) {name} [{tag}]: n_jobs 1 == 4", np.array_equal(got, parallel))
-
-            # the intersections: Cor. 1 at the interval level, on both branches
-            for name, model, branches in (
-                (
-                    "PI&DA+PI",
-                    sm.IntersectedPartialR2(n_jobs=1, **common).fit(X, y, GX=GX, G=GX),
-                    (dict(design=X, y=y), dict(design=GX, y=y)),
-                ),
-                (
-                    "PI&DA+PI+IV",
-                    sm.IntersectedInstrumentalVariablePartialR2(epsilon_iv=EPSILON_IV, n_jobs=1, **common).fit(
-                        X, y, GX=GX, G=GX
-                    ),
-                    (dict(design=X, y=y), dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV)),
-                ),
-            ):
-                got = model.predict(Q)
-                base = l1_bounds(queries=Q, gamma=GAMMA, calibrate=calibrate, **branches[0])
-                augmented = l1_bounds(queries=Q, gamma=GAMMA, calibrate=calibrate, **branches[1])
-                want = np.column_stack(
-                    [np.maximum(base[:, 0], augmented[:, 0]), np.minimum(base[:, 1], augmented[:, 1])]
-                )
+                dict(design=X, y=y, kind="inv", GX=GX, epsilon=EPSILON),
+            ),
+            "PI+IV(null Z)": (
+                lambda nj, c=common, X=X, y=y: sm.InstrumentalVariablePartialR2(
+                    epsilon_iv=EPSILON_IV, n_jobs=nj, **c
+                ).fit(X, y, Z=None),
+                dict(design=X, y=y),
+            ),
+            "DA+PI+IV": (
+                lambda nj, c=common, y=y, GX=GX: sm.InstrumentalVariablePartialR2(
+                    epsilon_iv=EPSILON_IV, n_jobs=nj, **c
+                ).fit(GX, y, Z=GX),
+                dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV),
+            ),
+        }
+        for name, (build, reference_kw) in cases.items():
+            model = build(1)
+            got = model.predict(Q)
+            want = l1_bounds(queries=Q, gamma=GAMMA, **reference_kw)
+            finite = np.isfinite(got).all() and np.isfinite(want).all()
+            check(f"A28 (i) {name} [{tag}]: both sides solved", finite)
+            if finite:
                 delta = float(np.abs(got - want).max())
                 check(f"A28 (i) {name} [{tag}]: == explicit reference", delta <= BOUND_TOL, f"max |d| {delta:.2e}")
+            parallel = build(4).predict(Q)
+            check(f"A28 (i) {name} [{tag}]: n_jobs 1 == 4", np.array_equal(got, parallel))
+
+        # the intersections: Cor. 1 at the interval level, on both branches
+        for name, model, branches in (
+            (
+                "PI&DA+PI",
+                sm.IntersectedPartialR2(n_jobs=1, **common).fit(X, y, GX=GX, G=GX),
+                (dict(design=X, y=y), dict(design=GX, y=y)),
+            ),
+            (
+                "PI&DA+PI+IV",
+                sm.IntersectedInstrumentalVariablePartialR2(epsilon_iv=EPSILON_IV, n_jobs=1, **common).fit(
+                    X, y, GX=GX, G=GX
+                ),
+                (dict(design=X, y=y), dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV)),
+            ),
+        ):
+            got = model.predict(Q)
+            base = l1_bounds(queries=Q, gamma=GAMMA, **branches[0])
+            augmented = l1_bounds(queries=Q, gamma=GAMMA, **branches[1])
+            want = np.column_stack([np.maximum(base[:, 0], augmented[:, 0]), np.minimum(base[:, 1], augmented[:, 1])])
+            delta = float(np.abs(got - want).max())
+            check(f"A28 (i) {name} [{tag}]: == explicit reference", delta <= BOUND_TOL, f"max |d| {delta:.2e}")
 
 
 # --------------------------------------- (ii) closed form == SOCP == Cor. 3
@@ -233,33 +234,32 @@ def leg_i():
 
 def leg_ii():
     X, GX, y, Q = a10_fixture(1.5)
-    for calibrate in (True, False):
-        kw = dict(gamma=GAMMA, epsilon=EPSILON, calibrate=calibrate, mean_match=True, clipy=False, n_jobs=1)
-        socp = sm.PartialR2(**kw).fit(X, y)
-        socp_bounds = socp.predict(Q)
+    kw = dict(gamma=GAMMA, epsilon=EPSILON, mean_match=True, clipy=False, n_jobs=1)
+    socp = sm.PartialR2(**kw).fit(X, y)
+    socp_bounds = socp.predict(Q)
 
-        sm.CLOSED_FORM_SOLUTION = True
-        try:
-            closed = sm.PartialR2(**kw).fit(X, y)
-            closed_bounds = closed.predict(Q)
-        finally:
-            sm.CLOSED_FORM_SOLUTION = False
+    sm.CLOSED_FORM_SOLUTION = True
+    try:
+        closed = sm.PartialR2(**kw).fit(X, y)
+        closed_bounds = closed.predict(Q)
+    finally:
+        sm.CLOSED_FORM_SOLUTION = False
 
-        delta = float(np.abs(socp_bounds - closed_bounds).max())
-        check(f"A28 (ii) closed form == SOCP, calibrate={calibrate}", delta <= 1e-6, f"max |d| {delta:.2e}")
+    delta = float(np.abs(socp_bounds - closed_bounds).max())
+    check("A28 (ii) closed form == SOCP", delta <= 1e-6, f"max |d| {delta:.2e}")
 
-        # Cor. 3 by hand: h_erm(x) +- s sqrt(gamma) ||g_x||, g_x the representer
-        mu, ybar = X.mean(axis=0), float(np.mean(y))
-        Xc, yc = X - mu, np.asarray(y).flatten() - ybar
-        h_erm = np.linalg.lstsq(Xc, yc, rcond=None)[0]
-        scale = float(np.sqrt(np.mean((yc - Xc @ h_erm) ** 2))) if calibrate else 1.0
-        cov_inv = np.linalg.pinv(Xc.T @ Xc / len(Xc))
-        Qc = Q - mu
-        margin = scale * np.sqrt(GAMMA) * np.sqrt(np.maximum(0.0, np.sum((Qc @ cov_inv) * Qc, axis=1)))
-        centre = Qc @ h_erm + ybar
-        want = np.column_stack([centre - margin, centre + margin])
-        delta = float(np.abs(socp_bounds - want).max())
-        check(f"A28 (ii) SOCP == Cor. 3 closed form, calibrate={calibrate}", delta <= 1e-6, f"max |d| {delta:.2e}")
+    # Cor. 3 by hand: h_erm(x) +- s sqrt(gamma) ||g_x||, g_x the representer
+    mu, ybar = X.mean(axis=0), float(np.mean(y))
+    Xc, yc = X - mu, np.asarray(y).flatten() - ybar
+    h_erm = np.linalg.lstsq(Xc, yc, rcond=None)[0]
+    scale = float(np.sqrt(np.mean((yc - Xc @ h_erm) ** 2)))
+    cov_inv = np.linalg.pinv(Xc.T @ Xc / len(Xc))
+    Qc = Q - mu
+    margin = scale * np.sqrt(GAMMA) * np.sqrt(np.maximum(0.0, np.sum((Qc @ cov_inv) * Qc, axis=1)))
+    centre = Qc @ h_erm + ybar
+    want = np.column_stack([centre - margin, centre + margin])
+    delta = float(np.abs(socp_bounds - want).max())
+    check("A28 (ii) SOCP == Cor. 3 closed form", delta <= 1e-6, f"max |d| {delta:.2e}")
 
 
 # ------------------------------------------------- (iii) on the slice, really
@@ -268,7 +268,7 @@ def leg_ii():
 def leg_iii():
     X, GX, y, Q = a10_fixture(1.5)
     ybar = float(np.mean(y))
-    _, attained, D = l1_bounds(X, y, Q[:12], GAMMA, calibrate=True, want_h=True, kind="inv", GX=GX, epsilon=EPSILON)
+    _, attained, D = l1_bounds(X, y, Q[:12], GAMMA, want_h=True, kind="inv", GX=GX, epsilon=EPSILON)
     worst = 0.0
     for solutions in attained:
         for h1 in solutions:
@@ -277,7 +277,7 @@ def leg_iii():
 
     # elimination side: the slice is structural, h_erm and the Cor. 3 extremals
     # all satisfy it by construction -- check the identity the code relies on
-    model = sm.PartialR2(gamma=GAMMA, epsilon=EPSILON, calibrate=True, mean_match=True, n_jobs=1).fit(X, y)
+    model = sm.PartialR2(gamma=GAMMA, epsilon=EPSILON, mean_match=True, n_jobs=1).fit(X, y)
     residual = abs(float(np.mean((X - model.mu_) @ model.h_erm)))
     check("A28 (iii) eliminated form: mean_n((X - mu) h_erm) == 0", residual <= 1e-12, f"{residual:.2e}")
     fitted = float(np.mean((X - model.mu_) @ model.h_erm + model.y_offset_))
@@ -294,20 +294,15 @@ def leg_iv():
 
     data, gamma_star = optical_fixture()
     for gamma in (0.05, gamma_star, 4 * gamma_star):
-        for calibrate in (True, False):
-            for kind, kw in (("inv", dict(GX=data.GX)), ("iv", dict(Z=data.G))):
-                design = data.X if kind == "inv" else data.GX
-                got = constraint_floor(design, data.y, gamma, kind=kind, calibrate=calibrate, mean_match=True, **kw)
-                want = cvxpy_floor(design, data.y, gamma, kind, calibrate=calibrate, mean_match=True, **kw)
-                if abs(got - want) < 1e-11:  # both zero to solver precision
-                    check(f"A28 (iv) optical {kind} floor, gamma={gamma:.4g}, calibrate={calibrate}", True, "both ~0")
-                    continue
-                relative = abs(got - want) / max(abs(want), 1e-300)
-                check(
-                    f"A28 (iv) optical {kind} floor, gamma={gamma:.4g}, calibrate={calibrate}",
-                    relative < 1e-6,
-                    f"rel {relative:.2e}",
-                )
+        for kind, kw in (("inv", dict(GX=data.GX)), ("iv", dict(Z=data.G))):
+            design = data.X if kind == "inv" else data.GX
+            got = constraint_floor(design, data.y, gamma, kind=kind, mean_match=True, **kw)
+            want = cvxpy_floor(design, data.y, gamma, kind, mean_match=True, **kw)
+            if abs(got - want) < 1e-11:  # both zero to solver precision
+                check(f"A28 (iv) optical {kind} floor, gamma={gamma:.4g}", True, "both ~0")
+                continue
+            relative = abs(got - want) / max(abs(want), 1e-300)
+            check(f"A28 (iv) optical {kind} floor, gamma={gamma:.4g}", relative < 1e-6, f"rel {relative:.2e}")
 
 
 # ------------------------------------------------------------ (v) coverage
@@ -343,7 +338,7 @@ def leg_v():
             methods=methods,
             hyperparameters={},
             n_jobs=-1,
-            calibrate=True,
+            recalibrate=True,
             pad=True,
             clipy=True,
             mean_match=mean_match,
@@ -359,7 +354,7 @@ def leg_v():
             methods=methods,
             hyperparameters={},
             n_jobs=-1,
-            calibrate=True,
+            recalibrate=True,
             pad=True,
             clipy=True,
             mean_match=mean_match,

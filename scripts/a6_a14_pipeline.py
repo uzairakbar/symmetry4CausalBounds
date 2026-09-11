@@ -67,7 +67,7 @@ def fixture():
 
 def a13_cost_profile(sem, nets, X, GX, y, G, Q):
     """Time each stage separately. A reporting gate: record, do not assert."""
-    common = dict(calibrate=True, clipy=True, unfrozen_layers=1)
+    common = dict(clipy=True, unfrozen_layers=1)
     profile = {}
 
     start = time.perf_counter()
@@ -115,7 +115,7 @@ def a14_memory(sem):
 
 
 def a7_query_status(sem, nets, X, GX, y, G, Q):
-    common = dict(calibrate=True, clipy=True, unfrozen_layers=1)
+    common = dict(clipy=True, unfrozen_layers=1)
 
     model = PartialR2Net(gamma=0.1, outcome_model=nets["X"], **common).fit(X, y)
     bounds = model.predict(Q)
@@ -145,7 +145,7 @@ def a21_intersection_wiring(sem, nets, X, GX, y, G, Q):
     """
     from src.methods.partial_r2_net import IntersectedIVPartialR2Net, IntersectedPartialR2Net
 
-    common = dict(gamma=0.1, calibrate=True, clipy=True, unfrozen_layers=1)
+    common = dict(gamma=0.1, clipy=True, unfrozen_layers=1)
     models = {
         "PI&DA+PI": IntersectedPartialR2Net(epsilon=0.1, pad=False, outcome_models=nets, **common).fit(
             X, y, GX=GX, G=G
@@ -228,7 +228,7 @@ def a8_jax_equals_fd(nets, X, GX, y, G, Q):
     gradient IS the solve -- so the gate compares the terms directly: value against
     the mirror exactly, gradient against a central difference of the mirror.
     """
-    common = dict(gamma=0.1, calibrate=True, clipy=True, n_jobs=1, unfrozen_layers=1)
+    common = dict(gamma=0.1, clipy=True, n_jobs=1, unfrozen_layers=1)
     pi = PartialR2Net(outcome_model=nets["X"], **common).fit(X, y)
     iv = IVConstrainedPartialR2Net(epsilon_iv=0.12, outcome_model=nets["GX"], **common).fit(GX, y, Z=G)
 
@@ -404,7 +404,7 @@ def a6_perf_fairness():
         epsilon=0.05,
         n_pi=512,
         n_queries=8,
-        calibrate=True,
+        recalibrate=False,
         pad=False,
         clipy=True,
     )
@@ -448,7 +448,7 @@ def a26_budget_wiring():
             net="domnist-fast",
             gamma=gamma,
             epsilon=epsilon,
-            calibrate=True,
+            recalibrate=False,
             n_jobs=8,
             augmentation="translate > rotation > contrast > saturation > hue",
             methods=["PI", "DA+PI", "PI+INV"],

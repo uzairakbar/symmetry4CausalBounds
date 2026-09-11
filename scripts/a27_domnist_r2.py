@@ -120,7 +120,6 @@ def fit_and_predict(nets, X, GX, y, G, Q, unfrozen_layers, n_jobs=N_JOBS, mean_m
         gamma=GAMMA_STAR,
         epsilon=EPSILON,
         epsilon_iv=EPSILON_IV,
-        calibrate=True,
         clipy=True,
         n_jobs=n_jobs,
         mean_match=mean_match,
@@ -226,13 +225,13 @@ def gate_gradients(nets, X, GX, y, G):
     values exactly, gradients by central finite differences."""
     from src.methods.partial_r2_net import IVConstrainedPartialR2Net, RecentredInvPartialR2Net
 
-    pi = PartialR2Net(gamma=GAMMA_STAR, calibrate=True, outcome_model=nets["X"], n_jobs=1).fit(X, y)
-    inv = RecentredInvPartialR2Net(
-        gamma=GAMMA_STAR, epsilon=EPSILON, calibrate=True, outcome_model=nets["GX"], n_jobs=1
-    ).fit(X, y, GX=GX)
-    iv = IVConstrainedPartialR2Net(
-        gamma=GAMMA_STAR, epsilon_iv=EPSILON_IV, calibrate=True, outcome_model=nets["GX"], n_jobs=1
-    ).fit(GX, y, Z=G)
+    pi = PartialR2Net(gamma=GAMMA_STAR, outcome_model=nets["X"], n_jobs=1).fit(X, y)
+    inv = RecentredInvPartialR2Net(gamma=GAMMA_STAR, epsilon=EPSILON, outcome_model=nets["GX"], n_jobs=1).fit(
+        X, y, GX=GX
+    )
+    iv = IVConstrainedPartialR2Net(gamma=GAMMA_STAR, epsilon_iv=EPSILON_IV, outcome_model=nets["GX"], n_jobs=1).fit(
+        GX, y, Z=G
+    )
 
     rng = np.random.default_rng(0)
     theta = pi.theta_c_ + 0.05 * np.sqrt(np.mean(pi.theta_c_**2)) * rng.standard_normal(pi.theta_c_.size)
@@ -268,9 +267,9 @@ def gate_band(results, label, n_pi):
             continue
 
         # from the sensitivity model's own bound on Var(U + xi) (see MEAN_BAND_SE),
-        # written out rather than read back from `_band_tau` -- and via the BUDGET,
-        # so the `calibrate=False` units are covered too
-        budget = branch.scale**2 * branch.gamma
+        # written out rather than read back from `_band_tau` -- and via the BUDGET
+        # the ball is solved at, i.e. the recalibrated one
+        budget = branch.scale**2 * branch.budget(branch.gamma)
         want = MEAN_BAND_SE * np.sqrt((branch.sigma2_ + budget) / n_pi)
         check(
             f"A27 {label} {name}: tau == {MEAN_BAND_SE} sqrt((sigma^2 + b_r2)/n)",
@@ -330,9 +329,7 @@ def polish_compare(nets, X, GX, y, G, Q):
     import src.methods.partial_r2_net as pr2
 
     for name, design, net in (("PI", X, "X"), ("DA+PI", GX, "GX")):
-        model = PartialR2Net(
-            gamma=GAMMA_STAR, epsilon=EPSILON, calibrate=True, outcome_model=nets[net], n_jobs=N_JOBS
-        ).fit(design, y)
+        model = PartialR2Net(gamma=GAMMA_STAR, epsilon=EPSILON, outcome_model=nets[net], n_jobs=N_JOBS).fit(design, y)
         full = model.predict(Q)
         try:  # same feasible set, fewer polish solves -- the only thing that moves
             pr2.SINGLE_POLISH_WITH_BAND = True

@@ -61,7 +61,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         self._epsilon_star = None
         self._epsilon_pad = None
         self.toggles = dict(
-            calibrate=kwargs.get("calibrate", False),
+            recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
             clipy=kwargs.get("clipy", True),
             n_jobs=kwargs.get("n_jobs", 1),
@@ -173,12 +173,12 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         return OpticalQuerySweep
 
-    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
         toggle -- perf needs serial models to time methods, not the harness."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return MethodRegistry.build_methods(
-            self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, **toggles
+            self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, rho=rho, **toggles
         )
 
     def get_sweep_runner_cls(self, param: str) -> type:

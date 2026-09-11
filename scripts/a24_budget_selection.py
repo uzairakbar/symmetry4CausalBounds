@@ -113,7 +113,6 @@ def a24_floor_cache():
         outcome_model=net,
         link=DOMNIST_CONFIG.link,
         unfrozen_layers=DOMNIST_CONFIG.unfrozen_layers,
-        calibrate=True,
     )
     model.fit(X=X, y=y, GX=GX, G=G)
 
@@ -176,7 +175,7 @@ def a24_report_schema(path):
     # cannot be traced back to the run that produced them
     for key in (
         "pad",
-        "calibrate",
+        "recalibrate",
         "n_pi",
         "n_eval",
         "unfrozen_layers",

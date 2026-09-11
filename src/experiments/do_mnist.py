@@ -62,6 +62,21 @@ def train_pair(X, GX, y, init_seed, net="domnist-fast", **train_kw):
     }
 
 
+def _net_rho(nets, X, GX, y) -> float:
+    """sigma~^2/sigma^2 on the prefit pair: the GX net's MSE on GX over the X net's
+    MSE on X, both against y on the SAME rows. NaN-free by construction unless the
+    X net fits y exactly, in which case rho is left at 1."""
+    if nets is None:
+        return 1.0
+    y = np.asarray(y).ravel().astype(float)
+    mse_x = float(np.mean((y - np.asarray(nets["X"].predict_mean(X)).ravel()) ** 2))
+    mse_gx = float(np.mean((y - np.asarray(nets["GX"].predict_mean(GX)).ravel()) ** 2))
+    if not mse_x > 0.0 or not np.isfinite(mse_gx):
+        logger.warning("do-mnist: rho on the prefit nets not computable; falling back to 1.")
+        return 1.0
+    return mse_gx / mse_x
+
+
 def pi_subset(n_total: int, n_pi: int, seed: int) -> np.ndarray:
     """Rows the latent model and constraints are fit on. Drawn once per experiment,
     so PI and DA+PI see the same rows."""
@@ -144,8 +159,14 @@ class DoMNISTQuerySweep(GenericQuerySweep):
                 gamma=self.default_gamma,
                 epsilon=self.default_epsilon,
                 epsilon_iv=self.default_epsilon,
+                rho=self.fit_rho(),
                 outcome_models=self.nets,
             )
+
+    def fit_rho(self) -> float:
+        """rho on the prefit nets' MSE over the n_pi rows, the same ratio the
+        intersections read off their branches (`IntersectedPartialR2Net.rho`)."""
+        return _net_rho(self.nets, self.X, self.GX, self.y)
 
     def _load_data(self):
         """ONE paired draw, which the SEM's target net drew identically (same N,
@@ -218,6 +239,13 @@ class DoMNISTMixin:
         """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either."""
         return self.default_epsilon
 
+    def fit_rho(self, experiment_index: int, data=None) -> float:
+        """rho on the prefit nets' MSE over the step's rows (see `_net_rho`); the
+        linear `rho_hat` would refit OLS on pixels, which is not the class here."""
+        if data is None or getattr(data, "GX", None) is None:
+            return 1.0
+        return _net_rho(self._nets.get(experiment_index), data.X, data.GX, data.y)
+
     def method_kwargs(self, experiment_index: int) -> dict[str, object]:
         return {"outcome_models": self._nets[experiment_index]}
 
@@ -286,7 +314,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         self.net = net
         self.unfrozen_layers = unfrozen_layers
         self.toggles = dict(
-            calibrate=kwargs.get("calibrate", False),
+            recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
             clipy=kwargs.get("clipy", True),
             n_jobs=kwargs.get("n_jobs", 1),
@@ -335,7 +363,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
     def _poly_factory(self):
         return Flatten()
 
-    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, outcome_models=None):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None):
         """Methods at explicit budgets. `n_jobs` overrides the toggle -- perf needs
         serial models to time methods, not the harness."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
@@ -344,6 +372,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
+            rho=rho,
             backend="partial_r2_net",
             outcome_models=outcome_models,
             unfrozen_layers=self.unfrozen_layers,

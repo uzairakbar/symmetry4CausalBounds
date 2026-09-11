@@ -173,7 +173,7 @@ def main(args):
     n_pi = args.n_pi or block.get("n_pi", 60_000)
     seed = block.get("seed", 42)
     toggles = dict(
-        calibrate=block.get("calibrate", False),
+        recalibrate=block.get("recalibrate", True),
         pad=block.get("pad", False),
         clipy=block.get("clipy", True),
         n_jobs=block.get("n_jobs", 1),

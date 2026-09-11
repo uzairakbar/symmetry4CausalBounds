@@ -119,7 +119,7 @@ def leg_iv():
         methods=["PI"],
         hyperparameters={},
         n_jobs=1,
-        calibrate=True,
+        recalibrate=True,
         pad=False,
         clipy=True,
     )
