@@ -15,10 +15,11 @@ guards; the query sweeps read `eps_tol` (2**-8) from `SimulationConfig` and
         eps*, the default call 2**-5 over it, and the query runner's
         `default_epsilon` is the former.
 
-Both query runners also carry the raw declared gamma (`raw_gamma`): (ii) and (iii)
-check `runner.default_gamma == config gamma / sigma-hat^2` of the draw and that the
-fitted PI ball's radius `scale * sqrt(budget)` is sqrt(config gamma) (1.0 / 0.5),
-which is what the rescale exists for.
+Both query runners also carry the raw declared gamma (`raw_gamma`): (i) pins the
+declared radii, sqrt(SimulationConfig.gamma) == 1.0 and sqrt(OpticalDeviceConfig.gamma)
+== 0.5; (ii) and (iii) check `runner.default_gamma == config gamma / sigma-hat^2` of
+the draw and that the fitted PI ball's radius `scale * sqrt(budget)` is sqrt(config
+gamma), which is what the rescale exists for.
 
     python scripts/a34_eps_tol.py
 """
@@ -95,6 +96,10 @@ def leg_i():
     check("(i) SimulationConfig.eps_tol == 2**-8", SIMULATION_CONFIG.eps_tol == QUERY_TOL)
     check("(i) OpticalDeviceConfig.eps_tol == 2**-8", OPTICAL_CONFIG.eps_tol == QUERY_TOL)
     check("(i) EPS_TOL == 2**-5", EPS_TOL == 2**-5)
+    check(
+        "(i) sqrt(SimulationConfig.gamma) == 1.0", np.sqrt(SIMULATION_CONFIG.gamma) == 1.0, f"{SIMULATION_CONFIG.gamma}"
+    )
+    check("(i) sqrt(OpticalDeviceConfig.gamma) == 0.5", np.sqrt(OPTICAL_CONFIG.gamma) == 0.5, f"{OPTICAL_CONFIG.gamma}")
 
 
 def leg_ii():
