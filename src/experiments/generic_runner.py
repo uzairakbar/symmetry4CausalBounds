@@ -400,9 +400,9 @@ class EpsilonRatioStrategy(GenericParamSweep):
 
     This is the ONLY sweep that recalibrates the DA (to
     ROBUSTNESS_EPSILON_TRUE[experiment_name]), so that eps* > 0 makes the ratio
-    axis meaningful, and the only one that swaps the configured DA chain for
-    ROBUSTNESS_AUGMENTATION[experiment_name] where that is set (optical: the
-    configured chain has no knob to tune).
+    axis meaningful, and the only one that appends
+    ROBUSTNESS_AUGMENTATION[experiment_name] to the configured DA chain where
+    that is set (optical: the configured chain has no knob to tune).
     """
 
     param_key = "epsilon"
@@ -411,9 +411,9 @@ class EpsilonRatioStrategy(GenericParamSweep):
         # scoped to this sweep only; never leaks into trS/n/m/perf or the query panel
         name = kwargs.get("experiment_name", "simulation")
         kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[name]
-        chain = ROBUSTNESS_AUGMENTATION[name]
-        if chain is not None:
-            kwargs["da_factory"] = partial(kwargs["da_factory"], augmentation=chain)
+        component = ROBUSTNESS_AUGMENTATION[name]
+        if component is not None:
+            kwargs["da_factory"] = partial(kwargs["da_factory"], append=component)
         super().__init__(**kwargs)
 
         if not self.pad:

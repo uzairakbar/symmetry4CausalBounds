@@ -7,6 +7,7 @@ import numpy as np
 from loguru import logger
 from sklearn.preprocessing import PolynomialFeatures
 
+from src.data_augmentors.optical_device import ALL_AUGMENTATIONS
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, MethodRegistry
@@ -43,6 +44,12 @@ def _knob_to_augment_kwargs(strength: float) -> dict[str, float]:
         "p": float(strength),
         "noise_coeff": float(np.sqrt(0.1 * strength)),  # up to 0.1 Var(X)
     }
+
+
+def _with_component(chain: str, component: str) -> str:
+    """`chain` with `component` appended, unless the chain already carries it."""
+    present = list(ALL_AUGMENTATIONS) if chain == "all" else chain.replace(" ", "").split(">")
+    return chain if component in present else f"{chain} > {component}"
 
 
 # =============================================================================
@@ -144,10 +151,11 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             return float(configured)
         return self.measured_epsilon_pad() + EPS_TOL
 
-    def _da_factory(self, sem=None, augmentation: str | None = None):
-        """Factory for creating DA instances. `augmentation` overrides the
-        configured chain; only the robustness sweep passes one."""
-        return DA(self.augmentation if augmentation is None else augmentation)
+    def _da_factory(self, sem=None, append: str | None = None):
+        """Factory for creating DA instances. `append` adds one component to the
+        configured chain unless it is already there (`all` carries every one);
+        only the robustness sweep passes it."""
+        return DA(self.augmentation if append is None else _with_component(self.augmentation, append))
 
     def _poly_factory(self):
         """Factory for creating polynomial transformer."""

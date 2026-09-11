@@ -26,19 +26,21 @@
         small), a cliff (too large), a curve that does not recover at eps*.
         Misses: the 8-experiment band and the other DA+ lines, which the probe
         log holds (see the comment at the constant).
-  (v)   isolation of the chain swap: the optical epsilon runner's DA (read off the
-        runner, `das[0]`) is exactly the chain of `ROBUSTNESS_AUGMENTATION` and
-        carries gaussian-noise; the optical gamma runner's DA, the query runner's
-        DA and the orchestrator's own budget DA are the configured chain of
-        config.yaml and carry no gaussian-noise. Catches: an override set to None
-        (no knob, so no dip either), an override that leaks into another sweep or
-        the panel. Misses: a leak into trS/n/m, which build their DA through the
-        same factory as gamma.
-  (vi)  the optical dip, mirroring (iii): two optical experiments, 5 steps, the
-        configured toggles; mean DA+PI coverage < 1 at the smallest r, 1.0 at
-        r = 1, minimum above 0.7. Catches: the constant back at 2^-1 (flat), the
-        override gone (flat). Misses: how faint the dip is; the constant's comment
-        says the device caps it near 0.96.
+  (v)   isolation of the appended component: the optical epsilon runner's DA (read
+        off the runner, `das[0]`) is config.yaml's chain plus the component of
+        `ROBUSTNESS_AUGMENTATION`, so it carries gaussian-noise; every other
+        strategy's runner (gamma, trS, n, m, recalibrate), the query runner and
+        the orchestrator's own budget DA are config.yaml's chain and carry no
+        gaussian-noise. Catches: a component set to None (no knob, so no dip
+        either), a leak into any other sweep or the panel. Misses: a chain in
+        config.yaml that already names gaussian-noise, where the sweep and the
+        rest legitimately share it.
+  (vi)  the optical dip, mirroring (iii): three optical experiments, 5 steps, the
+        configured toggles; the lowest of the DA+PI and DA+PI+IV means at the
+        smallest r is < 1, both are 1.0 at r = 1 and above 0.7 throughout.
+        Catches: the constant back at 2^-1 (flat), the component gone (flat).
+        Misses: how faint the dip is; the constant's comment says the device
+        floors it near 0.95.
   (vii) the optical constant is the chosen 5.0, and eps* / std(h*) on the pool
         stays under 10: the round-5 value 8 was 11 std of h* and was rejected as
         an artefact of a destroyed image, and the comment at the constant shows 6
@@ -50,9 +52,10 @@
 Writes only into a fresh directory under `~/scratch/tmp/a40/`, removed when it
 passes. Nothing here touches do-MNIST (its sweeps stop at `m`).
 
-    MPLBACKEND=Agg python scripts/a40_eps_star.py
+    MPLBACKEND=Agg python scripts/a40_eps_star.py [--seed 42]
 """
 
+import argparse
 import os
 import shutil
 import sys
@@ -71,13 +74,16 @@ from src.experiments.configs import (  # noqa: E402
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
 )
+from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
+METHODS_OPTICAL = ["PI", "DA+PI", "DA+PI+IV"]
 N_STEPS = 5
 N_EXPERIMENTS = 2
+N_EXPERIMENTS_OPTICAL = 3
 N_JOBS = 4
 COVERAGE_FLOOR = 0.7
 OPTICAL_EPS_STAR = 5.0
@@ -117,20 +123,14 @@ def configured():
     return toggles, draw, str(opt.get("augmentation", SHIPPED_CHAIN))
 
 
-def build(experiment, draw, chain, **toggles):
-    set_seed(42)
-    common = dict(
-        seed=42,
-        n_experiments=N_EXPERIMENTS,
-        sweep_samples=N_STEPS,
-        methods=METHODS,
-        hyperparameters={},
-        n_jobs=N_JOBS,
-        **toggles,
-    )
+def build(experiment, draw, chain, seed, **toggles):
+    set_seed(seed)
+    common = dict(seed=seed, sweep_samples=N_STEPS, hyperparameters={}, n_jobs=N_JOBS, **toggles)
     if experiment == "simulation":
-        return SimulationOrchestrator(kernel_dim=0, **draw, **common)
-    return OpticalOrchestrator(n_samples=1000, augmentation=chain, **common)
+        return SimulationOrchestrator(kernel_dim=0, n_experiments=N_EXPERIMENTS, methods=METHODS, **draw, **common)
+    return OpticalOrchestrator(
+        n_samples=1000, augmentation=chain, n_experiments=N_EXPERIMENTS_OPTICAL, methods=METHODS_OPTICAL, **common
+    )
 
 
 def epsilon_runner(orch):
@@ -205,23 +205,29 @@ def leg_ii(sim):
 
 
 def dip(runner, tag):
-    """`runner.run`; the DA+PI coverage curve must dip at the smallest r, recover at
-    r = 1 and never go under the floor."""
+    """`runner.run`; the DA+ coverage curves must dip at the smallest r (the lowest
+    of them, so a tail count on one line is enough), each recover at r = 1 and
+    never go under the floor."""
     x, results, _ = runner.run(f"a40 {tag} epsilon sweep")
     x = np.asarray(x, dtype=float)
+    lines = [m for m in results if m.startswith("DA+")]
+    cov = {m: np.asarray(results[m]["coverage"], dtype=float).mean(axis=1) for m in lines}
     per_exp = np.asarray(results["DA+PI"]["coverage"], dtype=float)
-    cov = per_exp.mean(axis=1)
     w_da = np.asarray(results["DA+PI"]["interval_width"], dtype=float).mean(axis=1)
     w_pi = np.asarray(results["PI"]["interval_width"], dtype=float).mean(axis=1)
     print("      r:        " + " ".join(f"{v:.4g}" for v in x))
-    print("      DA+PI cov " + " ".join(f"{v:.3f}" for v in cov))
-    print("      per exp at the smallest r: " + " ".join(f"{v:.3f}" for v in per_exp[0]))
+    for m in lines:
+        print(f"      {m:9s} " + " ".join(f"{v:.3f}" for v in cov[m]))
+    print("      DA+PI per exp at the smallest r: " + " ".join(f"{v:.3f}" for v in per_exp[0]))
     print("      DA+PI/PI  " + " ".join(f"{v:.3f}" for v in w_da / w_pi))
+    lowest = min(cov[m][0] for m in lines)
     check(f"{tag} r = 1 is the last grid point", np.isclose(x[-1], 1.0), f"{x[-1]:.6g}")
-    check(f"{tag} DA+PI coverage < 1 at the smallest r", cov[0] < 1.0, f"{cov[0]:.4f} at r {x[0]:.4g}")
-    check(f"{tag} DA+PI coverage == 1 at r = 1", np.isclose(cov[-1], 1.0), f"{cov[-1]:.4f}")
-    check(f"{tag} DA+PI min coverage above the floor", np.nanmin(cov) > COVERAGE_FLOOR, f"{np.nanmin(cov):.4f}")
-    return x, cov, w_da / w_pi
+    check(f"{tag} lowest DA+ coverage < 1 at the smallest r", lowest < 1.0, f"{lowest:.4f} at r {x[0]:.4g}")
+    for m in lines:
+        check(f"{tag} {m} coverage == 1 at r = 1", np.isclose(cov[m][-1], 1.0), f"{cov[m][-1]:.4f}")
+        floor_ok = np.nanmin(cov[m]) > COVERAGE_FLOOR
+        check(f"{tag} {m} min coverage above the floor", floor_ok, f"{np.nanmin(cov[m]):.4f}")
+    return x, cov["DA+PI"], w_da / w_pi
 
 
 def leg_iii(sim, draw):
@@ -230,28 +236,26 @@ def leg_iii(sim, draw):
 
 
 def leg_v(orch, opt_eps, chain):
-    print("(v) the chain swap reaches the optical epsilon runner and nothing else")
-    override = ROBUSTNESS_AUGMENTATION["optical_device"]
-    check("(v) ROBUSTNESS_AUGMENTATION is set for optical", override is not None, f"{override!r}")
-    want = parse_chain(override) if override else []
+    print("(v) the appended component reaches the optical epsilon runner and nothing else")
+    component = ROBUSTNESS_AUGMENTATION["optical_device"]
+    check(
+        "(v) ROBUSTNESS_AUGMENTATION names gaussian-noise for optical", component == "gaussian-noise", repr(component)
+    )
     configured_chain = parse_chain(chain)
+    want = configured_chain + ["gaussian-noise"] if "gaussian-noise" not in configured_chain else configured_chain
     eps_chain = chain_of(opt_eps.das[0])
-    check("(v) epsilon runner DA == ROBUSTNESS_AUGMENTATION", eps_chain == want, f"{eps_chain}")
+    check("(v) epsilon runner DA == configured chain + gaussian-noise", eps_chain == want, f"{eps_chain}")
     check("(v) epsilon runner DA carries gaussian-noise", "gaussian-noise" in eps_chain)
-    prefix = eps_chain[: len(configured_chain)] == configured_chain
-    check("(v) epsilon runner DA keeps the configured chain as prefix", prefix)
-    others = {
-        "gamma runner": chain_of(sweep_runner(orch, "gamma").das[0]),
-        "query runner": chain_of(query_runner(orch).da),
-        "orchestrator budget": chain_of(orch._oracle_pieces()[1]),
-    }
+    others = {f"{p} runner": chain_of(sweep_runner(orch, p).das[0]) for p in STRATEGIES if p != "epsilon"}
+    others["query runner"] = chain_of(query_runner(orch).da)
+    others["orchestrator budget"] = chain_of(orch._oracle_pieces()[1])
     for name, got in others.items():
         check(f"(v) {name} DA == configured chain", got == configured_chain, f"{got}")
         check(f"(v) {name} DA has no gaussian-noise", "gaussian-noise" not in got)
 
 
 def leg_vi(opt):
-    print(f"(vi) the dip on {N_EXPERIMENTS} optical experiments")
+    print(f"(vi) the dip on {N_EXPERIMENTS_OPTICAL} optical experiments")
     return dip(opt, "(vi)")
 
 
@@ -275,8 +279,11 @@ if __name__ == "__main__":
     os.chdir(REPO)
     os.makedirs(TMPROOT, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix="a40_", dir=TMPROOT)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    seed = parser.parse_args().seed
     toggles, draw, chain = configured()
-    orchs = {name: build(name, draw, chain, **toggles) for name in ("simulation", "optical_device")}
+    orchs = {name: build(name, draw, chain, seed, **toggles) for name in ("simulation", "optical_device")}
     runners = {name: epsilon_runner(orch) for name, orch in orchs.items()}
     leg_i(runners)
     sim, _ = runners["simulation"]

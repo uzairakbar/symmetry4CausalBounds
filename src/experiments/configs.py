@@ -227,28 +227,39 @@ FLOOR_GUARD_R: float = 9.0
 #   5      3.49       0.962           0.952          1.50   (4 exp, 16 steps; seeds 7 / 1: 0.98 / 0.97)
 #   6      3.85       0.958           0.952          1.73   (4 exp, 16 steps)
 #   8      4.47       0.960           0.955          2.17
-# The dip is capped by the device, not by eps*: the unpadded DA+PI half-width
-# stops shrinking at 1.6 from eps* 3 on, and 96% of the pool's h* lie within
-# 1.6 of its mean, so DA+PI coverage cannot fall below ~0.96 at any eps* (5, 6
-# and 8 all sit on that floor). 5 is the smallest value whose dip shows on
-# every draw seen (4 is flat on seed 7). It is 7 std of h* and noise 3.5x the
-# pixel std, so the DA+ERM centre is mostly the pool mean: a faint dip, the
-# top tail of h*, not the sim's slope. Every DA+ line stays above 0.95. The
+# The dip is capped by the device and the toggles, not by eps*. Under
+# `recalibrate: true` the DA+PI radius is sigma~ sqrt(gamma*/rho_hat) =
+# sigma_X sqrt(gamma*) = 0.635, the baseline PI radius, whatever the noise
+# does: rho_hat keeps rising with the strength (2.1 -> 2.3) and is cancelled.
+# What the noise moves is the representer norm of the centred clean query
+# against the noise-dominated Sigma_GX, and that floors at 2.2 (a second
+# moment over its variance for the squared features), so the raw DA+PI
+# half-width floors at 0.635 x 2.2 = 1.41 while the DA+ERM centre collapses
+# to the train mean (std 0.20 -> 0.06). Coverage then tends to
+# P(|h* - mean| < 1.41) = 0.947 on the pool: h* has a 5% right tail (2.1 to
+# 3.9) and no left tail, and those same queries miss at every eps* from 5 up
+# (0.955-0.96 in the mean, 0.94-0.98 per 100-query split, at 5, 8, 12, 20).
+# 5 is the smallest value whose dip shows on every draw seen (4 is flat on
+# seed 7) and already sits on that floor; 6 and 8 add width, nothing else.
+# It is 7 std of h* and noise 3.5x the pixel std: a tail count of 4-5
+# queries in 100, not the sim's slope. Every DA+ line stays above 0.95. The
 # tuner solves on one draw; the pooled oracle (8 draws) reads 4.88 for it.
 ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
     "simulation": 3.0,
     "optical_device": 5.0,
 }
 
-# The DA chain the robustness sweep runs under, where it differs from the
-# configured one. None = the configured chain. Optical: config.yaml ships a
-# permutation-only chain with no strength knob (eps* pinned at 0.254, every DA+
-# coverage line flat at 1.0), so the sweep, and ONLY it, appends gaussian-noise
-# and retunes its strength to the constant above; the query panel and the other
-# sweeps read config.yaml. Applied in EpsilonRatioStrategy.
+# The component the robustness sweep APPENDS to the configured DA chain, where
+# that chain has no strength knob. None = the configured chain as is. Optical:
+# config.yaml ships a permutation-only chain (eps* pinned at 0.254, every DA+
+# coverage line flat at 1.0), so the sweep, and ONLY it, runs config.yaml's
+# chain plus gaussian-noise (skipped when the chain already carries it, `all`
+# included) and retunes its strength to the constant above; the query panel and
+# the other sweeps read config.yaml alone. Applied in EpsilonRatioStrategy,
+# derived in OpticalOrchestrator._da_factory.
 ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
     "simulation": None,
-    "optical_device": "rotation > hflip > vflip > random-permutation > gaussian-noise",
+    "optical_device": "gaussian-noise",
 }
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
