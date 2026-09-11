@@ -34,9 +34,13 @@ EPSILON_STAR_SEED: int = 0
 
 
 def _knob_to_augment_kwargs(strength: float) -> dict[str, float]:
-    """Map the [0, 1] strength knob onto the optical DA's own parameters."""
+    """Map the [0, 1] strength knob onto the optical DA's own parameters.
+
+    s is the permutation probability of every component (flips, rotation and
+    random-permutation alike). `noise_coeff` reaches a chain that still names
+    gaussian-noise and is inert otherwise."""
     return {
-        "p": 0.5 * float(strength),  # flip/rotation probability
+        "p": float(strength),
         "noise_coeff": float(np.sqrt(0.1 * strength)),  # up to 0.1 Var(X)
     }
 

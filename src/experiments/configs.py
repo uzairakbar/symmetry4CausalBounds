@@ -247,14 +247,18 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         # rho tr(S)/k under calibrated budgets, tr(S)/k under raw budgets (rho = 1
         # there, see ExpansionStrategy). The label is the same in both cases.
         xlabel=r"$\rho \operatorname{tr}(\mathcal{S})/k$",
-        # tuned to the informative range: past it both DAs saturate and the
+        # sim: tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
-        # Calibrated, optical never reaches x < 1 -- its permutations symmetrise
-        # rather than inflate the covariance, so rho outgrows the trace and
-        # Prop. 2 never holds for it. Under raw budgets tr(S)/k <= 1 on every
-        # step of both datasets, so the 1.0 vline sits at or past the right edge.
+        # optical: s is the permutation probability of every component
+        # (_knob_to_augment_kwargs). Measured on the shipped chain (seed 42):
+        # tr(S)/k 0.79 -> 1.09 and rho 1.55 -> 1.67 from s = 0.2 to 0.99, both
+        # monotone, so the recalibrated axis crosses Prop. 2's 1.0. Below 0.2
+        # tr(S)/k folds back (0.94 at s = 0.01, minimum at 0.2 on every seed
+        # measured), which would put two knobs on one x and zigzag the sorted
+        # line, so the grid starts at 0.2. p = 1 is excluded: the Bernoulli
+        # scaler divides by sqrt(p(1-p)) = 0 there (NaN instrument for DA+PI+IV).
         grid_fn=lambda dataset, n: (
-            np.logspace(-1.5, 1.0, num=n) if dataset == "simulation" else np.linspace(0.01, 0.3, num=n)
+            np.logspace(-1.5, 1.0, num=n) if dataset == "simulation" else np.linspace(0.2, 0.99, num=n)
         ),
         xscale="linear",
         vlines=(1.0,),
