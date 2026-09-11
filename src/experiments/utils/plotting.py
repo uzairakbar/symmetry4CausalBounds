@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from loguru import logger
-from matplotlib.ticker import NullFormatter
+from matplotlib.ticker import LogLocator, MaxNLocator, NullFormatter, ScalarFormatter
 from numpy.typing import NDArray
 
 from .constants import (
@@ -235,6 +235,43 @@ def _label_major_ticks_only(*axes):
         ax.yaxis.set_minor_formatter(NullFormatter())
 
 
+def _major_ticks_in_view(axis) -> int:
+    lo, hi = sorted(axis.get_view_interval())
+    return int(np.sum([(lo <= t <= hi) for t in axis.get_majorticklocs()]))
+
+
+def _at_least_two_major_ticks(*axes, skip_x=()):
+    """
+    Every axis shows at least two labelled major ticks, or the reader cannot
+    size the scale.
+
+    A log axis spanning under a decade (the n sweep: 128..1024, clipped to
+    (128, 1006) or (128, 982)) holds at most one decade tick, so the default
+    LogLocator leaves zero or one major in view. Where fewer than two majors fall
+    inside the view interval, a log axis gets a LogLocator on (1, 2, 5) x 10^k
+    with plain-number labels (LogFormatterSciNotation labels only one of the (1,
+    2, 5) ticks in view), and a linear axis a MaxNLocator that insists on two.
+    Called AFTER the last limit or scale change at every figure site; axes in
+    `skip_x` keep their x ticks (the digit sweep's thumbnails ARE its ticks).
+    Ends by re-blanking the minor labels, which a new locator would reinstate.
+    """
+    for ax in axes:
+        for axis, scale in ((ax.xaxis, ax.get_xscale()), (ax.yaxis, ax.get_yscale())):
+            if axis is ax.xaxis and ax in skip_x:
+                continue
+            if _major_ticks_in_view(axis) >= 2:
+                continue
+            if scale == "log":
+                axis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+                formatter = ScalarFormatter()
+                formatter.set_scientific(False)
+                formatter.set_useOffset(False)
+                axis.set_major_formatter(formatter)
+            else:
+                axis.set_major_locator(MaxNLocator(nbins=4, min_n_ticks=2))
+    _label_major_ticks_only(*axes)
+
+
 def _get_method_color(method_name: str) -> str:
     """Get color for a method from the color palette."""
     palette = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4", "C5"])
@@ -379,6 +416,7 @@ def create_sweep_plot(
         # (trS opts out to linear on purpose), not a default to be second-guessed.
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
         _label_major_ticks_only(plt.gca())
+        _at_least_two_major_ticks(plt.gca())
 
         # Reference thresholds (budget ratio 1, Prop. 2 threshold): one unlabelled
         # line each. AFTER _rescale: gated on the resolved xlim, so a narrowing
@@ -539,6 +577,7 @@ def create_query_sweep_plot(
     plt.ylim([min_mean - padding, max_mean + padding])
     plt.xscale(xscale)
     _label_major_ticks_only(plt.gca())
+    _at_least_two_major_ticks(plt.gca())
 
     # Legend
     hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
@@ -698,6 +737,7 @@ def create_panel_plot(
         if "ylim" in cfg:
             ax.set_ylim(cfg["ylim"])
     _label_major_ticks_only(*axes.ravel())
+    _at_least_two_major_ticks(*axes.ravel())
 
     # === Legend ===
     ax_legend = axes[2, 1]
@@ -895,6 +935,8 @@ def create_perf_plot(
         if ax is not None and ax_cost is not None:
             fig.align_ylabels([ax, ax_cost])
         _label_major_ticks_only(*fig.axes)  # fig.axes includes the twin
+        # x is categorical (one fixed tick per method), never re-located
+        _at_least_two_major_ticks(*fig.axes, skip_x=tuple(fig.axes))
         fig.tight_layout()
         plt.show()
 
@@ -994,6 +1036,7 @@ def create_digit_sweep_plot(
     ax.set_xticklabels([])  # the thumbnails ARE the ticks
     ax.tick_params(labelsize=FS_TICK)
     _label_major_ticks_only(ax)
+    _at_least_two_major_ticks(ax, skip_x=(ax,))
 
     # thumbnails below the axis. The SEM renders RGB = [t,0,1-t]*grey, so the
     # background is exactly 0 and the ink mask doubles as the alpha channel --
