@@ -31,6 +31,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A35 | `a35_sim_dim.py` | simulation `treatment_dim`: optional yaml key with the `DatasetDefaults` fallback (the SEM's 32), validated as a positive int, required by `SimulationOrchestrator`, reaches the SEM draw and the DA, and every script states it |
 | A36 | `a36_trs_knob.py` | optical trS knob: `RandomPermutation` honours p (bit-identical at the default p = 1, identity rows kept under p < 1), p = s, grid `linspace(0.2, 0.99)`, tr(S)/k rising and pinned on the shipped-chain fixture |
 | A37 | `a37_major_ticks.py` | at least two labelled major ticks on every axis: the (1, 2, 5) log fallback with plain labels on the n sweep (200, 500, 1000), every sweep param on both datasets, the query sweep and the perf figure, on synthetic inputs |
+| A38 | `a38_recalibrate.py` | the recalibrated post-DA budget (SS4.2): every ball at sigma-hat sqrt(gamma~), gamma~ = gamma((1 - t) + t/rho); Cor. 3 closed form at gamma~, the registry hands rho to the standalone DA+ balls only, the predict-time knob, DA+PI(False)/DA+PI(True) == sqrt(rho_hat) on one sim experiment, ordering under the configured toggles, intersection == max/min of its branches, the floor guard on the same ball, oracle units, `TOGGLE_KEYS`; the old token is grepped away and the recipes that still carry it are reported |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
