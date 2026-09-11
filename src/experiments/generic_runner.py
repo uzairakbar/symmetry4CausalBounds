@@ -165,6 +165,8 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         if not np.isfinite(rho):
             logger.warning("rho_hat not computable; falling back to 1.")
             return 1.0
+        if rho < 1.0:
+            logger.warning(f"rho_hat {rho:.4f} < 1 (DPI says >= 1): sampling noise; the solvers read it as 1.")
         return float(rho)
 
     @property

@@ -284,7 +284,10 @@ class ParamSweepRunner(BaseExperimentRunner):
         the intersections compute the same ratio from their own two branches."""
         if data is None or getattr(data, "GX", None) is None:
             return 1.0
-        return self._finite(rho_hat(data.X, data.GX, data.y, intercept=self.mean_match), 1.0, "rho_hat")
+        rho = self._finite(rho_hat(data.X, data.GX, data.y, intercept=self.mean_match), 1.0, "rho_hat")
+        if rho < 1.0:
+            logger.warning(f"rho_hat {rho:.4f} < 1 (DPI says >= 1): sampling noise; the solvers read it as 1.")
+        return rho
 
     def _finite(self, value, fallback, name: str) -> float:
         if value is None or not np.isfinite(value):

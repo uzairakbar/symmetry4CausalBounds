@@ -41,8 +41,10 @@ def recalibrated_gamma(gamma, rho, t) -> float:
     t = 1 scales the inherited gamma down to gamma/rho, the budget the DA's
     information loss rho = sigma~^2/sigma^2 leaves on the augmented data; t = 0
     keeps gamma. Linear in between, which is what the recalibrate sweep plots.
+    rho >= 1 in population (DPI); a sample rho_hat < 1 is noise and is read as 1,
+    so the post-DA budget never exceeds the inherited gamma.
     """
-    return float(gamma) * ((1.0 - float(t)) + float(t) / float(rho))
+    return float(gamma) * ((1.0 - float(t)) + float(t) / max(float(rho), 1.0))
 
 
 class BoundedSA(SA):
@@ -117,7 +119,9 @@ class BoundedSA(SA):
         rho = float(rho)
         if not np.isfinite(rho) or rho <= 0.0:
             raise ValueError(f"rho must be a positive finite float; got {rho!r}")
-        self._rho = rho
+        # DPI: rho >= 1 in population; a sample value below 1 is read as 1, so the
+        # recalibrated budget never exceeds the inherited gamma (`recalibrated_gamma`)
+        self._rho = max(rho, 1.0)
 
     @property
     def recalibrate(self) -> float:

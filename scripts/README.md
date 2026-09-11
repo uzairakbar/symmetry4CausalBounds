@@ -49,7 +49,7 @@ head weights and the solver backtracks along segments, so it enforces a BAND
 `|mean_n h - ybar| <= tau` with `tau = 2 sqrt((sigma_hat^2 + b_r2) / n_pi)`, where
 `b_r2` is the ball's own budget -- two standard errors of the level under the
 sensitivity model's own bound on `Var(U + xi)` (see `MEAN_BAND_SE`; the second term
-is the budget, not `sigma_hat^2 gamma`, so raw budgets get the right units). It
+is the budget, not `sigma_hat^2 gamma`, so the recalibrated budget is the one in the band). It
 enters as the PAIR `(m <= tau, -m <= tau)`, linear in `m`; the squared form
 `m^2 <= tau^2` is ill-conditioned as the slab thins. The band is a live constraint,
 so PI/DA+PI take the full multi-start polish there; `a27 --polish-compare` at

@@ -10,7 +10,8 @@ inherited gamma.
          and are reported, not gated);
   (ii)   closed form on a synthetic fixture: PartialR2(gamma, rho, recalibrate=t) equals
          Cor. 3 at gamma~ to 1e-6 for t in (0, 0.5, 1) and rho in (1.3, 2.0); rho = 1
-         makes t = 0 and t = 1 bit-identical; the registry hands rho to the standalone
+         makes t = 0 and t = 1 bit-identical and rho = 0.5 is read as 1 (DPI), so the
+         budget never exceeds the inherited gamma; the registry hands rho to the standalone
          DA+ balls only and the intersections read theirs off their branches;
   (iii)  predict-time knob: `predict(Q, recalibrate=1.0)` on a t = 0 model equals the
          t = 1 model, and the intersection follows its branches;
@@ -20,7 +21,7 @@ inherited gamma.
   (iv')  configured leg (toggles read from config.yaml): PI bit-identical, DA+PI and
          DA+PI+IV narrower under True at every query and strictly in the mean, the pad
          still applied;
-  (v)    the intersection == max/min of the standalone branches under True, both legs;
+  (v)    both intersections == max/min of their standalone branches under True, both legs;
   (vi)   `constraint_floor(gamma, rho=r, recalibrate=t)` == `constraint_floor(gamma~)`;
   (vii)  oracle units: gamma* == bias^2/sigma^2, `thm1_gamma_min` is its closed form,
          and no oracle function still takes the old flag;
@@ -63,7 +64,7 @@ from src.sem.simulation import LinearSimulationSEM  # noqa: E402
 # built at runtime so this file passes its own grep
 OLD = "".join(("cali", "brate"))
 GAMMA, EPSILON, EPSILON_IV = 0.5, 0.3, 0.2
-METHODS = ["PI", "DA+PI", "DA+PI+IV", "PI&DA+PI"]
+METHODS = ["PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
 N_QUERIES = 32
 N_JOBS = 4
 FAIL = []
@@ -167,6 +168,15 @@ def leg_ii():
     off = PartialR2(rho=1.0, recalibrate=False, **common).fit(GX, y).predict(Q)
     on = PartialR2(rho=1.0, recalibrate=True, **common).fit(GX, y).predict(Q)
     check("(ii) rho = 1: t = 0 and t = 1 bit-identical", np.array_equal(off, on))
+    # DPI: a sample rho below 1 is noise and must not grow the ball past gamma
+    below = PartialR2(rho=0.5, recalibrate=True, **common).fit(GX, y)
+    check(
+        "(ii) rho = 0.5, t = 1: the budget is the inherited gamma",
+        below.budget(GAMMA) == GAMMA,
+        f"{below.budget(GAMMA)}",
+    )
+    check("(ii) rho = 0.5, t = 1: the bounds are the t = 0 bounds", np.array_equal(below.predict(Q), off))
+    check("(ii) recalibrated_gamma(g, 0.5, 1) == g", recalibrated_gamma(GAMMA, 0.5, 1.0) == GAMMA)
 
     names = ["PI", "PI+INV", "PI+IV", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
     built = MethodRegistry.build_methods(
@@ -293,16 +303,16 @@ def leg_iv_configured():
 
 
 def leg_v(on, label):
-    got = on["PI&DA+PI"]
-    want = np.column_stack(
-        [np.maximum(on["PI"][:, 0], on["DA+PI"][:, 0]), np.minimum(on["PI"][:, 1], on["DA+PI"][:, 1])]
-    )
-    delta = float(np.nanmax(np.abs(got - want)))
-    check(
-        f"(v) PI&DA+PI == max/min of PI and DA+PI under True ({label})",
-        np.allclose(got, want, atol=1e-9),
-        f"max |d| {delta:.2e}",
-    )
+    # both intersection pairs: a dropped `augmented.rho` on either one shows up here
+    for name, da in (("PI&DA+PI", "DA+PI"), ("PI&DA+PI+IV", "DA+PI+IV")):
+        got = on[name]
+        want = np.column_stack([np.maximum(on["PI"][:, 0], on[da][:, 0]), np.minimum(on["PI"][:, 1], on[da][:, 1])])
+        delta = float(np.nanmax(np.abs(got - want)))
+        check(
+            f"(v) {name} == max/min of PI and {da} under True ({label})",
+            np.allclose(got, want, atol=1e-9),
+            f"max |d| {delta:.2e}",
+        )
 
 
 # --------------------------------------------------------------- (vi) the floor
