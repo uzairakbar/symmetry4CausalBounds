@@ -17,12 +17,14 @@
         off the runner's own oracle. This is the reason a dip exists at all.
         Catches: a constant put back under the radius (the old 2^-1). Misses:
         whether the excess is enough to move the centre out; that is (iii).
-  (iii) the dip, in data: one sim experiment, 5 steps, `runner.run` under the
-        toggles in config.yaml; DA+PI coverage at the smallest r is < 1, at r = 1
-        it is 1.0, and its minimum over the grid stays above 0.7. Catches: a flat
-        line (constant too small), a cliff (too large), a curve that does not
-        recover at eps*. Misses: the 8-experiment band and the other DA+ lines,
-        which the probe log holds (see the comment at the constant).
+  (iii) the dip, in data: two sim experiments, 5 steps, `runner.run` under the
+        toggles, `n_samples` and `treatment_dim` of config.yaml (DatasetDefaults
+        when omitted, so a moved dimension is tested at the figure's own); the
+        mean DA+PI coverage at the smallest r is < 1, at r = 1 it is 1.0, and its
+        minimum over the grid stays above 0.7. Catches: a flat line (constant too
+        small), a cliff (too large), a curve that does not recover at eps*.
+        Misses: the 8-experiment band and the other DA+ lines, which the probe
+        log holds (see the comment at the constant).
   (iv)  optical stays at 2^-1. Catches: an edit that moves it. Misses: nothing
         else; the optical curve is flat by mechanism, not by this number.
 
@@ -45,13 +47,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from src.experiments import generic_runner  # noqa: E402
-from src.experiments.configs import ROBUSTNESS_EPSILON_TRUE  # noqa: E402
+from src.experiments.configs import DATASET_DEFAULTS, ROBUSTNESS_EPSILON_TRUE  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
 N_STEPS = 5
+N_EXPERIMENTS = 2
 N_JOBS = 4
 COVERAGE_FLOOR = 0.7
 TMPROOT = os.path.expanduser("~/scratch/tmp/a40")
@@ -64,24 +67,40 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def configured_toggles():
+def configured():
+    """The toggles and the sim draw (`n_samples`, `treatment_dim`) of config.yaml,
+    the latter falling back to DatasetDefaults as main.py does."""
     with open(os.path.join(REPO, "config.yaml")) as handle:
-        defaults = (yaml.safe_load(handle) or {}).get("defaults") or {}
-    return dict(
+        config = yaml.safe_load(handle) or {}
+    defaults = config.get("defaults") or {}
+    sim = config.get("simulation") or {}
+    fallback = DATASET_DEFAULTS["simulation"]
+    toggles = dict(
         recalibrate=bool(defaults.get("recalibrate", True)),
         pad=bool(defaults.get("pad", False)),
         clipy=bool(defaults.get("clipy", True)),
         mean_match=bool(defaults.get("mean_match", True)),
     )
+    draw = dict(
+        n_samples=int(sim.get("n_samples", fallback.n_samples)),
+        treatment_dim=int(sim.get("treatment_dim", fallback.treatment_dim)),
+    )
+    return toggles, draw
 
 
-def build(experiment, **toggles):
+def build(experiment, draw, **toggles):
     set_seed(42)
     common = dict(
-        seed=42, n_experiments=1, sweep_samples=N_STEPS, methods=METHODS, hyperparameters={}, n_jobs=N_JOBS, **toggles
+        seed=42,
+        n_experiments=N_EXPERIMENTS,
+        sweep_samples=N_STEPS,
+        methods=METHODS,
+        hyperparameters={},
+        n_jobs=N_JOBS,
+        **toggles,
     )
     if experiment == "simulation":
-        return SimulationOrchestrator(n_samples=2048, kernel_dim=0, treatment_dim=32, **common)
+        return SimulationOrchestrator(kernel_dim=0, **draw, **common)
     return OpticalOrchestrator(n_samples=1000, augmentation="rotation > hflip > vflip > random-permutation", **common)
 
 
@@ -141,15 +160,17 @@ def leg_ii(sim):
     check("(ii) eps* > sigma sqrt(gamma*)", eps > radius_outcome, f"{eps:.4g} vs {radius_outcome:.4g}")
 
 
-def leg_iii(sim):
-    print("(iii) the dip on one sim experiment")
+def leg_iii(sim, draw):
+    print(f"(iii) the dip on {N_EXPERIMENTS} sim experiments, n {draw['n_samples']}, d {draw['treatment_dim']}")
     x, results, _ = sim.run("a40 epsilon sweep")
     x = np.asarray(x, dtype=float)
-    cov = np.asarray(results["DA+PI"]["coverage"], dtype=float)[:, 0]
-    w_da = np.asarray(results["DA+PI"]["interval_width"], dtype=float)[:, 0]
-    w_pi = np.asarray(results["PI"]["interval_width"], dtype=float)[:, 0]
+    per_exp = np.asarray(results["DA+PI"]["coverage"], dtype=float)
+    cov = per_exp.mean(axis=1)
+    w_da = np.asarray(results["DA+PI"]["interval_width"], dtype=float).mean(axis=1)
+    w_pi = np.asarray(results["PI"]["interval_width"], dtype=float).mean(axis=1)
     print("      r:        " + " ".join(f"{v:.4g}" for v in x))
     print("      DA+PI cov " + " ".join(f"{v:.3f}" for v in cov))
+    print("      per exp at the smallest r: " + " ".join(f"{v:.3f}" for v in per_exp[0]))
     print("      DA+PI/PI  " + " ".join(f"{v:.3f}" for v in w_da / w_pi))
     check("(iii) r = 1 is the last grid point", np.isclose(x[-1], 1.0), f"{x[-1]:.6g}")
     check("(iii) DA+PI coverage < 1 at the smallest r", cov[0] < 1.0, f"{cov[0]:.4f} at r {x[0]:.4g}")
@@ -169,12 +190,12 @@ if __name__ == "__main__":
     os.chdir(REPO)
     os.makedirs(TMPROOT, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix="a40_", dir=TMPROOT)
-    toggles = configured_toggles()
-    runners = {name: epsilon_runner(build(name, **toggles)) for name in ("simulation", "optical_device")}
+    toggles, draw = configured()
+    runners = {name: epsilon_runner(build(name, draw, **toggles)) for name in ("simulation", "optical_device")}
     leg_i(runners)
     sim, _ = runners["simulation"]
     leg_ii(sim)
-    x, cov, ratio = leg_iii(sim)
+    x, cov, ratio = leg_iii(sim, draw)
     leg_iv()
     with open(os.path.join(tmp, "dip.txt"), "w") as handle:
         for r, c, w in zip(x, cov, ratio, strict=True):

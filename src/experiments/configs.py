@@ -205,14 +205,14 @@ FLOOR_GUARD_R: float = 9.0
 # the DA (0.71 on sim: bias^2 0.505), so h* only leaves it below eps* once the
 # DA+ERM centre drifts by that much, and the drift grows with eps*. At the old
 # 0.5 nothing ever left the ball and every DA+ coverage curve sat at 1.0.
-# Measured on sim (d 32, n 2048, recalibrate/pad/mean_match on, clipy off,
-# r = eps/eps* from 2^-6 to 1; logs ~/scratch/tmp/impl_v7/logs/runs/):
-#   eps*  strength   DA+PI at 2^-6   DA+PI+IV   DA+PI/PI width at r = 1
-#   1     0.09-0.10  1.000           1.000      0.91
-#   2     0.18-0.20  1.000           0.983      1.16
-#   3     0.26-0.30  0.917           0.885      1.37   (4 exp, 16 steps)
-#   4     0.35-0.40  0.757           0.737      1.62   (4 exp, 16 steps)
-#   6     0.54-0.61  0.576           0.576      2.13
+# Measured on sim (seed 42, d 32, n 2048, recalibrate/pad/mean_match on, clipy
+# off, r = eps/eps* from 2^-6 to 1; logs ~/scratch/tmp/impl_v7/logs/runs/):
+#   eps*  strength   DA+PI at 2^-6   min DA+PI+IV   DA+PI/PI width at r = 1
+#   1     0.09-0.10  1.000           1.000          0.91
+#   2     0.18-0.20  1.000           0.983          1.16
+#   3     0.26-0.30  0.917           0.885          1.37   (4 exp, 16 steps)
+#   4     0.35-0.40  0.757           0.737          1.62   (4 exp, 16 steps)
+#   6     0.54-0.61  0.576           0.576          2.13
 # All are back at 1.0 by r = 1. 3 is the smallest with a dip the experiment
 # band does not swallow (per-experiment 0.84-0.97 at 2^-6), a slope and not a
 # cliff; 4 slips under 0.8 and 6 is a failure mode. The price is DA+PI 1.37x
