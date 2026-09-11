@@ -50,6 +50,9 @@ class SimulationConfig:
 
     gamma: float = 1.0
     epsilon: float = 2**-8
+    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5), which is
+    # the more favourable setting there
+    eps_tol: float = 2**-8
     # SEM confounding. None = fully confounded, which drives sigma^2 to the
     # outcome-noise floor and rho to ~57: Prop. 2 can then never hold.
     gamma_true: float | None = 1.0
@@ -102,6 +105,9 @@ class OpticalDeviceConfig:
     # former understates Thm. 3.A's own requirement ~3x. See `epsilon_pad_star`.
     pad_epsilon: float | None = None
     epsilon_true: float | None = None
+    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5), which is
+    # the more favourable setting there
+    eps_tol: float = 2**-8
     test_fraction: float = 0.1
     dataset_index: int = 8
     ground_truth_model: Literal["linear", "polynomial"] = "polynomial"
@@ -173,7 +179,7 @@ EPS_TOL: float = 2**-5
 # `ParamSweepRunner._floor_guard`, which only ever RAISES a budget, and only where the
 # oracle value was already unusable.
 #
-# Calibrated on the simulation trS grid, where the oracle IV budget (EPS_TOL, 0.0039)
+# Calibrated on the simulation trS grid, where the oracle IV budget (EPS_TOL, then 2**-8)
 # sits below the floor at the 5 lowest knobs and DA+PI+IV was all-NaN there. Measured
 # DA+PI+IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
 #   r=2.25  0.82-0.88            under-covers

@@ -108,9 +108,13 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         method_factory: Callable | None = None,
         default_gamma: float = 1.0,
         default_epsilon: float = 2**-8,
+        eps_tol: float = EPS_TOL,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # knife-edge tolerance on the oracle IV budget; the dataset configs set
+        # it for the query sweep, the param sweeps keep EPS_TOL
+        self.eps_tol = float(eps_tol)
 
         # Create SEM and DA
         self.sem = sem_factory()
@@ -161,9 +165,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         to the constraint's own floor if it lands under it (`FLOOR_GUARD_R`)."""
         budget = getattr(self.oracle, "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
-            logger.warning("eps_iv_star unavailable; IV budget falls back to EPS_TOL.")
+            logger.warning("eps_iv_star unavailable; IV budget falls back to the tolerance.")
             budget = 0.0
-        budget = float(budget) + EPS_TOL
+        budget = float(budget) + self.eps_tol
 
         if getattr(self, "G", None) is None or np.size(self.G) == 0:
             return budget

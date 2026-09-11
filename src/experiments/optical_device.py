@@ -114,12 +114,12 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             logger.info(f"Optical padding eps (q{PAD_QUANTILE:g} of |W|): {self._epsilon_pad:.6f}")
         return self._epsilon_pad
 
-    def _epsilon_budget(self, configured: float | None) -> float:
+    def _epsilon_budget(self, configured: float | None, tol: float = EPS_TOL) -> float:
         """PI+INV's ASSUMED invariance bound -- the SS3.1 constraint budget.
 
         `None` means take the measured one. SS3.1 constrains E_inv(h) <= eps^2, and
         `epsilon_star` is exactly that functional evaluated at h_*, so eps* +
-        EPS_TOL admits h_* by construction while any smaller budget excludes it --
+        `tol` admits h_* by construction while any smaller budget excludes it --
         an invalid interval, not a tight one. Whether the published 2**-2 was
         smaller depends on the augmentation in force (measured: 0.2121 for
         `rotation > gaussian-noise`, which config.yaml ships, but 0.2600 for
@@ -129,7 +129,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         """
         if configured is not None:
             return float(configured)
-        return self.measured_epsilon_star() + EPS_TOL
+        return self.measured_epsilon_star() + tol
 
     def _pad_budget(self, configured: float | None) -> float:
         """Thm. 3.A's epsilon. `None` takes the measured pointwise budget; a float
@@ -162,7 +162,8 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     method_factory=self.build_methods,
                     default_gamma=OPTICAL_CONFIG.gamma,
-                    default_epsilon=self._epsilon_budget(OPTICAL_CONFIG.query_epsilon),
+                    default_epsilon=self._epsilon_budget(OPTICAL_CONFIG.query_epsilon, tol=OPTICAL_CONFIG.eps_tol),
+                    eps_tol=OPTICAL_CONFIG.eps_tol,
                     **kwargs,
                 )
 

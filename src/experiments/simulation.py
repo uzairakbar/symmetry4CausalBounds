@@ -84,6 +84,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     method_factory=self.build_methods,
                     default_gamma=SIMULATION_CONFIG.gamma,
                     default_epsilon=SIMULATION_CONFIG.epsilon,
+                    eps_tol=SIMULATION_CONFIG.eps_tol,
                     **kwargs,
                 )
 
