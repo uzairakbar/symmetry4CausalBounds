@@ -166,7 +166,7 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 # =============================================================================
 
 # keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
-EPS_TOL: float = 2**-8
+EPS_TOL: float = 2**-5
 
 # Floor guard. An auto-set budget below the constraint's own attainable floor is not
 # a tighter bound, it is NO bound: every query comes back INFEASIBLE and the method
@@ -204,7 +204,7 @@ SPECTRUM_KEEP: float = 0.999
 
 # budget-ratio grid: centred on 1, i.e. on the oracle value
 def _RATIO_GRID(dataset, n):
-    return np.geomspace(2**-3, 2**3, num=n)
+    return np.geomspace(2**-6, 2**0, num=n)
 
 
 @dataclass(frozen=True)
