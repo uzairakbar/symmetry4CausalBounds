@@ -29,6 +29,7 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A33 | `a33_gamma_vline.py` | gamma sweep annotation: no strategy overrides the spec vlines, one unlabelled line per in-view reference and no text, `generic_runner` free of `thm1_gamma_min`, `sweep_record` stores the spec constant |
 | A34 | `a34_eps_tol.py` | query sweep tolerance: `eps_tol` 2**-8 from `SimulationConfig` / `OpticalDeviceConfig` reaches the query runners' IV and optical budgets, the param sweeps and floor guards keep `EPS_TOL` 2**-5 |
 | A35 | `a35_sim_dim.py` | simulation `treatment_dim`: optional yaml key with the `DatasetDefaults` fallback (the SEM's 32), validated as a positive int, required by `SimulationOrchestrator`, reaches the SEM draw and the DA, and every script states it |
+| A36 | `a36_trs_knob.py` | optical trS knob: `RandomPermutation` honours p (bit-identical at the default p = 1, identity rows kept under p < 1), p = s, grid `linspace(0.2, 0.99)`, tr(S)/k rising and pinned on the shipped-chain fixture |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.

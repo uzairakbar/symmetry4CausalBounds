@@ -13,7 +13,8 @@ grid, both datasets, both toggles, through the production path (`sweep_record`,
          and trS recomputed by the gate on the runner's own data;
   (ii)   the returned x is the experiment mean in KNOB order, `trS_values.pkl` is
          bit-identical to it, and the width array is (n_steps, n_exp);
-  (iii)  raw: x falls strictly with the knob, and on an unbootstrapped render the
+  (iii)  raw: x is strictly monotone in the knob (falling on sim, rising on the
+         optical fixture, whose knob is the permutation probability), and on an unbootstrapped render the
          DA+PI line carries `sort(x)` against the width means in that order, exactly,
          and its CI band (the `fill_between` polygon in the line's colour) carries the
          2.5/97.5 width percentiles in that same order, so a sorted line over an
@@ -74,8 +75,11 @@ N_EXP, N_STEPS = 2, 4
 LINE = re.compile(r"trS step (\S+): rho (\S+) tr\(S\)/k (\S+) \(untruncated (\S+)\) x (\S+)(.*)$")
 MARK = {True: "calibrated: x = rho tr(S)/k", False: "raw budgets: rho := 1, x = tr(S)/k"}
 # the calibrated product folds back on the sim fixture (steps 0 and 1 swap); the
-# raw axis is strictly decreasing, argsort [3, 2, 1, 0], on both fixtures
+# raw axis is strictly monotone on both fixtures: falling on sim (argsort
+# [3, 2, 1, 0]), rising on optical since random-permutation honours p = s
+# (tr(S)/k 0.785 -> 1.015 on the 4-step grid, measured 2026-09-11)
 EXPECT_ARGSORT_CAL = {"simulation": [3, 2, 0, 1], "optical_device": [0, 1, 2, 3]}
+EXPECT_RAW_SIGN = {"simulation": -1, "optical_device": 1}
 AXIS_KEYS = {"knob", "rho", "trS", "x", "calibrate"}
 TMPROOT = os.path.expanduser("~/scratch/tmp/a31")
 FAIL = []
@@ -103,7 +107,7 @@ def build(experiment, calibrate):
     )
     if experiment == "simulation":
         return SimulationOrchestrator(n_samples=2048, kernel_dim=0, treatment_dim=32, **common)
-    return OpticalOrchestrator(n_samples=1000, augmentation="rotation > gaussian-noise", **common)
+    return OpticalOrchestrator(n_samples=1000, augmentation="rotation > hflip > vflip > random-permutation", **common)
 
 
 def second_runner(orch, param, **override):
@@ -219,7 +223,7 @@ def run_one(experiment, calibrate):
     if not calibrate:
         # (iii) raw: monotone axis, sorted line, y reordered with x, and the CI band
         # reordered with the line (the band is drawn from the same reordered array)
-        dec = bool((np.diff(x) < 0).all())
+        dec = bool((np.sign(np.diff(x)) == EXPECT_RAW_SIGN[experiment]).all())
         xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None
         yd = np.asarray(lines[0].get_ydata(), dtype=float) if len(lines) == 1 else None
         xs_ok = xd is not None and np.array_equal(xd, np.sort(x))
@@ -235,7 +239,8 @@ def run_one(experiment, calibrate):
             tag,
             "(iii)",
             dec and xs_ok and ys_ok and band_ok,
-            f"decreasing {dec} xdata==sort(x) {xs_ok} ydata exact {ys_ok} band exact {band_ok}; "
+            f"monotone ({'falling' if EXPECT_RAW_SIGN[experiment] < 0 else 'rising'}) {dec} "
+            f"xdata==sort(x) {xs_ok} ydata exact {ys_ok} band exact {band_ok}; "
             f"xdata {None if xd is None else np.round(xd, 5).tolist()}",
         )
     else:
