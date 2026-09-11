@@ -11,7 +11,7 @@ from loguru import logger
 from sklearn.model_selection import train_test_split
 
 from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
-from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP
+from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, ROBUSTNESS_EPSILON_TRUE, SPECTRUM_KEEP, TRS_XLABEL
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, trace_S_over_k
 from src.methods.sensitivity_models import constraint_floor
@@ -408,15 +408,16 @@ class EpsilonRatioStrategy(GenericParamSweep):
 class ExpansionStrategy(GenericParamSweep):
     """
     Informativeness: sweep the DA strength knob; the x-axis is the MEASURED
-    relative expansion of Prop. 2, post-poly, averaged over experiments: the
-    factor `rho if recalibrate else 1.0` times tr(S)/k, and the label stays
-    `rho tr(S)/k`. That keeps the axis of the shipped toggle; the factor and
-    label that follow the recalibrated mechanism are the next change. Base
-    data is fixed per experiment and the DA draws use common random numbers.
-    On both datasets tr(S)/k was measured to fall with the knob while rho rises,
-    so the product can fold back (it does on optical at full scale and on the
-    4-step sim fixture of a31), which is why `create_sweep_plot` sorts the
-    (x, y) pairs before drawing.
+    relative expansion of Prop. 2, post-poly, averaged over experiments, for
+    the ball in force. Recalibrated (`recalibrate: true`) the DA+ radius is
+    sigma~ sqrt(gamma/rho) = sigma sqrt(gamma), so the ratio is tr(S)/k and the
+    axis plots x = tr(S)/k under that label; at the inherited gamma the radius
+    carries sqrt(rho), so x = rho tr(S)/k under `rho tr(S)/k`. The label follows
+    the factor (`xlabel`, TRS_XLABEL) and both go into the axis pkl. Base data
+    is fixed per experiment and the DA draws use common random numbers. On sim
+    tr(S)/k falls with the knob while rho rises, so the product can fold back
+    (it does on the 4-step sim fixture of a31), which is why `create_sweep_plot`
+    sorts the (x, y) pairs it is given, i.e. the plotted quantity, before drawing.
     """
 
     param_key = "trS"
@@ -437,11 +438,13 @@ class ExpansionStrategy(GenericParamSweep):
         # the raw pinv reads ~23% high at the top of the grid (see SPECTRUM_KEEP).
         rho = rho_hat(data.X, data.GX, data.y, intercept=self.mean_match)
         trace_S = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-        factor = rho if self.recalibrate else 1.0
+        # the ball in force: recalibrated the sqrt(rho) cancels, so x = tr(S)/k;
+        # at the inherited gamma it does not, so x = rho tr(S)/k
+        factor = 1.0 if self.recalibrate else rho
         x = factor * trace_S
         self._measured[(experiment_index, float(param))] = x
         self._factors[(experiment_index, float(param))] = (rho, trace_S)
-        convention = "recalibrated: x = rho tr(S)/k" if self.recalibrate else "inherited gamma: rho := 1, x = tr(S)/k"
+        convention = "recalibrated: x = tr(S)/k" if self.recalibrate else "inherited gamma: x = rho tr(S)/k"
         logger.info(
             f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
             f"(untruncated {trace_S_over_k(data.X, data.GX):.5f}) "
@@ -474,11 +477,17 @@ class ExpansionStrategy(GenericParamSweep):
         # exactly as the base does, or this sweep alone bypasses the guard
         return self._floor_guard(per_step, data, "inv", experiment_index, "epsilon")
 
+    @property
+    def xlabel(self) -> str:
+        """The label of the factor in force (TRS_XLABEL), not the spec's static one."""
+        return TRS_XLABEL[bool(self.recalibrate)]
+
     def axis_record(self) -> dict[str, Any]:
         """
         Both factors of the measured x, per (knob, experiment), in KNOB order like
-        the values pkl: `x == nanmean(rho * trS, 1)` when recalibrated, `nanmean(trS, 1)`
-        otherwise, so the other convention is `nanmean` of the other product.
+        the values pkl: `x == nanmean(trS, 1)` when recalibrated, `nanmean(rho * trS, 1)`
+        otherwise, so the other convention is `nanmean` of the other product. The
+        toggle and the label the figure was drawn with ride along.
         """
         knob = np.asarray(self.get_param_range(), dtype=float)
         nan_pair = (np.nan, np.nan)
@@ -491,6 +500,7 @@ class ExpansionStrategy(GenericParamSweep):
             "trS": factors[:, :, 1],
             "x": self.observed_x(knob),
             "recalibrate": bool(self.recalibrate),
+            "xlabel": self.xlabel,
         }
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:

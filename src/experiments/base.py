@@ -252,6 +252,11 @@ class ParamSweepRunner(BaseExperimentRunner):
         return param_values
 
     @property
+    def xlabel(self) -> str:
+        """Label of the plotted x; strategies whose axis depends on a toggle override."""
+        return self.spec.xlabel
+
+    @property
     def vlines(self) -> tuple[float, ...]:
         """Reference x positions; strategies may add measured thresholds."""
         return self.spec.vlines
@@ -488,6 +493,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_cache = {}  # (param) -> (x, results, statuses), memo per param
         self._sweep_vlines = {}  # (param) -> measured reference x positions
         self._sweep_axis = {}  # (param) -> factors behind a measured x, or None
+        self._sweep_xlabel = {}  # (param) -> the runner's label for the plotted x
 
     @abstractmethod
     def get_query_runner_cls(self) -> type[QuerySweepRunner]:
@@ -549,6 +555,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_cache[param] = record
         self._sweep_vlines[param] = runner.vlines
         self._sweep_axis[param] = runner.axis_record()
+        self._sweep_xlabel[param] = runner.xlabel
         return record
 
     def _run_sweeps(self, sweep_spec):
@@ -575,7 +582,7 @@ class ExperimentOrchestrator(ABC):
                     },
                     experiment=self.name,
                     fname=f"{param}_{metric}",
-                    xlabel=PARAM_SPECS[param].xlabel,
+                    xlabel=self._sweep_xlabel.get(param, PARAM_SPECS[param].xlabel),
                     ylabel=metric_spec.ylabel,
                     xscale=PARAM_SPECS[param].xscale,
                     yscale=metric_spec.yscale,

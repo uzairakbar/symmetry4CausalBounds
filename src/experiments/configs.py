@@ -215,6 +215,14 @@ def _RATIO_GRID(dataset, n):
     return np.geomspace(2**-6, 2**0, num=n)
 
 
+# trS x-axis label by the `recalibrate` toggle: the ball in force decides which
+# Prop. 2 ratio the axis is (see ExpansionStrategy)
+TRS_XLABEL: dict[bool, str] = {
+    True: r"$\operatorname{tr}(\mathcal{S})/k$",
+    False: r"$\rho \operatorname{tr}(\mathcal{S})/k$",
+}
+
+
 @dataclass(frozen=True)
 class ParamSpec:
     """Axis + policy metadata for one sweepable parameter."""
@@ -243,16 +251,19 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         data_constant=True,
     ),
     "trS": ParamSpec(
-        # knob grid; the x-axis actually plotted is the MEASURED expansion:
-        # rho tr(S)/k under `recalibrate: true`, tr(S)/k otherwise (see
-        # ExpansionStrategy). The label is the same in both cases.
-        xlabel=r"$\rho \operatorname{tr}(\mathcal{S})/k$",
+        # knob grid; the x-axis actually plotted is the MEASURED expansion of
+        # Prop. 2 for the ball in force: tr(S)/k under `recalibrate: true`
+        # (the DA+ radius is sigma sqrt(gamma)), rho tr(S)/k under `false` (the
+        # radius carries sqrt(rho)). The runner picks the factor and the label
+        # (TRS_XLABEL); this static xlabel is the `false` one.
+        xlabel=TRS_XLABEL[False],
         # sim: tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
         # optical: s is the permutation probability of every component
         # (_knob_to_augment_kwargs). Measured on the shipped chain (seed 42):
         # tr(S)/k 0.79 -> 1.09 and rho 1.55 -> 1.67 from s = 0.2 to 0.99, both
-        # monotone, so the recalibrated axis crosses Prop. 2's 1.0. Below 0.2
+        # monotone, so the recalibrated axis tr(S)/k crosses Prop. 2's 1.0 and
+        # the inherited-gamma axis rho tr(S)/k (1.23 -> 1.82) sits above it. Below 0.2
         # tr(S)/k folds back (0.94 at s = 0.01, minimum at 0.2 on every seed
         # measured), which would put two knobs on one x and zigzag the sorted
         # line, so the grid starts at 0.2. p = 1 is excluded: the Bernoulli

@@ -145,14 +145,24 @@ class injected:
 
 
 # -------------------------------------------------------------------- renders
-def render_sweep(experiment, param, metric, x, results, save, **kwargs):
+def axis_xlabel(sweep_dir, param):
+    """The label the run drew its measured axis with (`<param>_axis.pkl`), else the spec's."""
+    path = f"{sweep_dir}/{param}_axis.pkl"
+    if os.path.exists(path):
+        record = load(path)
+        if isinstance(record, dict) and record.get("xlabel"):
+            return record["xlabel"]
+    return PARAM_SPECS[param].xlabel
+
+
+def render_sweep(experiment, param, metric, x, results, save, sweep_dir=None, **kwargs):
     spec = METRIC_SPECS[metric]
     plotting.create_sweep_plot(
         x,
         {name: record[spec.key] for name, record in results.items() if spec.include_ate or name != "ATE"},
         experiment=experiment,
         fname=f"{param}_{metric}",
-        xlabel=PARAM_SPECS[param].xlabel,
+        xlabel=axis_xlabel(sweep_dir, param) if sweep_dir else PARAM_SPECS[param].xlabel,
         ylabel=spec.ylabel,
         xscale=PARAM_SPECS[param].xscale,
         yscale=spec.yscale,
@@ -209,7 +219,7 @@ def row_a(artifacts, experiments, save):
             fewest = None
             before = len(_errors)
             for metric in metrics:
-                fig = render_sweep(experiment, param, metric, x, results, save)
+                fig = render_sweep(experiment, param, metric, x, results, save, sweep_dir=sweep_dir)
                 a, b, c, d = tick_report(fig)
                 labels, bare, n_log = labels + a, bare + b, n_log + c
                 fewest = d if fewest is None else min(fewest, d)
@@ -298,9 +308,11 @@ def rows_bcd(artifacts, experiments):
     plot_id = f"{param}_{metric}"
     tag = f"{experiment} {plot_id}"
 
+    sweep_dir = f"{artifacts}/{experiment}/sweep"
+
     def render(cfg=None, **kwargs):
         with injected(experiment, plot_id, cfg or {}):
-            fig = render_sweep(experiment, param, metric, x, results, False, **kwargs)
+            fig = render_sweep(experiment, param, metric, x, results, False, sweep_dir=sweep_dir, **kwargs)
         report = style_report(fig.axes[0])
         plt.close("all")
         return report

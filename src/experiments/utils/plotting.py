@@ -338,8 +338,8 @@ def create_sweep_plot(
         fname = fname or "".join(c for c in xlabel if c.isalnum())
         cfg = _plot_config(experiment, fname)
 
-        # x can be MEASURED rather than a designed grid (trS plots the observed
-        # rho tr(S)/k when recalibrated, tr(S)/k otherwise), so it is not
+        # x can be MEASURED rather than a designed grid (trS plots tr(S)/k when
+        # recalibrated, rho tr(S)/k otherwise), so it is not
         # guaranteed ascending. matplotlib draws segments in array order, so an
         # out-of-order x makes the line double back on itself and read as
         # jitter. This is the one sort on the sweep path: the runner and the
