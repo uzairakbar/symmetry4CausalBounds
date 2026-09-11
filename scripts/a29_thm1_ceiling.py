@@ -8,10 +8,7 @@ Three legs:
      measurable, so the smallest budget whose FITTED DA+PI ball still contains
      h_* is known -- `thm1_gamma_min` must reproduce it exactly;
   3. a report on optical, where the DA is not T-invariant, so Thm. 1's premise
-     fails and the threshold is a reference rather than a prediction;
-  4. the two PLOTTED vlines, pinned: nothing else in the gate suite digests them
-     (a10 stores values/results/statuses only), so a change to the published
-     figures' annotation would otherwise pass every gate unnoticed.
+     fails and the threshold is a reference rather than a prediction.
 
     python scripts/a29_thm1_ceiling.py
 """
@@ -24,7 +21,6 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.configs import OPTICAL_CONFIG  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
@@ -39,38 +35,6 @@ from src.oracle import (  # noqa: E402
 
 N_RANDOM = 20_000
 METHODS = ["PI", "DA+PI"]
-# The gamma-sweep vline, mean over the config's 8 replicates at `calibrate: true`:
-# thm1_gamma_min / gamma* on the POPULATION oracle -- i.e. the number the figure
-# actually draws. Deterministic given the seeds. DELIBERATE geometry changes move
-# these; update the constant in the same commit and say so in the message.
-# Recorded under `mean_match: true`. Giving the noise-ratio fits their intercept
-# (Lem. 2's class) moved them from 0.4493541624 / 0.2784036752 by +0.00045 /
-# +0.00049 -- rho alone, 0.1-0.2 %, invisible on the figure but not silent.
-# Then restoring the optical GROUND TRUTH's intercept moved the optical line again,
-# 0.2788961493 -> 0.2769650206 (-0.7 %): gamma* is now measured over span(phi, 1),
-# the same class the solver searches, so bias_sq went 0.40088 -> 0.402549. The sim
-# line does not move -- its SEM never dropped an intercept.
-# The optical line is a badly conditioned function of rho and must not be pinned
-# on a single augmentation draw. gamma_min/gamma* = (gamma* - (rho - 1)) /
-# (rho gamma*) differences two similar numbers in its numerator, and the optical
-# device sits near rho - 1 ~ gamma*, where d ln(line) / d ln rho is about -8: a 3 %
-# draw-to-draw wobble in rho moves the annotation 20 %. Pinned on one draw this
-# constant read 0.2208095226 (rho 1.4570) purely because the RNG stream happened to
-# realign -- a +2 sigma outlier against a draw SD of 0.03. `prepare_pair` now pools
-# ORACLE_POOL_DRAWS seeded draws for a fixed-pool SEM, which is what makes this
-# number the population quantity the figure claims to annotate rather than one
-# sample of it. The sim line is untouched throughout: that SEM draws fresh rows per
-# replicate, so it was already averaging, and its rho sits nowhere near the
-# ill-conditioned regime.
-# Finally, putting the exogenous noise into sigma^2 (it was E[Var(U|X)] only, so
-# gamma* was loose by 1.8 % here) moved it 0.2760702564 -> 0.3002509908.
-VLINE_SIM, VLINE_OPTICAL = 0.4497995531, 0.3002509908
-VLINE_RTOL = 1e-6
-# The optical pin belongs to the PUBLISHED optical configuration. Trying another
-# ground truth or dataset index legitimately moves the line (measured: a linear
-# ground truth sends it to 0, i.e. Thm. 1 certifies validity at every budget), so
-# the check reports instead of failing when `OpticalDeviceConfig` has moved.
-VLINE_OPTICAL_CONFIG = ("polynomial", 8)
 FAIL = []
 
 
@@ -247,19 +211,18 @@ def a29_in_data():
 
     rows = np.array(rows)
     print(
-        f"  report: sim r_emp {rows[:, 0].mean():.4f} | population vline new {rows[:, 1].mean():.4f} "
+        f"  report: sim r_emp {rows[:, 0].mean():.4f} | population threshold new {rows[:, 1].mean():.4f} "
         f"old {rows[:, 2].mean():.4f} (per-experiment spread +-{rows[:, 0].std():.3f}; the population "
         "line is not a discriminating statistic)"
     )
-    return float(rows[:, 1].mean()), float(rows[:, 2].mean())
 
 
 # --------------------------------------------------- 3. optical: premise fails
 
 
 def a29_optical_report(n_experiments=8):
-    """Optical runs the config's own fixture, so the vline reported here is the
-    one the published figure draws."""
+    """Optical runs the config's own fixture, so the threshold reported here is
+    the one the published configuration implies."""
     set_seed(42)
     orch = OpticalOrchestrator(
         seed=42,
@@ -293,12 +256,12 @@ def a29_optical_report(n_experiments=8):
         o = oracle_of(a_sq, s_sq, s_da_sq / s_sq, calibrate=True)
         eps = epsilon_star(runner.sems[j], runner.das[j], features=runner._features)
         print(
-            f"  report: optical exp {j} SAMPLE-FIT (not the plotted vline): r_emp {r_emp:.4f} vs "
+            f"  report: optical exp {j} SAMPLE-FIT (not the population threshold): r_emp {r_emp:.4f} vs "
             f"new {thm1_gamma_min(o, True) / o.gamma_star:.4f} old {old_gamma_min(o, True) / o.gamma_star:.4f} "
             f"| rho {s_da_sq / s_sq:.4f} eps* {eps:.4f}"
         )
     print(
-        f"  report: optical PLOTTED vline new {np.mean(new):.4f} old {np.mean(old):.4f} "
+        f"  report: optical population threshold new {np.mean(new):.4f} old {np.mean(old):.4f} "
         f"(gamma* {runner.get_oracle(0).gamma_star:.4f}, rho {runner.get_oracle(0).rho:.4f})"
     )
     print(
@@ -306,39 +269,11 @@ def a29_optical_report(n_experiments=8):
         "  Thm. 1's premise does not hold there: BOTH lines are references, not predictions, and\n"
         "  Thm. 3.A's eps-padding is what carries validity. Do not 'fix' the formula against them."
     )
-    return float(np.mean(new)), float(np.mean(old))
-
-
-def a29_vline_pin(sim, optical):
-    """The published annotation, pinned. a10 digests bounds and statuses, never
-    vlines, so without this leg the one number this formula moves is ungated.
-
-    A DELIBERATE geometry change moves these; update the constants in the same
-    commit that moves them and say so in the message."""
-    optical_config = (OPTICAL_CONFIG.ground_truth_model, OPTICAL_CONFIG.dataset_index)
-    published = optical_config == VLINE_OPTICAL_CONFIG
-    if not published:
-        print(
-            f"  report: OpticalDeviceConfig is {optical_config}, not the published "
-            f"{VLINE_OPTICAL_CONFIG}; its vline pin is reported, not gated."
-        )
-
-    for name, (new, old), reference, hard in (
-        ("sim", sim, VLINE_SIM, True),
-        ("optical", optical, VLINE_OPTICAL, published),
-    ):
-        ok = abs(new - reference) <= VLINE_RTOL * reference
-        tag = "PASS" if ok else ("FAIL" if hard else "WARN")
-        print(f"[{tag}] A29 {name}: plotted vline == the recorded value {new:.6f} vs {reference:.6f}")
-        if hard and not ok:
-            FAIL.append(f"A29 {name}: plotted vline == the recorded value")
-        check(f"A29 {name}: the new line is at most the old one", new <= old, f"{new:.6f} <= {old:.6f}")
 
 
 if __name__ == "__main__":
     a29_closed_forms()
-    sim_vline = a29_in_data()
-    optical_vline = a29_optical_report()
-    a29_vline_pin(sim_vline, optical_vline)
+    a29_in_data()
+    a29_optical_report()
     print(f"\n{'A29 ALL PASS' if not FAIL else 'A29 FAILURES: ' + ', '.join(FAIL)}")
     sys.exit(bool(FAIL))

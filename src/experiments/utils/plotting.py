@@ -287,7 +287,7 @@ def create_sweep_plot(
     Aggressively robust to NaN/Inf values.
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
-    threshold, Thm. 1 threshold).
+    threshold).
 
     Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
     the mean lines -- see _rescale. The style keys `legend`, `x_color`, `y_color`,
@@ -380,27 +380,14 @@ def create_sweep_plot(
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
         _label_major_ticks_only(plt.gca())
 
-        # Reference thresholds (budget ratio 1, Prop. 2 / Thm. 1 thresholds).
-        # gamma sweeps append the Thm. 1 ratio last (generic_runner.py).
-        # AFTER _rescale: gated on the resolved xlim, so a narrowing override cannot
-        # leave the label anchored off-frame. zorder=0 keeps these behind the data.
+        # Reference thresholds (budget ratio 1, Prop. 2 threshold): one unlabelled
+        # line each. AFTER _rescale: gated on the resolved xlim, so a narrowing
+        # override cannot draw off-frame. zorder=0 keeps these behind the data.
         x_lo, x_hi = plt.gca().get_xlim()
-        for i, x in enumerate(vlines):
+        for x in vlines:
             if not (np.isfinite(x) and x_lo <= x <= x_hi):
                 continue
             plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
-            if i > 0:  # the appended Thm. 1 threshold
-                plt.text(
-                    x,
-                    0.5,
-                    r"$\epsilon$-validity (Thm. 1)",
-                    transform=plt.gca().get_xaxis_transform(),
-                    rotation=90,
-                    va="center",
-                    ha="right",
-                    fontsize=FS_TICK * 0.75,
-                    color="0.4",
-                )
 
         # Legend
         hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)

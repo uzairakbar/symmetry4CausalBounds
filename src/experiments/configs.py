@@ -84,8 +84,7 @@ class OpticalDeviceConfig:
     # Consequence to read the query panel with: this gamma is 0.354 against a
     # measured gamma* of 0.662, so h_* is NOT in the identified set there and
     # PI+INV misses it on a minority of queries. That is the assumption being
-    # violated, not the solver failing -- it is what Thm. 1's gamma_min annotation
-    # on the gamma sweep exists to locate.
+    # violated, not the solver failing.
     gamma: float = 2**-2
     # None = take the HONEST bound: the measured eps* (+ EPS_TOL), which is what
     # SS3.1's epsilon is -- the constraint E_inv(h) <= eps^2 evaluated at h_*, for

@@ -30,12 +30,10 @@ and `perf/perf.pkl` when present. No experiment is run.
     MPLBACKEND=Agg python scripts/a32_figure_style.py [--artifacts DIR] [--save]
 
 `--artifacts` defaults to the repo's untracked `artifacts/`. Without `--save`
-nothing is written. With `--save` the sweep and perf pdfs are re-rendered INTO
-`--artifacts`, EXCEPT the sweeps whose runner adds a measured vline that no pkl
-records (gamma: the Thm. 1 ratio, `GammaRatioStrategy.vlines`); those are rendered
-for the checks, left on disk untouched (checked by mtime), and need `main.py` with
-`sweep: param: [gamma]`. The query sweep and panel are the orchestrator's too
-(`query: true`). The run chdirs to a scratch directory whose `artifacts` is a
+nothing is written. With `--save` every sweep and perf pdf is re-rendered INTO
+`--artifacts` (every sweep vline is a PARAM_SPECS constant, so the pkls carry all
+a figure needs). The query sweep and panel are the orchestrator's (`query: true`)
+and are left alone (checked by mtime). The run chdirs to a scratch directory whose `artifacts` is a
 symlink to that tree, so the repo's own `artifacts/` is written only when it IS
 the argument. Nothing here touches do-MNIST: the digit sweep is drawn from a
 synthetic (n, 3, 8, 8) array.
@@ -62,9 +60,7 @@ from matplotlib.colors import to_rgba  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments.base import ParamSweepRunner  # noqa: E402
 from src.experiments.configs import ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS  # noqa: E402
-from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
 from src.experiments.utils.constants import PANEL_CONFIGS, PLOT_CONFIGS, plot_keys_for, validate_plot_keys  # noqa: E402
 
@@ -176,11 +172,6 @@ def render_perf(experiment, record, save):
 
 
 # ---------------------------------------------------------------------- rows
-def measured_vline(param):
-    """True when the runner overrides `vlines` with a measured threshold no pkl records."""
-    return STRATEGIES[param].vlines is not ParamSweepRunner.vlines
-
-
 def pdf_mtimes(artifacts):
     return {p: os.path.getmtime(p) for p in glob.glob(f"{artifacts}/*/*/*.pdf")}
 
@@ -211,11 +202,8 @@ def row_a(artifacts, experiments, save):
             metrics = [m for m, spec in METRIC_SPECS.items() if not spec.perf_only]
             labels = bare = n_log = 0
             before = len(_errors)
-            save_this = save and not measured_vline(param)
-            if save and not save_this:
-                print(f"  {experiment} {param}: NOT saved, its runner adds a measured vline; re-render it with main.py")
             for metric in metrics:
-                fig = render_sweep(experiment, param, metric, x, results, save_this)
+                fig = render_sweep(experiment, param, metric, x, results, save)
                 a, b, c = minor_report(fig)
                 labels, bare, n_log = labels + a, bare + b, n_log + c
                 plt.close("all")
@@ -266,7 +254,7 @@ def row_a(artifacts, experiments, save):
     if save:
         after = pdf_mtimes(artifacts)
         touched = sorted(p for p in after if after[p] != before_mtimes.get(p))
-        kept = [p for p in before_mtimes if measured_vline_pdf(p) or "/query/" in p]
+        kept = [p for p in before_mtimes if "/query/" in p]
         wrong = [p for p in kept if p in touched]
         expected = [p for p in before_mtimes if p not in kept]
         missing = [p for p in expected if p not in touched]
@@ -278,12 +266,6 @@ def row_a(artifacts, experiments, save):
             f"not rewritten {[os.path.relpath(p, artifacts) for p in missing]}; "
             f"wrongly rewritten {[os.path.relpath(p, artifacts) for p in wrong]}",
         )
-
-
-def measured_vline_pdf(path):
-    """A sweep pdf of a param whose runner adds a measured vline."""
-    name = os.path.basename(path)
-    return "/sweep/" in path and any(name.startswith(f"{p}_") for p in STRATEGIES if measured_vline(p))
 
 
 def first_sweep(artifacts, experiments):

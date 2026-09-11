@@ -21,7 +21,6 @@ from src.oracle import (
     epsilon_star,
     pool_oracles,
     preserve_rng,
-    thm1_gamma_min,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -345,28 +344,6 @@ class GammaRatioStrategy(GenericParamSweep):
 
     def get_predict_kwargs(self, param, experiment_index: int):
         return {"gamma": float(param) * self.fit_gamma(experiment_index)}
-
-    @property
-    def vlines(self):
-        """Also mark the Thm. 1 threshold, as a ratio of gamma*.
-
-        `thm1_gamma_min` inverts the TIGHT ceiling of App. F.1, so the line is
-        the exact budget below which DA can lose h_*, not a sufficient bound.
-
-        Thm. 1 assumes a T-invariant h_*. Where the DA is only approximately
-        invariant (eps* > 0, e.g. optical) the governing statement is Thm. 3.A's
-        eps-padding instead, and this line is a reference, not a prediction.
-        """
-        ratios = []
-        for j in range(self.n_experiments):
-            oracle = self.get_oracle(j)
-            gamma_star = self._finite(oracle.gamma_star, self.default_gamma, "gamma*")
-            if gamma_star > 0:
-                ratios.append(thm1_gamma_min(oracle, self.calibrate) / gamma_star)
-
-        if not ratios:
-            return self.spec.vlines
-        return tuple(self.spec.vlines) + (float(np.mean(ratios)),)
 
 
 class EpsilonRatioStrategy(GenericParamSweep):

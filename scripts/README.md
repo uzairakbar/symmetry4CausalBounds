@@ -22,10 +22,10 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; guard is a no-op when feasible, rescues when not |
 | A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`, `--compare-off`) |
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
-| A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, both plotted vlines pinned |
+| A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, optical reported as a reference |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
 | A31 | `a31_trs_axis.py` | trS sweep axis: rho tr(S)/k when calibrated, tr(S)/k under raw budgets (rho = 1), the one sort in `create_sweep_plot`, `trS_axis.pkl` factors, label and vline under both toggles |
-| A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders the sweep and perf pdfs into DIR, except the gamma sweeps, whose Thm. 1 vline is measured at run time and needs `main.py`): major-only tick labels on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
+| A32 | `a32_figure_style.py` | figure style from the sweep pkls (`--artifacts DIR`; `--save` re-renders every sweep and perf pdf into DIR): major-only tick labels on every axes of every figure, the `legend` / `x_color` / `y_color` / `title` / `title_color` keys through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`, an unknown key fails at import |
 
 `smoke_do_mnist.py` is an end-to-end query-sweep + perf run at reduced scale;
 `--full` runs it at the config's own numbers.
@@ -105,12 +105,12 @@ carries explicitly:
   consequence to read the query panel with is that its `gamma = 2**-1.5 = 0.354`
   sits below `gamma* = 0.662`, so `h_*` is genuinely outside the identified set
   there and PI+INV misses it on a minority of queries -- the assumption being
-  violated, which is what the gamma sweep and Thm. 1's `gamma_min` exist to locate.
+  violated, which is what the gamma sweep exists to locate.
 - **The oracle is pooled over seeded DA draws.** For a fixed-pool SEM the rows
   never change, so a single augmentation draw is not the population quantity the
-  figures annotate. This matters most for `rho`: Thm. 1's plotted threshold has
-  `d ln / d ln rho ~ -8` where this device sits, so a 3 % draw wobble moves the
-  annotation 20 %.
+  figures annotate. This matters most for `rho`: Thm. 1's threshold has
+  `d ln / d ln rho ~ -8` where this device sits, so a 3 % draw wobble moves it
+  20 %.
 
 A30's pinch-query leg is the one to keep: at `phi(x) = mean(phi)` Cor. 3 collapses
 the interval to `{ybar}`, so that single query -- not the coverage average over the
