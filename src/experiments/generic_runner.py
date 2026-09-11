@@ -390,15 +390,16 @@ class EpsilonRatioStrategy(GenericParamSweep):
     invalid by construction, leaving PI+INV infeasible throughout and the
     intersections inheriting that invalidity -- see PLAN 7.)
 
-    This is the ONLY sweep that recalibrates the DA (to ROBUSTNESS_EPSILON_TRUE),
-    so that eps* > 0 makes the ratio axis meaningful.
+    This is the ONLY sweep that recalibrates the DA (to
+    ROBUSTNESS_EPSILON_TRUE[experiment_name]), so that eps* > 0 makes the ratio
+    axis meaningful.
     """
 
     param_key = "epsilon"
 
     def __init__(self, **kwargs):
         # scoped to this sweep only; never leaks into trS/n/m/perf
-        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE
+        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[kwargs.get("experiment_name", "simulation")]
         super().__init__(**kwargs)
 
         if not self.pad:

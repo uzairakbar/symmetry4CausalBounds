@@ -199,12 +199,32 @@ EPS_TOL: float = 2**-5
 FLOOR_GUARD_R: float = 9.0
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
-# true invariance error, so that eps/eps* is a meaningful ratio axis.
-# MUST clear the optical eps* floor: the strength knob drives only the gaussian
-# noise, so permutations hold eps* at ~0.239 even at strength 0. 0.5 sits at
-# strength ~0.87 there (2.1x the floor) and ~0.084 on simulation, whose floor
-# is 0. Below the floor, recalibrated_da_epsilon clamps and the sweep goes flat.
-ROBUSTNESS_EPSILON_TRUE: float = 2**-1
+# true invariance error, so that eps/eps* is a meaningful ratio axis. Keyed by
+# EXPERIMENT_NAME (simulation.py, optical_device.py).
+# Why the two differ. The DA+ ball keeps the radius sigma sqrt(gamma*) after
+# the DA (0.71 on sim: bias^2 0.505), so h* only leaves it below eps* once the
+# DA+ERM centre drifts by that much, and the drift grows with eps*. At the old
+# 0.5 nothing ever left the ball and every DA+ coverage curve sat at 1.0.
+# Measured on sim (d 32, n 2048, recalibrate/pad/mean_match on, clipy off,
+# r = eps/eps* from 2^-6 to 1; logs ~/scratch/tmp/impl_v7/logs/runs/):
+#   eps*  strength   DA+PI at 2^-6   DA+PI+IV   DA+PI/PI width at r = 1
+#   1     0.09-0.10  1.000           1.000      0.91
+#   2     0.18-0.20  1.000           0.983      1.16
+#   3     0.26-0.30  0.917           0.885      1.37   (4 exp, 16 steps)
+#   4     0.35-0.40  0.757           0.737      1.62   (4 exp, 16 steps)
+#   6     0.54-0.61  0.576           0.576      2.13
+# All are back at 1.0 by r = 1. 3 is the smallest with a dip the experiment
+# band does not swallow (per-experiment 0.84-0.97 at 2^-6), a slope and not a
+# cliff; 4 slips under 0.8 and 6 is a failure mode. The price is DA+PI 1.37x
+# PI wide at eps = eps*.
+# The optical device has no knob under the shipped permutation chain: the
+# sweep warns and keeps eps* 0.254, so the constant is inert there and stays
+# at the old value. With a gaussian-noise term the raw half-width (~2.5) is
+# several std of h* (~0.7), so a dip is not reachable there either.
+ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
+    "simulation": 3.0,
+    "optical_device": 2**-1,
+}
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
 # The near-null eigendirections of Sigma_GX are noise and 1/w blows them up, so the
