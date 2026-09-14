@@ -394,7 +394,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     cells.append(f"$[{low:.3f}, {high:.3f}]${ratio}")
             lines.append(TEX_MAPPER.get(name, name) + " & " + " & ".join(cells) + r" \\")
         lines.append(r"\midrule")
-        lines.append(r"$b_r$ & " + " & ".join(f"{scale * value:.3f}" for value in b_r) + r" \\")
+        # the target's own name: the restricted point under `iv`, the synthetic
+        # homogeneous coefficient under `plasmode`
+        label = r"$b_r$" if self.target == "iv" else r"$b_*$"
+        lines.append(label + " & " + " & ".join(f"{scale * value:.3f}" for value in b_r) + r" \\")
         lines.append(r"$b_u$ (2SLS) & " + " & ".join(f"{scale * value:.3f}" for value in b_u) + r" \\")
         for by in ("state", "year"):
             low, high = _two_stage_interval(design, by)
@@ -415,6 +418,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         panel_data = SEM.panel()
         lines = [
             rf"% cigarette trend ladder; anchor {self.anchor}, sliver guard gamma_z = {CIGARETTE_CONFIG.gamma_z:g}.",
+            r"% A property of the panel and the anchor, not of the target: it is the same under `plasmode`.",
             r"% W is the classical restriction F (iid by construction); J2 is the two-step restricted GMM.",
             r"\begin{tabular}{lrrrrrrrrr}",
             r"\toprule",
