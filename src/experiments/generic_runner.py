@@ -180,6 +180,11 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 rho=self.fit_rho(),
             )
 
+    def extent(self, queries) -> np.ndarray:
+        """Target-set half-width at each query, beside `self.sem.f(queries)`. Zeros
+        for a point target; the query figures of a set-valued target read it."""
+        return self.sem.extent(queries)
+
     def _load_data(self):
         """(X_raw, GX_raw, y, G). Override when the draw needs its own protocol."""
         X_raw, y = self.sem(N=self.n_samples)
@@ -316,8 +321,11 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
 
     @property
     def finite_pool(self) -> bool:
-        """Optical draws from a fixed pool and needs a train/test split."""
-        return "OpticalDeviceSEM" in str(type(self.sems[0]))
+        """A SEM that exposes a pool draws from a fixed set of rows and needs a
+        train/test split; a generator gets an interventional test set instead.
+        `SEM.pool` is the property that says which, so ask it rather than the class
+        name (the two agree on both shipped SEMs)."""
+        return getattr(self.sems[0], "pool", None) is not None
 
     # ------------------------------------------------------- fixed base sample
 
@@ -346,6 +354,13 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         X_test = self.apply_transform(X_test_raw)
         return (X_train_raw, self.apply_transform(X_train_raw), y_train, X_test, sem.f(X_test))
 
+    def _extent(self, experiment_index: int, X_test) -> np.ndarray:
+        """Target-set half-width at each query, beside `sem.f(X_test)`. Zeros for a
+        point target, which is every shipped SEM. Not folded into `_draw_base`'s
+        tuple: do-MNIST overrides that method, and a sixth element would break it.
+        """
+        return self.sems[experiment_index].extent(X_test)
+
     def _augment_once(self, experiment_index: int, X_raw, **augment_kwargs):
         """One DA pass; common random numbers across a knob grid within an experiment."""
         with preserve_rng():
@@ -363,7 +378,15 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         else:
             GX_raw, G = self.das[experiment_index](X_raw, **augment_kwargs)
 
-        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G, X_test=X_test, estimand=estimand)
+        return SweepData(
+            X=X,
+            y=y,
+            GX=self.apply_transform(GX_raw),
+            G=G,
+            X_test=X_test,
+            estimand=estimand,
+            extent=self._extent(experiment_index, X_test),
+        )
 
 
 # =============================================================================
@@ -622,7 +645,15 @@ class SampleSizeStrategy(GenericParamSweep):
         X_raw, X, y = X_raw[:n_train], X[:n_train], y[:n_train]
 
         GX_raw, G = self.das[experiment_index](X_raw)
-        return SweepData(X=X, y=y, GX=self.apply_transform(GX_raw), G=G, X_test=X_test, estimand=estimand)
+        return SweepData(
+            X=X,
+            y=y,
+            GX=self.apply_transform(GX_raw),
+            G=G,
+            X_test=X_test,
+            estimand=estimand,
+            extent=self._extent(experiment_index, X_test),
+        )
 
 
 class FoldStrategy(GenericParamSweep):
@@ -657,6 +688,7 @@ class FoldStrategy(GenericParamSweep):
             G=np.vstack(Gs),
             X_test=X_test,
             estimand=estimand,
+            extent=self._extent(experiment_index, X_test),
             X_base=X,
             y_base=y,
         )

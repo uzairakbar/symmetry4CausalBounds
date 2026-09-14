@@ -82,6 +82,8 @@ class SweepData:
     # untiled copies for baselines that are exactly tiling-invariant (m-sweep)
     X_base: np.ndarray | None = None
     y_base: np.ndarray | None = None
+    # half-width of the target SET per query (`SEM.extent`); None is a point target
+    extent: np.ndarray | None = None
 
     def __iter__(self):
         return iter((self.X, self.y, self.GX, self.G, self.X_test, self.estimand))
@@ -93,6 +95,11 @@ class SweepData:
     @property
     def fit_arrays(self) -> dict[str, Any]:
         return dict(X=self.X, y=self.y, GX=self.GX, G=self.G, X_base=self.X_base, y_base=self.y_base)
+
+    @property
+    def metric_extent(self) -> float | np.ndarray:
+        """`extent` as the metrics take it: 0.0 when the target is a point."""
+        return 0.0 if self.extent is None else self.extent
 
 
 # =============================================================================
@@ -436,7 +443,9 @@ class ParamSweepRunner(BaseExperimentRunner):
                             elapsed = time.perf_counter() - start
                             query_status = getattr(model, "query_status", None)
 
-                        record = evaluate_queries(data.estimand, estimate, query_status, elapsed)
+                        record = evaluate_queries(
+                            data.estimand, estimate, query_status, elapsed, extent=data.metric_extent
+                        )
                         for metric in METRIC_FIELDS:
                             results[name][metric][i, j] = getattr(record, metric)
                         statuses[name][i, j] = record.status_counts

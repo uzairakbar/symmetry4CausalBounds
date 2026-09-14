@@ -100,6 +100,11 @@ class PanelBuilder:
                 )
                 self.fitted_models[name] = model
 
+    def predict(self, raw_points: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray]:
+        """Public name for `_predict_sweep`, so an orchestrator with its own query
+        grids can reuse the fitted models without reaching for a private one."""
+        return self._predict_sweep(raw_points)
+
     def _predict_sweep(self, raw_points: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray]:
         """
         Run predictions on specific geometry using cached models.

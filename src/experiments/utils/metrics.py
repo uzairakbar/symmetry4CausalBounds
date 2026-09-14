@@ -54,6 +54,7 @@ def approximation_error(
     estimand: NDArray,
     estimate: NDArray,
     normalize: bool = DEFAULT_NORMALIZE_ERROR,
+    extent: float | NDArray = 0.0,
 ) -> float:
     """
     Compute approximation error for interval estimates.
@@ -65,6 +66,9 @@ def approximation_error(
         estimand: Ground truth target f or f(x)
         estimate: Interval estimates [lower, upper] or point estimates
         normalize: Whether to normalize by baseline error
+        extent: Half-width of the target SET at each query (`SEM.extent`). The
+            miss is measured from the FAR edge of the set, so a point target
+            (extent 0, every shipped SEM) is the shipped expression unchanged.
 
     Returns:
         Approximation error
@@ -80,14 +84,12 @@ def approximation_error(
     upper_bound = estimate[:, 1]
     estimand_flat = estimand.squeeze()
 
-    # Check if points are inside intervals
-    inside_interval = (estimand_flat >= lower_bound) & (estimand_flat <= upper_bound)
-
-    # For points outside, compute squared distance to nearest bound
-    distance_squared = np.minimum((lower_bound - estimand_flat) ** 2, (upper_bound - estimand_flat) ** 2)
-
-    # Combine: 0 if inside, distance_squared if outside
-    errors = np.where(inside_interval, 0, distance_squared)
+    # squared distance from the interval to the target set, 0 when the set is
+    # inside. At extent 0 this is exactly the old where(inside, 0, min(...)): it
+    # returns (lo - f)^2 below the interval, (f - hi)^2 above it, 0 in between.
+    # The square is not optional -- the metric is a SQUARED distance.
+    miss = np.maximum(lower_bound - estimand_flat + extent, estimand_flat + extent - upper_bound)
+    errors = np.maximum(0.0, miss) ** 2
     approx_sq_error = np.nanmean(errors[:, None])
 
     if normalize:
@@ -172,6 +174,7 @@ def coverage(
     estimand: NDArray,
     estimate: NDArray,
     normalize: bool = DEFAULT_NORMALIZE_ERROR,
+    extent: float | NDArray = 0.0,
 ) -> float:
     """
     Coverage rate: mean 1{lower <= truth <= upper}.
@@ -184,9 +187,12 @@ def coverage(
         estimand: Ground truth target f or f(x)
         estimate: Interval estimates [lower, upper] or point estimates
         normalize: Unused; kept for a uniform metric signature
+        extent: Half-width of the target SET at each query (`SEM.extent`). The
+            WHOLE set has to be inside, so a point target (extent 0, every
+            shipped SEM) is the shipped comparison unchanged.
 
     Returns:
-        Fraction of queries whose interval contains the truth
+        Fraction of queries whose interval contains the target
     """
     if estimate.shape[0] != estimand.shape[0]:
         raise ValueError(f"Estimate sample size {estimate.shape[0]} != estimand sample size {estimand.shape[0]}.")
@@ -194,7 +200,7 @@ def coverage(
     estimate = _as_interval(estimate)
     estimand_flat = estimand.squeeze()
 
-    covered = (estimand_flat >= estimate[:, 0]) & (estimand_flat <= estimate[:, 1])
+    covered = (estimand_flat - extent >= estimate[:, 0]) & (estimand_flat + extent <= estimate[:, 1])
     return float(np.mean(np.where(np.isnan(estimate).any(axis=1), False, covered)))
 
 
@@ -264,6 +270,7 @@ def evaluate_queries(
     estimate: NDArray,
     statuses: NDArray = None,
     elapsed: float = 0.0,
+    extent: float | NDArray = 0.0,
 ) -> QueryEval:
     """
     Build the full record for one (method, step, experiment).
@@ -273,6 +280,9 @@ def evaluate_queries(
         estimate: Interval estimates [lower, upper] or point estimates
         statuses: Per-query SolveStatus ints; None means all-OK (point estimators)
         elapsed: Wall-clock seconds for the whole predict call
+        extent: Half-width of the target set per query (`SweepData.extent`), 0 for
+            a point target. It reaches the 4-way split as well as the two metrics,
+            or `coverage` and the split would disagree about the same queries.
 
     Returns:
         QueryEval
@@ -285,7 +295,11 @@ def evaluate_queries(
     statuses = np.asarray(statuses, dtype=int)
 
     estimand_flat = estimand.squeeze()
-    covered = (estimand_flat >= interval[:, 0]) & (estimand_flat <= interval[:, 1]) & ~np.isnan(interval).any(axis=1)
+    covered = (
+        (estimand_flat - extent >= interval[:, 0])
+        & (estimand_flat + extent <= interval[:, 1])
+        & ~np.isnan(interval).any(axis=1)
+    )
 
     # mutually exclusive, ordered: failure -> infeasible -> covers -> non-covering
     failure = statuses == SolveStatus.FAILURE
@@ -302,10 +316,12 @@ def evaluate_queries(
     )
 
     return QueryEval(
-        approximation_error=approximation_error(estimand, estimate),
+        approximation_error=approximation_error(estimand, estimate, extent=extent),
+        # a sup over the ESTIMATE's endpoints against the target CENTRE, so it
+        # reads `f` whatever the extent is; say so wherever it is printed
         worst_error=worst_error(estimand, estimate),
         interval_width=interval_width(estimand, estimate),
-        coverage=coverage(estimand, estimate),
+        coverage=coverage(estimand, estimate, extent=extent),
         wall_clock=elapsed / max(n_queries, 1),
         status_counts=counts,
     )

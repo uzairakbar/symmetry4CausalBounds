@@ -116,6 +116,14 @@ PANEL_CONFIGS = {
         2: {"scale": "linear", "ylim": (0, 0.01), "linear_width": 1.0, "linthresh": 2.0},
         3: {"ylim": (-2.625, 3.375)},
     },
+    # the FWL'd panel is sigma-normalised, so the rows are in units of sigma: the
+    # measured PI width is 1.89 and h* has std 1. Tuned once against that.
+    "cigarettes": {
+        0: {"scale": "asinh", "ylim": (0, 10.01), "linear_width": 0.25, "linthresh": 2.0},
+        1: {"scale": "asinh", "ylim": (0, 5), "linear_width": 0.5, "linthresh": 1.0},
+        2: {"scale": "linear", "ylim": (0, 5), "linear_width": 1.0, "linthresh": 2.0},
+        3: {"ylim": (-4, 4)},
+    },
 }
 
 

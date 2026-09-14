@@ -321,6 +321,7 @@ def create_sweep_plot(
     bootstrapped: bool = True,
     experiment: str = "simulation",
     fname: str | None = None,
+    subdir: str = SUBDIR_SWEEP,
     vlines: tuple[float, ...] = (),
     legend: bool | str | tuple[float, float] | None = None,
     x_color: str = "k",
@@ -333,6 +334,10 @@ def create_sweep_plot(
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold).
+
+    `subdir` is the artifacts folder the figure lands in; the default is where every
+    param sweep goes. A per-query curve on a shared x grid is this function's shape
+    too (the cigarette width-ratio figure), and it belongs beside the query figures.
 
     Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
     the mean lines -- see _rescale. The style keys `legend`, `x_color`, `y_color`,
@@ -470,7 +475,7 @@ def create_sweep_plot(
         plt.show()
 
         if savefig:
-            save(fig, f"{fname}_sweep", experiment, format, subdir=SUBDIR_SWEEP, dpi=PLOT_DPI)
+            save(fig, f"{fname}_sweep", experiment, format, subdir=subdir, dpi=PLOT_DPI)
 
     except Exception as e:
         # Fallback so one plot failure doesn't kill the whole experiment batch
@@ -498,6 +503,7 @@ def create_query_sweep_plot(
     x_color: str = "k",
     title: str | None = None,
     title_color: str = "k",
+    fname: str | None = None,
 ):
     """
     Create a query sweep plot showing predictions across treatment values.
@@ -521,6 +527,10 @@ def create_query_sweep_plot(
         legend, x_color, title, title_color: style keys, see constants._STYLE_KEYS.
             The orchestrator passes ANNOTATE_SWEEP_PLOT["pc12"] here;
             PLOT_CONFIGS[experiment]["query"] wins over these arguments key by key.
+        fname: filename stem, '_sweep' appended. Default: the alphanumerics of
+            `xlabel`, which is what every shipped figure is named by. Given when
+            several figures share an axis label, or when the derived name is
+            unreadable (a TeX label reduces to e.g. 'logmathrmCPI').
     """
     legend_items = [item for item in (legend_items or []) if item in y_results]
     cfg = _plot_config(experiment, "query")
@@ -610,8 +620,8 @@ def create_query_sweep_plot(
     plt.show()
 
     if savefig:
-        fname = "".join(c for c in xlabel if c.isalnum()) + "_sweep"
-        save(fig, fname, experiment, format, subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
+        fname = fname or "".join(c for c in xlabel if c.isalnum())
+        save(fig, f"{fname}_sweep", experiment, format, subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
 
 
 def create_panel_plot(

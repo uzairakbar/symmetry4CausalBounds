@@ -244,9 +244,14 @@ FLOOR_GUARD_R: float = 9.0
 # It is 7 std of h* and noise 3.5x the pixel std: a tail count of 4-5
 # queries in 100, not the sim's slope. Every DA+ line stays above 0.95. The
 # tuner solves on one draw; the pooled oracle (8 draws) reads 4.88 for it.
+# Cigarettes: eps* is LINEAR in the translation strength (0.096 at 0, 0.509 at 0.5,
+# 1.007 at 1.0 against the unrestricted target), and at 0.5 the DA+PI coverage runs
+# 0.797 at r = 2^-6 up to 1.000 at r = 1 for 1.486x the width -- the same profile
+# the simulation's 3.0 was chosen for. a53(v) is where it is re-read.
 ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
     "simulation": 3.0,
     "optical_device": 5.0,
+    "cigarettes": 0.5,
 }
 
 # The component the robustness sweep APPENDS to the configured DA chain, where
@@ -260,6 +265,8 @@ ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
 ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
     "simulation": None,
     "optical_device": "gaussian-noise",
+    # the translation carries its own `strength` knob, so nothing is appended
+    "cigarettes": None,
 }
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
@@ -328,8 +335,14 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         # measured), which would put two knobs on one x and zigzag the sorted
         # line, so the grid starts at 0.2. p = 1 is excluded: the Bernoulli
         # scaler divides by sqrt(p(1-p)) = 0 there (NaN instrument for DA+PI+IV).
+        # cigarettes: s multiplies the DA amplitude along v, whose unit is
+        # sd(X . v-hat) after FWL, so the grid is the decades either side of it.
         grid_fn=lambda dataset, n: (
-            np.logspace(-1.5, 1.0, num=n) if dataset == "simulation" else np.linspace(0.2, 0.99, num=n)
+            np.logspace(-1.5, 1.0, num=n)
+            if dataset == "simulation"
+            else np.logspace(-3, 3, num=n, base=2)
+            if dataset == "cigarettes"
+            else np.linspace(0.2, 0.99, num=n)
         ),
         xscale="linear",
         vlines=(1.0,),
@@ -339,11 +352,16 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         # grid_fn=lambda dataset, n: np.array(
         #     [128, 256, 512, 1024] if dataset == "simulation" else [128, 256, 512, 1000]  # 1000 = optical pool max
         # ),
-        grid_fn=lambda dataset, n: np.linspace(
-            128,
-            1024 if dataset == "simulation" else 1000,
-            16,
-            dtype=int,
+        # cigarettes: n is the pre-split panel size, a tenth of it up to all 2450
+        grid_fn=lambda dataset, n: (
+            np.linspace(245, 2450, 16, dtype=int)
+            if dataset == "cigarettes"
+            else np.linspace(
+                128,
+                1024 if dataset == "simulation" else 1000,
+                16,
+                dtype=int,
+            )
         ),
     ),
     "m": ParamSpec(
@@ -481,6 +499,31 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
     },
     "pc12": {
         "xlabel": r"$\vartheta$",
+        "xscale": "linear",
+    },
+    # cigarettes: one figure per treatment coordinate, the other three held at the
+    # data mean (exactly 0 after FWL), plus the ray along v-hat, where every
+    # homogeneous h is 0 and the symmetry alone identifies the point. The ids are
+    # also the filenames (`create_query_sweep_plot`'s `fname`): the derived names
+    # would be 'logp', 'logy', 'logpn' and 'logmathrmCPI'.
+    "dim_p": {
+        "xlabel": r"$\log p$",
+        "xscale": "linear",
+    },
+    "dim_y": {
+        "xlabel": r"$\log y$",
+        "xscale": "linear",
+    },
+    "dim_pn": {
+        "xlabel": r"$\log p_n$",
+        "xscale": "linear",
+    },
+    "dim_cpi": {
+        "xlabel": r"$\log \mathrm{CPI}$",
+        "xscale": "linear",
+    },
+    "ray_v": {
+        "xlabel": r"$c$",
         "xscale": "linear",
     },
 }
