@@ -171,32 +171,44 @@ def leg_i(block):
 # =============================================================================
 
 
+def _pi_half_width(runner, model):
+    """Half-width of a fitted PI model at the three fixed queries."""
+    fit_model(
+        model=model,
+        method_name="PI",
+        X=runner.X,
+        y=runner.y,
+        GX=runner.GX,
+        G=runner.G,
+        hyperparameters={},
+        da=runner.da,
+    )
+    bounds = model.predict(QUERIES)
+    return (bounds[:, 1] - bounds[:, 0]) / 2.0
+
+
 def leg_ii(orch, runner):
     print("(ii) the declared budget reaches the solver as gamma")
-    X = runner.X
-    precision = np.linalg.inv(X.T @ X / len(X))
+    precision = np.linalg.inv(runner.X.T @ runner.X / len(runner.X))
+    # the closed form is anchored on the TABLE, never on what the runner happens to
+    # be holding: a budget mangled on the way in must show up as a width, not cancel
     declared = QUERY_GAMMA[orch.spec]
     check("(ii) the runner's gamma is QUERY_GAMMA[spec]", abs(runner.default_gamma - declared) < 1e-15, f"{declared}")
 
-    for gamma in (declared, declared / 4.0):
-        builders = orch.build_methods(gamma=gamma, epsilon=runner.default_epsilon)
-        model = builders["PI"]()
-        fit_model(
-            model=model,
-            method_name="PI",
-            X=X,
-            y=runner.y,
-            GX=runner.GX,
-            G=runner.G,
-            hyperparameters={},
-            da=runner.da,
-        )
-        bounds = model.predict(QUERIES)
-        measured = (bounds[:, 1] - bounds[:, 0]) / 2.0
+    cases = [
+        (declared, "the runner's own PI model", runner.methods["PI"]()),
+        (
+            declared / 4.0,
+            "build_methods at a quarter budget",
+            orch.build_methods(gamma=declared / 4.0, epsilon=runner.default_epsilon)["PI"](),
+        ),
+    ]
+    for gamma, label, model in cases:
+        measured = _pi_half_width(runner, model)
         closed = np.sqrt(gamma) * np.sqrt(np.einsum("ij,jk,ik->i", QUERIES, precision, QUERIES))
         gap = float(np.max(np.abs(measured - closed)))
         check(
-            f"(ii) PI half-width = sigma sqrt({gamma:g}) sqrt(x' Sigma^-1 x)",
+            f"(ii) {label}: half-width = sigma sqrt({gamma:g}) sqrt(x' Sigma^-1 x)",
             gap < HALF_WIDTH_TOL,
             f"max gap {gap:.2e}",
         )
@@ -240,11 +252,11 @@ def leg_iv(orch):
     x = np.asarray(x, dtype=float)
     check("(iv) the plotted x falls with the knob", bool(np.all(np.diff(x) < 0.0)), f"{np.round(x, 4)}")
     check("(iv) every x is at or under 1 (Prop. 2)", bool(np.all(x <= 1.0 + 1e-9)), f"max {x.max():.5f}")
-    check(
-        "(iv) the label follows the factor",
-        runner.xlabel == TRS_XLABEL[runner.recalibrate],
-        f"recalibrate={runner.recalibrate}",
-    )
+    # against the CONFIGURED toggle, not the runner's own: comparing the runner to
+    # itself would pass whatever ball it went on to solve
+    configured = bool(orch.toggles["recalibrate"])
+    check("(iv) the runner solves the configured ball", runner.recalibrate == configured, f"{configured}")
+    check("(iv) the label follows the factor", runner.xlabel == TRS_XLABEL[configured], f"recalibrate={configured}")
 
 
 # =============================================================================
@@ -276,6 +288,16 @@ def leg_v(block, seed):
         )
 
         sems = runner.sems
+        # BEFORE anything draws: `sample` is the replicate mechanism and the oracle
+        # reads `pool`, so a draw that moved the pool would move h_* with it
+        snapshot = tuple(np.array(part, copy=True) for part in sems[0].pool)
+        for _ in range(2):
+            sems[0].sample(PANEL_ROWS)
+        check(
+            f"(v) {target}: `sample` leaves the pool alone",
+            all(np.array_equal(before, after) for before, after in zip(snapshot, sems[0].pool, strict=True)),
+        )
+
         pools = [sem.pool[0] for sem in sems]
         solutions = [sem.solution for sem in sems]
         check(
