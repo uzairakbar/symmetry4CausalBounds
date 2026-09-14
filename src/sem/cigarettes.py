@@ -16,10 +16,13 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
+
+from src.sem.abstract import StructuralEquationModel as SEM
 
 # raw sources and the built panel live under $SYM4CB_DATA_DIR (large files stay
 # off the repo and off $HOME); `data/cigarettes` is a symlink at that directory
@@ -61,6 +64,16 @@ ANCHORS: dict[str, tuple[tuple[str, ...], tuple[int, ...]]] = {
 }
 # neighbour aggregator: `min` is Baltagi's bootlegging term, `mean` the robustness row
 NEIGHBOURS: dict[str, tuple[str, str]] = {"min": ("pn", "tax_sn"), "mean": ("pn_mean", "tax_sn_mean")}
+
+
+# plasmode defaults; the config dataclass overrides them (SS6)
+GAMMA_TRUE: float = 0.25
+OUTCOME_NOISE_STD: float = 0.1
+CONFOUND_DIRECTIONS: tuple[str, ...] = ("v", "own_price", "worst_case")
+# the leaky-IV guard (SS5): FIXED, never swept
+GAMMA_Z: float = 2**-8
+# one state history; the cluster bootstrap deals in these, not in rows
+YEARS_PER_STATE: int = 50
 
 
 def data_directory() -> str:
@@ -276,18 +289,29 @@ def clustered_vcov(D: NDArray, u: NDArray, bread: NDArray, K: int, cluster: NDAr
     and the year clustering is not decoration. Serial correlation within a state
     over 50 years is strong, which is why the state clustering is the default read.
     """
+    meat = score_meat(D, u, cluster)
     if cluster is None:
-        meat = (D * u[:, None]).T @ (D * u[:, None])
         return bread @ meat @ bread
-    groups = np.unique(cluster)
+    groups = len(np.unique(cluster))
+    n = len(u)
+    adjustment = groups / (groups - 1) * (n - 1) / (n - K)
+    return adjustment * bread @ meat @ bread
+
+
+def score_meat(D: NDArray, u: NDArray, cluster: NDArray | None) -> NDArray:
+    """Sum of outer products of the cluster scores; no finite-sample factor.
+
+    The GMM weight is the inverse of THIS, so it must not carry the adjustment the
+    Wald's sandwich does, or J and the Wald stop being the same statistic.
+    """
+    if cluster is None:
+        return (D * u[:, None]).T @ (D * u[:, None])
     meat = np.zeros((D.shape[1], D.shape[1]))
-    for group in groups:
+    for group in np.unique(cluster):
         rows = cluster == group
         score = D[rows].T @ u[rows]
         meat += np.outer(score, score)
-    n = len(u)
-    adjustment = len(groups) / (len(groups) - 1) * (n - 1) / (n - K)
-    return adjustment * bread @ meat @ bread
+    return meat
 
 
 def clusters(design: PanelDesign, by: str) -> NDArray | None:
@@ -341,3 +365,221 @@ def first_stage_f(design: PanelDesign, by: str = "state") -> list[float]:
         excluded = coefficients[-n_excluded:]
         out.append(float(excluded @ np.linalg.solve(block, excluded) / n_excluded))
     return out
+
+
+def restricted_gmm(design: PanelDesign, by: str = "state") -> tuple[float, float, NDArray]:
+    """(J1w, J2, b): the restricted-GMM overid statistic of HD0 given IV validity.
+
+    Four moments, three free parameters after v'b = 0, so df 1 and J is a real test.
+
+    `J1w` evaluates the clustered-weight objective at the ONE-STEP (Z'Z)^-1
+    restricted estimate, which does not minimise it: an upper bound that rejects too
+    often, and the whole of the apparent disagreement with the Wald. `J2` is the
+    efficient two-step statistic -- re-estimate AT the weight, then evaluate -- and
+    is the one of the program actually being solved, so it is what gets reported.
+    """
+    N = null_basis()
+    Z = design.instruments
+    A = design.X @ N
+    Q = design.Q_Z
+    one_step = N @ np.linalg.lstsq(Q.T @ A, Q.T @ design.y, rcond=None)[0]
+
+    meat = score_meat(Z, design.y - design.X @ one_step, clusters(design, by))
+    moments = Z.T @ (design.y - design.X @ one_step)
+    J1w = float(moments @ np.linalg.solve(meat, moments))
+
+    weight = np.linalg.inv(meat)
+    jacobian = Z.T @ A
+    two_step = N @ np.linalg.solve(jacobian.T @ weight @ jacobian, jacobian.T @ weight @ (Z.T @ design.y))
+    moments = Z.T @ (design.y - design.X @ two_step)
+    return J1w, float(moments @ np.linalg.solve(meat, moments)), two_step
+
+
+# =============================================================================
+# SEM
+# =============================================================================
+
+
+class CigaretteSEM(SEM):
+    """The panel as a recorded SEM, under one of two targets.
+
+    `iv`       h_* is the restricted-IV point of SS0.2: the tax-moment program
+               solved subject to v'b = 0, so it satisfies the instrument and
+               homogeneity at once and eps* is 0 by construction. Z is then
+               discarded -- the tax column is read once, here, and never reaches a
+               solver. Coverage of this target is validity CONDITIONAL on those two
+               assumptions; what probes the assumptions is the compatibility
+               statistic above and the sliver below.
+    `plasmode` the real FWL'd design with a synthetic exactly homogeneous h_* and
+               synthetic confounding of known strength, in the simulation SEM's
+               convention, so gamma* == `gamma_true` exactly. Validity against a
+               truth nobody has to believe in.
+
+    Units: y and every coefficient vector are divided by the OLS residual sd, so
+    sigma^2 = 1 on the `iv` path and gamma* = bias^2. `EPS_TOL` is a module constant
+    in outcome units, which on the raw panel (sigma 0.1455) would be 21% of sigma.
+    """
+
+    load_panel = staticmethod(load_panel)
+
+    _PANEL: dict[str, NDArray] | None = None  # filled on first use, not on import
+
+    @classmethod
+    def panel(cls) -> dict[str, NDArray]:
+        """The cached panel. Built from the raw sources on first use, as
+        `OpticalDeviceSEM.dataset` downloads on first use: importing this module
+        must not reach for the network or the disk."""
+        if cls._PANEL is None:
+            cls._PANEL = cls.load_panel()
+        return cls._PANEL
+
+    def __init__(
+        self,
+        spec: str = "t3",
+        target: Literal["iv", "plasmode"] = "iv",
+        anchor: str = "own-tax",
+        neighbour: str = "min",
+        bootstrap: bool = False,
+        sliver: bool = False,
+        gamma_z: float = GAMMA_Z,
+        gamma_true: float = GAMMA_TRUE,
+        confound_direction: str = "v",
+        outcome_noise_std: float = OUTCOME_NOISE_STD,
+    ):
+        if target not in ("iv", "plasmode"):
+            raise ValueError(f"target {target!r} is not one of ['iv', 'plasmode'].")
+        if sliver and target != "iv":
+            raise ValueError("the leaky-IV sliver is a set around the restricted point; it needs target 'iv'.")
+
+        self.design = build_design(self.panel(), spec=spec, anchor=anchor, neighbour=neighbour)
+        self.target = target
+        self.bootstrap = bool(bootstrap)
+        self._sliver = bool(sliver)
+        self._gamma_z = float(gamma_z)
+        self.X = self.design.X
+        # the tax column, read ONCE, here. `fit_model` hands DA+PI+IV the DA's own
+        # translation amounts as Z (`model_fitting.py:77`); no solver ever sees this.
+        self._Z = self.design.Z
+
+        b_r, self._misfit = restricted_fit(self.design)
+        if target == "iv":
+            self.W_XY = b_r.reshape(-1, 1)
+            self.y = self.design.y.reshape(-1, 1)
+            gap = self.design.b_ols - b_r
+            self._bias_sq = float(gap @ self.design.Sigma @ gap)
+            self._sigma_sq = 1.0
+        else:
+            self.W_XY = self._plasmode_target().reshape(-1, 1)
+            self._noise_std = float(outcome_noise_std)
+            self._kappa_sq = self._calibrate(float(gamma_true))
+            self.y = self._draw_outcome(confound_direction)
+            self._bias_sq = self._kappa_sq
+            self._sigma_sq = 1.0 - self._kappa_sq + self._noise_std**2
+
+    # ------------------------------------------------------------- plasmode
+
+    def _plasmode_target(self) -> NDArray:
+        """P_null(v) b_u: the unrestricted 2SLS fit projected onto the homogeneous
+        subspace. Exactly homogeneous, and near enough the data's own elasticities
+        that Var(h_*(X)) and the confounding are the same order."""
+        N = null_basis()
+        b_u, _ = two_stage_fit(self.design)
+        return N @ (N.T @ b_u)
+
+    def _calibrate(self, gamma_true: float) -> float:
+        """kappa^2 = gamma (1 + s^2) / (1 + gamma), the simulation's inversion, so
+        gamma* = bias^2/sigma^2 comes out at `gamma_true` exactly."""
+        if gamma_true < 0.0:
+            raise ValueError("`gamma_true` must be non-negative.")
+        s_sq = self._noise_std**2
+        return float(min(gamma_true * (1.0 + s_sq) / (1.0 + gamma_true), 1.0))
+
+    def _draw_outcome(self, direction: str) -> NDArray:
+        """Y = h_*(X) + kappa u_d + sqrt(1 - kappa^2) e + s nu, with u_d the design
+        projected on `direction` and STANDARDISED: without the unit variance the
+        confounding no longer has the magnitude gamma_true was inverted for."""
+        if direction not in CONFOUND_DIRECTIONS:
+            raise ValueError(f"confound_direction {direction!r} is not one of {list(CONFOUND_DIRECTIONS)}.")
+        if direction == "v":
+            # the spec-S story made explicit: an unobserved taste drift co-moving
+            # with the price level, which is the direction the symmetry is about
+            d = V / np.linalg.norm(V)
+        elif direction == "own_price":
+            d = np.eye(self.design.k)[0]
+        else:
+            d = np.linalg.solve(self.design.Sigma, self.W_XY.ravel())
+        confounder = self.X @ d
+        confounder = confounder / confounder.std()
+        kappa = np.sqrt(self._kappa_sq)
+        n = len(self.X)
+        noise = np.sqrt(1.0 - self._kappa_sq) * np.random.randn(n) + self._noise_std * np.random.randn(n)
+        return (self.f(self.X).ravel() + kappa * confounder + noise).reshape(-1, 1)
+
+    # -------------------------------------------------------------- the target
+
+    @property
+    def bias_sq(self) -> float:
+        return self._bias_sq
+
+    @property
+    def sigma_sq(self) -> float:
+        return self._sigma_sq
+
+    @property
+    def pool(self) -> tuple[NDArray, NDArray]:
+        """The panel itself -- see `SEM.pool`. The oracle reads THIS, never a
+        `sample`, so h_*, gamma* and eps* do not move with the replicate draw."""
+        return self.X, self.y
+
+    def extent(self, X) -> NDArray:
+        """Half-width of the target SET at each query; zero means a point target.
+
+        With `sliver` on, the target is everything consistent with the tax moment at
+        a FIXED gamma_z and with v'b = 0 (SS5),
+
+            S = { b : v'b = 0,  ||Q_Z'(y - X b)|| / sqrt(n) <= sigma sqrt(gamma_z) },
+
+        an ellipsoid in the three free parameters centred at b_r, so the per-query
+        extent is closed form: one 3x3 inverse, no solver. S is non-empty iff the
+        minimised misfit r0 is under the radius, which is itself a test of
+        "leaky-by-gamma_z IV and HD0" -- empty is information, not a failure.
+        """
+        X = np.asarray(X, dtype=float)
+        if not self._sliver:
+            return np.zeros(len(X))
+        slack = self._sigma_sq * self._gamma_z - self._misfit**2
+        if slack <= 0.0:
+            logger.info(
+                f"leaky-IV sliver EMPTY at {self.design.spec}/{self.design.anchor}: misfit {self._misfit:.4f} "
+                f"exceeds the radius {np.sqrt(self._sigma_sq * self._gamma_z):.4f}; falling back to the point target."
+            )
+            return np.zeros(len(X))
+        N = null_basis()
+        A = self.design.Q_Z.T @ (self.X @ N)
+        precision = np.linalg.inv(A.T @ A)
+        projected = X @ N
+        return np.sqrt(slack * len(self.X)) * np.sqrt(np.einsum("ij,jk,ik->i", projected, precision, projected))
+
+    # ------------------------------------------------------------- replicates
+
+    def sample(self, N: int = 1, **kwargs) -> tuple[NDArray, NDArray]:
+        """The replicate mechanism (SS6). `pool` is untouched either way.
+
+        `bootstrap=False`: the first rows of the panel, so at N = 2450 the draw IS
+        the panel, deterministically -- what the query figures and the coefficient
+        table are fit on.
+        `bootstrap=True`: whole state histories drawn WITH replacement, the sweep
+        replicate. Clusters and not rows, because within-state serial correlation
+        over 50 years is strong and an iid row bootstrap would understate the spread
+        and inflate coverage.
+        """
+        n_total = len(self.X)
+        if not self.bootstrap:
+            if n_total >= N:
+                return self.X[:N], self.y[:N]
+            logger.debug(f"CigaretteSEM: {N} rows requested from a panel of {n_total}; padding by cluster resample.")
+        states = np.unique(self.design.state)
+        rows = {state: np.flatnonzero(self.design.state == state) for state in states}
+        drawn = np.random.choice(states, int(np.ceil(N / YEARS_PER_STATE)), replace=True)
+        index = np.concatenate([rows[state] for state in drawn])
+        return self.X[index], self.y[index]
