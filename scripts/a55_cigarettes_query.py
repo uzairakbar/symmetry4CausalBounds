@@ -23,17 +23,21 @@ through `create_query_sweep_plot` and Q7 through `create_sweep_plot` with the
         recomputed here from the two closed forms; the SOLVER's own ratio agrees
         with it to 0.01 over the plotted queries (the SOCP's accuracy, and a
         positive epsilon budget, are what the gap is); and the four coefficient
-        |cos| are 0.028 / 0.306 / 0.100 / 0.772. Catches: the Euclidean angle in
-        place of the Sigma^-1 one -- with v = (1,1,1,1) every e_j then reads 0.5.
+        |cos| are 0.028 / 0.306 / 0.100 / 0.772, and the figure's four marked
+        queries are those same cosines. Catches: the Euclidean angle in place of
+        the Sigma^-1 one -- with v = (1,1,1,1) every e_j then reads 0.5.
   (iv)  the per-figure trims: the log-CPI grid under 0.70, the log p grid at 1.000
         +- 0.005, and the ray along v-hat two orders of magnitude under either,
         where a homogeneous h is 0 and the symmetry alone identifies the point.
         Catches: the dimension order swapped in the grid builder.
-  (v)   coefficients.tex: one row per configured method, and every interval
-        contains b_r. Analytic once h_* is strictly interior (a linear functional
-        of a point inside the ball is inside its image), so it tests that the
-        budget and the target were passed, nothing more; a plumbing check, and
-        labelled as one.
+  (v)   coefficients.tex, cell by cell. The b_r and b_u rows against a50(vi) and
+        SS0.5 IN RAW LOG UNITS, the cosine row against SS9, and PI+INV's log-CPI
+        width ratio against the trim leg (iv) measured. Then the plumbing check the
+        plan asks for: one row per configured method and every interval contains
+        b_r, which is analytic once h_* is strictly interior (a linear functional
+        of a point inside the ball is inside its image) and is labelled as such.
+        The cell pins are what catch a units error: the table is the main-text
+        table and a row-count check reads none of it.
   (vi)  ladder.tex: five data rows, one per spec, and the t3 row carries the
         numbers a50 and a52 pin (rho_max, W, J2 under three clusterings, gamma*).
 
@@ -46,6 +50,7 @@ Never touches do-MNIST.
 import argparse
 import os
 import pickle
+import re
 import shutil
 import sys
 
@@ -59,7 +64,7 @@ sys.path.insert(0, REPO)
 from src.experiments.cigarettes import DIM_IDS, RAY_ID, CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import QUERY_GAMMA, resolve_dataset_block  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.utils.constants import ARTIFACTS_DIRECTORY, SUBDIR_QUERY  # noqa: E402
+from src.experiments.utils.constants import ARTIFACTS_DIRECTORY, SUBDIR_QUERY, TEX_MAPPER  # noqa: E402
 from src.sem.cigarettes import V, null_basis  # noqa: E402
 
 GRID_POINTS = 32
@@ -96,6 +101,11 @@ PRICE_RATIO = 1.000
 PRICE_TOL = 0.005
 RAY_CEILING = 0.01
 SPEC_ROWS = 5
+# leg (v): the table is written in RAW log units, so its cells are a50(vi)'s b_r and
+# SS0.5's unrestricted point, not the solver's sigma-normalised numbers
+B_R_RAW = (-1.992, 0.507, 1.237, 0.249)
+B_U_RAW = (-2.000, 0.457, 1.229, 0.044)
+CELL_TOL = 5e-4
 # a50 / a52 pins for the t3 row of the ladder
 T3_LADDER = {"rho_max": 1.0020, "W": 4.8, "J2_state": 2.74, "J2_year": 1.75, "J2_iid": 6.62, "gamma": 0.1922}
 
@@ -139,6 +149,20 @@ def trim(name):
     if "PI+INV" not in width or "PI" not in width:
         return None
     return width["PI+INV"] / width["PI"]
+
+
+def table_rows(text):
+    """The data rows of a booktabs table, the row terminator stripped."""
+    return [line.rstrip().removesuffix(r"\\").strip() for line in text.splitlines() if line.rstrip().endswith(r"\\")]
+
+
+def cells(row):
+    return [cell.strip() for cell in row.split("&")]
+
+
+def row_named(rows, label):
+    """The row whose first cell is `label`, or None."""
+    return next((row for row in rows if cells(row)[0] == label), None)
 
 
 def cosines(points, precision):
@@ -258,7 +282,13 @@ def leg_iii(runner):
     gap = float(np.max(np.abs(measured - np.sqrt(1.0 - angle**2))))
     check("(iii) the solver agrees with the law", gap < SOLVER_TOL, f"max gap {gap:.4f}")
 
+    marks = load("ratio_cos_marks")
     coefficient_cos = cosines(np.eye(X.shape[1]), precision)
+    check(
+        "(iii) the figure marks the four coefficient queries",
+        marks is not None and float(np.max(np.abs(np.asarray(marks) - coefficient_cos))) < 1e-12,
+        "" if marks is None else f"{np.round(marks, 4)}",
+    )
     for j, (measured_cos, expected) in enumerate(zip(coefficient_cos, COSINES, strict=True)):
         check(
             f"(iii) |cos(e_{j}, v)|",
@@ -310,11 +340,40 @@ def leg_v(orch, runner):
     print("(v) coefficients.tex")
     with open(os.path.join(ARTIFACTS, "coefficients.tex")) as handle:
         table = handle.read()
-    rows = [line for line in table.splitlines() if line.endswith(r"\\")]
+    rows = table_rows(table)
     check(
         "(v) one row per configured method plus five reference rows",
         len(rows) == 1 + len(orch.kwargs["methods"]) + 5,
         f"{len(rows)} rows",
+    )
+
+    # the cells themselves, in the RAW log units the table declares. A row count
+    # reads no number, so a units error (sigma dropped) leaves the headline
+    # elasticity at -0.29 and every other leg green.
+    for label, expected in ((r"$b_r$", B_R_RAW), (r"$b_u$ (2SLS)", B_U_RAW)):
+        row = row_named(rows, label)
+        if row is None:
+            check(f"(v) the {label} row", False, "missing")
+            continue
+        values = [float(cell) for cell in cells(row)[1:]]
+        gap = float(np.max(np.abs(np.asarray(values) - np.asarray(expected))))
+        check(f"(v) the {label} row in raw log units", gap < CELL_TOL, f"{values} vs {list(expected)}")
+
+    row = row_named(rows, r"$|\cos(e_j, v)|$")
+    if row is None:
+        check("(v) the cosine row", False, "missing")
+    else:
+        values = [float(cell) for cell in cells(row)[1:]]
+        gap = float(np.max(np.abs(np.asarray(values) - np.asarray(COSINES))))
+        check("(v) the cosine row", gap < CELL_TOL, f"{values}")
+
+    trims = trim("dim_cpi_outcomes")
+    row = row_named(rows, TEX_MAPPER["PI+INV"])
+    printed = None if row is None else re.search(r"\(([0-9.]+)\)\s*$", cells(row)[-1])
+    check(
+        "(v) PI+INV's log-CPI width ratio matches the figure's trim",
+        printed is not None and trims is not None and abs(float(printed.group(1)) - float(trims[0])) < CELL_TOL,
+        f"{None if printed is None else printed.group(1)} vs {None if trims is None else round(float(trims[0]), 4)}",
     )
 
     design = runner.sem.design

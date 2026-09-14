@@ -338,8 +338,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         ratios = {name: (width / widths["PI"])[:, None] for name, width in widths.items()}
 
         cosines = _cosines(queries, precision)
+        # the four coefficient queries, marked on the axis and saved beside it: the
+        # figure's whole reading is that each one's trim is fixed by its own angle
+        marks = _cosines(np.eye(X.shape[1]), precision)
         save(cosines, "ratio_cos_values", self.name, "pkl", subdir=SUBDIR_QUERY)
         save(ratios, "ratio_cos_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
+        save(marks, "ratio_cos_marks", self.name, "pkl", subdir=SUBDIR_QUERY)
         create_sweep_plot(
             cosines,
             ratios,
@@ -349,7 +353,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             xlabel=r"$|\cos({\bm{x}}, {\bm{v}})|$",
             ylabel=r"width / PI width",
             bootstrapped=False,
-            vlines=tuple(_cosines(np.eye(X.shape[1]), precision)),
+            vlines=tuple(marks),
         )
 
     # ------------------------------------------------------------------ tables
