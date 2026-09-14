@@ -115,13 +115,30 @@ def shipped_block():
 
 
 def load(name):
-    with open(os.path.join(ARTIFACTS, f"{name}.pkl"), "rb") as handle:
+    """A saved query record, or None when the run did not write it. None rather
+    than an exception: a figure that never got drawn must turn a leg RED, not stop
+    the gate before the legs that would say why."""
+    path = os.path.join(ARTIFACTS, f"{name}.pkl")
+    if not os.path.exists(path):
+        logger.warning(f"{path} is missing.")
+        return None
+    with open(path, "rb") as handle:
         return pickle.load(handle)  # noqa: S301 - our own artifacts, no untrusted input
 
 
 def widths(record):
     """Per-query interval width of every PI method in a saved query record."""
+    if record is None:
+        return {}
     return {name: bounds[:, 0, 1] - bounds[:, 0, 0] for name, bounds in record.items() if bounds.ndim == 3}
+
+
+def trim(name):
+    """PI+INV over PI, per query, from a saved record; None when either is absent."""
+    width = widths(load(name))
+    if "PI+INV" not in width or "PI" not in width:
+        return None
+    return width["PI+INV"] / width["PI"]
 
 
 def cosines(points, precision):
@@ -149,8 +166,13 @@ def leg_0(runner):
         f"{len(np.unique(design, axis=0))} distinct",
     )
 
-    ratio = float(widths(load("dim_cpi_outcomes"))["PI+INV"][0] / widths(load("dim_cpi_outcomes"))["PI"][0])
-    check("(0) the log-CPI PI+INV / PI trim", CPI_RATIO[0] <= ratio <= CPI_RATIO[1], f"{ratio:.4f} in {CPI_RATIO}")
+    ratios = trim("dim_cpi_outcomes")
+    ratio = None if ratios is None else float(ratios[0])
+    check(
+        "(0) the log-CPI PI+INV / PI trim",
+        ratio is not None and CPI_RATIO[0] <= ratio <= CPI_RATIO[1],
+        f"{ratio} in {CPI_RATIO}",
+    )
 
 
 # =============================================================================
@@ -215,7 +237,11 @@ def leg_iii(runner):
     N = null_basis()
     inverse_restricted = N @ np.linalg.inv(N.T @ Sigma @ N) @ N.T
 
-    queries = np.asarray(load("ratio_cos_values"))
+    saved = load("ratio_cos_values")
+    if saved is None:
+        check("(iii) the width-ratio record exists", False)
+        return
+    queries = np.asarray(saved)
     rows = np.linspace(0, len(X) - 1, len(queries), dtype=int)
     points = X[rows]
     angle = cosines(points, precision)
@@ -228,7 +254,7 @@ def leg_iii(runner):
     law = float(np.max(np.abs(restricted / free - (1.0 - angle**2))))
     check("(iii) the analytic law", law < LAW_TOL, f"max deviation {law:.2e}")
 
-    measured = np.asarray(load("ratio_cos_outcomes")["PI+INV"]).ravel()
+    measured = np.asarray(load("ratio_cos_outcomes")["PI+INV"]).ravel()  # guarded by the record check above
     gap = float(np.max(np.abs(measured - np.sqrt(1.0 - angle**2))))
     check("(iii) the solver agrees with the law", gap < SOLVER_TOL, f"max gap {gap:.4f}")
 
@@ -248,10 +274,11 @@ def leg_iii(runner):
 
 def leg_iv():
     print("(iv) the trim per figure")
-    trims = {}
-    for name in DIM_IDS + (RAY_ID,):
-        width = widths(load(f"{name}_outcomes"))
-        trims[name] = width["PI+INV"] / width["PI"]
+    trims = {name: trim(f"{name}_outcomes") for name in DIM_IDS + (RAY_ID,)}
+    missing = sorted(name for name, value in trims.items() if value is None)
+    check("(iv) every per-dimension record exists", not missing, f"missing {missing}" if missing else "")
+    if missing:
+        return
 
     cpi = float(np.max(trims["dim_cpi"]))
     check("(iv) the log-CPI grid trims below 0.70", cpi < CPI_CEILING, f"{cpi:.4f}")
@@ -263,12 +290,14 @@ def leg_iv():
     check("(iv) the ray along v-hat collapses", ray < RAY_CEILING, f"{ray:.2e}")
     check("(iv) the ray is two orders under the CPI grid", ray * 100 < cpi, f"{ray:.2e} vs {cpi:.4f}")
 
-    # the grids are not interchangeable: a swapped dimension order shows here
-    order = [float(np.mean(trims[name])) for name in DIM_IDS]
+    # the grids are not interchangeable, and this is keyed on the NAMES rather than
+    # on DIM_IDS' order: |cos(e_j, v)| ranks the four coordinates CPI, y, p_n, p, so
+    # the trims must rank the same way whatever order the builder walks them in
+    ranked = [float(np.mean(trims[name])) for name in ("dim_cpi", "dim_y", "dim_pn", "dim_p")]
     check(
-        "(iv) log CPI trims hardest, log p least",
-        order.index(min(order)) == 3 and order.index(max(order)) == 0,
-        f"{np.round(order, 4)}",
+        "(iv) the trims rank as |cos(e_j, v)| does: CPI, y, p_n, p",
+        bool(np.all(np.diff(ranked) > 0.0)),
+        f"{np.round(ranked, 4)}",
     )
 
 
@@ -351,8 +380,8 @@ if __name__ == "__main__":
 
     runner = orch.get_query_runner_cls()(methods=orch.methods, **{**orch._get_clean_kwargs(), "n_experiments": 1})
     print(f"query budget gamma = {QUERY_GAMMA[orch.spec]:g}, epsilon = {runner.default_epsilon:.6g}")
-    leg_0(runner)
     leg_i()
+    leg_0(runner)
     leg_ii(orch, runner, raw)
     leg_iii(runner)
     leg_iv()
