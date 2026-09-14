@@ -143,10 +143,48 @@ class DoMNISTConfig:
         return float(lo), float(1.0 - lo)
 
 
+@dataclass(frozen=True)
+class CigaretteConfig:
+    """Cigarette panel constants. READ THIS FIRST, on where the budget comes from.
+
+    The SWEEPS never read a declared gamma: `ParamSweepRunner.fit_gamma` returns
+    `oracle.gamma_star`, so all six solve at gamma*(target), recomputed per target
+    and per spec -- that is where the budget is tuned to the oracle. `QUERY_GAMMA`
+    below reaches the query runner alone, where it is DECLARED, as
+    `OpticalDeviceConfig.gamma` is and for the reason its comment gives: coverage
+    at gamma* exactly is a tautology, since h_* then sits ON the Lem. 2 sphere.
+    """
+
+    # None = the measured eps* + EPS_TOL, which is EPS_TOL here: h_* is exactly
+    # homogeneous on both targets and the DA translates along v, so the defect is
+    # 0 by construction and the budget is pure knife-edge tolerance.
+    epsilon: float | None = None
+    query_epsilon: float | None = None
+    # None pads DA+ intervals by `epsilon` (Thm. 3.A); with eps* = 0 that is
+    # 2 x EPS_TOL of width, about 3% of the PI interval, and there is no defect
+    # for it to repair.
+    pad_epsilon: float | None = None
+    epsilon_true: float | None = None
+    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5)
+    eps_tol: float = 2**-8
+    test_fraction: float = 0.1
+    # the leaky-IV misspecification guard (SS5): FIXED, never swept. The sliver is
+    # empty at every spec but t3 with the own-tax anchor, which is what makes its
+    # non-emptiness a falsification rather than a p-value.
+    gamma_z: float = 2**-8
+    # plasmode: the confounding is drawn along `confound_direction` and calibrated
+    # so gamma* == gamma_true exactly. v is the spec-S story made explicit, a taste
+    # drift co-moving with the price level.
+    gamma_true: float = 0.25
+    confound_direction: Literal["v", "own_price", "worst_case"] = "v"
+    outcome_noise_std: float = 0.1
+
+
 # Default configurations
 SIMULATION_CONFIG = SimulationConfig()
 OPTICAL_CONFIG = OpticalDeviceConfig()
 DOMNIST_CONFIG = DoMNISTConfig()
+CIGARETTE_CONFIG = CigaretteConfig()
 
 
 # =============================================================================
@@ -170,6 +208,9 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
     "optical_device": DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
     # sweep_samples = the 10 digit exemplars on the query x-axis
     "do_mnist": DatasetDefaults(n_samples=1_200_000, n_experiments=1, sweep_samples=10),
+    # n_samples = the whole balanced panel; ask for more and the SEM resamples
+    # whole state histories WITH replacement
+    "cigarettes": DatasetDefaults(n_samples=2450, n_experiments=8, sweep_samples=32),
 }
 
 
@@ -268,6 +309,20 @@ ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
     # the translation carries its own `strength` knob, so nothing is appended
     "cigarettes": None,
 }
+
+
+# Per-spec QUERY budget for the cigarette panel, a module constant beside the two
+# ROBUSTNESS tables, which is this file's pattern for a per-dataset lookup. It is
+# kept out of `CigaretteConfig` so that dataclass stays flat and scalar like the
+# other three: a dict field under `frozen=True` makes the generated __hash__ raise.
+# The rule: the smallest power of two STRICTLY ABOVE the measured gamma*(restricted)
+# at the spec, so h_* stays strictly interior on the falsification rows too. A flat
+# 2**-2 would sit BELOW gamma* at s (0.2953) and t1 (0.4136) and PI itself could
+# miss there. Measured coverage at these values is 1.000 for PI and PI+INV at every
+# spec, and the trim barely moves: PI+INV/PI reads 0.868 at t3 here against 0.869
+# at gamma*. The SWEEPS are unaffected -- they solve at gamma*(target) and sweep
+# the ratio around it, which is where the validity reading lives.
+QUERY_GAMMA: dict[str, float] = {"s": 2**-1, "t1": 2**-1, "t2": 2**-2, "t3": 2**-2, "t4": 2**-2}
 
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
 # The near-null eigendirections of Sigma_GX are noise and 1/w blows them up, so the
@@ -773,6 +828,19 @@ DATASET_KEYS: dict[str, set] = {
         "treatment_dim",
     },
     "optical_device": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation"},
+    "cigarettes": {
+        "seed",
+        "n_samples",
+        "n_experiments",
+        "sweep_samples",
+        "methods",
+        "augmentation",
+        "target",
+        "spec",
+        "anchor",
+        "da_amplitude",
+        "sliver",
+    },
     "do_mnist": {
         "seed",
         "n_samples",
@@ -795,6 +863,8 @@ TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match"}
 REQUIRED_KEYS: dict[str, set] = {
     "simulation": {"seed", "kernel_dim"},
     "optical_device": {"seed", "augmentation"},
+    # `target` and `spec` decide what h_* IS, so neither has a defensible default
+    "cigarettes": {"seed", "augmentation", "target", "spec"},
     # `methods` is required HERE and nowhere else: the fallback below is all 11 of
     # ALL_METHODS, and the partial_r2_net backend defines only 9. Omitting it would
     # be a hard error mid-run rather than a config error up front.
@@ -828,6 +898,23 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"config.{name}.recalibrate must be a bool (true = gamma/rho, false = gamma); got {recalibrate!r}."
         )
+
+    # dataset-specific, unlike the two guards above: these keys exist on one block
+    # only, and an unknown spec would otherwise run silently at the loader's default
+    if name == "cigarettes":
+        for key, allowed in (
+            ("target", {"iv", "plasmode"}),
+            ("spec", {"s", "t1", "t2", "t3", "t4"}),
+            ("anchor", {"own-tax", "own-and-neighbour-tax"}),
+        ):
+            value = block.get(key, ...)
+            if value is not ... and value not in allowed:
+                raise ValueError(f"config.cigarettes.{key} must be one of {sorted(allowed)}; got {value!r}.")
+        amplitude = block.get("da_amplitude", 1.0)
+        if isinstance(amplitude, bool) or not isinstance(amplitude, int | float) or not 0.0 < amplitude < 1e3:
+            raise ValueError(f"config.cigarettes.da_amplitude must be a positive float; got {amplitude!r}.")
+        if not isinstance(block.get("sliver", False), bool):
+            raise ValueError(f"config.cigarettes.sliver must be a bool; got {block.get('sliver')!r}.")
 
     defaults = DATASET_DEFAULTS[name]
     for key in ("n_samples", "n_experiments", "sweep_samples"):

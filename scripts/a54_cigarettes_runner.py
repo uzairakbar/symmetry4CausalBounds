@@ -1,0 +1,360 @@
+"""A54: the cigarette orchestrator is wired -- config in, budgets and replicates out.
+
+refactor5 adds one orchestrator, one config dataclass, three registry entries, the
+per-spec `QUERY_GAMMA` table, the validation branch and the root-yaml block. Nothing
+it adds is a number of its own: the budgets come from `QUERY_GAMMA` and the oracle,
+the replicate scheme from the `bootstrap` flag the two runners are built with. Legs:
+
+  (i)   validation. The shipped block resolves; an unknown `target`, `spec` or
+        `anchor`, a non-bool `sliver` and a non-positive `da_amplitude` each raise.
+        Catches: the branch deleted (an unknown spec then runs silently at the
+        loader's default, which is a DIFFERENT experiment). Misses: a value that is
+        in the set but wrong for the run.
+  (ii)  budget plumbing. PI's half-width at three fixed queries equals the closed
+        form sigma sqrt(gamma) sqrt(x' Sigma^-1 x) to 1e-6, at the spec's declared
+        budget and at a quarter of it. The panel is sigma-normalised, so this is the
+        one leg that says the DECLARED gamma reached the solver as gamma and not as
+        something monotone in it. Catches: a squared, halved or rescaled budget, a
+        `QUERY_GAMMA` lookup on the wrong spec. Misses: which epsilon was used --
+        PI carries no invariance constraint.
+  (iii) the gamma sweep moves. Four ratio steps, one experiment: PI's coverage at
+        r = 1 is far above its coverage at r = 2^-4, the curve is monotone, and
+        PI+INV's width stays inside PI's at the plan's 0.869 +- 0.03. Catches: a
+        budget that does not reach `predict`, an inverted ratio axis.
+  (iv)  the trS axis is the recalibrated one. Four knobs, one experiment: the
+        PLOTTED x is monotone decreasing in the knob, never above 1 (Prop. 2), and
+        the runner's label is `TRS_XLABEL[True]` under `recalibrate: true`.
+        Catches: the label and the factor disagreeing, an amplitude that does not
+        reach the DA.
+  (v)   `target` routes, and the two runners get DIFFERENT replicate schemes.
+        gamma* is 0.1922 under `iv` and gamma_true under `plasmode`; `pool` and
+        `solution` are identical across the sweep SEMs under both, so the oracle
+        does not move with the draw; under `plasmode` the outcome differs between
+        experiments. Under `iv` the SWEEP fit sets are pairwise different and carry
+        duplicated state histories, while the QUERY design is the full panel, 2450
+        distinct rows, elementwise `pool[0]`. Catches: both runners built from one
+        factory (the whole point of SS6), a target that does not route, an oracle
+        that reads the resample.
+
+    MPLBACKEND=Agg python scripts/a54_cigarettes_runner.py [--seed 42]
+
+Reads the cigarettes block of config.yaml the way main.py does. Never touches
+do-MNIST.
+"""
+
+import argparse
+import os
+import sys
+
+import numpy as np
+import yaml
+from loguru import logger
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+
+from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
+from src.experiments.configs import (  # noqa: E402
+    QUERY_GAMMA,
+    TRS_XLABEL,
+    resolve_dataset_block,
+)
+from src.experiments.utils import fit_model, set_seed  # noqa: E402
+from src.sem.cigarettes import V, null_basis  # noqa: E402
+
+# small enough to stay under a minute, large enough for every leg to move
+SWEEP_STEPS = 4
+N_JOBS = 4
+GAMMA_GRID = (2.0**-4, 2.0**-2, 2.0**-1, 1.0)
+TRS_GRID = (0.125, 0.5, 2.0, 8.0)
+# leg (ii): three queries, none of them degenerate
+QUERIES = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.4, -0.2, 0.3, 0.1]])
+HALF_WIDTH_TOL = 1e-6
+# leg (iii), plan SS0.7: PI+INV is 0.869 of PI at t3. The COVERAGE pins are relative
+# to PI's own curve, not to 1.000: the sweeps fit state-cluster bootstrap replicates
+# against an oracle read off the whole pool (SS6), so nothing covers 1.000 here and a
+# pin at 1.0 would fail a correct implementation (measured PI at r = 1: 0.963).
+WIDTH_RATIO = 0.869
+WIDTH_TOL = 0.03
+COVERAGE_DROP = 0.3
+# leg (v)
+GAMMA_STAR_T3 = 0.19221455
+GAMMA_STAR_TOL = 1e-6
+PANEL_ROWS = 2450
+
+FAIL = []
+
+
+def check(name, ok, detail=""):
+    print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail}")
+    if not ok:
+        FAIL.append(name)
+
+
+def shipped_block():
+    """The cigarettes block of config.yaml, merged with the defaults as main.py
+    merges it, minus the `experiment` plan."""
+    with open(os.path.join(REPO, "config.yaml")) as handle:
+        config = yaml.safe_load(handle) or {}
+    block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
+    block.pop("experiment", None)
+    return block
+
+
+def build(block, seed, **overrides):
+    """An orchestrator on the shipped block, shrunk for the gate."""
+    block = resolve_dataset_block("cigarettes", dict(block))
+    block.update(seed=seed, n_jobs=N_JOBS, **overrides)
+    set_seed(seed)
+    return CigaretteOrchestrator(**block, hyperparameters={})
+
+
+def sweep_runner(orch, param, grid, **overrides):
+    kwargs = {k: v for k, v in orch.kwargs.items() if k != "methods"}
+    kwargs.update(overrides)
+    return orch.get_sweep_runner_cls(param)(
+        methods=orch.methods,
+        method_factory=orch.build_methods,
+        param_grid_override=list(grid),
+        **kwargs,
+    )
+
+
+def query_runner(orch):
+    kwargs = {k: v for k, v in orch.kwargs.items() if k != "methods"}
+    kwargs["n_experiments"] = 1
+    return orch.get_query_runner_cls()(methods=orch.methods, **kwargs)
+
+
+# =============================================================================
+# LEG (i): VALIDATION
+# =============================================================================
+
+
+def leg_i(block):
+    print("(i) the cigarettes validation branch")
+    try:
+        resolved = resolve_dataset_block("cigarettes", dict(block))
+        ok = resolved["target"] in ("iv", "plasmode") and resolved["n_samples"] == PANEL_ROWS
+    except Exception as error:  # noqa: BLE001
+        resolved, ok = None, False
+        print(f"      shipped block raised: {error}")
+    check("(i) the shipped block resolves", ok, f"target {None if resolved is None else resolved['target']}")
+
+    bad = {
+        "target": "ols",
+        "spec": "t9",
+        "anchor": "federal-tax",
+        "sliver": "yes",
+        "da_amplitude": -1.0,
+    }
+    for key, value in bad.items():
+        candidate = {**block, key: value}
+        try:
+            resolve_dataset_block("cigarettes", candidate)
+            raised = False
+        except ValueError as error:
+            raised = key in str(error)
+        check(f"(i) {key}={value!r} is rejected", raised)
+
+    # a bool is an int subclass; `da_amplitude: true` must not mean 1.0
+    try:
+        resolve_dataset_block("cigarettes", {**block, "da_amplitude": True})
+        raised = False
+    except ValueError:
+        raised = True
+    check("(i) da_amplitude=True is rejected", raised)
+
+
+# =============================================================================
+# LEG (ii): BUDGET PLUMBING
+# =============================================================================
+
+
+def leg_ii(orch, runner):
+    print("(ii) the declared budget reaches the solver as gamma")
+    X = runner.X
+    precision = np.linalg.inv(X.T @ X / len(X))
+    declared = QUERY_GAMMA[orch.spec]
+    check("(ii) the runner's gamma is QUERY_GAMMA[spec]", abs(runner.default_gamma - declared) < 1e-15, f"{declared}")
+
+    for gamma in (declared, declared / 4.0):
+        builders = orch.build_methods(gamma=gamma, epsilon=runner.default_epsilon)
+        model = builders["PI"]()
+        fit_model(
+            model=model,
+            method_name="PI",
+            X=X,
+            y=runner.y,
+            GX=runner.GX,
+            G=runner.G,
+            hyperparameters={},
+            da=runner.da,
+        )
+        bounds = model.predict(QUERIES)
+        measured = (bounds[:, 1] - bounds[:, 0]) / 2.0
+        closed = np.sqrt(gamma) * np.sqrt(np.einsum("ij,jk,ik->i", QUERIES, precision, QUERIES))
+        gap = float(np.max(np.abs(measured - closed)))
+        check(
+            f"(ii) PI half-width = sigma sqrt({gamma:g}) sqrt(x' Sigma^-1 x)",
+            gap < HALF_WIDTH_TOL,
+            f"max gap {gap:.2e}",
+        )
+
+
+# =============================================================================
+# LEG (iii): THE GAMMA SWEEP
+# =============================================================================
+
+
+def leg_iii(orch):
+    print("(iii) the gamma sweep")
+    runner = sweep_runner(orch, "gamma", GAMMA_GRID, n_experiments=1)
+    x, results, _ = runner.run("gamma")
+    coverage = {name: np.nanmean(record["coverage"], axis=1) for name, record in results.items()}
+    width = {name: np.nanmean(record["interval_width"], axis=1) for name, record in results.items()}
+
+    pi = coverage["PI"]
+    check("(iii) PI coverage rises with the budget", bool(np.all(np.diff(pi) > -1e-12)), f"{np.round(pi, 3)}")
+    check(
+        "(iii) PI coverage at r = 1 clears r = 2^-4 by 0.3",
+        float(pi[-1] - pi[0]) > COVERAGE_DROP,
+        f"{pi[0]:.3f} -> {pi[-1]:.3f}",
+    )
+    check("(iii) PI coverage at r = 2^-4 is well under 1", float(pi[0]) < 0.6, f"{pi[0]:.3f}")
+
+    ratio = float(width["PI+INV"][-1] / width["PI"][-1])
+    check("(iii) PI+INV / PI at r = 1", abs(ratio - WIDTH_RATIO) < WIDTH_TOL, f"{ratio:.4f} vs {WIDTH_RATIO}")
+    return x, pi
+
+
+# =============================================================================
+# LEG (iv): THE trS AXIS
+# =============================================================================
+
+
+def leg_iv(orch):
+    print("(iv) the trS axis is the recalibrated one")
+    runner = sweep_runner(orch, "trS", TRS_GRID, n_experiments=1)
+    x, _, _ = runner.run("trS")
+    x = np.asarray(x, dtype=float)
+    check("(iv) the plotted x falls with the knob", bool(np.all(np.diff(x) < 0.0)), f"{np.round(x, 4)}")
+    check("(iv) every x is at or under 1 (Prop. 2)", bool(np.all(x <= 1.0 + 1e-9)), f"max {x.max():.5f}")
+    check(
+        "(iv) the label follows the factor",
+        runner.xlabel == TRS_XLABEL[runner.recalibrate],
+        f"recalibrate={runner.recalibrate}",
+    )
+
+
+# =============================================================================
+# LEG (v): TARGET ROUTING AND THE REPLICATE SCHEME
+# =============================================================================
+
+
+def _rows_per_state(design_rows, pool_rows, states):
+    """How many rows of `design_rows` each state contributes, matched back through
+    the pool. A state drawn twice by the cluster bootstrap contributes about twice
+    its 50-year history, minus what the test split took."""
+    lookup = {row.tobytes(): index for index, row in enumerate(pool_rows)}
+    drawn = [states[lookup[row.tobytes()]] for row in design_rows if row.tobytes() in lookup]
+    return np.unique(np.asarray(drawn), return_counts=True)
+
+
+def leg_v(block, seed):
+    print("(v) target routing and the replicate scheme")
+    N = null_basis()
+    for target, expected in (("iv", GAMMA_STAR_T3), ("plasmode", None)):
+        orch = build(block, seed, target=target, n_experiments=2, sweep_samples=8)
+        runner = sweep_runner(orch, "gamma", GAMMA_GRID[:1], n_experiments=2)
+        gamma_star = float(runner.get_oracle(0).gamma_star)
+        want = expected if expected is not None else orch.kwargs.get("gamma_true", 0.25)
+        check(
+            f"(v) {target}: gamma*",
+            abs(gamma_star - want) < (GAMMA_STAR_TOL if expected else 1e-12),
+            f"{gamma_star:.8f} vs {want}",
+        )
+
+        sems = runner.sems
+        pools = [sem.pool[0] for sem in sems]
+        solutions = [sem.solution for sem in sems]
+        check(
+            f"(v) {target}: pool identical across sweep SEMs",
+            all(np.array_equal(pools[0], other) for other in pools[1:]),
+        )
+        check(
+            f"(v) {target}: solution identical across sweep SEMs",
+            all(np.array_equal(solutions[0], other) for other in solutions[1:]),
+        )
+        check(
+            f"(v) {target}: h_* is homogeneous",
+            float(abs(V @ solutions[0].ravel())) < 1e-12,
+            f"|v'b| {float(abs(V @ solutions[0].ravel())):.2e}",
+        )
+        check(
+            f"(v) {target}: h_* lies in null(v)",
+            float(np.max(np.abs(solutions[0].ravel() - N @ (N.T @ solutions[0].ravel())))) < 1e-12,
+        )
+
+        outcomes = [sem.pool[1] for sem in sems]
+        differs = not np.array_equal(outcomes[0], outcomes[1])
+        check(
+            f"(v) {target}: the outcome {'differs' if target == 'plasmode' else 'is fixed'} between experiments",
+            differs == (target == "plasmode"),
+        )
+
+        # `sample` is the sweep replicate mechanism: a cluster bootstrap under `iv`,
+        # the panel itself under `plasmode`, where the replicate is the outcome draw
+        draws = [sems[0].sample(PANEL_ROWS)[0] for _ in range(2)]
+        resamples = not np.array_equal(draws[0], draws[1])
+        check(
+            f"(v) {target}: the sweep SEM {'resamples' if target == 'iv' else 'returns the panel'}",
+            resamples == (target == "iv"),
+        )
+        if target == "plasmode":
+            check("(v) plasmode: the sweep draw IS the panel", np.array_equal(draws[0], pools[0]))
+
+        # the SWEEP fit sets under `iv`: bootstrap replicates, so pairwise different
+        # and carrying whole state histories more than once
+        if target == "iv":
+            fits = [runner._base_data(j)[0] for j in range(2)]
+            check("(v) iv: sweep fit sets are pairwise different", not np.array_equal(fits[0], fits[1]))
+            states, counts = _rows_per_state(fits[0], pools[0], sems[0].design.state)
+            check(
+                "(v) iv: the sweep fit set carries duplicated state histories",
+                int(counts.max()) > 50,
+                f"{len(states)} distinct states, up to {int(counts.max())} rows each",
+            )
+
+        # the QUERY runner: the panel itself, every row once
+        runner_q = query_runner(orch)
+        design = runner_q.X
+        check(f"(v) {target}: the query design IS the pool", np.array_equal(design, pools[0]), f"{design.shape}")
+        check(
+            f"(v) {target}: the query design has {PANEL_ROWS} distinct rows",
+            len(np.unique(design, axis=0)) == PANEL_ROWS,
+            f"{len(np.unique(design, axis=0))}",
+        )
+
+
+if __name__ == "__main__":
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
+    os.chdir(REPO)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    seed = parser.parse_args().seed
+
+    block = shipped_block()
+    leg_i(block)
+    orch = build(block, seed, n_experiments=1, sweep_samples=8)
+    leg_ii(orch, query_runner(orch))
+    leg_iii(orch)
+    leg_iv(orch)
+    leg_v(block, seed)
+
+    if not FAIL:
+        print("A54 PASS")
+    else:
+        print(f"A54 FAIL: {FAIL}")
+        sys.exit(1)

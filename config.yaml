@@ -133,6 +133,63 @@ optical_device:
         # # perf:
         # #     metric: [wall_clock, seed_var]
 
+cigarettes:
+    seed: 42
+    # iv       = h* solves the tax-moment program SUBJECT TO v'beta = 0 (restricted
+    #            2SLS), so it satisfies the instrument and homogeneity at once;
+    #            Z is then discarded. eps* = 0 by construction, nothing is padded.
+    #            A VALIDITY AND SHARPNESS experiment: the target was built to
+    #            satisfy both assumptions, so coverage of it is measurable on
+    #            real data (conditional on those assumptions). Every sweep runs.
+    #            Only the value AT gamma* is a tautology, so the query panel uses
+    #            the DECLARED per-spec configs.QUERY_GAMMA; the SWEEPS solve at
+    #            gamma*(target).
+    # plasmode = real design, synthetic exactly-homogeneous h* and synthetic
+    #            confounding of known strength; gamma* == gamma_true. VALIDITY.
+    target: iv
+    # state FE plus a trend of this order. t3 is chosen by the restriction's own
+    # diagnostics: the OLS ladder converges there (rho_max 1.0020, unchanged at
+    # t4), the restricted-GMM J does not reject under state or year clustering
+    # (2.74 / 1.75; it DOES under iid, 6.62), and it is the only cell whose
+    # leaky-IV sliver is non-empty at both guard levels. t1 and t2 are the
+    # pre-registered falsification rows: reported, not run.
+    spec: t3
+    # own-tax = Z is the own state excise, only log p endogenous (F 68 state /
+    #           324 year). own-and-neighbour adds the min-neighbour excise for
+    #           log p_n: weak at t1 (F 10.0 / 4.8) and the sliver is empty.
+    anchor: own-tax
+    n_samples: 2_450        # the whole panel; more resamples WITH replacement
+    n_experiments: 8        # iv: state-cluster bootstrap replicates of the fit
+                            # sample with h* held fixed from the full pool, so
+                            # the bars are a resampling RATE. plasmode: fresh
+                            # (U, xi) per experiment on the fixed design.
+    sweep_samples: 128      # also the per-dimension query grids, forced EVEN so
+                            # the exact zero stays off them
+    # DA amplitude along v = (1,1,1,1), in units of sd(X . v-hat) after FWL
+    # (0.1055 at t3). The trS sweep multiplies this by its own `scale` knob.
+    da_amplitude: 1.0
+    # the leaky-IV misspecification guard. false = the target is the restricted
+    # point alone. gamma_z is FIXED at CigaretteConfig.gamma_z, never swept; the
+    # sliver is empty at every spec except t3 with the own-tax anchor.
+    sliver: false
+    methods:
+        # - ATE
+        # - ERM
+        # - DA+ERM
+        # - DA+IV
+        - PI+INV
+        - PI
+        - DA+PI
+        - DA+PI+IV
+        - PI&DA+PI
+        - PI&DA+PI+IV
+    augmentation: translate
+    experiment:
+        query: true
+        sweep:
+            param:  [epsilon, gamma, trS, n, m, recalibrate]
+            metric: [coverage, approx_error, worst_error, width]
+
 # net training; reaches GradientDescentERM._fit via fit_model. The linear
 # experiments have no nets and ignore every key here.
 hyperparameters:
