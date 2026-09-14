@@ -38,6 +38,17 @@ equivalent one. So the gate is half regression and half interface. Legs:
         both sides of the interval, so neither branch of either formula is
         untested. Catches: a non-zero default, a mis-signed padding, an
         approximation branch written as a min over padded endpoints.
+  (ix)  the extent array TRAVELS. Leg (vii) proves the two metrics honour a
+        positive `extent` and that the interface is inert at zero; it says nothing
+        about whether the array ever reaches them. So: the sim SEM with one method
+        swapped for a constant half-width, through the real `GammaRatioStrategy`,
+        against the same draw without it. `SweepData.extent` must arrive filled,
+        and coverage must strictly fall while the approximation error strictly
+        rises. Catches: a severed fill -- `_extent` returning zeros, the
+        `SweepData` field dropped at a construction site, `metric_extent` pinned
+        at 0.0 -- every one of which leaves the sliver silently invisible in every
+        sweep figure while legs (i)-(viii) stay green. Misses: the query path,
+        which has no metrics; a55 is where that lands.
   (viii) the do-MNIST SEM inherits `extent` from the base class and returns zeros
         on a 3-row array. CLASS ONLY: the SEM is never constructed and no dataset
         is touched. Catches: `extent` defined on a subclass instead of the base.
@@ -66,6 +77,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     DATASET_DEFAULTS,
     PARAM_SPECS,
@@ -119,6 +131,10 @@ EPSILON_GRID = (2.0**-6, 2.0**-3, 1.0)
 COVERAGE_FLOOR = 0.7
 EPS_STAR_RTOL = 0.05
 MICRO_SAMPLES = 500
+# leg (ix): a half-width in the sim's outcome units. Wider than the HALF-widths the
+# sim's own intervals have at gamma* (PI 3.88, DA+PI 2.38), so the set falls out of
+# both and every method's coverage has to move, not just the tighter one.
+STUB_EXTENT = 5.0
 # leg (vi): the name `create_query_sweep_plot` has always derived from the xlabel
 DERIVED_XLABEL = r"$\vartheta$"
 DERIVED_FNAME = "vartheta_sweep"
@@ -533,6 +549,96 @@ def leg_vii(orchs, seed):
 
 
 # =============================================================================
+# LEG (ix): THE FILL
+# =============================================================================
+
+
+class SetTargetSEM(LinearSimulationSEM):
+    """The simulation SEM with a SET target: same centre, a constant half-width.
+
+    Only a method is added, no state, so a SEM can be promoted to this class after
+    it is built and its draw is bit-identical. Any metric that then moves moved
+    because the extent array travelled.
+    """
+
+    def extent(self, X) -> np.ndarray:
+        return np.full(len(X), STUB_EXTENT)
+
+
+def leg_ix(draw, chain, seed, **toggles):
+    print("(ix) the extent array travels SEM -> SweepData -> evaluate_queries")
+    orch = build("simulation", draw, chain, seed, **toggles)
+    point_factory = orch._sem_factory
+
+    def set_factory():
+        sem = point_factory()
+        sem.__class__ = SetTargetSEM
+        return sem
+
+    def sweep(factory):
+        """One gamma step at the oracle budget, through the production strategy."""
+        orch._sem_factory = factory
+        set_seed(seed)
+        runner = orch.get_sweep_runner_cls("gamma")(
+            methods=orch.methods,
+            method_factory=orch.build_methods,
+            param_grid_override=np.asarray([1.0]),
+            **orch._get_clean_kwargs(),
+        )
+        set_seed(seed)
+        data = runner.generate_data(0, 1.0)
+        set_seed(seed)
+        _, results, _ = runner.run("a53 extent fill")
+        return data, results
+
+    try:
+        point_data, point = sweep(point_factory)
+        set_data, wide = sweep(set_factory)
+    finally:
+        orch._sem_factory = point_factory
+
+    n_queries = len(point_data.X_test)
+    check(
+        "(ix) a point target fills extent with zeros",
+        point_data.extent is not None and np.array_equal(point_data.extent, np.zeros(n_queries)),
+        f"{np.shape(point_data.extent)}",
+    )
+    check(
+        "(ix) and reaches the metrics as zero",
+        not np.any(point_data.metric_extent),
+        f"max {float(np.max(np.abs(point_data.metric_extent))):g}",
+    )
+    check("(ix) an unfilled field still reads 0.0", SweepData(*([None] * 6)).metric_extent == 0.0)
+    arrived = set_data.extent
+    check(
+        "(ix) a set target fills extent with its own half-width",
+        arrived is not None and np.array_equal(arrived, np.full(n_queries, STUB_EXTENT)),
+        f"{None if arrived is None else (np.shape(arrived), float(np.min(arrived)), float(np.max(arrived)))}",
+    )
+    check(
+        "(ix) and reaches the metrics unchanged",
+        np.array_equal(np.asarray(set_data.metric_extent), np.full(n_queries, STUB_EXTENT)),
+        f"{np.asarray(set_data.metric_extent).ravel()[:2]}",
+    )
+
+    for name in point:
+        scalar = {m: (float(point[name][m][0, 0]), float(wide[name][m][0, 0])) for m in HASHED_METRICS}
+        print(f"      {name:7s} " + "  ".join(f"{m} {a:.4f}->{b:.4f}" for m, (a, b) in scalar.items()))
+        cov_point, cov_set = scalar["coverage"]
+        err_point, err_set = scalar["approximation_error"]
+        check(f"(ix) {name}: coverage strictly falls", cov_set < cov_point, f"{cov_point:.4f} -> {cov_set:.4f}")
+        check(
+            f"(ix) {name}: approximation error strictly rises",
+            err_set > err_point,
+            f"{err_point:.4g} -> {err_set:.4g}",
+        )
+        # `worst_error` is a sup over the ESTIMATE's endpoints against the target
+        # CENTRE, so it reads `f` whatever the extent is (SS5)
+        worst_point, worst_set = scalar["worst_error"]
+        check(f"(ix) {name}: worst_error still reads the centre", worst_set == worst_point, f"{worst_point:.6g}")
+
+
+# =============================================================================
 # LEG (viii): THE do-MNIST CLASS
 # =============================================================================
 
@@ -582,6 +688,7 @@ if __name__ == "__main__":
     leg_vi(tmp)
     leg_vii(orchs, args.seed)
     leg_viii()
+    leg_ix(draw, chain, args.seed, **toggles)
 
     if not FAIL:
         shutil.rmtree(tmp, ignore_errors=True)
