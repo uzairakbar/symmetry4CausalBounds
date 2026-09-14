@@ -123,6 +123,10 @@ MICRO_SAMPLES = 500
 DERIVED_XLABEL = r"$\vartheta$"
 DERIVED_FNAME = "vartheta_sweep"
 
+# read once, through getattr: a break that MOVES `extent` off the base class must
+# make legs (vii) and (viii) print FAIL, not raise on the way to them
+BASE_EXTENT = getattr(StructuralEquationModel, "extent", None)
+
 TMPROOT = os.path.expanduser("~/scratch/tmp/a53")
 FAIL = []
 
@@ -483,14 +487,11 @@ def leg_vii(orchs, seed):
             extent.shape == (len(X),) and not np.any(extent),
             f"shape {extent.shape}, max {np.max(np.abs(extent)) if extent.size else 0}",
         )
-    check(
-        "(vii) LinearSimulationSEM inherits extent",
-        LinearSimulationSEM.extent is StructuralEquationModel.extent,
-    )
-    check(
-        "(vii) OpticalDeviceSEM inherits extent",
-        OpticalDeviceSEM.extent is StructuralEquationModel.extent,
-    )
+    for cls in (LinearSimulationSEM, OpticalDeviceSEM):
+        check(
+            f"(vii) {cls.__name__} inherits extent from the base class",
+            BASE_EXTENT is not None and getattr(cls, "extent", None) is BASE_EXTENT,
+        )
 
     outside = []
     for name, estimand, interval in _draws(orchs, seed):
@@ -541,13 +542,16 @@ def leg_viii():
     from src.sem.do_mnist import DoMNISTSEM
 
     inherited = getattr(DoMNISTSEM, "extent", None)
-    check("(viii) extent comes from the base class", inherited is StructuralEquationModel.extent)
+    check("(viii) extent comes from the base class", inherited is not None and inherited is BASE_EXTENT)
     check(
         "(viii) the signature is (self, X)",
-        list(inspect.signature(StructuralEquationModel.extent).parameters) == ["self", "X"],
+        BASE_EXTENT is not None and list(inspect.signature(BASE_EXTENT).parameters) == ["self", "X"],
     )
+    if inherited is None:
+        check("(viii) it returns zeros of the query count", False, "no `extent` on the class")
+        return
     stub = object.__new__(DoMNISTSEM)  # no __init__: nothing is downloaded or read
-    out = DoMNISTSEM.extent(stub, np.zeros((3, 2)))
+    out = inherited(stub, np.zeros((3, 2)))
     check("(viii) it returns zeros of the query count", out.shape == (3,) and not np.any(out), f"{out!r}")
 
 
