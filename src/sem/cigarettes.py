@@ -577,7 +577,12 @@ class CigaretteSEM(SEM):
         if not self.bootstrap:
             if n_total >= N:
                 return self.X[:N], self.y[:N]
-            logger.debug(f"CigaretteSEM: {N} rows requested from a panel of {n_total}; padding by cluster resample.")
+            # not an error -- a sweep may legitimately ask for more rows than the
+            # panel has -- but the draw is then a BOOTSTRAP, so anything read off it
+            # carries resampling noise the panel itself does not have
+            logger.warning(
+                f"CigaretteSEM: {N} rows requested from a panel of {n_total}; padding by cluster resample."
+            )
         states = np.unique(self.design.state)
         rows = {state: np.flatnonzero(self.design.state == state) for state in states}
         drawn = np.random.choice(states, int(np.ceil(N / YEARS_PER_STATE)), replace=True)

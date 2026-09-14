@@ -76,11 +76,12 @@ NOISE_STD = 0.1
 # draws is pinned tightly and the individual draws loosely; the plan's [0.85, 1.15]
 # on 20 draws is a 1.9-sigma band and rejects a correct SEM most of the time.
 PLASMODE_DRAWS = 40
-BAND_MEAN = (0.95, 1.10)
+BAND_MEAN = (0.96, 1.07)
 BAND_DRAW = (0.6, 1.5)
 BOOTSTRAP_SEEDS = 20
 DISTINCT_MEAN = (29.0, 33.0)
 DISTINCT_ANY = (22, 40)
+PADDED = 2500
 # J1w, J2, Wald at t3; MEASURED, plan SS0.3
 COMPATIBILITY = {"iid": (6.68, 6.62, 6.73), "state": (8.93, 2.74, 2.79), "year": (2.18, 1.75, 1.90)}
 WALD_GAP = 0.2
@@ -88,7 +89,7 @@ ONE_STEP_GAP = 3.0
 SLIVER_RATIO = 0.063
 SLIVER_RATIO_TOL = 0.005
 SLIVER_CPI = 0.533
-SLIVER_CPI_TOL = 0.02
+SLIVER_CPI_TOL = 0.005
 DOUBLING = 2.635
 QUERIES = 512
 FAIL = []
@@ -111,6 +112,30 @@ def restricted_by_projector(design):
     return N @ np.linalg.solve(A.T @ P @ A, A.T @ P @ design.y)
 
 
+def sliver_by_projector(design, gamma_z, queries):
+    """The sliver half-width, recomputed INDEPENDENTLY of the SEM: the projector
+    Z(Z'Z)^-1 Z' from the normal equations where the SEM carries an orthonormal
+    basis of span(Z), and the restricted point from `restricted_by_projector`.
+
+    Same set, different arithmetic. A wrong metric -- the plain design second moment
+    N'X'XN in place of the IV one (Q_Z'XN)'(Q_Z'XN) -- moves every coefficient
+    half-width, and pinning all four against this is what sees it.
+    """
+    N = null_basis()
+    Z = design.instruments
+    P = Z @ np.linalg.solve(Z.T @ Z, Z.T)
+    A = design.X @ N
+    metric = A.T @ P @ A
+    residual = design.y - design.X @ restricted_by_projector(design)
+    misfit_sq = float(residual @ P @ residual) / len(design.y)
+    slack = gamma_z - misfit_sq
+    if slack <= 0.0:
+        return np.zeros(len(queries))
+    projected = np.asarray(queries, dtype=float) @ N
+    spread = np.einsum("ij,jk,ik->i", projected, np.linalg.inv(metric), projected)
+    return np.sqrt(slack * len(design.y)) * np.sqrt(spread)
+
+
 def leg_i(sem):
     print("(i) the iv target is the restricted-IV point")
     independent = restricted_by_projector(sem.design)
@@ -125,6 +150,21 @@ def leg_i(sem):
 
 def index_of(pool_X):
     return {row.tobytes(): position for position, row in enumerate(pool_X)}
+
+
+def whole_histories(drawn_X, lookup, states, years):
+    """True when the draw is made of COMPLETE state histories: every state in it
+    contributes a whole multiple of 50 rows and covers all 50 years. An iid row
+    bootstrap fails this on its first draw."""
+    positions = np.array([lookup[row.tobytes()] for row in drawn_X])
+    drawn_states = states[positions]
+    for state in np.unique(drawn_states):
+        rows = drawn_states == state
+        if int(rows.sum()) % YEARS_PER_STATE != 0:
+            return False
+        if len(np.unique(years[positions][rows])) != YEARS_PER_STATE:
+            return False
+    return True
 
 
 def leg_ii():
@@ -151,26 +191,47 @@ def leg_ii():
         )
 
     plain = CigaretteSEM(bootstrap=False)
+    lookup = index_of(pool_X)
+    states, years = plain.design.state, plain.design.year
     first, second = plain.sample(len(pool_X)), plain.sample(len(pool_X))
     check("(ii) bootstrap=False: sample(2450) IS the panel", np.array_equal(first[0], pool_X))
     check("(ii) bootstrap=False: two draws agree", np.array_equal(first[0], second[0]))
 
-    lookup = index_of(pool_X)
-    states = plain.design.state
+    # above the panel the draw is a BOOTSTRAP and says so out loud, whatever the flag
+    messages = []
+    handle = logger.add(messages.append, level="WARNING")
+    padded_X, padded_y = plain.sample(PADDED)
+    logger.remove(handle)
+    expected = YEARS_PER_STATE * int(np.ceil(PADDED / YEARS_PER_STATE))
+    check("(ii) bootstrap=False: a request above the panel is padded", len(padded_X) == expected, f"{len(padded_X)}")
+    check("(ii) bootstrap=False: outcomes padded alike", len(padded_y) == expected, f"{len(padded_y)}")
+    check(
+        "(ii) bootstrap=False: the padding warns",
+        any("padding by cluster resample" in str(message) for message in messages),
+        f"{len(messages)} warnings",
+    )
+    check(
+        "(ii) bootstrap=False: padding leaves the pool alone",
+        np.array_equal(plain.pool[0], pool_X) and np.array_equal(plain.pool[1], pool_y),
+    )
+    check(
+        "(ii) bootstrap=False: the padding is by CLUSTER",
+        whole_histories(padded_X, lookup, states, years),
+        "every state in the padded draw contributes complete 50-year histories",
+    )
+
     booted = CigaretteSEM(bootstrap=True)
     np.random.seed(SEED)
     draw_X, draw_y = booted.sample(len(pool_X))
     again_X, _ = booted.sample(len(pool_X))
     positions = np.array([lookup[row.tobytes()] for row in draw_X])
-    drawn_states = states[positions]
-    counts = {state: int((drawn_states == state).sum()) for state in np.unique(drawn_states)}
-    whole = all(count % YEARS_PER_STATE == 0 for count in counts.values())
-    years = plain.design.year
-    complete = all(
-        len(np.unique(years[positions][drawn_states == state])) == YEARS_PER_STATE for state in counts
-    )
+    distinct_states = len(np.unique(states[positions]))
     check("(ii) bootstrap=True: 2450 rows", len(draw_X) == len(pool_X) and len(draw_y) == len(pool_X))
-    check("(ii) bootstrap=True: whole state histories", whole and complete, f"{len(counts)} distinct states")
+    check(
+        "(ii) bootstrap=True: whole state histories",
+        whole_histories(draw_X, lookup, states, years),
+        f"{distinct_states} distinct states",
+    )
     check("(ii) bootstrap=True: draws differ", not np.array_equal(draw_X, again_X))
     distinct = []
     for seed in range(BOOTSTRAP_SEEDS):
@@ -304,10 +365,18 @@ def leg_vii(sem):
     precision = np.linalg.inv(guarded.design.Sigma)
     width = 2.0 * np.sqrt(gamma_star(guarded)) * np.sqrt(np.einsum("ij,jk,ik->i", queries, precision, queries))
     ratio = float(np.mean(2.0 * guarded.extent(queries) / width))
-    cpi = float(guarded.extent(coefficients)[3])
+    half_widths = guarded.extent(coefficients)
+    cpi = float(half_widths[3])
     print(f"      t3 misfit r0 {guarded._misfit:.4f}, extent/PI width {ratio:.4f}, e_cpi half-width {cpi:.4f}")
+    print("      coefficient half-widths " + " ".join(f"{value:.6f}" for value in half_widths))
     check("(vii) sliver true: extent / PI width", abs(ratio - SLIVER_RATIO) < SLIVER_RATIO_TOL, f"{ratio:.4f}")
     check("(vii) sliver true: e_cpi half-width", abs(cpi - SLIVER_CPI) < SLIVER_CPI_TOL, f"{cpi:.4f}")
+    independent = sliver_by_projector(guarded.design, 2**-8, coefficients)
+    for index, name in enumerate(("log p", "log y", "log p_n", "log CPI")):
+        gap = abs(float(half_widths[index] - independent[index]))
+        check(f"(vii) {name} half-width == the independent closed form", gap < 1e-10, f"gap {gap:.2e}")
+    observed = float(np.abs(guarded.extent(queries) - sliver_by_projector(guarded.design, 2**-8, queries)).max())
+    check("(vii) the observed queries agree too", observed < 1e-10, f"max gap {observed:.2e}")
 
     messages = []
     handle = logger.add(messages.append, level="INFO")
