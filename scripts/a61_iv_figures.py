@@ -534,7 +534,8 @@ def leg_vi(reference):
     print("(vi) the normalise rule")
     y = {
         "PI": np.array([[1.0, 1.0], [0.0, 0.0], [2.0, 2.0], [np.nan, np.nan]]),
-        "DA+PI": np.array([[0.5, 0.5], [0.0, 0.0], [1.0, 3.0], [1.0, 1.0]]),
+        # a POSITIVE miss on the zero-baseline step: x/0 is inf without the guard
+        "DA+PI": np.array([[0.5, 0.5], [0.3, 0.0], [1.0, 3.0], [1.0, 1.0]]),
     }
     out, baseline = normalize_sweep(y, "gamma_width")
     check("(vi) the baseline is PI", baseline == "PI")
@@ -543,8 +544,9 @@ def leg_vi(reference):
         "(vi) DA+PI is divided by the same per-step number", np.allclose(out["DA+PI"][[0, 2]], [[0.5, 0.5], [0.5, 1.5]])
     )
     check(
-        "(vi) a zero baseline step reads NaN for every method, never inf",
+        "(vi) a zero baseline step reads NaN for every method, never inf (x/0 and 0/0 alike)",
         np.all(np.isnan(out["PI"][1])) and np.all(np.isnan(out["DA+PI"][1])),
+        f"{out['DA+PI'][1]}",
     )
     check("(vi) an all-NaN baseline step reads NaN too", np.all(np.isnan(out["DA+PI"][3])))
     check("(vi) the input is left untouched", y["PI"][2, 0] == 2.0)
