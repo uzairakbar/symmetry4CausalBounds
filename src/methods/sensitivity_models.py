@@ -590,19 +590,20 @@ class InstrumentalVariablePartialR2(PartialR2):
         self._has_iv = False
         self._supports_closed_form = False
 
-        if gamma_z != 0.0:
-            logger.warning(
-                f"gamma_z={gamma_z} != 0: the IV budget is exact only at "
-                "gamma_z = 0, where the cross-term vanishes. The additive "
-                "s*sqrt(gamma_z) top-up is a heuristic."
-            )
-
     @property
     def iv_bound(self):
-        """sqrt of the budget on Var(E[Y - h|Z]) = ||E[W#|Z-tilde]||."""
+        """The radius on ||E[W#|Z-tilde]||: root sum square of the T-as-IV budget
+        `epsilon_iv` and the declared real-Z radius s sqrt(gamma_z) (SS2.6).
+
+        The joint projector on span(T, Z) splits into P_T and P_(Z|T), so two
+        budgets on the two pieces admit exactly the h whose joint norm is under
+        their root sum square; the plain sum is conservative. Exact when span(T)
+        and span(Z) are orthogonal. Bit-identical to `epsilon_iv` at gamma_z = 0,
+        which is every shipped run (sqrt(e^2) is exact in binary arithmetic).
+        """
         # s is the *pre*-DA sigma = sqrt(sigma_sq / rho)
-        s = float(np.sqrt(self.sigma_sq / self.rho))
-        return self.epsilon_iv + s * np.sqrt(self.gamma_z)
+        s_sq = self.sigma_sq / self.rho
+        return float(np.sqrt(self.epsilon_iv**2 + s_sq * self.gamma_z))
 
     def _precompute_matrices(self, X, y, Z=None, **kwargs):
         self._has_iv = Z is not None and np.size(Z) > 0
@@ -614,6 +615,13 @@ class InstrumentalVariablePartialR2(PartialR2):
             )
 
         self.Z_projector_R, self.y_residual_base = iv_constraint_terms(X, y, Z)
+        if self.gamma_z != 0.0:
+            # once per fitted model; the overlap of span(T) and span(Z) is not
+            # measurable here, the solver sees the joint instrument only
+            logger.info(
+                f"IV budget gamma_z={self.gamma_z:g}: joint bound sqrt(eps_iv^2 + s^2 gamma_z) = "
+                f"{self.iv_bound:.6g}; exact when span(T) and span(Z) are orthogonal"
+            )
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
@@ -728,18 +736,18 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             mean_match=self.mean_match,
         )
 
-    def _fit_branches(self, X, y, GX, G):
+    def _fit_branches(self, X, y, GX, G, Z=None):
         self.baseline = self._branch(pad=False).fit(X, y)
         self.augmented = self._branch(pad=self.pad).fit(GX, y)
         # rho known once both noise levels are; the DA branch solves at gamma~
         self.augmented.rho = self.rho
 
-    def _fit(self, X, y, GX=None, G=None, **kwargs):
+    def _fit(self, X, y, GX=None, G=None, Z=None, **kwargs):
         if GX is None:
             raise ValueError("GX (augmented treatment) required")
 
         GX = np.asarray(GX).reshape(len(GX), -1)
-        self._fit_branches(X, y, GX, G)
+        self._fit_branches(X, y, GX, G, Z)
 
         self.sigma_sq = self.baseline.sigma_sq
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
@@ -758,7 +766,8 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
 
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
-    """Baseline PI+IV (null instrument) intersected with DA+PI+IV."""
+    """Baseline PI+IV on the real Z intersected with DA+PI+IV on Z-tilde = (T, Z).
+    An empty set makes the baseline PI and Z-tilde the translation alone, today's run."""
 
     def __init__(self, gamma_z=0.0, epsilon_iv=None, **kwargs):
         self.gamma_z = gamma_z
@@ -779,10 +788,13 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             mean_match=self.mean_match,
         )
 
-    def _fit_branches(self, X, y, GX, G):
-        # baseline sees no instrument => reduces to PI
-        self.baseline = self._branch(pad=False).fit(X, y, Z=None)
-        self.augmented = self._branch(pad=self.pad).fit(GX, y, Z=G)
+    def _fit_branches(self, X, y, GX, G, Z=None):
+        # empty is spelled (n, 0), so the stack below is G elementwise with an
+        # identical QR and the baseline reduces to PI exactly
+        Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
+        self.baseline = self._branch(pad=False).fit(X, y, Z=Z)
+        # the DA branch constrains the joint Z-tilde = (T, Z) of Asm. 3, T first
+        self.augmented = self._branch(pad=self.pad).fit(GX, y, Z=np.column_stack([G, Z]))
         # rho known once both noise levels are: the ball and the IV threshold are
         # cvx Parameters, set at predict
         self.augmented.rho = self.rho
