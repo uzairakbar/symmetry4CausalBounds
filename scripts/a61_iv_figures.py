@@ -55,16 +55,17 @@ toggle) and both recipes (`normalize: true`). Legs:
         exactly 1.0 where its mean is positive and NaN, never inf and never a
         floor, where it is exactly 0.0, every other method divided by the same
         number; PI+IV is the baseline when PI is absent, nothing is divided
-        without either (one warning), a `_coverage` id is left alone, and
+        without either (one warning), a `_coverage` and an `_approx_error` id
+        are left alone (the rollback itself is a63-iii's), and
         `validate_plot_keys` raises at import on `normalize` under a `_coverage`
         id; the y-label carries the baseline's name. On the recipe run's own
-        gamma sweep the PI series after the bootstrap reads 1.0 to 1e-12 at every
-        positive step and NaN at every zero step (`gamma_approx_error` has such
-        steps at and above gamma*, counted). With the toggle on or off the sweep
-        pkls of the shipped cigarette block equal leg (D)'s: the toggle is
-        plot-only. Catches: a baseline other than the rule's (DA+PI is not 1.0),
-        the `base > 0` guard dropped (inf or 0/0 where NaN is pinned), a toggle
-        that leaks into a solver. Misses: figure bytes, which carry a timestamp.
+        gamma sweep the PI series of the width and worst_error figures after the
+        bootstrap reads 1.0 to 1e-12 at every positive step and NaN at every
+        zero step. With the toggle on or off the sweep pkls of the shipped
+        cigarette block equal leg (D)'s: the toggle is plot-only. Catches: a
+        baseline other than the rule's (DA+PI is not 1.0), the `base > 0` guard
+        dropped (inf or 0/0 where NaN is pinned), a toggle that leaks into a
+        solver. Misses: figure bytes, which carry a timestamp.
 
     MPLBACKEND=Agg python scripts/a61_iv_figures.py [--reference JSON] [--skip-digest]
 
@@ -566,10 +567,12 @@ def leg_vi(reference):
     check("(vi) the input is left untouched", y["PI"][2, 0] == 2.0)
     out, baseline = normalize_sweep({"PI+IV": y["PI"], "DA+PI": y["DA+PI"]}, "gamma_worst_error")
     check("(vi) PI+IV is the baseline when PI is absent", baseline == "PI+IV" and out["PI+IV"][0, 0] == 1.0)
-    same, baseline = normalize_sweep({"DA+PI": y["DA+PI"]}, "gamma_approx_error")
+    same, baseline = normalize_sweep({"DA+PI": y["DA+PI"]}, "gamma_worst_error")
     check("(vi) without PI or PI+IV nothing is divided", baseline is None and same["DA+PI"] is y["DA+PI"])
     same, baseline = normalize_sweep(y, "gamma_coverage")
     check("(vi) a _coverage id is left alone", baseline is None and same is y)
+    same, baseline = normalize_sweep(y, "gamma_approx_error")
+    check("(vi) an _approx_error id is left alone", baseline is None and same is y)
     try:
         validate_plot_keys("x", {"gamma_coverage": {"normalize": True}}, plot_keys_for)
         check("(vi) validate_plot_keys raises on normalize under a _coverage id", False)
@@ -600,7 +603,6 @@ def leg_vi(reference):
         for metric, fname in (
             ("interval_width", "gamma_width"),
             ("worst_error", "gamma_worst_error"),
-            ("approximation_error", "gamma_approx_error"),
         ):
             series = bootstrap({name: record[metric] for name, record in results.items()})
             base = np.nanmean(series["PI"], axis=1)
@@ -612,10 +614,6 @@ def leg_vi(reference):
             print(f"      RECORDED {fname}: {int(positive.sum())} positive PI steps, {int(zero.sum())} zero steps")
             check(f"(vi) {fname}: PI reads 1.0 to 1e-12 at every positive step", baseline == "PI" and ok_one)
             check(f"(vi) {fname}: every method reads NaN at every zero step", ok_nan)
-        check(
-            "(vi) gamma_approx_error has a zero PI step at or above gamma* (the half that can fail)",
-            np.any(np.nanmean(results["PI"]["approximation_error"], axis=1) == 0.0),
-        )
 
     if reference is None:
         print("      (vi) pkl comparisons SKIPPED by --skip-digest")

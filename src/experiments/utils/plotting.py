@@ -314,20 +314,24 @@ def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[d
     """Every series divided by the baseline's per-step mean (SS10.1); returns the
     new dict and the baseline's name, or the input untouched and None.
 
-    Honoured for the `_width`, `_worst_error` and `_approx_error` ids only; a
-    `_coverage` id is a rate and is ignored with one warning. The baseline is
+    Honoured for the `_width` and `_worst_error` ids only; a `_coverage` id is a
+    rate and an `_approx_error` id a squared miss whose baseline is 0 above
+    gamma*, and both are ignored with one warning. The baseline is
     deterministic, `NORMALIZE_BASELINES` in order, and its absence means no
     normalisation and one warning naming the methods present. The divisor is the
     baseline's nanmean per step (over experiments, or over the bootstrap
     resamples once `bootstrap` has run), so the baseline's own mean reads 1.0.
-    Where that mean is exactly 0.0 (`approx_error` at and above gamma*, where
-    the baseline misses nothing) every method's ratio is NaN, never inf and never
-    a floor: 0/0 and x/0 both read as a gap, and one INFO line counts the steps.
+    Where that mean is exactly 0.0, which no shipped width or worst-error sweep
+    reaches, every method's ratio is NaN rather than inf: 0/0 and x/0 both read
+    as a gap, and one INFO line counts the steps.
     """
     fname = fname or ""
     if not fname.endswith(NORMALIZED_SWEEP_SUFFIXES):
-        if fname.endswith("_coverage"):
-            logger.warning(f"{fname}: `normalize` ignored, coverage is a rate.")
+        if fname.endswith(("_coverage", "_approx_error")):
+            logger.warning(
+                f"{fname}: `normalize` ignored: coverage is a rate, approx_error a squared miss whose baseline "
+                "is 0 above gamma*."
+            )
         return y_results, None
     baseline = next((name for name in NORMALIZE_BASELINES if name in y_results), None)
     if baseline is None:
@@ -377,8 +381,8 @@ def create_sweep_plot(
     threshold).
 
     `normalize` divides every series by the baseline's (`normalize_sweep`, SS10.1)
-    on the width, worst-error and approx-error figures and appends the baseline's
-    name to the y-label; `PLOT_CONFIGS[experiment][fname]["normalize"]` overrides it
+    on the width and worst-error figures and appends the baseline's name to the
+    y-label; `PLOT_CONFIGS[experiment][fname]["normalize"]` overrides it
     per figure. The pkls are written before this function runs and never move.
 
     `subdir` is the artifacts folder the figure lands in; the default is where every

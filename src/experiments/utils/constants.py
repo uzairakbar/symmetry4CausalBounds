@@ -106,14 +106,16 @@ PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
-# `normalize` on `create_sweep_plot` (SS10.1): divide every series of a width,
-# worst-error or approx-error sweep figure by the baseline's, so the baseline
-# reads 1.0 and the rest as fractions of it. Off by default, so no shipped figure
+# `normalize` on `create_sweep_plot` (SS10.1): divide every series of a width or
+# worst-error sweep figure by the baseline's, so the baseline reads 1.0 and the
+# rest as fractions of it. Off by default, so no shipped figure
 # moves; the recipes turn it on through the global `normalize` toggle. NOT the
 # per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the zero predictor.
 DEFAULT_NORMALIZE_SWEEP: bool = False
-# the figure ids it is honoured for, by suffix; `_coverage` is a rate and never is
-NORMALIZED_SWEEP_SUFFIXES: tuple[str, ...] = ("_width", "_worst_error", "_approx_error")
+# the figure ids it is honoured for, by suffix. A `_coverage` id is a rate and an
+# `_approx_error` id a squared miss whose baseline vanishes above gamma*; neither
+# is normalised (approx_error rolled back 2026-09-15 at the user's request)
+NORMALIZED_SWEEP_SUFFIXES: tuple[str, ...] = ("_width", "_worst_error")
 # the baseline, in this order: PI if it ran, else PI+IV, else no normalisation
 NORMALIZE_BASELINES: tuple[str, ...] = ("PI", "PI+IV")
 
@@ -156,8 +158,8 @@ PANEL_CONFIGS = {
 #   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
-#   normalize      width / worst_error / approx_error sweeps only: divide every
-#                  series by the baseline's (SS10.1); a `_coverage` id rejects it
+#   normalize      width / worst_error sweeps only: divide every series by the
+#                  baseline's (SS10.1); a `_coverage` or `_approx_error` id rejects it
 #   bars           perf only; False retires the stacked reliability bars
 # Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
 #   legend         False hides it, True shows it, a str or (x, y) tuple is a
@@ -197,9 +199,10 @@ def validate_plot_keys(name: str, table: dict[str, dict[str, Any]], allowed) -> 
         bad = set(cfg) - keys
         if bad:
             raise ValueError(f"{name}[{plot_id!r}]: unknown key(s) {sorted(bad)}.")
-        if "normalize" in cfg and plot_id.endswith("_coverage"):
-            # a rate divided by a rate means nothing; loud, at import
-            raise ValueError(f"{name}[{plot_id!r}]: `normalize` is meaningless on a coverage figure.")
+        if "normalize" in cfg and plot_id.endswith(("_coverage", "_approx_error")):
+            # a rate divided by a rate means nothing, and a miss divided by a
+            # baseline that vanishes above gamma* reads as noise; loud, at import
+            raise ValueError(f"{name}[{plot_id!r}]: `normalize` is meaningless on a coverage or approx-error figure.")
 
 
 PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {

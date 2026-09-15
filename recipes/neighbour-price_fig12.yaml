@@ -4,7 +4,7 @@ defaults:
     clipy: false
     mean_match: true
     n_jobs: -1
-    normalize: true     # sweep figures as fractions of the baseline (PI)
+    normalize: true     # width and worst-error sweep figures as fractions of the baseline (PI)
 
 cigarettes:
     seed: 42
