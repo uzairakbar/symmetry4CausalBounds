@@ -22,8 +22,10 @@ Legs:
         their DATASET_KEYS. Misses: nothing about what the key would do there.
   (iii) the rejections: a duplicate name, an unknown name, a bare string, a
         non-string entry, a negative int, a bool, an int above treatment_dim, a
-        gamma_z outside [0, 1) all raise; every legal set of SS7.1 resolves, and an
-        absent key stays absent. Catches: the duplicate check dropped (a repeated
+        gamma_z outside [0, 1) and a gamma_z of 0 under a non-empty set (a bound of
+        exactly 0 is INFEASIBLE everywhere, SS3.3) all raise; every legal set of
+        SS7.1 resolves, gamma_z 0 resolves under an empty set (unread there), and
+        an absent key stays absent. Catches: the duplicate check dropped (a repeated
         column is a spurious moment, SS2.1), a bool passing as an int. Misses: a
         legal-looking name the panel does not carry, which the loader catches.
   (iv)  the registry builds exactly ALL_METHODS in the plan's order, and
@@ -198,6 +200,8 @@ def leg_iii():
         ("cigarettes", dict(iv=["tax_s"], gamma_z=1.0), "gamma_z at 1"),
         ("cigarettes", dict(iv=["tax_s"], gamma_z=-0.1), "a negative gamma_z"),
         ("cigarettes", dict(iv=["tax_s"], gamma_z=True), "a bool gamma_z"),
+        ("cigarettes", dict(iv=["tax_s"], gamma_z=0), "gamma_z 0 under a non-empty set"),
+        ("cigarettes", dict(iv=["tax_s", "y", "cpi"], gamma_z=0.0), "gamma_z 0.0 under the phase-b set"),
         ("simulation", dict(iv=-1), "a negative int"),
         ("simulation", dict(iv=True), "a bool"),
         ("simulation", dict(iv=33), "an int above treatment_dim 32"),
@@ -211,9 +215,11 @@ def leg_iii():
         check(f"(iii) cigarettes iv={iv} resolves", rejection("cigarettes", iv=iv) is None)
     for iv in (0, 1, 4, 32):
         check(f"(iii) simulation iv={iv} resolves", rejection("simulation", iv=iv) is None)
-    for gamma_z in (0, 0.5, 2**-8):
+    for gamma_z in (0.5, 2**-8, 1e-9):
         message = rejection("cigarettes", iv=["tax_s"], gamma_z=gamma_z)
-        check(f"(iii) cigarettes gamma_z={gamma_z} resolves", message is None, message or "")
+        check(f"(iii) cigarettes gamma_z={gamma_z} resolves under a non-empty set", message is None, message or "")
+    message = rejection("cigarettes", iv=[], gamma_z=0)
+    check("(iii) cigarettes gamma_z=0 resolves under an empty set (unread there)", message is None, message or "")
     absent = all("iv" not in resolve_dataset_block(name, base_block(name)) for name in ("cigarettes", "simulation"))
     check("(iii) an absent iv stays absent (the consumers apply the defaults)", absent)
 

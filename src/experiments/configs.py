@@ -923,7 +923,10 @@ def _check_instruments(name: str, block: dict[str, Any]) -> bool:
     instrument. cigarettes: a list of column names without duplicates (a repeated
     column makes `qr` complete an arbitrary orthonormal basis and that completion
     becomes a spurious moment); [] or absent is no instrument, and the target
-    then falls back to the anchor set. Every other block has no such key.
+    then falls back to the anchor set. `gamma_z` is read only under a non-empty
+    set and must then be strictly positive: a radius of exactly 0 makes the
+    non-DA +IV bound 0, INFEASIBLE on every query (SS3.3). Every other block has
+    no such key.
     """
     if name == "simulation":
         iv = block.get("iv", 0)
@@ -947,6 +950,11 @@ def _check_instruments(name: str, block: dict[str, Any]) -> bool:
         gamma_z = block.get("gamma_z", GAMMA_Z_DEFAULT)
         if isinstance(gamma_z, bool) or not isinstance(gamma_z, int | float) or not 0.0 <= gamma_z < 1.0:
             raise ValueError(f"config.cigarettes.gamma_z must be a float in [0, 1); got {gamma_z!r}.")
+        if iv and gamma_z <= 0.0:
+            raise ValueError(
+                f"config.cigarettes.gamma_z must be strictly positive under a non-empty iv {iv!r}: a declared "
+                f"radius of 0 makes the +IV bound exactly 0, INFEASIBLE on every query; got {gamma_z!r}."
+            )
         return len(iv) > 0
     return False
 

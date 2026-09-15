@@ -235,21 +235,46 @@ def build_design(
     )
 
 
+def instrument_set(design: PanelDesign, names) -> NDArray:
+    """The CONFIGURED instrument matrix, (n, m), from panel column names in the
+    order given (the yaml's `iv:`). A treatment name is that FWL'd regressor
+    instrumenting itself (included exogenous), an excise name the FWL'd excise
+    column the anchor carries: the same residualised columns the design uses,
+    never the raw ones (SS2.1). Empty names give (n, 0), no instrument. The
+    anchor decides which excise columns exist; a name it does not carry raises.
+    """
+    excise = ANCHORS[design.anchor][0]
+    columns = []
+    for name in names:
+        if name in TREATMENTS:
+            columns.append(design.X[:, TREATMENTS.index(name)])
+        elif name in excise:
+            columns.append(design.Z[:, excise.index(name)])
+        else:
+            raise ValueError(
+                f"instrument {name!r} is neither a treatment {TREATMENTS} nor an excise column of anchor "
+                f"{design.anchor!r} {excise}."
+            )
+    return np.column_stack(columns) if columns else np.zeros((design.n, 0))
+
+
 # =============================================================================
 # TARGETS
 # =============================================================================
 
 
-def restricted_fit(design: PanelDesign) -> tuple[NDArray, float]:
+def restricted_fit(design: PanelDesign, instruments: NDArray | None = None) -> tuple[NDArray, float]:
     """(b_r, r0): 2SLS restricted to the homogeneous subspace, and its IV misfit.
 
     b_r = N argmin_a || Q_Z' (y - X N a) ||^2, so it satisfies the tax moment
     condition as closely as any homogeneous function can and satisfies v'b = 0
-    exactly. Four moments and three free parameters: over-identified by one, and
-    r0 = || Q_Z'(y - X b_r) || / sqrt(n) is what is left over.
+    exactly. On the anchor set (the default) that is four moments and three free
+    parameters: over-identified by one, and r0 = || Q_Z'(y - X b_r) || / sqrt(n)
+    is what is left over. `instruments` fits against a configured set instead
+    (decision 1): with three moments the point is exactly identified and r0 is 0.
     """
     N = null_basis()
-    Q = design.Q_Z
+    Q = design.Q_Z if instruments is None else np.linalg.qr(instruments)[0]
     A = Q.T @ (design.X @ N)
     d = Q.T @ design.y
     a = np.linalg.lstsq(A, d, rcond=None)[0]
@@ -405,11 +430,16 @@ class CigaretteSEM(SEM):
 
     `iv`       h_* is the restricted-IV point of SS0.2: the tax-moment program
                solved subject to v'b = 0, so it satisfies the instrument and
-               homogeneity at once and eps* is 0 by construction. Z is then
-               discarded -- the tax column is read once, here, and never reaches a
-               solver. Coverage of this target is validity CONDITIONAL on those two
-               assumptions; what probes the assumptions is the compatibility
-               statistic above and the sliver below.
+               homogeneity at once and eps* is 0 by construction. With
+               `iv_columns` empty the moments are the anchor set's and the tax
+               column is read once, here, and never reaches a solver. With a
+               configured set (the yaml's `iv:`) the moments ARE that set, the
+               target is the restricted fit against it (decision 1) and the same
+               columns ride beside every draw as the trailing `iv_width` columns
+               (`iv_pool` beside `pool`), so the solvers see them too. Coverage
+               of this target is validity CONDITIONAL on those two assumptions;
+               what probes the assumptions is the compatibility statistic above
+               and the sliver below.
     `plasmode` the real FWL'd design with a synthetic exactly homogeneous h_* and
                synthetic confounding of known strength, in the simulation SEM's
                convention, so gamma* == `gamma_true` exactly. Validity against a
@@ -445,11 +475,18 @@ class CigaretteSEM(SEM):
         gamma_true: float = GAMMA_TRUE,
         confound_direction: str = "v",
         outcome_noise_std: float = OUTCOME_NOISE_STD,
+        iv_columns=(),
     ):
         if target not in ("iv", "plasmode"):
             raise ValueError(f"target {target!r} is not one of ['iv', 'plasmode'].")
         if sliver and target != "iv":
             raise ValueError("the leaky-IV sliver is a set around the restricted point; it needs target 'iv'.")
+        self.iv_columns = tuple(iv_columns)
+        if sliver and self.iv_columns:
+            # the sliver is the set around the ANCHOR set's restricted point at a
+            # fixed gamma_z; under a configured set the target moves and the
+            # ellipsoid would need that set's geometry. Not defined here.
+            raise ValueError("the leaky-IV sliver is defined on the anchor set; it does not combine with `iv`.")
 
         self.design = build_design(self.panel(), spec=spec, anchor=anchor, neighbour=neighbour)
         self.target = target
@@ -457,11 +494,16 @@ class CigaretteSEM(SEM):
         self._sliver = bool(sliver)
         self._gamma_z = float(gamma_z)
         self.X = self.design.X
-        # the tax column, read ONCE, here. `fit_model` hands DA+PI+IV the DA's own
-        # translation amounts as Z (`model_fitting.py:77`); no solver ever sees this.
+        # the anchor's tax column, read ONCE, here, for the ladder diagnostics and
+        # the anchor-set fallback; no solver sees it
         self._Z = self.design.Z
+        # the CONFIGURED instrument set, (n, m): what the solvers see, row-aligned
+        # with `X`, and (n, 0) when there is none
+        self._Z_iv = instrument_set(self.design, self.iv_columns)
 
-        b_r, self._misfit = restricted_fit(self.design)
+        # the target: the restricted fit against the configured set when there is
+        # one, else the anchor set (decision 15), exactly today's b_r
+        b_r, self._misfit = restricted_fit(self.design, self._Z_iv if self.iv_columns else None)
         if target == "iv":
             self.W_XY = b_r.reshape(-1, 1)
             self.y = self.design.y.reshape(-1, 1)
@@ -531,6 +573,25 @@ class CigaretteSEM(SEM):
         `sample`, so h_*, gamma* and eps* do not move with the replicate draw."""
         return self.X, self.y
 
+    # ------------------------------------------------------------ instruments
+
+    @property
+    def iv_width(self) -> int:
+        return self._Z_iv.shape[1]
+
+    @property
+    def iv_pool(self) -> NDArray | None:
+        """The configured instrument beside `pool`, row for row; None without one."""
+        return self._Z_iv if self.iv_width > 0 else None
+
+    def _rows(self, index) -> tuple[NDArray, NDArray]:
+        """(X | Z, y) at `index`: the instrument rides as the trailing columns of a
+        draw when there is one, so a row resample keeps Z aligned with X."""
+        X = self.X[index]
+        if self.iv_width > 0:
+            X = np.column_stack([X, self._Z_iv[index]])
+        return X, self.y[index]
+
     def extent(self, X) -> NDArray:
         """Half-width of the target SET at each query; zero means a point target.
 
@@ -576,15 +637,13 @@ class CigaretteSEM(SEM):
         n_total = len(self.X)
         if not self.bootstrap:
             if n_total >= N:
-                return self.X[:N], self.y[:N]
+                return self._rows(slice(None, N))
             # not an error -- a sweep may legitimately ask for more rows than the
             # panel has -- but the draw is then a BOOTSTRAP, so anything read off it
             # carries resampling noise the panel itself does not have
-            logger.warning(
-                f"CigaretteSEM: {N} rows requested from a panel of {n_total}; padding by cluster resample."
-            )
+            logger.warning(f"CigaretteSEM: {N} rows requested from a panel of {n_total}; padding by cluster resample.")
         states = np.unique(self.design.state)
         rows = {state: np.flatnonzero(self.design.state == state) for state in states}
         drawn = np.random.choice(states, int(np.ceil(N / YEARS_PER_STATE)), replace=True)
         index = np.concatenate([rows[state] for state in drawn])
-        return self.X[index], self.y[index]
+        return self._rows(index)

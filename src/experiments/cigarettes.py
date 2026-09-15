@@ -13,6 +13,7 @@ from src.experiments.configs import (
     ANNOTATE_SWEEP_PLOT,
     CIGARETTE_CONFIG,
     EPS_TOL,
+    GAMMA_Z_DEFAULT,
     QUERY_GAMMA,
     MethodRegistry,
 )
@@ -97,20 +98,37 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         anchor: str = "own-tax",
         da_amplitude: float = 1.0,
         sliver: bool = False,
+        iv=None,
+        gamma_z: float | None = None,
         **kwargs,
     ):
         """
         Args:
             target: `iv` = the restricted-IV point (the tax-moment program solved
-                subject to v'b = 0, so Z can be discarded); `plasmode` = the real
-                design with a synthetic homogeneous h_* and known confounding.
+                subject to v'b = 0 against the configured instrument set, or the
+                anchor set without one); `plasmode` = the real design with a
+                synthetic homogeneous h_* and known confounding.
             spec: state FE plus a trend of this order.
             anchor: which excise columns instrument which regressors.
             da_amplitude: DA amplitude along v, in units of sd(X . v-hat).
             sliver: target the leaky-IV set rather than the restricted point.
+            iv: the instrument set by panel column name (the yaml's `iv:`); None
+                or [] is no instrument and today's run exactly (SS7.1).
+            gamma_z: the DECLARED leakiness budget of that set (SS2.6), read only
+                when it is non-empty; None is `GAMMA_Z_DEFAULT`.
         """
         self.target, self.spec, self.anchor = target, spec, anchor
         self.sliver = bool(sliver)
+        self.iv_columns = tuple(iv or ())
+        # the real-Z radius s sqrt(gamma_z) is DECLARED, never oracle, and it
+        # exists only with an instrument to declare it on; 0 keeps the IV classes
+        # bit-identical to today's (`iv_bound` is then exactly `epsilon_iv`)
+        self.gamma_z = float(GAMMA_Z_DEFAULT if gamma_z is None else gamma_z) if self.iv_columns else 0.0
+        if self.iv_columns:
+            logger.info(
+                f"instrument set {list(self.iv_columns)}: the target is the restricted fit against it, gamma_z "
+                f"{self.gamma_z:g} declared (radius {np.sqrt(self.gamma_z):.4f} of the residual sd)."
+            )
         self._epsilon_star = None
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
@@ -134,11 +152,14 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # `QUERY_GAMMA` for why the query budget is declared rather than measured.
         self.gamma = QUERY_GAMMA[spec]
         epsilon = self._epsilon_budget(CIGARETTE_CONFIG.epsilon)
+        gamma_z_declared = self.gamma_z
 
         class CigaretteRegistry(MethodRegistry):
             @staticmethod
             def build_methods(names):
-                return MethodRegistry.build_methods(names, gamma=QUERY_GAMMA[spec], epsilon=epsilon, **toggles)
+                return MethodRegistry.build_methods(
+                    names, gamma=QUERY_GAMMA[spec], epsilon=epsilon, gamma_z=gamma_z_declared, **toggles
+                )
 
         super().__init__(EXPERIMENT_NAME, CigaretteRegistry(), **kwargs)
 
@@ -149,8 +170,9 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
 
         `bootstrap` is the replicate mechanism and is bound PER RUNNER (SS6): the
         query figures and the coefficient table are fit on the full panel, the
-        sweeps on state-cluster bootstrap replicates of it. `pool` is the whole
-        panel either way, so h_*, gamma* and eps* do not move between them.
+        sweeps on replicates of it (`get_sweep_runner_cls` picks which kind).
+        `pool` is the whole panel either way, so h_*, gamma* and eps* do not move
+        between them. The configured instrument set rides beside every draw.
         """
         return SEM(
             spec=self.spec,
@@ -158,6 +180,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             anchor=self.anchor,
             bootstrap=bootstrap,
             sliver=self.sliver,
+            iv_columns=self.iv_columns,
             gamma_z=CIGARETTE_CONFIG.gamma_z,
             gamma_true=CIGARETTE_CONFIG.gamma_true,
             confound_direction=CIGARETTE_CONFIG.confound_direction,
@@ -218,6 +241,9 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     # the panel is sigma-normalised, so gamma is already in the
                     # paper's units and sigma-hat^2 is 1: nothing to rescale
                     raw_gamma=False,
+                    # a configured set declares its budget (SS2.6): the runner
+                    # hands the solver r_T alone and never raises it
+                    declared_iv=bool(outer.iv_columns),
                     **kwargs,
                 )
 
@@ -233,6 +259,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
             epsilon_iv_z=epsilon_iv_z,
+            gamma_z=self.gamma_z,
             rho=rho,
             **toggles,
         )
@@ -240,9 +267,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
     def get_sweep_runner_cls(self, param: str) -> type:
         """Configured strategy for one sweep parameter."""
         outer, Strategy = self, STRATEGIES[param]
-        # the sweep replicates: a state-cluster bootstrap under `iv` (a resampling
-        # rate against a fixed target), the fresh outcome draw under `plasmode`
-        sem_factory = partial(outer._sem_factory, bootstrap=(outer.target == "iv"))
+        # the sweep replicates: a state-cluster bootstrap under `iv` with no
+        # configured instrument (a resampling rate against a fixed target); 90%
+        # row splits under a configured set, whose budget is declared against the
+        # POOL and whose target is a pool quantity (SS2.4, decision 9); the fresh
+        # outcome draw under `plasmode`
+        sem_factory = partial(outer._sem_factory, bootstrap=(outer.target == "iv" and not outer.iv_columns))
 
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
@@ -257,6 +287,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     default_gamma=QUERY_GAMMA[outer.spec],
                     default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.epsilon),
                     experiment_name=EXPERIMENT_NAME,
+                    declared_iv=bool(outer.iv_columns),
                     **extra,
                     **kwargs,
                 )
@@ -404,9 +435,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     cells.append(f"$[{low:.3f}, {high:.3f}]${ratio}")
             lines.append(TEX_MAPPER.get(name, name) + " & " + " & ".join(cells) + r" \\")
         lines.append(r"\midrule")
-        # the target's own name: the restricted point under `iv`, the synthetic
-        # homogeneous coefficient under `plasmode`
-        label = r"$b_r$" if self.target == "iv" else r"$b_*$"
+        # the target's own name: the anchor set's restricted point under `iv`,
+        # the restricted fit against the configured set or the synthetic
+        # homogeneous coefficient otherwise
+        label = r"$b_r$" if self.target == "iv" and not self.iv_columns else r"$b_*$"
         lines.append(label + " & " + " & ".join(f"{scale * value:.3f}" for value in b_r) + r" \\")
         lines.append(r"$b_u$ (2SLS) & " + " & ".join(f"{scale * value:.3f}" for value in b_u) + r" \\")
         for by in ("state", "year"):
