@@ -591,6 +591,17 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xlabel": r"$c$",
         "xscale": "linear",
     },
+    # the two headline figures of the neighbour-price run (SS10): beta_pn against
+    # the confounding budget on the benchmarked range, and against the declared
+    # real-Z radius r_Z = s sqrt(gamma_z) at the query budget
+    "beta_pn_gamma": {
+        "xlabel": r"$\gamma$",
+        "xscale": "linear",
+    },
+    "beta_pn_budget": {
+        "xlabel": r"$r_Z = s\sqrt{\gamma_z}$",
+        "xscale": "log",
+    },
 }
 
 validate_plot_keys("ANNOTATE_SWEEP_PLOT", ANNOTATE_SWEEP_PLOT, {"xlabel", "xscale"} | _STYLE_KEYS)
@@ -897,7 +908,9 @@ DATASET_KEYS: dict[str, set] = {
     },
 }
 
-TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match"}
+# `normalize` is a PLOTTING switch (SS10.1), not a solver one: nothing reads it
+# before `_run_sweeps`, and the pkls never move
+TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {
@@ -984,6 +997,11 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(recalibrate, bool):
         raise ValueError(
             f"config.{name}.recalibrate must be a bool (true = gamma/rho, false = gamma); got {recalibrate!r}."
+        )
+    normalize = block.get("normalize", False)
+    if not isinstance(normalize, bool):
+        raise ValueError(
+            f"config.{name}.normalize must be a bool (divide sweep figures by the baseline); got {normalize!r}."
         )
 
     # dataset-specific, unlike the two guards above: these keys exist on one block

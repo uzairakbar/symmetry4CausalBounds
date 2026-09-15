@@ -17,8 +17,11 @@ from .constants import (
     ALPHA_MAP,
     COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
+    DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
+    NORMALIZE_BASELINES,
+    NORMALIZED_SWEEP_SUFFIXES,
     PAGE_WIDTH,
     PANEL_CONFIGS,
     PARTIAL_IDENTIFICATION_STYLE,
@@ -304,6 +307,40 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
     return highlighted
 
 
+def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[dict[str, NDArray], str | None]:
+    """Every series divided by the baseline's per-step mean (SS10.1); returns the
+    new dict and the baseline's name, or the input untouched and None.
+
+    Honoured for the `_width`, `_worst_error` and `_approx_error` ids only; a
+    `_coverage` id is a rate and is ignored with one warning. The baseline is
+    deterministic, `NORMALIZE_BASELINES` in order, and its absence means no
+    normalisation and one warning naming the methods present. The divisor is the
+    baseline's nanmean per step (over experiments, or over the bootstrap
+    resamples once `bootstrap` has run), so the baseline's own mean reads 1.0.
+    Where that mean is exactly 0.0 (`approx_error` at and above gamma*, where
+    the baseline misses nothing) every method's ratio is NaN, never inf and never
+    a floor: 0/0 and x/0 both read as a gap, and one INFO line counts the steps.
+    """
+    fname = fname or ""
+    if not fname.endswith(NORMALIZED_SWEEP_SUFFIXES):
+        if fname.endswith("_coverage"):
+            logger.warning(f"{fname}: `normalize` ignored, coverage is a rate.")
+        return y_results, None
+    baseline = next((name for name in NORMALIZE_BASELINES if name in y_results), None)
+    if baseline is None:
+        logger.warning(f"{fname}: `normalize` needs one of {NORMALIZE_BASELINES} among {list(y_results)}; drawn as is.")
+        return y_results, None
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+        base = np.nanmean(np.asarray(y_results[baseline], dtype=np.float64), axis=1)
+    positive = base > 0
+    dropped = int(np.sum(~positive))
+    if dropped:
+        logger.info(f"{fname}: {dropped} of {len(base)} steps have a zero {baseline} baseline and read NaN.")
+    divisor = np.where(positive, base, np.nan)[:, None]
+    return {name: np.asarray(series, dtype=np.float64) / divisor for name, series in y_results.items()}, baseline
+
+
 def create_sweep_plot(
     x_values: NDArray,
     y_results: dict[str, NDArray],
@@ -327,6 +364,7 @@ def create_sweep_plot(
     x_color: str = "k",
     title: str | None = None,
     title_color: str = "k",
+    normalize: bool = DEFAULT_NORMALIZE_SWEEP,
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
@@ -334,6 +372,11 @@ def create_sweep_plot(
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold).
+
+    `normalize` divides every series by the baseline's (`normalize_sweep`, SS10.1)
+    on the width, worst-error and approx-error figures and appends the baseline's
+    name to the y-label; `PLOT_CONFIGS[experiment][fname]["normalize"]` overrides it
+    per figure. The pkls are written before this function runs and never move.
 
     `subdir` is the artifacts folder the figure lands in; the default is where every
     param sweep goes. A per-query curve on a shared x grid is this function's shape
@@ -366,6 +409,13 @@ def create_sweep_plot(
 
         if bootstrapped:
             y_results = bootstrap(y_results)
+
+        # after the bootstrap, so the bands are divided by the same per-step
+        # number as the mean
+        if cfg.get("normalize", normalize):
+            y_results, baseline = normalize_sweep(y_results, fname)
+            if baseline is not None:
+                ylabel = rf"{ylabel} / {TEX_MAPPER[baseline]}"
 
         legend_items = [item for item in (legend_items or []) if item in y_results]
 
@@ -504,11 +554,14 @@ def create_query_sweep_plot(
     title: str | None = None,
     title_color: str = "k",
     fname: str | None = None,
+    vlines: tuple[float, ...] = (),
 ):
     """
     Create a query sweep plot showing predictions across treatment values.
 
     Handles both point estimates and interval estimates (PI methods).
+    `vlines` marks reference x positions, as on `create_sweep_plot`; empty by
+    default, so every existing figure is drawn as before.
 
     Args:
         x_values: Query values for x-axis
@@ -564,9 +617,10 @@ def create_query_sweep_plot(
         if method_name in legend_items:
             legend_items[legend_items.index(method_name)] = label
 
-        # Update bounds
-        max_mean = max(max_mean, upper_bound.max())
-        min_mean = min(min_mean, lower_bound.min())
+        # Update bounds. nan-aware: an interval-against-a-budget figure carries
+        # a gap where a solve was INFEASIBLE, and a NaN limit would raise
+        max_mean = max(max_mean, float(np.nanmax(upper_bound)))
+        min_mean = min(min_mean, float(np.nanmin(lower_bound)))
 
         color = colors[COLOR_MAP[method_name]]
 
@@ -598,6 +652,9 @@ def create_query_sweep_plot(
     plt.xscale(xscale)
     _label_major_ticks_only(plt.gca())
     _at_least_two_major_ticks(plt.gca())
+    for x in vlines:
+        if np.isfinite(x) and min(x_values) <= x <= max(x_values):
+            plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
 
     # Legend
     hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)

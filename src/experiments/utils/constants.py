@@ -106,6 +106,16 @@ PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
+# `normalize` on `create_sweep_plot` (SS10.1): divide every series of a width,
+# worst-error or approx-error sweep figure by the baseline's, so the baseline
+# reads 1.0 and the rest as fractions of it. Off by default, so no shipped figure
+# moves; the recipes turn it on through the global `normalize` toggle. NOT the
+# per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the zero predictor.
+DEFAULT_NORMALIZE_SWEEP: bool = False
+# the figure ids it is honoured for, by suffix; `_coverage` is a rate and never is
+NORMALIZED_SWEEP_SUFFIXES: tuple[str, ...] = ("_width", "_worst_error", "_approx_error")
+# the baseline, in this order: PI if it ran, else PI+IV, else no normalisation
+NORMALIZE_BASELINES: tuple[str, ...] = ("PI", "PI+IV")
 
 # Configuration for panel plots per experiment and per row
 # Row index mapping: 0: Worst Error, 1: Width, 2: Density, 3: Predictions
@@ -146,6 +156,8 @@ PANEL_CONFIGS = {
 #   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
+#   normalize      width / worst_error / approx_error sweeps only: divide every
+#                  series by the baseline's (SS10.1); a `_coverage` id rejects it
 #   bars           perf only; False retires the stacked reliability bars
 # Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
 #   legend         False hides it, True shows it, a str or (x, y) tuple is a
@@ -159,8 +171,8 @@ PANEL_CONFIGS = {
 #   PLOT_CONFIGS["*"]["gamma_coverage"] = {"y_color": "red"}
 #   PLOT_CONFIGS["optical_device"]["query"] = {"title": r"radial sweep", "title_color": "tab:blue"}
 _STYLE_KEYS: set = {"legend", "x_color", "y_color", "title", "title_color"}
-_PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh"} | _STYLE_KEYS
-_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale"}) | {"bars"}  # categorical x
+_PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh", "normalize"} | _STYLE_KEYS
+_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale", "normalize"}) | {"bars"}  # categorical x
 _PLOT_KEYS_QUERY: set = set(_STYLE_KEYS)  # limits and scale come from ANNOTATE_SWEEP_PLOT
 
 
@@ -185,6 +197,9 @@ def validate_plot_keys(name: str, table: dict[str, dict[str, Any]], allowed) -> 
         bad = set(cfg) - keys
         if bad:
             raise ValueError(f"{name}[{plot_id!r}]: unknown key(s) {sorted(bad)}.")
+        if "normalize" in cfg and plot_id.endswith("_coverage"):
+            # a rate divided by a rate means nothing; loud, at import
+            raise ValueError(f"{name}[{plot_id!r}]: `normalize` is meaningless on a coverage figure.")
 
 
 PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {

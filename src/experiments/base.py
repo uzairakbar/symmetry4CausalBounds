@@ -673,6 +673,8 @@ class ExperimentOrchestrator(ABC):
                     xscale=PARAM_SPECS[param].xscale,
                     yscale=metric_spec.yscale,
                     vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
+                    # the global toggle of SS10.1; absent from the shipped yaml
+                    normalize=self.kwargs.get("normalize", False),
                 )
 
     def _run_perf(self, perf_spec):
