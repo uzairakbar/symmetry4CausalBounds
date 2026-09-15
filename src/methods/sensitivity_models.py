@@ -588,6 +588,7 @@ class InstrumentalVariablePartialR2(PartialR2):
         self.y_residual_base = None
         self.iv_threshold_param = None
         self._has_iv = False
+        self._budget_logged = False
         self._supports_closed_form = False
 
     @property
@@ -615,13 +616,6 @@ class InstrumentalVariablePartialR2(PartialR2):
             )
 
         self.Z_projector_R, self.y_residual_base = iv_constraint_terms(X, y, Z)
-        if self.gamma_z != 0.0:
-            # once per fitted model; the overlap of span(T) and span(Z) is not
-            # measurable here, the solver sees the joint instrument only
-            logger.info(
-                f"IV budget gamma_z={self.gamma_z:g}: joint bound sqrt(eps_iv^2 + s^2 gamma_z) = "
-                f"{self.iv_bound:.6g}; exact when span(T) and span(Z) are orthogonal"
-            )
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
@@ -639,6 +633,17 @@ class InstrumentalVariablePartialR2(PartialR2):
         super()._set_solver_parameters(gamma)
         if self._has_iv:
             self.iv_threshold_param.value = np.sqrt(self.N_samples) * self.iv_bound
+            if self.gamma_z != 0.0 and not self._budget_logged:
+                # once per fitted model, at the first solve: rho is final here (an
+                # intersection sets its DA branch's after fit). The overlap of
+                # span(T) and span(Z) is not measurable in the solver, which sees
+                # the joint instrument only; a60 records it with G and Z apart
+                self._budget_logged = True
+                logger.info(
+                    f"IV budget gamma_z={self.gamma_z:g}: epsilon_iv={self.epsilon_iv:g}, "
+                    f"s={np.sqrt(self.sigma_sq / self.rho):.6g}, joint bound sqrt(eps_iv^2 + s^2 gamma_z) = "
+                    f"{self.iv_bound:.6g}; exact when span(T) and span(Z) are orthogonal"
+                )
 
 
 class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePartialR2):
@@ -774,12 +779,12 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         self.epsilon_iv = epsilon_iv
         super().__init__(**kwargs)
 
-    def _branch(self, pad):
+    def _branch(self, pad, epsilon_iv):
         return InstrumentalVariablePartialR2(
             gamma=self.gamma,
             gamma_z=self.gamma_z,
             epsilon=self.epsilon,
-            epsilon_iv=self.epsilon_iv,
+            epsilon_iv=epsilon_iv,
             pad=pad,
             recalibrate=self.recalibrate,
             rho=1.0,
@@ -792,9 +797,12 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         # empty is spelled (n, 0), so the stack below is G elementwise with an
         # identical QR and the baseline reduces to PI exactly
         Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
-        self.baseline = self._branch(pad=False).fit(X, y, Z=Z)
+        # SS2.6 per branch: the baseline is a non-DA +IV method and carries no
+        # T-as-IV term, so its bound is exactly r_Z = s sqrt(gamma_z) (none at all
+        # under an empty Z); the DA branch keeps the joint root-sum-square bound
+        self.baseline = self._branch(pad=False, epsilon_iv=0.0).fit(X, y, Z=Z)
         # the DA branch constrains the joint Z-tilde = (T, Z) of Asm. 3, T first
-        self.augmented = self._branch(pad=self.pad).fit(GX, y, Z=np.column_stack([G, Z]))
+        self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv).fit(GX, y, Z=np.column_stack([G, Z]))
         # rho known once both noise levels are: the ball and the IV threshold are
         # cvx Parameters, set at predict
         self.augmented.rho = self.rho

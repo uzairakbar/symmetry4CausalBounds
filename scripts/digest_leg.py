@@ -8,9 +8,10 @@ is hashed (`wall_clock` excluded) and compared against a reference JSON recorded
 the parent commit with this same file. No tolerance: any difference is a FAIL, and
 so is an artifact that appears or disappears.
 
-The blocks are built HERE rather than read from config.yaml: the shipped yaml has
-the sim and optical blocks commented out and the live copy carries the user's own
-edits, so the leg pins the configuration the plan calls shipped, not whatever the
+The blocks are built HERE rather than read from config.yaml (they match the file at
+14509db key for key, where the three blocks are active and only do_mnist is commented
+out): the live copy carries the user's own edits and a later commit may move the
+file, so the leg pins the configuration the plan calls shipped, not whatever the
 file says today. The run is the production path (`Orchestrator(**block).run(plan)`,
 exactly as src/main.py drives it), figures included; the figures are not hashed
 because a PDF carries a timestamp.
@@ -21,7 +22,9 @@ because a PDF carries a timestamp.
 Gates import `compare()` and turn every artifact into one check. Record and compare
 on the SAME node: BLAS kernels differ across CPU models at the last ulp, so a lone
 leg (D) failure on another node means nothing until the reference is re-recorded
-there (the JSON carries the node name and the gate warns on a mismatch).
+there (the JSON carries the node name and the gate warns on a mismatch). The runs
+are pinned to one BLAS thread in the parent (see `run_all`), and the reference was
+recorded pinned; an unpinned comparison drifts on the optical gamma sweep.
 """
 
 import argparse
@@ -37,14 +40,19 @@ import sys
 import time
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_REFERENCE = os.path.expanduser("~/scratch/tmp/impl_v10/digests/reference_14509db.json")
+DEFAULT_REFERENCE = os.path.expanduser("~/scratch/tmp/impl_v10/digests/reference_14509db_pinned.json")
 
 DATASETS = ("simulation", "optical_device", "cigarettes")
 QUERY_SAMPLES = 8  # even, so the cigarette query grids never touch the origin
 SWEEP_SAMPLES = 2  # the gamma grid: geomspace(2^-6, 1, 2)
-N_JOBS = 8  # bit-identical to serial (a5); keeps the shared node under 16
+# SERIAL solves. a5 pins serial and parallel bit-identical, and the parallel path
+# still drifted here by 1e-9 on one PI+INV sweep metric in about half the gate
+# runs (never standalone), which points at the reused loky workers rather than
+# the numbers; serial never drifted. Under a minute for all three datasets.
+N_JOBS = 1
 HASHED_SUFFIXES = (".pkl", ".tex")
 SKIP_KEYS = ("wall_clock",)  # a timer, never reproducible
 
@@ -169,12 +177,19 @@ def run_dataset(name: str, kind: str) -> dict[str, str]:
 
 
 def run_all(datasets=DATASETS, quiet: bool = False) -> dict[str, dict[str, str]]:
+    """Every dataset's query panel and gamma sweep, with the PARENT process pinned
+    to one BLAS thread. The solve workers are pinned already; the fits are not, and
+    a multithreaded QR moves at the last ulp with the thread pool's history (a gate
+    that toggled the pool before this leg saw PI+INV's sweep metrics move by 1e-9,
+    one run in four). Single-threaded kernels are deterministic, so the reference
+    must be recorded the same way; hence `_pinned` in its name."""
     digests = {}
-    for name in datasets:
-        start = time.perf_counter()
-        digests[name] = {**run_dataset(name, "query"), **run_dataset(name, "sweep")}
-        if not quiet:
-            print(f"      leg (D) {name}: {len(digests[name])} artifacts in {time.perf_counter() - start:.0f}s")
+    with threadpool_limits(limits=1):
+        for name in datasets:
+            start = time.perf_counter()
+            digests[name] = {**run_dataset(name, "query"), **run_dataset(name, "sweep")}
+            if not quiet:
+                print(f"      leg (D) {name}: {len(digests[name])} artifacts in {time.perf_counter() - start:.0f}s")
     return digests
 
 

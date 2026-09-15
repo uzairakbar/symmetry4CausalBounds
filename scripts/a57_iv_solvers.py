@@ -32,10 +32,12 @@ Legs:
         1.644600], PI+INV+IV [0.951673, 1.644600], DA+PI+IV on Z-tilde [1.149780,
         1.648402], raw log units, SS4.1's [0.375, 1.645], [0.952, 1.645],
         [1.150, 1.648]; every solve OK. The two IV rows are read off the standalone
-        classes AND off the intersection's two branches. Catches: any change to
-        the IV or INV arithmetic, a Z that is not the FWL'd column (p7: +7 moves
-        beta_pn by 0.004), a branch handed the wrong instrument. Misses: a solver
-        bump under 1e-6, which is why the tolerance is not 1e-9.
+        classes AND off the intersection's two branches, the latter at epsilon_iv 0
+        and gamma_z 2^-8, where both branch bounds read 0.0625 on this sigma-
+        normalised panel (s = 1). Catches: any change to the IV or INV arithmetic,
+        a Z that is not the FWL'd column (p7: +7 moves beta_pn by 0.004), a branch
+        handed the wrong instrument. Misses: a solver bump under 1e-6, which is
+        why the tolerance is not 1e-9.
   (v)   the intersection's baseline branch is fitted with Z and its DA branch with
         Z-tilde = column_stack([G, Z]), read off the fitted attributes: the rows
         of `Z_projector_R` above M count the instrument (m, then p + m) and
@@ -51,10 +53,22 @@ Legs:
         strictly below the plain sum 0.09375, and rho-aware (s is the pre-DA
         sigma). Then at fit: PI+IV at epsilon_iv 0, gamma_z 2^-8 reproduces the
         epsilon_iv 0.0625, gamma_z 0 interval to 1e-6 (p10 E), and a gamma_z
-        model logs the joint bound once at INFO, not WARNING. Catches: the plain
-        sum put back (the DA bound would read 0.09375 and (D) would not notice,
-        since it runs at gamma_z 0), s read post-DA, the old warning. Misses: the
-        0.7% overlap of span(T) and span(Z) the plan states (SS2.6).
+        model logs one INFO line, not WARNING, naming gamma_z, epsilon_iv, s and
+        the joint bound, at its first solve (rho is final there) and not at fit.
+        Catches: the plain sum put back (the DA bound would read 0.09375 and (D)
+        would not notice, since it runs at gamma_z 0), s read post-DA, the old
+        warning, a line printed before an intersection's DA branch knows its rho.
+        Misses: the 0.7% overlap of span(T) and span(Z) the plan states (SS2.6),
+        which a60 records with G and Z held apart.
+  (vii) the intersection budgets per branch (SS2.6, the coordinator's ruling): the
+        baseline branch gets epsilon_iv 0.0, so at epsilon_iv 2^-5, gamma_z 2^-8,
+        s = 1 its bound is exactly r_Z = 0.0625 while the DA branch's is the joint
+        0.069877, both to 1e-6; the intersection's own epsilon_iv is untouched;
+        the DA branch's rho is set after fit; under an empty Z the baseline has no
+        IV constraint at all (so leg (D) cannot move) and the DA branch keeps the
+        joint bound on T. Catches: both branches handed the same budget (the
+        baseline would read 0.069877), the T-as-IV term leaking into the baseline.
+        Misses: the numbers under a real Z at those two budgets (a60/a61).
 
     MPLBACKEND=Agg python scripts/a57_iv_solvers.py [--seed 0] [--reference JSON] [--skip-digest]
 
@@ -75,6 +89,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import digest_leg  # noqa: E402
 
+import src.methods.sensitivity_models as solvers  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.configs import EPS_TOL  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
@@ -127,6 +142,15 @@ def bounds(model, k=4):
     return np.asarray(model.predict(np.eye(k), gamma=GAMMA), dtype=float)
 
 
+def fitted(model, **arrays):
+    """`model.fit(**arrays)` and None, or None and the exception, so a raise is a
+    FAIL line in the log and not a traceback that hides the later legs."""
+    try:
+        return model.fit(**arrays), None
+    except Exception as error:  # reported by the leg
+        return None, error
+
+
 def leg_d(reference):
     print("(D) the shipped configuration does not move: query panel and gamma sweep step, three datasets")
     for label, ok, detail in digest_leg.compare(REPO, reference):
@@ -138,7 +162,10 @@ def leg_i(design):
     X, y = design.X, design.y
     reference = bounds(PartialR2(gamma=GAMMA, **COMMON).fit(X, y))
     for tag, Z in (("None", None), ("zeros((n, 0))", np.zeros((design.n, 0)))):
-        model = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=None, **COMMON).fit(X=X, y=y, Z=Z)
+        model, error = fitted(InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=None, **COMMON), X=X, y=y, Z=Z)
+        check(f"(i) Z={tag}: fits", error is None, repr(error) if error else "")
+        if error is not None:
+            continue
         gap = float(np.abs(bounds(model) - reference).max())
         check(f"(i) Z={tag}: max |PI+IV - PI| == 0.0", gap == 0.0, f"{gap!r}")
         check(f"(i) Z={tag}: no instrument read", not model._has_iv)
@@ -150,16 +177,21 @@ def leg_ii(design, GX):
     reference = bounds(InvarianceConstrainedPartialR2(gamma=GAMMA, epsilon=EPS_TOL, **COMMON).fit(X, y, GX=GX))
     for tag, Z in (("None", None), ("zeros((n, 0))", np.zeros((design.n, 0)))):
         model = InvarianceConstrainedInstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, **COMMON)
-        model.fit(X=X, y=y, GX=GX, Z=Z)
+        model, error = fitted(model, X=X, y=y, GX=GX, Z=Z)
+        check(f"(ii) Z={tag}: fits", error is None, repr(error) if error else "")
+        if error is not None:
+            continue
         gap = float(np.abs(bounds(model) - reference).max())
         check(f"(ii) Z={tag}: max |PI+INV+IV - PI+INV| == 0.0", gap == 0.0, f"{gap!r}")
 
 
 def leg_iii(design, Z):
     print("(iii) a zero IV bound is INFEASIBLE, not a silent [0, 0]")
-    model = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=0.0, gamma_z=0.0, **COMMON).fit(
-        X=design.X, y=design.y, Z=Z
-    )
+    model = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=0.0, gamma_z=0.0, **COMMON)
+    model, error = fitted(model, X=design.X, y=design.y, Z=Z)
+    check("(iii) fits at a zero bound", error is None, repr(error) if error else "")
+    if error is not None:
+        return
     check("(iii) iv_bound is 0", model.iv_bound == 0.0, repr(model.iv_bound))
     out = bounds(model)
     status = np.asarray(model.query_status)
@@ -178,14 +210,20 @@ def leg_iv(design, Z, GX, G):
     da_pi_iv = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=IV_BOUND, **COMMON)
     da_pi_iv.fit(X=GX, y=y, Z=np.column_stack([G, Z]))
     da_pi_iv.rho = da_pi_iv.sigma_sq / PartialR2(gamma=GAMMA, **COMMON).fit(X, y).sigma_sq
-    intersection = IntersectedInstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=IV_BOUND, **COMMON)
+    # the intersection budgets per branch (SS2.6): the baseline at r_Z = s sqrt(gamma_z)
+    # with epsilon_iv 0, the DA branch at the root sum square. With epsilon_iv 0 and
+    # gamma_z 2^-8 both read 0.0625 on this sigma-normalised panel (s = 1), the
+    # setting the reference rows were measured at
+    intersection = IntersectedInstrumentalVariablePartialR2(
+        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=0.0, gamma_z=GAMMA_Z, **COMMON
+    )
     intersection.fit(X=X, y=y, GX=GX, G=G, Z=Z)
     models = {
         "PI+IV": pi_iv,
         "PI+INV+IV": pi_inv_iv,
         "DA+PI+IV": da_pi_iv,
-        "PI&DA+PI+IV baseline (PI+IV)": intersection.baseline,
-        "PI&DA+PI+IV DA branch (DA+PI+IV)": intersection.augmented,
+        "PI&DA+PI+IV baseline at r_Z (PI+IV)": intersection.baseline,
+        "PI&DA+PI+IV DA branch at the joint bound (DA+PI+IV)": intersection.augmented,
     }
     for name, model in models.items():
         key = name.split("(")[-1].rstrip(")") if "(" in name else name
@@ -298,21 +336,58 @@ def leg_vi(design, Z):
         f"gap {gap:.2e}",
     )
 
+    # the line fires at the first solve, after rho is final, once per fitted model
     records = []
     sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
     try:
-        InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON).fit(X=X, y=y, Z=Z)
+        logged = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON)
+        logged.fit(X=X, y=y, Z=Z)
+        at_fit = sum("IV budget" in r["message"] for r in records)
+        bounds(logged)
+        bounds(logged)
     finally:
         logger.remove(sink)
-    lines = [r for r in records if "gamma_z" in r["message"]]
-    check("(vi) a gamma_z model logs the joint bound once", len(lines) == 1, f"{len(lines)} lines")
-    check(
-        "(vi) at INFO, not WARNING",
-        bool(lines) and all(r["level"].name == "INFO" for r in lines),
-        lines[0]["message"] if lines else "",
-    )
-    printed = float(lines[0]["message"].split("= ")[1].split(";")[0]) if lines else np.nan
+    lines = [r for r in records if "IV budget" in r["message"]]
+    check("(vi) nothing logged at fit, rho is not final there", at_fit == 0, f"{at_fit} lines")
+    check("(vi) a gamma_z model logs the joint bound once over two solves", len(lines) == 1, f"{len(lines)} lines")
+    message = lines[0]["message"] if lines else ""
+    check("(vi) at INFO, not WARNING", bool(lines) and all(r["level"].name == "INFO" for r in lines), message)
+    printed = float(message.split("joint bound")[1].split("= ")[1].split(";")[0]) if lines else np.nan
     check("(vi) the line names the joint bound", abs(printed - joint) < 1e-6, f"printed {printed!r} vs {joint:.9f}")
+    named = f"gamma_z={GAMMA_Z:g}" in message and f"epsilon_iv={EPS_TOL:g}" in message and "s=" in message
+    check("(vi) the line names gamma_z, epsilon_iv and s", named, message)
+
+
+def leg_vii(design, Z, GX, G):
+    print("(vii) the intersection budgets per branch: baseline r_Z, DA branch the joint bound")
+    X, y = design.X, design.y
+    model = IntersectedInstrumentalVariablePartialR2(
+        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
+    )
+    model.fit(X=X, y=y, GX=GX, G=G, Z=Z)
+    base, aug = model.baseline, model.augmented
+    check("(vii) the intersection keeps its own epsilon_iv 2^-5", model.epsilon_iv == EPS_TOL)
+    check("(vii) baseline branch epsilon_iv is 0.0", base.epsilon_iv == 0.0, repr(base.epsilon_iv))
+    check("(vii) DA branch epsilon_iv is 2^-5", aug.epsilon_iv == EPS_TOL, repr(aug.epsilon_iv))
+    check("(vii) both branches carry gamma_z 2^-8", base.gamma_z == GAMMA_Z and aug.gamma_z == GAMMA_Z)
+    check(
+        "(vii) baseline bound is r_Z = 0.0625 to 1e-6 (s = 1)",
+        abs(base.iv_bound - IV_BOUND) < 1e-6,
+        f"{base.iv_bound:.9f}",
+    )
+    check(
+        "(vii) DA branch bound is 0.069877 to 1e-6 (s = 1)", abs(aug.iv_bound - RSS_BOUND) < 1e-6, f"{aug.iv_bound:.9f}"
+    )
+    check("(vii) DA branch rho set after fit", aug.rho == model.rho and aug.rho > 1.0, f"{aug.rho:.6f}")
+    empty = IntersectedInstrumentalVariablePartialR2(
+        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
+    )
+    empty.fit(X=X, y=y, GX=GX, G=G, Z=None)
+    check("(vii) empty Z: baseline has no IV constraint at all", not empty.baseline._has_iv)
+    check(
+        "(vii) empty Z: DA branch keeps the joint bound on T",
+        empty.augmented._has_iv and abs(empty.augmented.iv_bound - RSS_BOUND) < 1e-6,
+    )
 
 
 if __name__ == "__main__":
@@ -324,6 +399,7 @@ if __name__ == "__main__":
     parser.add_argument("--reference", default=digest_leg.DEFAULT_REFERENCE)
     parser.add_argument("--skip-digest", action="store_true")
     args = parser.parse_args()
+    print(f"tree: {solvers.__file__}")
     design, Z, GX, G = design_and_draw(args.seed)
     leg_i(design)
     leg_ii(design, GX)
@@ -331,6 +407,7 @@ if __name__ == "__main__":
     leg_iv(design, Z, GX, G)
     leg_v(design, Z, GX, G)
     leg_vi(design, Z)
+    leg_vii(design, Z, GX, G)
     if not args.skip_digest:
         leg_d(args.reference)
     else:

@@ -38,10 +38,14 @@ Legs:
         instrument (`_has_iv`) and predicts finite bounds; `IV` requested under an
         empty set is a config error naming both `IV` and `iv`, and an omitted
         `methods` falls back to ALL_METHODS without `IV` unless there is an
-        instrument set (a default is not a request). Catches: `PI+IV` built from
-        `common` (no `epsilon_iv`, so the class raises on the first real Z), a
-        silent 2SLS on no instrument, a fallback that trips its own error. Misses:
-        the numbers the fits produce (a57).
+        instrument set (a default is not a request); the four IV classes built
+        with `gamma_z` 2^-8 carry it, and their bounds follow SS2.6 (the joint
+        0.069877 on the non-DA classes at s = 1, the joint at its own s on a DA
+        class, r_Z 0.0625 on the intersection's baseline branch). Catches: `PI+IV`
+        built from `common` (no `epsilon_iv`, so the class raises on the first
+        real Z), a silent 2SLS on no instrument, a fallback that trips its own
+        error, `gamma_z` not forwarded by the registry. Misses: the numbers the
+        fits produce (a57).
 
     MPLBACKEND=Agg python scripts/a56_iv_registry.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -63,6 +67,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import digest_leg  # noqa: E402
 
+import src.methods.sensitivity_models as solvers  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     ALL_METHODS,
@@ -295,6 +300,38 @@ def leg_vi(seed):
             check(f"(vi) {name} read the instrument", model._has_iv)
         if name == "PI&DA+PI+IV":
             check("(vi) PI&DA+PI+IV DA branch read the instrument", model.augmented._has_iv)
+    # gamma_z reaches every IV class through the registry, and the bound follows
+    # SS2.6: non-DA classes at s = 1 read 0.069877 with epsilon_iv 2^-5, a DA class
+    # its own s, an intersection's baseline branch epsilon_iv 0 so r_Z alone
+    declared = MethodRegistry.build_methods(
+        ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
+        gamma=GAMMA,
+        epsilon=EPS_TOL,
+        epsilon_iv=EPS_TOL,
+        gamma_z=2**-8,
+        recalibrate=True,
+        pad=False,
+        clipy=False,
+        n_jobs=1,
+        mean_match=True,
+    )
+    fitted = {name: declared[name]().fit(**calls[name]) for name in declared}
+    fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline
+    fitted["PI&DA+PI+IV DA branch"] = fitted["PI&DA+PI+IV"].augmented
+    for name, model in fitted.items():
+        check(f"(vi) {name} built with gamma_z 2^-8 carries it", model.gamma_z == 2**-8, repr(model.gamma_z))
+    joint = float(np.hypot(EPS_TOL, np.sqrt(2**-8)))
+    for name in ("PI+IV", "PI+INV+IV"):
+        got = fitted[name].iv_bound
+        check(f"(vi) {name} bound is the joint 0.069877 to 1e-6", abs(got - joint) < 1e-6, f"{got:.9f}")
+    for name in ("DA+PI+IV", "PI&DA+PI+IV DA branch"):
+        model = fitted[name]
+        want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
+        check(
+            f"(vi) {name} bound is the joint at its own s", abs(model.iv_bound - want) < 1e-12, f"{model.iv_bound:.9f}"
+        )
+    got = fitted["PI&DA+PI+IV baseline"].iv_bound
+    check("(vi) PI&DA+PI+IV baseline bound is r_Z = 0.0625 to 1e-6", abs(got - 0.0625) < 1e-6, f"{got:.9f}")
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))
     for name, extra in empty:
         message = rejection(name, methods=["PI", "IV"], **extra) or ""
@@ -319,6 +356,7 @@ if __name__ == "__main__":
     parser.add_argument("--reference", default=digest_leg.DEFAULT_REFERENCE)
     parser.add_argument("--skip-digest", action="store_true")
     args = parser.parse_args()
+    print(f"tree: {solvers.__file__}")
     leg_i()
     leg_ii()
     leg_iii()

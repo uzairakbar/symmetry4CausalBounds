@@ -99,7 +99,7 @@ ALPHA_MAP: dict[str, float] = {
 }
 
 # Visual style configuration
-POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "IV", "DA+IV"]
+POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV", "IV"]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 
