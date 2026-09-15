@@ -22,9 +22,11 @@ because a PDF carries a timestamp.
 Gates import `compare()` and turn every artifact into one check. Record and compare
 on the SAME node: BLAS kernels differ across CPU models at the last ulp, so a lone
 leg (D) failure on another node means nothing until the reference is re-recorded
-there (the JSON carries the node name and the gate warns on a mismatch). The runs
-are pinned to one BLAS thread in the parent (see `run_all`), and the reference was
-recorded pinned; an unpinned comparison drifts on the optical gamma sweep.
+there (the JSON carries the node name and the gate warns on a mismatch). The solves
+are SERIAL (`N_JOBS`), which is what cured the 1e-9 drift of the sim gamma sweep
+under the parallel path; the parent is also pinned to one BLAS thread (see
+`run_all`) and the reference was recorded pinned, because an unpinned comparison
+reads the optical gamma sweep differently at the last ulp.
 """
 
 import argparse
@@ -178,11 +180,13 @@ def run_dataset(name: str, kind: str) -> dict[str, str]:
 
 def run_all(datasets=DATASETS, quiet: bool = False) -> dict[str, dict[str, str]]:
     """Every dataset's query panel and gamma sweep, with the PARENT process pinned
-    to one BLAS thread. The solve workers are pinned already; the fits are not, and
-    a multithreaded QR moves at the last ulp with the thread pool's history (a gate
-    that toggled the pool before this leg saw PI+INV's sweep metrics move by 1e-9,
-    one run in four). Single-threaded kernels are deterministic, so the reference
-    must be recorded the same way; hence `_pinned` in its name."""
+    to one BLAS thread. The pin is about the thread count: a multithreaded QR moves
+    at the last ulp with the number of threads, and the optical gamma sweep read
+    differently unpinned, so the reference is recorded pinned too (hence `_pinned`
+    in its name). It is NOT what cured the 1e-9 drift of PI+INV's sim gamma-sweep
+    metrics seen in about half the earlier gate runs; that came from the parallel
+    solve path (reused loky workers) and `N_JOBS = 1` is the cure. Single-threaded
+    serial runs are deterministic, so record and compare the same way."""
     digests = {}
     with threadpool_limits(limits=1):
         for name in datasets:

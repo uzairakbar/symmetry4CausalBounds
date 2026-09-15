@@ -22,6 +22,7 @@ from src.experiments.configs import (
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
+from src.experiments.utils.model_fitting import instrument_columns, joint_instrument
 from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
@@ -75,6 +76,9 @@ class OracleMixin:
         # seed per draw rather than consecutive calls). A SEM that draws fresh rows
         # every time already averages over replicates and is left alone.
         X, y = pool if pool is not None else (None, None)
+        # the pool stays (X, y); a recorded SEM's instrument rides beside it and
+        # reaches `eps_iv_z_star` only (a generator's is split off its own draw)
+        Z = None if pool is None else getattr(sem, "iv_pool", None)
         draws = ORACLE_POOL_DRAWS if pool is not None else 1
         with preserve_rng():
             oracles = []
@@ -89,6 +93,7 @@ class OracleMixin:
                         y=y,
                         features=features,
                         mean_match=self.mean_match,
+                        Z=Z,
                     )
                 )
         oracle = pool_oracles(oracles)
@@ -151,7 +156,10 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         # not exist until the draw does. Building methods first would silently skip
         # the guard. (`DoMNISTQuerySweep` passes method_factory=None and rebuilds
         # after its nets exist; that still works.)
-        self.X_raw, self.GX_raw, self.y, self.G = self._load_data()
+        loaded = self._load_data()
+        self.X_raw, self.GX_raw, self.y, self.G = loaded[:4]
+        # a 4-tuple (do-MNIST's override) carries no instrument
+        self.Z = instrument_columns(loaded[4] if len(loaded) > 4 else None, len(self.X_raw))
 
         # Apply polynomial transformation if provided
         if self.poly:
@@ -186,10 +194,15 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         return self.sem.extent(queries)
 
     def _load_data(self):
-        """(X_raw, GX_raw, y, G). Override when the draw needs its own protocol."""
+        """(X_raw, GX_raw, y, G, Z). Override when the draw needs its own protocol.
+
+        Split site: a SEM with instruments emits them as the trailing columns of
+        the draw, and they come off here so the DA, the features and every query
+        see treatment columns only."""
         X_raw, y = self.sem(N=self.n_samples)
+        X_raw, Z = self.sem.split_instruments(X_raw)
         GX_raw, G = self.da(X_raw)
-        return X_raw, GX_raw, y, G
+        return X_raw, GX_raw, y, G, Z
 
     def fit_rho(self) -> float:
         """rho_hat of the one draw, as `ParamSweepRunner.fit_rho` (SS4.2)."""
@@ -203,9 +216,13 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv(self) -> float:
-        """Oracle IV budget, off the knife edge (same guard as PI+INV), then raised
-        to the constraint's own floor if it lands under it (`FLOOR_GUARD_R`)."""
-        budget = getattr(self.oracle, "eps_iv_star", None)
+        """IV budget, off the knife edge (same guard as PI+INV), then raised to the
+        constraint's own floor if it lands under it (`FLOOR_GUARD_R`). The floor
+        is that of the joint constraint on Z-tilde = (T, Z). Oracle path: the two
+        oracle pieces in quadrature (`OracleParameters.iv_budget`); declared path
+        (`declared_iv`, SS2.6): the T piece alone, logged against the floor and
+        never raised, the solver adding s sqrt(gamma_z) in root sum square."""
+        budget = getattr(self.oracle, "eps_iv_star" if self.declared_iv else "iv_budget", None)
         if budget is None or not np.isfinite(budget):
             logger.warning("eps_iv_star unavailable; IV budget falls back to the tolerance.")
             budget = 0.0
@@ -219,13 +236,22 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 self.y,
                 self.default_gamma,
                 kind="iv",
-                Z=self.G,
+                Z=joint_instrument(self.G, self.Z),
                 mean_match=self.mean_match,
                 rho=self.fit_rho(),
                 recalibrate=self.recalibrate,
             )
         except Exception as error:
             logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")
+            return budget
+
+        if self.declared_iv:
+            side = "above" if budget**2 >= floor else "BELOW"
+            logger.info(
+                f"epsilon_iv: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the joint "
+                f"constraint's floor {floor:.4g} on its own; left as declared, never raised. The real-Z "
+                "radius s sqrt(gamma_z) joins it in root sum square in the solver."
+            )
             return budget
 
         if budget**2 >= floor:  # feasible: leave it exactly as it was
@@ -260,6 +286,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             X_raw=self.X_raw,
             GX_raw=self.GX_raw,
             oracle=self.oracle,
+            Z=self.Z,
         )
 
 
@@ -330,29 +357,44 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
     # ------------------------------------------------------- fixed base sample
 
     def _base_data(self, experiment_index: int, n_samples: int | None = None):
-        """(X_train_raw, X_train, y_train, X_test, estimand), drawn once per j."""
+        """(X_train_raw, X_train, y_train, X_test, estimand, Z_train), drawn once per j.
+
+        An override that returns the old 5-tuple (do-MNIST's `_draw_base`) carries
+        no instrument and is padded with an (n, 0) Z here."""
         key = (experiment_index, n_samples)
         if key not in self._base:
-            self._base[key] = self._draw_base(experiment_index, n_samples)
+            drawn = tuple(self._draw_base(experiment_index, n_samples))
+            if len(drawn) == 5:
+                drawn = (*drawn, None)
+            X_raw, X, y, X_test, estimand, Z = drawn
+            self._base[key] = (X_raw, X, y, X_test, estimand, instrument_columns(Z, len(X_raw)))
         return self._base[key]
 
     def _draw_base(self, experiment_index: int, n_samples: int | None = None):
+        """Split site: a SEM with instruments emits them as the trailing columns of
+        every draw. Rows are split BEFORE columns on a finite pool, so Z stays
+        aligned with X under the cigarette state-cluster bootstrap; the DA, the
+        features, `f` and `extent` all see treatment columns only."""
         sem = self.sems[experiment_index]
         n_total = self.n_samples if n_samples is None else int(n_samples)
 
         if self.finite_pool:
             # finite pool: split unique instances; test set fixed across steps
-            X_all, y_all = sem(N=n_total)
-            X_train_raw, X_test_raw, y_train, _ = train_test_split(
-                X_all, y_all, test_size=self.test_fraction, random_state=self.seed + experiment_index
+            XZ_all, y_all = sem(N=n_total)
+            XZ_train, XZ_test, y_train, _ = train_test_split(
+                XZ_all, y_all, test_size=self.test_fraction, random_state=self.seed + experiment_index
             )
+            X_train_raw, Z_train = sem.split_instruments(XZ_train)
+            X_test_raw, _ = sem.split_instruments(XZ_test)
         else:
             # generator: interventional test set
-            X_train_raw, y_train = sem(N=n_total)
-            X_test_raw, _ = sem(N=int(self.test_fraction * n_total), intervention=True)
+            XZ_train, y_train = sem(N=n_total)
+            X_train_raw, Z_train = sem.split_instruments(XZ_train)
+            XZ_test, _ = sem(N=int(self.test_fraction * n_total), intervention=True)
+            X_test_raw, _ = sem.split_instruments(XZ_test)
 
         X_test = self.apply_transform(X_test_raw)
-        return (X_train_raw, self.apply_transform(X_train_raw), y_train, X_test, sem.f(X_test))
+        return (X_train_raw, self.apply_transform(X_train_raw), y_train, X_test, sem.f(X_test), Z_train)
 
     def _extent(self, experiment_index: int, X_test) -> np.ndarray:
         """Target-set half-width at each query, beside `sem.f(X_test)`. Zeros for a
@@ -371,7 +413,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         self, experiment_index: int, n_samples: int | None = None, common_random: bool = False, **augment_kwargs
     ) -> SweepData:
         """Default single-fold SweepData on the fixed base sample."""
-        X_raw, X, y, X_test, estimand = self._base_data(experiment_index, n_samples)
+        X_raw, X, y, X_test, estimand, Z = self._base_data(experiment_index, n_samples)
 
         if common_random:
             GX_raw, G = self._augment_once(experiment_index, X_raw, **augment_kwargs)
@@ -386,6 +428,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             X_test=X_test,
             estimand=estimand,
             extent=self._extent(experiment_index, X_test),
+            Z=Z,
         )
 
 
@@ -635,14 +678,14 @@ class SampleSizeStrategy(GenericParamSweep):
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         n = int(param)
-        X_raw, X, y, X_test, estimand = self._base_data(experiment_index)
+        X_raw, X, y, X_test, estimand, Z = self._base_data(experiment_index)
 
         # optical n counts pre-split rows; sim n is the train size itself
         n_train = int(round((1.0 - self.test_fraction) * n)) if self.finite_pool else n
         if n_train > len(X):
             logger.warning(f"n={n} needs {n_train} train rows, only {len(X)} drawn.")
             n_train = len(X)
-        X_raw, X, y = X_raw[:n_train], X[:n_train], y[:n_train]
+        X_raw, X, y, Z = X_raw[:n_train], X[:n_train], y[:n_train], Z[:n_train]
 
         GX_raw, G = self.das[experiment_index](X_raw)
         return SweepData(
@@ -653,6 +696,7 @@ class SampleSizeStrategy(GenericParamSweep):
             X_test=X_test,
             estimand=estimand,
             extent=self._extent(experiment_index, X_test),
+            Z=Z,
         )
 
 
@@ -676,7 +720,7 @@ class FoldStrategy(GenericParamSweep):
     def generate_data(self, experiment_index: int, param) -> SweepData:
         m = int(param)
         da = self.das[experiment_index]
-        X_raw, X, y, X_test, estimand = self._base_data(experiment_index, self.n_samples_override)
+        X_raw, X, y, X_test, estimand, Z = self._base_data(experiment_index, self.n_samples_override)
 
         GX_raws, Gs = zip(*(da(X_raw) for _ in range(m)), strict=False)
 
@@ -691,6 +735,9 @@ class FoldStrategy(GenericParamSweep):
             extent=self._extent(experiment_index, X_test),
             X_base=X,
             y_base=y,
+            # tiled beside X and y, the untiled copy beside X_base
+            Z=np.tile(Z, (m, 1)),
+            Z_base=Z,
         )
 
 

@@ -28,6 +28,7 @@ from src.experiments.utils.constants import (
     SUBDIR_SWEEP,
 )
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries, rho_hat
+from src.experiments.utils.model_fitting import instrument_columns, joint_instrument
 from src.experiments.utils.plotting import (
     create_perf_plot,
     create_query_sweep_plot,
@@ -67,6 +68,11 @@ class ExperimentDataContext:
     X_raw: np.ndarray | None = None
     GX_raw: np.ndarray | None = None
     oracle: Any | None = None  # OracleParameters; unused by default
+    # the real instrument, (n, m); None is spelled (n, 0) on construction (SS2.5)
+    Z: np.ndarray | None = None
+
+    def __post_init__(self):
+        self.Z = instrument_columns(self.Z, len(self.X))
 
 
 @dataclass
@@ -84,6 +90,18 @@ class SweepData:
     y_base: np.ndarray | None = None
     # half-width of the target SET per query (`SEM.extent`); None is a point target
     extent: np.ndarray | None = None
+    # the real instrument beside X, (n, m), and its untiled copy beside X_base.
+    # None is spelled (n, 0) here, the one place a None is converted, so no
+    # consumer ever sees one (SS2.5)
+    Z: np.ndarray | None = None
+    Z_base: np.ndarray | None = None
+
+    def __post_init__(self):
+        self.Z = instrument_columns(self.Z, len(self.X))
+        if self.X_base is not None:
+            # a tiled Z starts with its untiled block, so that is the default
+            base = self.Z[: len(self.X_base)] if self.Z_base is None else self.Z_base
+            self.Z_base = instrument_columns(base, len(self.X_base))
 
     def __iter__(self):
         return iter((self.X, self.y, self.GX, self.G, self.X_test, self.estimand))
@@ -94,7 +112,16 @@ class SweepData:
 
     @property
     def fit_arrays(self) -> dict[str, Any]:
-        return dict(X=self.X, y=self.y, GX=self.GX, G=self.G, X_base=self.X_base, y_base=self.y_base)
+        return dict(
+            X=self.X,
+            y=self.y,
+            GX=self.GX,
+            G=self.G,
+            X_base=self.X_base,
+            y_base=self.y_base,
+            Z=self.Z,
+            Z_base=self.Z_base,
+        )
 
     @property
     def metric_extent(self) -> float | np.ndarray:
@@ -122,6 +149,7 @@ class BaseExperimentRunner(ABC):
         pad: bool = False,
         clipy: bool = True,
         mean_match: bool = True,
+        declared_iv: bool = False,
         **kwargs,
     ):
         if seed >= 0:
@@ -141,6 +169,13 @@ class BaseExperimentRunner(ABC):
         self.pad = pad
         self.clipy = clipy
         self.mean_match = mean_match
+        # the IV budget rule of SS2.6, set per dataset by the orchestrator like
+        # `raw_gamma` and `eps_tol` are. False: oracle, the T-as-IV piece and the
+        # real-Z piece in quadrature, floor-guarded. True: declared, a non-empty
+        # `iv:` asserting near-perfect instruments; the runner hands the solver
+        # the T piece alone, the solver adds s sqrt(gamma_z) in root sum square,
+        # and the floor guard never raises it (decision 8)
+        self.declared_iv = bool(declared_iv)
 
     @abstractmethod
     def run(self, desc: str):
@@ -182,6 +217,7 @@ class QuerySweepRunner(BaseExperimentRunner):
                         y=context.y,
                         GX=context.GX,
                         G=context.G,
+                        Z=context.Z,
                         hyperparameters=self.hyperparameters,
                         da=context.da,
                     )
@@ -307,7 +343,7 @@ class ParamSweepRunner(BaseExperimentRunner):
             return float(fallback)
         return float(value)
 
-    def _floor_guard(self, budget, data, kind: str, experiment_index: int, label: str) -> float:
+    def _floor_guard(self, budget, data, kind: str, experiment_index: int, label: str, declared: bool = False) -> float:
         """Rescue a budget that is INFEASIBLE, and only such a budget.
 
         A budget under the constraint's own attainable floor is not a tighter
@@ -325,11 +361,22 @@ class ParamSweepRunner(BaseExperimentRunner):
         Once a budget IS infeasible the oracle value carries no information about
         where to put it, so it goes to `sqrt(FLOOR_GUARD_R * floor)` -- far enough
         off the knife edge to cover (`configs.py` has the calibration).
+
+        The IV floor is that of the joint constraint on Z-tilde = (T, Z), the one
+        the DA+ methods solve. `declared` (SS2.6, a non-empty `iv:`): the floor is
+        measured and logged beside the budget, but the budget is NEVER raised.
+        It is the T-as-IV term r_T; the declared real-Z radius joins it in root
+        sum square inside the solver, and a declared budget that turns out
+        infeasible is information, not something to inflate away (decision 8).
         """
         if data is None:
             return budget
         design = getattr(data, "X" if kind == "inv" else "GX", None)
-        extra = {"GX": getattr(data, "GX", None)} if kind == "inv" else {"Z": getattr(data, "G", None)}
+        if kind == "inv":
+            extra = {"GX": getattr(data, "GX", None)}
+        else:
+            G = getattr(data, "G", None)
+            extra = {"Z": None if G is None else joint_instrument(G, getattr(data, "Z", None))}
         if design is None or next(iter(extra.values())) is None:
             return budget
         # the DA ball ('iv': DA+PI+IV fits on GX) is recalibrated; the baseline
@@ -349,6 +396,15 @@ class ParamSweepRunner(BaseExperimentRunner):
             logger.warning(f"{label}: constraint floor unavailable ({error}); budget left at the oracle value.")
             return budget
 
+        if declared:
+            side = "above" if budget**2 >= floor else "BELOW"
+            logger.info(
+                f"{label}: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the joint "
+                f"constraint's floor {floor:.4g} on its own; left as declared, never raised. The real-Z "
+                "radius s sqrt(gamma_z) joins it in root sum square in the solver."
+            )
+            return budget
+
         if budget**2 >= floor:  # feasible: leave it exactly as it was
             return budget
 
@@ -361,12 +417,17 @@ class ParamSweepRunner(BaseExperimentRunner):
         return guarded
 
     def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
-        """IV budget for this experiment: oracle eps_iv_star, off the knife edge,
-        floor-guarded exactly as `fit_epsilon` is."""
-        eps_iv_star = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
-        if eps_iv_star is None or not np.isfinite(eps_iv_star):
+        """IV budget for this experiment, off the knife edge, floor-guarded exactly
+        as `fit_epsilon` is. Oracle path: the T-as-IV piece and the real-Z piece
+        in quadrature (`OracleParameters.iv_budget`, SS2.3). Declared path: the T
+        piece alone, r_T, never raised (SS2.6); the solver adds s sqrt(gamma_z)."""
+        oracle = self.get_oracle(experiment_index)
+        budget = getattr(oracle, "eps_iv_star" if self.declared_iv else "iv_budget", None)
+        if budget is None or not np.isfinite(budget):
             return None
-        return self._floor_guard(float(eps_iv_star) + EPS_TOL, data, "iv", experiment_index, "epsilon_iv")
+        return self._floor_guard(
+            float(budget) + EPS_TOL, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
+        )
 
     def method_kwargs(self, experiment_index: int) -> dict[str, Any]:
         """Extra builder kwargs. Override when methods need per-experiment state

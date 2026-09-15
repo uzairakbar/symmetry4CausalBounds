@@ -38,18 +38,31 @@ class OracleParameters:
     bias_sq: float
     sigma_sq: float
     rho: float | None
-    # IV budget (Thm. 3.B, exact at gamma_z* = 0) and its byproducts
+    # IV budget (Thm. 3.B, exact at gamma_z* = 0) and its byproducts: the T-as-IV
+    # piece on span(G), the real-Z piece on span(Z|G) (SS2.3), and RMS(W#), eta
     eps_iv_star: float | None = None
+    eps_iv_z_star: float | None = None
     eps_rms: float | None = None
     eta: float | None = None
     # SHELVED: eps* under the perturb convention (exactly-invariant components
     # excluded). Recorded, never consumed -- lets the padding choice be revisited.
     epsilon_star_pointwise: float | None = None
 
+    @property
+    def iv_budget(self) -> float | None:
+        """The IV budget on the joint instrument Z-tilde = (T, Z): the two pieces
+        in quadrature, sqrt(eps_iv_star^2 + eps_iv_z_star^2) (SS2.3). The joint
+        projector splits orthogonally, so this is exact, and with an empty Z it
+        is `eps_iv_star` to the bit. The runner adds the tolerance."""
+        if self.eps_iv_star is None:
+            return None
+        z = 0.0 if self.eps_iv_z_star is None else float(self.eps_iv_z_star)
+        return float(np.sqrt(float(self.eps_iv_star) ** 2 + z**2))
+
 
 # Draw-pooled fields and how they pool: a NORM pools in the square (an RMS of RMSs),
 # a ratio pools as a plain mean. The rest are functions of the SEM alone.
-_ORACLE_RMS_FIELDS = ("epsilon_star", "eps_iv_star", "eps_rms", "epsilon_star_pointwise")
+_ORACLE_RMS_FIELDS = ("epsilon_star", "eps_iv_star", "eps_iv_z_star", "eps_rms", "epsilon_star_pointwise")
 _ORACLE_MEAN_FIELDS = ("rho", "eta", "gamma_z_star")
 
 
@@ -112,6 +125,18 @@ def _identity(X: NDArray) -> NDArray:
     return X
 
 
+def _draw(sem, n_samples: int) -> tuple:
+    """(X, y, Z) of one draw. A SEM with instruments emits them as trailing
+    columns of X (`SEM.iv_width`); they are split off HERE so no oracle routine
+    ever sees a wider design, and the empty case is (n, 0), never None."""
+    X, y = sem(N=n_samples)
+    split = getattr(sem, "split_instruments", None)
+    if split is None:
+        return X, y, np.zeros((len(X), 0))
+    X, Z = split(X)
+    return X, y, Z
+
+
 # =============================================================================
 # gamma*
 # =============================================================================
@@ -170,7 +195,7 @@ def _invariance_signal(
 
     with preserve_rng():
         if X is None:
-            X, _ = sem(N=n_samples)
+            X, _, _ = _draw(sem, n_samples)
         GX, G = da(X, **augment_kwargs)
         Phi = features(GX)
         w = (sem.f(features(X)) - sem.f(Phi)).flatten()
@@ -236,7 +261,7 @@ def epsilon_pad_star(
         if seed is not None:
             np.random.seed(seed)
         if X is None:
-            X, _ = sem(N=n_samples)
+            X, _, _ = _draw(sem, n_samples)
         pooled = []
         for draw in range(max(int(draws), 1)):
             # a fresh stream per draw, INSIDE the preserved block: the callee
@@ -269,7 +294,7 @@ def invariance_error(
 
     with preserve_rng():
         if X is None:
-            X, _ = sem(N=n_samples)
+            X, _, _ = _draw(sem, n_samples)
         GX = da.perturb(X)
 
         residuals = sem.f(features(X)) - sem.f(features(GX))
@@ -298,7 +323,7 @@ def recalibrated_da_epsilon(
     # freeze the sample so the 1-D solve sees a deterministic objective
     if X is None:
         with preserve_rng():
-            X, _ = sem(N=n_samples)
+            X, _, _ = _draw(sem, n_samples)
 
     def error(strength: float) -> float:
         da.strength = strength
@@ -391,6 +416,47 @@ def eps_iv_star(
     return budget, eps_rms, eta
 
 
+def eps_iv_z_star(
+    sem,
+    da,
+    X: NDArray,
+    y: NDArray | None,
+    Z: NDArray | None,
+    features: Callable | None = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+    mean_match: bool = False,
+) -> float:
+    """
+    The real-Z piece of the IV budget (SS2.3):
+
+        eps_iv_z_star = || Q_{Z|G}' (y - h_*(Phi(GX))) || / sqrt(N)
+
+    the residual of the target on the augmented design, projected on the real
+    instrument orthogonalised against the translation amounts G. The projector
+    on span(G, Z) splits as ||Q'r||^2 = ||Q_G'r||^2 + ||Q_{Z|G}'r||^2, so this
+    and `eps_iv_star` (the G piece) add in quadrature (`OracleParameters.iv_budget`).
+    On a simulation with a valid instrument it is sampling noise, which is why
+    it is measured rather than declared there (0.0552 at d 32, m 4, n 2048,
+    against EPS_TOL 0.03125). Under `mean_match` the residual is centred, as the
+    solver centres y and the design. Exactly 0.0 for an empty Z: nothing is
+    computed, so today's budget is untouched to the bit.
+    """
+    Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
+    if Z.shape[1] == 0:
+        return 0.0
+    if y is None:
+        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(GX)).")
+    features = features or _identity
+    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples)
+    # y - h_*(Phi(GX)) = (y - h_*(Phi(X))) + w, w being the invariance signal
+    residual = np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel() + w
+    if mean_match:
+        residual = residual - np.mean(residual)
+    Q_G, _ = np.linalg.qr(G)
+    Q, _ = np.linalg.qr(Z - Q_G @ (Q_G.T @ Z))
+    return float(np.linalg.norm(Q.T @ residual) / np.sqrt(len(residual)))
+
+
 # =============================================================================
 # Thm. 1 threshold
 # =============================================================================
@@ -477,8 +543,13 @@ def thm1_gamma_min(oracle: "OracleParameters") -> float:
 
 def gamma_z_star(sem, da, X=None, features=None) -> float | None:
     """
-    Oracle IV budget (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
-    Not implemented: no experiment uses instruments.
+    Oracle IV leakiness (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
+
+    None on purpose. The real-Z radius s sqrt(gamma_z) is DECLARED from the
+    dataset block (SS2.6, `GAMMA_Z_DEFAULT`), never estimated: a non-empty `iv:`
+    asserts the instruments are near perfect. The oracle piece of the IV budget
+    on the simulation is `eps_iv_z_star`, a norm, not a gamma. The slot stays so
+    `OracleParameters` keeps its shape.
     """
     return None
 
@@ -502,7 +573,7 @@ def _noise_ratio(
 
     with preserve_rng():
         if y is None:  # X given without outcomes: rho needs its own draw
-            X, y = sem(N=n_samples)
+            X, y, _ = _draw(sem, n_samples)
         GX, _ = da(X)
         Phi = features(GX)
         fit = OLS(fit_intercept=mean_match).fit(Phi, y)
@@ -520,15 +591,24 @@ def compute_oracle_parameters(
     n_samples: int = CALIBRATION_SAMPLES,
     strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR,
     mean_match: bool = False,
+    Z: NDArray | None = None,
 ) -> OracleParameters:
-    """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units."""
+    """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units.
+
+    `Z` is the real instrument row-aligned with `X` (a recorded SEM's `iv_pool`);
+    when X is drawn here, the draw's own trailing columns are it. It reaches
+    `eps_iv_z_star` only, so `eps_iv_star` stays the T-as-IV piece and the two
+    combine in `OracleParameters.iv_budget`."""
     features = features or _identity
 
     if X is None:
         with preserve_rng():
-            X, y = sem(N=n_samples)
+            X, y, drawn = _draw(sem, n_samples)
+        if Z is None:
+            Z = drawn
 
     iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
+    iv_z = eps_iv_z_star(sem, da, X=X, y=y, Z=Z, features=features, n_samples=n_samples, mean_match=mean_match)
 
     return OracleParameters(
         gamma_star=gamma_star(sem, strategy=strategy),
@@ -538,6 +618,7 @@ def compute_oracle_parameters(
         sigma_sq=float(sem.sigma_sq),
         rho=_noise_ratio(sem, da, X, y, features, n_samples, mean_match=mean_match),
         eps_iv_star=iv_budget,
+        eps_iv_z_star=iv_z,
         eps_rms=eps_rms,
         eta=eta,
         epsilon_star_pointwise=invariance_error(sem, da, X=X, features=features),
