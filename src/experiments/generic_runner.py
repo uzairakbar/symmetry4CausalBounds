@@ -223,9 +223,10 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         oracle pieces in quadrature (`OracleParameters.iv_budget`); declared path
         (`declared_iv`, SS2.6): the T piece alone, logged against the floor and
         never raised, the solver adding s sqrt(gamma_z) in root sum square."""
-        budget = getattr(self.oracle, "eps_iv_star" if self.declared_iv else "iv_budget", None)
+        field = "eps_iv_star" if self.declared_iv else "iv_budget"
+        budget = getattr(self.oracle, field, None)
         if budget is None or not np.isfinite(budget):
-            logger.warning("eps_iv_star unavailable; IV budget falls back to the tolerance.")
+            logger.warning(f"oracle {field} unavailable; IV budget falls back to the tolerance.")
             budget = 0.0
         budget = float(budget) + self.eps_tol
 

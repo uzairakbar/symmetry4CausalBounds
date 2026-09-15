@@ -51,9 +51,10 @@ class OracleParameters:
     @property
     def iv_budget(self) -> float | None:
         """The IV budget on the joint instrument Z-tilde = (T, Z): the two pieces
-        in quadrature, sqrt(eps_iv_star^2 + eps_iv_z_star^2) (SS2.3). The joint
-        projector splits orthogonally, so this is exact, and with an empty Z it
-        is `eps_iv_star` to the bit. The runner adds the tolerance."""
+        combined in quadrature per SS2.3, sqrt(eps_iv_star^2 + eps_iv_z_star^2).
+        The pieces are norms of different residuals (W# on span(G), y - GX h_* on
+        span(Z|G)), so this is the plan's arithmetic, not one projector identity.
+        With an empty Z it is `eps_iv_star` to the bit. The runner adds the tolerance."""
         if self.eps_iv_star is None:
             return None
         z = 0.0 if self.eps_iv_z_star is None else float(self.eps_iv_z_star)

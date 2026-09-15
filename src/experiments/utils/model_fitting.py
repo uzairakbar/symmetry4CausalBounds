@@ -86,6 +86,11 @@ def fit_model(
     X_solo = X if X_base is None else X_base
     y_solo = y if y_base is None else y_base
     Z = instrument_columns(Z, len(X))
+    if X_base is not None and Z_base is None:
+        # an untiled X without its untiled Z would fit PI+IV and IV with no
+        # instrument and no warning; `SweepData` always derives one, so this is a
+        # hand-written call and it must say what it means
+        raise ValueError("X_base without Z_base: pass the untiled instrument beside the untiled design.")
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
 
     # Dispatch based on method name to use correct data

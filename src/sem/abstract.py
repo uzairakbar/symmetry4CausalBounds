@@ -74,6 +74,10 @@ class StructuralEquationModel(ABC):
         if width == 0:
             return X, np.zeros((len(X), 0))
         X = np.asarray(X)
+        if X.ndim != 2 or X.shape[1] <= width:
+            # a draw that forgot its Z (an interventional one, say) would otherwise
+            # lose treatment columns silently
+            raise ValueError(f"a draw of shape {X.shape} cannot carry {width} instrument columns after the treatment.")
         return np.ascontiguousarray(X[:, :-width]), np.ascontiguousarray(X[:, -width:])
 
     @property

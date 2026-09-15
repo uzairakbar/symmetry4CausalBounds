@@ -264,11 +264,15 @@ def leg_vi(seed):
     z = design.Z[:, :1]
     np.random.seed(seed)
     GX, G = ScaleTranslation(V, std=float(np.std(X @ (V / np.linalg.norm(V)))))(X)
+    # two budgets (batch B's ruling): the DA classes carry `epsilon_iv`, the non-DA
+    # ones and the intersection's baseline `epsilon_iv_z`; both positive here, or
+    # the non-DA bound would be exactly 0 and INFEASIBLE (SS3.3)
     builders = MethodRegistry.build_methods(
         list(IV_METHODS),
         gamma=GAMMA,
         epsilon=EPS_TOL,
         epsilon_iv=EPS_TOL,
+        epsilon_iv_z=EPS_TOL,
         recalibrate=True,
         pad=False,
         clipy=False,
@@ -301,8 +305,9 @@ def leg_vi(seed):
         if name == "PI&DA+PI+IV":
             check("(vi) PI&DA+PI+IV DA branch read the instrument", model.augmented._has_iv)
     # gamma_z reaches every IV class through the registry, and the bound follows
-    # SS2.6: non-DA classes at s = 1 read 0.069877 with epsilon_iv 2^-5, a DA class
-    # its own s, an intersection's baseline branch epsilon_iv 0 so r_Z alone
+    # SS2.6 per row: the non-DA classes and the intersection's baseline carry
+    # `epsilon_iv_z` (default 0.0, the declared path) so their bound is exactly
+    # r_Z = s sqrt(gamma_z); the DA classes carry `epsilon_iv` and read the joint
     declared = MethodRegistry.build_methods(
         ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
         gamma=GAMMA,
@@ -320,10 +325,11 @@ def leg_vi(seed):
     fitted["PI&DA+PI+IV DA branch"] = fitted["PI&DA+PI+IV"].augmented
     for name, model in fitted.items():
         check(f"(vi) {name} built with gamma_z 2^-8 carries it", model.gamma_z == 2**-8, repr(model.gamma_z))
-    joint = float(np.hypot(EPS_TOL, np.sqrt(2**-8)))
-    for name in ("PI+IV", "PI+INV+IV"):
-        got = fitted[name].iv_bound
-        check(f"(vi) {name} bound is the joint 0.069877 to 1e-6", abs(got - joint) < 1e-6, f"{got:.9f}")
+    for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
+        model = fitted[name]
+        r_z = float(np.sqrt(model.sigma_sq / model.rho * 2**-8))
+        exact = model.epsilon_iv == 0.0 and model.iv_bound == r_z
+        check(f"(vi) {name}: epsilon_iv 0.0 and bound exactly r_Z = s sqrt(gamma_z)", exact, f"{model.iv_bound!r}")
     for name in ("DA+PI+IV", "PI&DA+PI+IV DA branch"):
         model = fitted[name]
         want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
@@ -332,6 +338,35 @@ def leg_vi(seed):
         )
     got = fitted["PI&DA+PI+IV baseline"].iv_bound
     check("(vi) PI&DA+PI+IV baseline bound is r_Z = 0.0625 to 1e-6", abs(got - 0.0625) < 1e-6, f"{got:.9f}")
+    # with a positive `epsilon_iv_z` the non-DA classes read the joint 0.069877
+    # (s = 1 on this panel) and `epsilon_iv_z` never reaches the DA class
+    both = MethodRegistry.build_methods(
+        ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
+        gamma=GAMMA,
+        epsilon=EPS_TOL,
+        epsilon_iv=EPS_TOL,
+        epsilon_iv_z=EPS_TOL,
+        gamma_z=2**-8,
+        recalibrate=True,
+        pad=False,
+        clipy=False,
+        n_jobs=1,
+        mean_match=True,
+    )
+    fitted = {name: both[name]().fit(**calls[name]) for name in both}
+    fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline
+    joint = float(np.hypot(EPS_TOL, np.sqrt(2**-8)))
+    for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
+        got = fitted[name].iv_bound
+        ok = fitted[name].epsilon_iv == EPS_TOL and abs(got - joint) < 1e-6
+        check(f"(vi) {name} with epsilon_iv_z 2^-5: bound is the joint 0.069877 to 1e-6", ok, f"{got:.9f}")
+    model = fitted["DA+PI+IV"]
+    want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
+    check(
+        "(vi) DA+PI+IV with epsilon_iv_z 2^-5: still the joint at its own s, epsilon_iv_z never reaches it",
+        abs(model.iv_bound - want) < 1e-12 and model.epsilon_iv == EPS_TOL,
+        f"{model.iv_bound:.9f}",
+    )
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))
     for name, extra in empty:
         message = rejection(name, methods=["PI", "IV"], **extra) or ""

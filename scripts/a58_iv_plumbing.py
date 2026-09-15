@@ -269,16 +269,23 @@ def make_generator():
     return InstrumentedSEM(treatment_dimension=K, gamma=GAMMA)
 
 
-def da_from_sem(sem):
-    return NullSpaceTranslation(sem.W_XY, kernel_dim=0)
+def da_from_sem(sem, strength=0.0):
+    """The sim's null-space translation; `strength` > 0 adds an out-of-kernel
+    component, so h* is no longer T-invariant and the T-side term is O(strength)."""
+    return NullSpaceTranslation(sem.W_XY, kernel_dim=0, strength=strength)
 
 
-def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, gamma_z=0.0, **extra):
+# the DA strength (vii) runs at, so eps_iv_star is far from 0 and the T-side budget
+# cannot coincide with the Z term (a T-invariant h* makes the two meet to the bit)
+MISSPECIFIED_STRENGTH = 0.5
+
+
+def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, gamma_z=0.0, strength=0.0, **extra):
     """One configured strategy on a stub, the way the orchestrators build them; a
     `gamma_z` closes over the factory as the cigarette orchestrator's will."""
     return STRATEGIES[param](
         sem_factory=sem_factory,
-        da_factory=da_from_sem,
+        da_factory=lambda sem: da_from_sem(sem, strength),
         poly_transform=None,
         test_fraction=TEST_FRACTION,
         default_gamma=GAMMA,
@@ -297,10 +304,10 @@ def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, 
     )
 
 
-def query_runner(sem, seed=0, declared_iv=False, cls=GenericQuerySweep):
+def query_runner(sem, seed=0, declared_iv=False, cls=GenericQuerySweep, strength=0.0):
     return cls(
         sem_factory=lambda: sem,
-        da_factory=lambda: da_from_sem(sem),
+        da_factory=lambda: da_from_sem(sem, strength),
         poly_transform=None,
         method_factory=factory,
         default_gamma=GAMMA,
@@ -522,19 +529,26 @@ def leg_i(seed):
     unaware = "split_instruments" not in source and "iv_" not in source
     check("(i) do-MNIST overrides know nothing of the carrier", unaware)
     # the batch B ruling adds `epsilon_iv_z` to every orchestrator's `build_methods`;
-    # nothing else in do_mnist.py may move, the two overrides least of all
-    diff = subprocess.run(
-        ["git", "-C", REPO, "diff", BASE_COMMIT, "--", "src/experiments/do_mnist.py"], capture_output=True, text=True
-    ).stdout
-    changed = [line for line in diff.split("\n") if line[:1] in "+-" and line[:3] not in ("+++", "---")]
-    outside = [
-        line for line in changed if any(k in line for k in ("_draw_base", "_load_data", "sample_paired", "X_raw"))
-    ]
-    check(
-        f"(i) do_mnist.py since {BASE_COMMIT}: only the build_methods signature moved",
-        not outside and len(changed) <= 12 and all("build_methods" in diff for _ in [0]),
-        f"{len(changed)} changed lines",
-    )
+    # nothing else in do_mnist.py may move, the two overrides least of all. Needs a
+    # checkout: on an archive copy (a break-it outside the worktree) it is skipped
+    checkout = subprocess.run(["git", "-C", REPO, "rev-parse", "--git-dir"], capture_output=True, text=True)
+    if checkout.returncode != 0:
+        print(f"      (i) do_mnist.py diff since {BASE_COMMIT} SKIPPED: not a git checkout")
+    else:
+        diff = subprocess.run(
+            ["git", "-C", REPO, "diff", BASE_COMMIT, "--", "src/experiments/do_mnist.py"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        changed = [line for line in diff.split("\n") if line[:1] in "+-" and line[:3] not in ("+++", "---")]
+        outside = [
+            line for line in changed if any(k in line for k in ("_draw_base", "_load_data", "sample_paired", "X_raw"))
+        ]
+        check(
+            f"(i) do_mnist.py since {BASE_COMMIT}: only the build_methods signature moved",
+            not outside and len(changed) <= 12 and "build_methods" in diff,
+            f"{len(changed)} changed lines",
+        )
 
     # the containers spell None as (n, 0)
     X = np.zeros((10, 3))
@@ -794,15 +808,16 @@ def leg_vi(seed):
 
 def leg_vii(seed):
     print("(vii) the oracle path: non-DA +IV methods carry eps_iv_z_star + EPS_TOL, the intersection is feasible")
+    # the routing on a MISSPECIFIED symmetry (DA strength > 0), where the T-side
+    # budget is far from the Z term, so substituting one for the other is visible
     np.random.seed(seed)
-    runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed)
+    runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed, strength=MISSPECIFIED_STRENGTH)
     data = runner.generate_data(0, GAMMA_GRID[0])
     oracle = runner.get_oracle(0)
     want_z, want_t = float(oracle.eps_iv_z_star) + EPS_TOL, runner.fit_epsilon_iv(0, 0, data)
+    apart = oracle.eps_iv_star > 10 * EPS_TOL and want_z != want_t
+    check("(vii) the Z term and the T-side budget differ on this draw", apart, f"{want_z:.6g} vs {want_t:.6g}")
     check("(vii) fit_epsilon_iv_z is eps_iv_z_star + EPS_TOL, unguarded", runner.fit_epsilon_iv_z(0, data) == want_z)
-    print(
-        f"      epsilon_iv_z {want_z:.6g}, T-side epsilon_iv {want_t:.6g} (the stub's h* is T-invariant, so they meet)"
-    )
     models = runner.build_models(0, 0, data)
     for name in NON_DA_IV:
         check(f"(vii) {name} carries epsilon_iv_z", models[name].epsilon_iv == want_z, f"{models[name].epsilon_iv!r}")
@@ -810,6 +825,14 @@ def leg_vii(seed):
     check("(vii) the intersection's baseline carries epsilon_iv_z", inter.baseline.epsilon_iv == want_z)
     t_side = inter.augmented.epsilon_iv == want_t == models["DA+PI+IV"].epsilon_iv
     check("(vii) its DA branch and DA+PI+IV carry the T-side term", t_side)
+    # feasibility on the WELL-SPECIFIED symmetry, the ruling's case: both budgets
+    # admit h* there, so the two branches overlap at every query. (Under the
+    # misspecified DA above the recalibrated DA ball can exclude h*, Thm. 1's
+    # regime, and the intersection empties at some queries: not plumbing.)
+    np.random.seed(seed)
+    runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed)
+    data = runner.generate_data(0, GAMMA_GRID[0])
+    inter = runner.build_models(0, 0, data)[INTERSECTION]
     inter.predict(data.X_test)
     feasible = all(
         np.all(np.asarray(m.query_status) == SolveStatus.OK) for m in (inter, inter.baseline, inter.augmented)
@@ -823,9 +846,10 @@ def leg_vii(seed):
     check(
         "(vii) an empty Z gives epsilon_iv_z exactly 0.0", empty.fit_epsilon_iv_z(0, empty.generate_data(0, 1.0)) == 0.0
     )
-    query = query_runner(make_generator(), seed=seed)
+    query = query_runner(make_generator(), seed=seed, strength=MISSPECIFIED_STRENGTH)
     same_term = query.epsilon_iv_z == float(query.oracle.eps_iv_z_star) + EPS_TOL
     check("(vii) the query runner's epsilon_iv_z is the same term", same_term)
+    check("(vii) and it differs from the query runner's T-side budget", query.epsilon_iv_z != query.epsilon_iv)
     check("(vii) and its PI+IV carries it", query.methods["PI+IV"]().epsilon_iv == query.epsilon_iv_z)
 
 
@@ -867,17 +891,24 @@ if __name__ == "__main__":
     parser.add_argument("--skip-digest", action="store_true")
     args = parser.parse_args()
     print(f"tree: {runner_module.__file__}")
-    leg_i(args.seed)
-    leg_ii()
-    leg_iii(args.seed)
-    leg_iv(args.seed)
-    leg_v(args.seed)
-    leg_vi(args.seed)
-    leg_vii(args.seed)
-    leg_viii(args.seed)
+    legs = [
+        ("(i)", leg_i, (args.seed,)),
+        ("(ii)", leg_ii, ()),
+        ("(iii)", leg_iii, (args.seed,)),
+        ("(iv)", leg_iv, (args.seed,)),
+        ("(v)", leg_v, (args.seed,)),
+        ("(vi)", leg_vi, (args.seed,)),
+        ("(vii)", leg_vii, (args.seed,)),
+        ("(viii)", leg_viii, (args.seed,)),
+    ]
     if not args.skip_digest:
-        leg_d(args.reference)
-    else:
+        legs.append(("(D)", leg_d, (args.reference,)))
+    for tag, leg, leg_args in legs:
+        try:
+            leg(*leg_args)
+        except Exception as error:  # a raise is a FAIL line, and the later legs still report
+            check(f"{tag} ran without raising", False, f"{type(error).__name__}: {error}")
+    if args.skip_digest:
         print("(D) SKIPPED by --skip-digest: a break-it run, not the committed state")
     if not FAIL:
         print("A58 PASS")
