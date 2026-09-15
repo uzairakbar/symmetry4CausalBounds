@@ -725,7 +725,8 @@ def leg_v(seed):
     check("(v) declared: one INFO line", len(declared_lines) == 1 and declared_lines[0]["level"].name == "INFO")
     message = declared_lines[0]["message"] if declared_lines else ""
     printed = float(message.split("floor ")[1].split(" ")[0]) if "floor " in message else np.nan
-    named = abs(printed - floor) < 1e-4 * max(floor, 1e-12)
+    # the line prints the floor to 4 significant digits, so 5e-4 relative is its precision
+    named = abs(printed - floor) <= 6e-4 * max(floor, 1e-12)
     check("(v) declared: the line names the joint constraint's floor", named, message)
     check("(v) declared: that floor is on Z-tilde, not on G alone", abs(floor - floor_g) > 1e-9, f"vs {floor_g:.4g}")
     check("(v) declared: the line says never raised", "never raised" in message)
