@@ -48,8 +48,10 @@ TEX_MAPPER: dict[str, str] = {
     "ERM": rf"${ERM}$",
     "DA+ERM": rf"$\mkern7mu\widetilde{{\mkern-7mu{{{ERM}}}\mkern-7mu}}\mkern7mu$",
     # instrumental variable
+    "IV": rf"${IV}$",
     "DA+IV": rf"$\widetilde{{{IV}}}$",
     "PI+IV": rf"${PI}+{IV}$",
+    "PI+INV+IV": rf"${PI}+{INV}+{IV}$",
     # sensitivity models
     "PI": rf"${PI}$",
     "PI+INV": rf"${PI}+{INV}$",
@@ -65,10 +67,12 @@ COLOR_MAP: dict[str, int] = {
     "ATE": 3,
     "ERM": 0,
     "DA+ERM": 3,
+    "IV": 2,  # the point-estimate pair with DA+IV
     "DA+IV": 2,
     "PI+INV": 7,
     "PI": 0,
     "PI+IV": 1,
+    "PI+INV+IV": 5,
     "DA+PI": 3,
     "DA+PI+IV": 2,
     "PI&DA+PI": 4,
@@ -81,11 +85,13 @@ ALPHA_MAP: dict[str, float] = {
     "ATE": 1.0,
     "ERM": 1.0,
     "DA+ERM": 1.0,
+    "IV": 1.0,
     "DA+IV": 1.0,
     # Partial identification methods (transparent)
     "PI+INV": 0.8,
     "PI": 0.2,
     "PI+IV": 0.2,
+    "PI+INV+IV": 0.8,
     "DA+PI": 0.2,
     "DA+PI+IV": 0.4,
     "PI&DA+PI": 0.4,
@@ -93,7 +99,7 @@ ALPHA_MAP: dict[str, float] = {
 }
 
 # Visual style configuration
-POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV"]
+POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "IV", "DA+IV"]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 

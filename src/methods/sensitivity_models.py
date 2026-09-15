@@ -633,6 +633,36 @@ class InstrumentalVariablePartialR2(PartialR2):
             self.iv_threshold_param.value = np.sqrt(self.N_samples) * self.iv_bound
 
 
+class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePartialR2):
+    """PI + INV + IV on the ORIGINAL design: the Lem. 2 ball, the invariance cone
+    of SS3.1 (`epsilon` on ||(GX - X) h||) and the leaky IV constraint of Asm. 3
+    (`epsilon_iv` on the instrument moments). Two separate budgets, unlike the
+    pooled one DA+PI+IV puts on Z-tilde. An empty Z reduces it to PI+INV exactly."""
+
+    def __init__(self, gamma=None, epsilon=None, **kwargs):
+        if epsilon is None:
+            raise ValueError("epsilon required")
+        super().__init__(gamma=gamma, epsilon=epsilon, **kwargs)
+        self.R_diff = None
+        self.eps_param = None
+
+    def _precompute_matrices(self, X, y, GX=None, Z=None, **kwargs):
+        super()._precompute_matrices(X, y, Z=Z, **kwargs)
+        self.R_diff, _ = inv_constraint_terms(X, X if GX is None else GX)
+
+    def _get_constraints(self):
+        constraints = super()._get_constraints()
+        self.eps_param = cp.Parameter(nonneg=True)
+        constraints.append(
+            cp.norm(cp.Constant(self.R_diff) @ self.h_var, 2) <= np.sqrt(self.N_samples) * self.eps_param
+        )
+        return constraints
+
+    def _set_solver_parameters(self, gamma):
+        super()._set_solver_parameters(gamma)
+        self.eps_param.value = float(self.epsilon)
+
+
 class IntersectionMixin:
     """
     Cor. 1 at the INTERVAL level: max of the lowers, min of the uppers, worse status.

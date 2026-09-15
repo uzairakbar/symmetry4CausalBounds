@@ -25,6 +25,11 @@ simulation:
     n_samples: 2_048
     kernel_dim: 0                   # bases of null(f) to construct DA. Set to 0 or -1 for random or full respectively.
     treatment_dim: 32               # SEM treatment dimension; omitted = DatasetDefaults (32)
+    # dimension of a standard-Gaussian instrument generated in the SEM. It reaches
+    # X through a rank-m map into a 32-dim treatment: an INCOMPLETE IV that
+    # identifies m of k directions and nothing else. 0 or omitted = no instrument
+    # and every number is the one shipped today. The IV run is recipes/iv_fig13.yaml.
+    # iv: 4
     n_experiments: 8
     sweep_samples: 128
     methods:
@@ -172,6 +177,20 @@ cigarettes:
     # point alone. gamma_z is FIXED at CigaretteConfig.gamma_z, never swept; the
     # sliver is empty at every spec except t3 with the own-tax anchor.
     sliver: false
+    # the instrument set, by panel column name. An excise column is an external
+    # instrument; a TREATMENT name means that regressor instruments itself, i.e. it
+    # is assumed exogenous and no confounding budget is spent on it. This is the
+    # included-exogenous block of a 2SLS instrument matrix, which is what
+    # `PanelDesign.instruments` already builds for the target. Legal: [], [tax_s],
+    # [tax_sn], [tax_s, tax_sn], [tax_s, y, cpi]. Omitted or [] = the anchor set
+    # decides the target (b_r) and every solver sees an empty instrument, which is
+    # exactly today's run. The neighbour-price run is recipes/neighbour-price_fig12.yaml.
+    # iv: [tax_s, y, cpi]
+    # the IV leakiness budget for the instruments listed in `iv:`, DECLARED on every
+    # path (SS2.6). The radius is s*sqrt(gamma_z), a fraction of the residual sd;
+    # 2^-8 gives 6.25%. Omit the key and that default is used. For DA+...+IV the
+    # T-as-IV budget is combined with it in root sum square on Z-tilde.
+    # gamma_z: 0.00390625     # 2^-8, the default; present here only to be explicit
     methods:
         # - ATE
         # - ERM

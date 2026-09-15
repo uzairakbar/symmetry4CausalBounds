@@ -33,11 +33,15 @@ from src.methods.sensitivity_models import (
     IntersectedPartialR2 as IntPartialR2,
 )
 from src.methods.sensitivity_models import (
+    InvarianceConstrainedInstrumentalVariablePartialR2 as InvIVPartialR2,
+)
+from src.methods.sensitivity_models import (
     InvarianceConstrainedPartialR2 as InvPartialR2,
 )
 from src.methods.sensitivity_models import (
     PartialR2,
 )
+from src.sem.cigarettes import TREATMENTS as CIGARETTE_TREATMENTS
 from src.sem.simulation import TREATMENT_DIMENSION
 
 # =============================================================================
@@ -220,6 +224,12 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 
 # keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
 EPS_TOL: float = 2**-5
+
+# the IV leakiness budget of a non-empty `iv:` (SS2.6). The real-Z radius is
+# s sqrt(gamma_z), a fraction of the residual sd; 2^-8 gives 6.25%. DECLARED on
+# every path, never oracle: listing instruments asserts they are near perfect.
+# Read only when the instrument set is non-empty; an absent key means this.
+GAMMA_Z_DEFAULT: float = 2**-8
 
 # Floor guard. An auto-set budget below the constraint's own attainable floor is not
 # a tighter bound, it is NO bound: every query comes back INFEASIBLE and the method
@@ -593,10 +603,14 @@ ALL_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
+    "IV",
     "DA+IV",
     "PI+INV",
     "PI",
     "PI+IV",
+    # INV before IV, as `PI+INV` is a prefix of it: the dispatch and the TeX
+    # composition stay consistent
+    "PI+INV+IV",
     "DA+PI",
     "DA+PI+IV",
     "PI&DA+PI",
@@ -707,6 +721,7 @@ class MethodRegistry:
         pad_epsilon: float | None = None,
         clipy: bool = True,
         epsilon_iv: float | None = None,
+        gamma_z: float = 0.0,
         n_jobs: int = 1,
         mean_match: bool = True,
         rho: float = 1.0,
@@ -717,8 +732,10 @@ class MethodRegistry:
         """
         Build only requested methods with given hyperparameters.
 
-        `pad` is applied to DA+ methods only; baseline PI/PI+INV/PI+IV never pad.
-        `gamma_z` is never set: no experiment uses instruments.
+        `pad` is applied to DA+ methods only; the baselines PI, PI+INV, PI+IV and
+        PI+INV+IV never pad. `gamma_z` is the declared real-Z budget of a non-empty
+        `iv:` (SS2.6); at its default 0, which is every shipped run, the only
+        instrument in play is the DA's own translation amount T.
 
         Args:
             method_names: List of method names to build
@@ -740,6 +757,9 @@ class MethodRegistry:
             epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
                 + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
                 pointwise eps that Thm. 3.A requires.
+            gamma_z: leakiness budget of the real instruments, `GAMMA_Z_DEFAULT`
+                under a non-empty `iv:`; the IV classes combine it with
+                `epsilon_iv` in root sum square (`iv_bound`)
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
@@ -781,7 +801,7 @@ class MethodRegistry:
             n_jobs=n_jobs,
             mean_match=mean_match,
         )
-        iv_common = dict(common, epsilon_iv=epsilon_iv)
+        iv_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=gamma_z)
         # the standalone DA+ balls carry the step's rho; the intersections read
         # theirs off their two branches (`IntersectedPartialR2.rho`)
         da_common = dict(common, rho=rho)
@@ -793,12 +813,17 @@ class MethodRegistry:
             # under `mean_match` the plotted point estimators carry one too
             "ERM": lambda: ERM(fit_intercept=mean_match),
             "DA+ERM": lambda: ERM(fit_intercept=mean_match),
+            # the point estimates fit with the real Z, DA+IV with Z-tilde; `IV`
+            # under an empty set is a config error (`resolve_dataset_block`)
+            "IV": lambda: IV(fit_intercept=mean_match),
             "DA+IV": lambda: IV(fit_intercept=mean_match),
             "PI+INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
             "PI": lambda: PartialR2(gamma=gamma, pad=False, **common),
-            # baseline PI+IV has a null instrument, so it reduces to PI and
-            # never reads the IV budget
-            "PI+IV": lambda: IVPartialR2(gamma=gamma, pad=False, **common),
+            # the baseline IV balls carry the IV budget: with an empty instrument
+            # the constraint is inert and they reduce to PI and PI+INV exactly,
+            # with a real Z the class raises unless `epsilon_iv` is set
+            "PI+IV": lambda: IVPartialR2(gamma=gamma, pad=False, **iv_common),
+            "PI+INV+IV": lambda: InvIVPartialR2(gamma=gamma, pad=False, **iv_common),
             "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **da_common),
             "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_iv_common),
             "PI&DA+PI": lambda: IntPartialR2(gamma=gamma, pad=pad, **common),
@@ -826,7 +851,9 @@ DATASET_KEYS: dict[str, set] = {
         "augmentation",
         "kernel_dim",
         "treatment_dim",
+        "iv",
     },
+    # no `iv` here or on do_mnist: the key is rejected on those blocks, not ignored
     "optical_device": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation"},
     "cigarettes": {
         "seed",
@@ -840,6 +867,8 @@ DATASET_KEYS: dict[str, set] = {
         "anchor",
         "da_amplitude",
         "sliver",
+        "iv",
+        "gamma_z",
     },
     "do_mnist": {
         "seed",
@@ -865,11 +894,50 @@ REQUIRED_KEYS: dict[str, set] = {
     "optical_device": {"seed", "augmentation"},
     # `target` and `spec` decide what h_* IS, so neither has a defensible default
     "cigarettes": {"seed", "augmentation", "target", "spec"},
-    # `methods` is required HERE and nowhere else: the fallback below is all 11 of
-    # ALL_METHODS, and the partial_r2_net backend defines only 9. Omitting it would
-    # be a hard error mid-run rather than a config error up front.
+    # `methods` is required HERE and nowhere else: the fallback below is the whole
+    # of ALL_METHODS, and the partial_r2_net backend defines only 9. Omitting it
+    # would be a hard error mid-run rather than a config error up front.
     "do_mnist": {"seed", "augmentation", "gamma", "epsilon", "methods"},
 }
+
+# legal cigarette instrument names: a treatment instruments itself (included
+# exogenous), an excise column is an external instrument
+CIGARETTE_INSTRUMENTS: frozenset = frozenset(CIGARETTE_TREATMENTS) | {"tax_s", "tax_sn"}
+
+
+def _check_instruments(name: str, block: dict[str, Any]) -> bool:
+    """Validate `iv` (and `gamma_z`); True when the instrument set is non-empty.
+
+    simulation: a non-negative int, at most `treatment_dim`; 0 or absent is no
+    instrument. cigarettes: a list of column names without duplicates (a repeated
+    column makes `qr` complete an arbitrary orthonormal basis and that completion
+    becomes a spurious moment); [] or absent is no instrument, and the target
+    then falls back to the anchor set. Every other block has no such key.
+    """
+    if name == "simulation":
+        iv = block.get("iv", 0)
+        if isinstance(iv, bool) or not isinstance(iv, int) or iv < 0:
+            raise ValueError(f"config.simulation.iv must be a non-negative int (0 = no instrument); got {iv!r}.")
+        if iv > block["treatment_dim"]:
+            raise ValueError(f"config.simulation.iv = {iv} exceeds treatment_dim = {block['treatment_dim']}.")
+        return iv > 0
+    if name == "cigarettes":
+        iv = block.get("iv", [])
+        if not isinstance(iv, list) or not all(isinstance(column, str) for column in iv):
+            raise ValueError(f"config.cigarettes.iv must be a list of column names ([] = no instrument); got {iv!r}.")
+        unknown = sorted(set(iv) - CIGARETTE_INSTRUMENTS)
+        if unknown:
+            legal = sorted(CIGARETTE_INSTRUMENTS)
+            raise ValueError(f"config.cigarettes.iv names unknown column(s) {unknown}; legal: {legal}.")
+        if len(set(iv)) != len(iv):
+            raise ValueError(f"config.cigarettes.iv repeats a column: {iv!r}.")
+        if len(iv) > len(CIGARETTE_TREATMENTS) + 2:
+            raise ValueError(f"config.cigarettes.iv lists {len(iv)} columns; at most {len(CIGARETTE_TREATMENTS) + 2}.")
+        gamma_z = block.get("gamma_z", GAMMA_Z_DEFAULT)
+        if isinstance(gamma_z, bool) or not isinstance(gamma_z, int | float) or not 0.0 <= gamma_z < 1.0:
+            raise ValueError(f"config.cigarettes.gamma_z must be a float in [0, 1); got {gamma_z!r}.")
+        return len(iv) > 0
+    return False
 
 
 def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
@@ -924,9 +992,21 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         dim = block["treatment_dim"]
         if isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0:
             raise ValueError(f"config.{name}.treatment_dim must be a positive int; got {dim!r}.")
-    block.setdefault("methods", list(ALL_METHODS))
+    # the instrument set decides whether the 2SLS baseline can run at all, so the
+    # fallback method list omits `IV` without one; listing it by hand is the error below
+    has_instruments = _check_instruments(name, block)
+    block.setdefault("methods", [method for method in ALL_METHODS if method != "IV" or has_instruments])
     # a stale method name (e.g. an old underscore spelling) must be a config
     # error here, not silently filtered out of the run by the registry
     _reject_unknown(block["methods"], ALL_METHODS, f"config.{name}.methods")
+
+    # 2SLS with no instrument returns W = 0 and predicts ybar at every query, a
+    # flat line labelled as a point estimate: loud and up front, never silent.
+    # PI+IV and PI+INV+IV are fine under an empty set: they reduce to PI and PI+INV.
+    if "IV" in block["methods"] and not has_instruments:
+        raise ValueError(
+            f"config.{name}.methods lists 'IV' but the instrument set is empty "
+            f"(iv = {block.get('iv', 'absent')!r}); drop 'IV' or set `iv:`."
+        )
 
     return block
