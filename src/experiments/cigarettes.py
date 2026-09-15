@@ -521,8 +521,9 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         F1: the beta_pn interval of each headline method against gamma on the
         benchmarked range, with the PI+IV feasibility floor, the two benchmarks
         (1x tax-differential, 1x addiction stock), gamma*(b) and 3x the
-        tax-differential marked. Reading: the lower bound flattens by 0.19 and
-        only the upper end grows with the budget; PI never separates from PI+INV.
+        tax-differential marked, the frame widened to show all five. Reading: the
+        lower bound flattens by 0.19 and only the upper end grows with the budget
+        (that PI never separates from PI+INV is T1's row, not a band here).
         F2: the same methods against the declared radius r_Z = s sqrt(gamma_z)
         at the query budget, the cluster-bootstrap median and p95 of the moment
         at the target marked, so the declared budget is seen against what a
@@ -547,6 +548,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 results[name][i, 0] = interval(model, float(gamma))
         Z, b = runner.sem.iv_pool, runner.sem.solution.ravel()
         tax_diff, lag = self.benchmarks()["tax_diff"][3], self.benchmarks()["lag_q"][3]
+        # the floor at PI+IV's bound s sqrt(gamma_z): the panel is sigma-normalised
+        # (`build_design` divides y by the OLS residual sd), so PI+IV's s is 1 and
+        # the bound is sqrt(gamma_z) in outcome units, what SS3.3's 0.1107 was
+        # measured at
         vlines = (
             feasibility_floor(design, Z, np.sqrt(self.gamma_z)),
             tax_diff,

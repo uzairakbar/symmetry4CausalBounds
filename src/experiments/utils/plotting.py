@@ -39,6 +39,9 @@ from .constants import (
 from .data_operations import bootstrap, save
 
 PlotScale = Literal["linear", "log", "symlog", "asinh"]
+# margin beyond the outermost mark on a query figure that carries marks, as a
+# fraction of the framed span, so no mark lies on the frame
+X_MARK_MARGIN: float = 0.02
 
 # clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
 # large is the runaway. A symmetric floor crops the TIGHTEST method, which is the
@@ -560,8 +563,9 @@ def create_query_sweep_plot(
     Create a query sweep plot showing predictions across treatment values.
 
     Handles both point estimates and interval estimates (PI methods).
-    `vlines` marks reference x positions, as on `create_sweep_plot`; empty by
-    default, so every existing figure is drawn as before.
+    `vlines` marks reference x positions, as on `create_sweep_plot`, and the frame
+    widens to cover them (`X_MARK_MARGIN`); empty by default, so every existing
+    figure is drawn as before.
 
     Args:
         x_values: Query values for x-axis
@@ -645,16 +649,24 @@ def create_query_sweep_plot(
 
     # Formatting
     _apply_style(plt.gca(), style, xlabel, ylabel)
-    plt.xlim([min(x_values), max(x_values)])
+    # the frame is the grid, as always; with marks it widens to cover every one
+    # of them, with a small margin, so a mark beyond the solved grid (F1's
+    # feasibility floor, its 3x benchmark) sits inside the frame over empty axis
+    marks = [x for x in vlines if np.isfinite(x)]
+    x_lo, x_hi = min(x_values), max(x_values)
+    if marks:
+        x_lo, x_hi = min(x_lo, min(marks)), max(x_hi, max(marks))
+        margin = X_MARK_MARGIN * (x_hi - x_lo)
+        x_lo, x_hi = x_lo - margin, x_hi + margin
+    plt.xlim([x_lo, x_hi])
 
     padding = 0.05 * max_mean
     plt.ylim([min_mean - padding, max_mean + padding])
     plt.xscale(xscale)
     _label_major_ticks_only(plt.gca())
     _at_least_two_major_ticks(plt.gca())
-    for x in vlines:
-        if np.isfinite(x) and min(x_values) <= x <= max(x_values):
-            plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
+    for x in marks:
+        plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
 
     # Legend
     hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)

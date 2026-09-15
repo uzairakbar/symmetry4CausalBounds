@@ -15,7 +15,9 @@ toggle) and both recipes (`normalize: true`). Legs:
   (i)   both recipes run end to end at reduced scale (1 experiment, 4 sweep samples,
         the gamma sweep) through the production path, and every SS10 file exists
         and is non-empty: F1 and F2 with their pkls, T1 carrying the benchmark
-        column, T2, and the four gamma sweep figures; `_run_sweeps` handed
+        column, T2, and the four gamma sweep figures; F1's own grid
+        (`beta_pn_gamma_values.pkl`) spans exactly `GAMMA_RANGE` and its outcomes
+        carry no NaN cell, so (ii)'s "shipped grid" is the figure's; `_run_sweeps` handed
         `normalize=True` to every sweep figure of both runs. `create_sweep_plot`
         swallows exceptions and only logs them, so existence is the check that
         bites. Catches: a figure that raises inside the plotter, the toggle not
@@ -335,6 +337,18 @@ def leg_i():
         "(i) F1 carries one band per headline method",
         tuple(outcomes) == HEADLINE_METHODS and all(v.shape == (4, 1, 2) for v in outcomes.values()),
     )
+    # the figure's OWN grid and cells, not the module constant the gate's (ii) grid
+    # is built from: a grid started under a feasibility floor writes NaN cells
+    with open(os.path.join(query, "beta_pn_gamma_values.pkl"), "rb") as handle:
+        f1_grid = pickle.load(handle)  # noqa: S301
+    spans = (
+        len(f1_grid) == 4
+        and f1_grid[0] == GAMMA_RANGE[0]
+        and f1_grid[-1] == GAMMA_RANGE[1]
+        and np.all(np.diff(f1_grid) > 0)
+    )
+    check("(i) F1's grid spans exactly GAMMA_RANGE", spans, f"{f1_grid}")
+    check("(i) F1's outcomes carry no NaN cell", all(np.all(np.isfinite(v)) for v in outcomes.values()))
     with open(os.path.join(query, "beta_pn_gamma_vlines.pkl"), "rb") as handle:
         vlines = pickle.load(handle)  # noqa: S301
     print(

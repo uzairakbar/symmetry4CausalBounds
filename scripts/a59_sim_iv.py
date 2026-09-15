@@ -16,7 +16,11 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         `iv_dim=0` has the same `W_XXi` and `W_XY` as one built without the argument
         and leaves the stream at the same point, while `iv_dim=4` draws its `U` after
         both. Catches: `U` drawn unconditionally (SS5.1), a draw moved before `W_XY`.
-        Misses: nothing about the instrument itself, which (ii) to (v) cover.
+        Misses: the non-digest half compares two constructions that share any
+        unconditional draw, so it is blind to one; the digest half is the pin, and
+        it sees the draw only when it consumes the stream (a `randn(d, 0)` basis
+        consumes nothing and is harmless). Nothing about the instrument itself,
+        which (ii) to (v) cover.
   (ii)  deterministic construction, no sampling: `A A' + root root' == I` and
         `U'U == I` to 1e-12, at the shipped `alpha` 1 and at 0.5. At `alpha` 1 the
         symmetric root coincides with `I - U U'`, so the 0.5 case is what separates
