@@ -112,6 +112,9 @@ DEFAULT_NORMALIZE_ERROR: bool = False
 # moves; the recipes turn it on through the global `normalize` toggle. NOT the
 # per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the zero predictor.
 DEFAULT_NORMALIZE_SWEEP: bool = False
+# coverage figures and every figure drawn normalised: linear y, these limits,
+# over any `PLOT_CONFIGS` scale or limit
+CLAMP_YLIM: tuple[float, float] = (-0.05, 1.05)
 # the figure ids it is honoured for, by suffix. A `_coverage` id is a rate and an
 # `_approx_error` id a squared miss whose baseline vanishes above gamma*; neither
 # is normalised (approx_error rolled back 2026-09-15 at the user's request)

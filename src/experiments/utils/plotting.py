@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from .constants import (
     _STYLE_KEYS,
     ALPHA_MAP,
+    CLAMP_YLIM,
     COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
     DEFAULT_NORMALIZE_SWEEP,
@@ -390,10 +391,11 @@ def create_sweep_plot(
     too (the cigarette width-ratio figure), and it belongs beside the query figures.
 
     Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
-    the mean lines -- see _rescale. The style keys `legend`, `x_color`, `y_color`,
-    `title`, `title_color` come from the same config entry, else from the arguments
-    of the same name (_style); `legend`, when given, overrides `hide_legend` and
-    `legend_loc`.
+    the mean lines -- see _rescale; a `_coverage` id and any figure drawn normalised
+    are then clamped to a linear axis on `CLAMP_YLIM`, whatever the config says.
+    The style keys `legend`, `x_color`, `y_color`, `title`, `title_color` come from
+    the same config entry, else from the arguments of the same name (_style);
+    `legend`, when given, overrides `hide_legend` and `legend_loc`.
     """
     try:
         # derived HERE, not inside `if savefig`, so the config id and the filename
@@ -419,6 +421,7 @@ def create_sweep_plot(
 
         # after the bootstrap, so the bands are divided by the same per-step
         # number as the mean
+        baseline = None
         if cfg.get("normalize", normalize):
             y_results, baseline = normalize_sweep(y_results, fname)
             if baseline is not None:
@@ -487,6 +490,15 @@ def create_sweep_plot(
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
         # (trS opts out to linear on purpose), not a default to be second-guessed.
         _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
+        # coverage, and anything drawn as a fraction of the baseline, reads on one
+        # fixed linear frame; the pad and the promotion of _rescale are undone here
+        # on purpose, and a series above the frame clips (the user's call)
+        if fname.endswith("_coverage") or baseline is not None:
+            for key in ("yscale", "ylim"):
+                if key in cfg:
+                    logger.warning(f"{fname}: {key} ignored, the axis is clamped to {CLAMP_YLIM}.")
+            plt.gca().set_yscale("linear")
+            plt.gca().set_ylim(*CLAMP_YLIM)
         _label_major_ticks_only(plt.gca())
         _at_least_two_major_ticks(plt.gca())
 
