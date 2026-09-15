@@ -721,6 +721,7 @@ class MethodRegistry:
         pad_epsilon: float | None = None,
         clipy: bool = True,
         epsilon_iv: float | None = None,
+        epsilon_iv_z: float = 0.0,
         gamma_z: float = 0.0,
         n_jobs: int = 1,
         mean_match: bool = True,
@@ -735,7 +736,9 @@ class MethodRegistry:
         `pad` is applied to DA+ methods only; the baselines PI, PI+INV, PI+IV and
         PI+INV+IV never pad. `gamma_z` is the declared real-Z budget of a non-empty
         `iv:` (SS2.6); at its default 0, which is every shipped run, the only
-        instrument in play is the DA's own translation amount T.
+        instrument in play is the DA's own translation amount T. Two IV budgets,
+        one per SS2.6 row: `epsilon_iv` is the DA methods' T-side term, `epsilon_iv_z`
+        the non-DA +IV methods' own (and the intersection's baseline branch).
 
         Args:
             method_names: List of method names to build
@@ -755,8 +758,13 @@ class MethodRegistry:
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range
             epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
-                + EPS_TOL. Reaches the IV constraint ONLY -- padding keeps the
-                pointwise eps that Thm. 3.A requires.
+                + EPS_TOL, the T-side term of the DA+ methods' joint bound
+                sqrt(epsilon_iv^2 + s^2 gamma_z). Reaches the IV constraint ONLY --
+                padding keeps the pointwise eps that Thm. 3.A requires.
+            epsilon_iv_z: the non-DA +IV methods' term (PI+IV, PI+INV+IV, the
+                intersection's baseline), bound sqrt(epsilon_iv_z^2 + s^2 gamma_z):
+                0.0 under a declared real-Z radius (exactly r_Z) and under an empty
+                set (inert), oracle `eps_iv_z_star` + EPS_TOL on the simulation
             gamma_z: leakiness budget of the real instruments, `GAMMA_Z_DEFAULT`
                 under a non-empty `iv:`; the IV classes combine it with
                 `epsilon_iv` in root sum square (`iv_bound`)
@@ -801,11 +809,14 @@ class MethodRegistry:
             n_jobs=n_jobs,
             mean_match=mean_match,
         )
-        iv_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=gamma_z)
+        # the non-DA +IV balls carry their own real-Z term; the DA+ ones the T-side
+        # term of the joint bound, and the intersection both, one per branch
+        iv_common = dict(common, epsilon_iv=epsilon_iv_z, gamma_z=gamma_z)
         # the standalone DA+ balls carry the step's rho; the intersections read
         # theirs off their two branches (`IntersectedPartialR2.rho`)
         da_common = dict(common, rho=rho)
-        da_iv_common = dict(iv_common, rho=rho)
+        da_iv_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=gamma_z, rho=rho)
+        int_iv_common = dict(common, epsilon_iv=epsilon_iv, epsilon_iv_z=epsilon_iv_z, gamma_z=gamma_z)
 
         all_builders = {
             "ATE": lambda: None,  # ATE computed analytically
@@ -827,7 +838,7 @@ class MethodRegistry:
             "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **da_common),
             "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_iv_common),
             "PI&DA+PI": lambda: IntPartialR2(gamma=gamma, pad=pad, **common),
-            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
+            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **int_iv_common),
         }
 
         if set(all_builders) != set(ALL_METHODS):

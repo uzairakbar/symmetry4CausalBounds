@@ -429,6 +429,19 @@ class ParamSweepRunner(BaseExperimentRunner):
             float(budget) + EPS_TOL, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
         )
 
+    def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
+        """The non-DA +IV methods' own term (SS2.6, one budget per row): 0.0 under an
+        empty instrument (inert) and on the declared path (the bound is then exactly
+        r_Z = s sqrt(gamma_z)); on the oracle path the real-Z piece off the knife edge,
+        `eps_iv_z_star + EPS_TOL`, never floor-guarded (the T-side guard stays)."""
+        Z = getattr(data, "Z", None)
+        if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
+            return 0.0
+        z_piece = getattr(self.get_oracle(experiment_index), "eps_iv_z_star", None)
+        if z_piece is None or not np.isfinite(z_piece):
+            return 0.0
+        return float(z_piece) + EPS_TOL
+
     def method_kwargs(self, experiment_index: int) -> dict[str, Any]:
         """Extra builder kwargs. Override when methods need per-experiment state
         the budgets do not carry (e.g. prefit outcome models)."""
@@ -443,6 +456,7 @@ class ParamSweepRunner(BaseExperimentRunner):
                 gamma=gamma,
                 epsilon=epsilon,
                 epsilon_iv=self.fit_epsilon_iv(experiment_index, step_index, data),
+                epsilon_iv_z=self.fit_epsilon_iv_z(experiment_index, data),
                 rho=self.fit_rho(experiment_index, data),
                 **self.method_kwargs(experiment_index),
             )
@@ -583,9 +597,11 @@ class ExperimentOrchestrator(ABC):
         epsilon_iv: float | None = None,
         n_jobs: int | None = None,
         rho: float = 1.0,
+        epsilon_iv_z: float = 0.0,
     ) -> dict[str, Any]:
         """Build methods at explicit budgets (per-experiment ParamPolicy); `rho`
-        is the step's information-loss factor for the DA+ balls."""
+        is the step's information-loss factor for the DA+ balls, `epsilon_iv` the
+        DA+ methods' T-side IV term and `epsilon_iv_z` the non-DA +IV methods' own."""
         pass
 
     @property

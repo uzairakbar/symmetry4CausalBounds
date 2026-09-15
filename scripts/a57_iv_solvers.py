@@ -60,15 +60,20 @@ Legs:
         warning, a line printed before an intersection's DA branch knows its rho.
         Misses: the 0.7% overlap of span(T) and span(Z) the plan states (SS2.6),
         which a60 records with G and Z held apart.
-  (vii) the intersection budgets per branch (SS2.6, the coordinator's ruling): the
-        baseline branch gets epsilon_iv 0.0, so at epsilon_iv 2^-5, gamma_z 2^-8,
-        s = 1 its bound is exactly r_Z = 0.0625 while the DA branch's is the joint
-        0.069877, both to 1e-6; the intersection's own epsilon_iv is untouched;
-        the DA branch's rho is set after fit; under an empty Z the baseline has no
-        IV constraint at all (so leg (D) cannot move) and the DA branch keeps the
-        joint bound on T. Catches: both branches handed the same budget (the
-        baseline would read 0.069877), the T-as-IV term leaking into the baseline.
-        Misses: the numbers under a real Z at those two budgets (a60/a61).
+  (vii) the intersection budgets per branch (SS2.6, the coordinator's rulings): the
+        baseline branch gets its own `epsilon_iv_z` (default 0.0), so at epsilon_iv
+        2^-5, gamma_z 2^-8, s = 1 its bound is exactly r_Z = 0.0625 while the DA
+        branch's is the joint 0.069877, both to 1e-6 (the declared case); the oracle
+        case, epsilon_iv_z 0.05 and gamma_z 0: the baseline reads 0.05 and the DA
+        branch its own epsilon_iv, which on that path the runner supplies as the
+        joint oracle budget sqrt(0.03125^2 + 0.05^2) = 0.058958, so that is what it
+        reads here, and handed 2^-5 instead it reads 2^-5, never epsilon_iv_z; the intersection's
+        own epsilon_iv is untouched; the DA branch's rho is set after fit; under an
+        empty Z the baseline has no IV constraint at all (so leg (D) cannot move)
+        and the DA branch keeps the joint bound on T. Catches: both branches handed
+        the same budget (the baseline would read 0.069877), the T-as-IV term leaking
+        into the baseline, `epsilon_iv_z` ignored (the oracle baseline would read
+        0 and be INFEASIBLE). Misses: the numbers under a real Z (a60/a61).
 
     MPLBACKEND=Agg python scripts/a57_iv_solvers.py [--seed 0] [--reference JSON] [--skip-digest]
 
@@ -117,6 +122,7 @@ REFERENCE = {
 PLAN_DIGITS = {"PI+IV": "[0.375, 1.645]", "PI+INV+IV": "[0.952, 1.645]", "DA+PI+IV": "[1.150, 1.648]"}
 INTERVAL_TOL = 1e-6
 RSS_BOUND = 0.069877  # sqrt(0.03125^2 + 0.0625^2)
+ORACLE_Z = 0.05  # the oracle case's epsilon_iv_z in (vii)
 PLAIN_SUM = 0.09375
 BUDGETS = (0.03125, 0.0625, 0.1, 0.017749, 0.3, 1e-3, 0.7071067811865476)
 FAIL = []
@@ -379,6 +385,40 @@ def leg_vii(design, Z, GX, G):
         "(vii) DA branch bound is 0.069877 to 1e-6 (s = 1)", abs(aug.iv_bound - RSS_BOUND) < 1e-6, f"{aug.iv_bound:.9f}"
     )
     check("(vii) DA branch rho set after fit", aug.rho == model.rho and aug.rho > 1.0, f"{aug.rho:.6f}")
+    # the oracle case: the baseline's own term with no declared radius; the DA
+    # branch's epsilon_iv is the joint oracle budget the runner supplies there
+    joint_oracle = float(np.hypot(EPS_TOL, ORACLE_Z))
+    oracle_case = IntersectedInstrumentalVariablePartialR2(
+        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=joint_oracle, epsilon_iv_z=ORACLE_Z, gamma_z=0.0, **COMMON
+    )
+    oracle_case.fit(X=X, y=y, GX=GX, G=G, Z=Z)
+    base, aug = oracle_case.baseline, oracle_case.augmented
+    check("(vii) oracle case: baseline branch epsilon_iv is epsilon_iv_z 0.05", base.epsilon_iv == ORACLE_Z)
+    check(
+        "(vii) oracle case: baseline bound is 0.05 to 1e-6 (s = 1)",
+        abs(base.iv_bound - ORACLE_Z) < 1e-6,
+        f"{base.iv_bound:.9f}",
+    )
+    check(
+        "(vii) oracle case: DA branch bound is sqrt(0.03125^2 + 0.05^2) = 0.058958 to 1e-6",
+        abs(aug.iv_bound - joint_oracle) < 1e-6,
+        f"{aug.iv_bound:.9f}",
+    )
+    t_only = IntersectedInstrumentalVariablePartialR2(
+        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, epsilon_iv_z=ORACLE_Z, gamma_z=0.0, **COMMON
+    )
+    t_only.fit(X=X, y=y, GX=GX, G=G, Z=Z)
+    check(
+        "(vii) oracle case: epsilon_iv_z never reaches the DA branch (handed 2^-5 it reads 2^-5)",
+        t_only.augmented.epsilon_iv == EPS_TOL and abs(t_only.augmented.iv_bound - EPS_TOL) < 1e-9,
+        f"{t_only.augmented.iv_bound:.9f}",
+    )
+    bounds(oracle_case)
+    check(
+        "(vii) oracle case: both branches solve OK on every coefficient query",
+        np.all(np.asarray(base.query_status) == SolveStatus.OK)
+        and np.all(np.asarray(aug.query_status) == SolveStatus.OK),
+    )
     empty = IntersectedInstrumentalVariablePartialR2(
         gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
     )

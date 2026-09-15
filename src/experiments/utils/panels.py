@@ -95,6 +95,7 @@ class PanelBuilder:
                     y=context.y,
                     GX=context.GX,
                     G=context.G,
+                    Z=context.Z,
                     hyperparameters=self.runner.hyperparameters,
                     da=context.da,
                 )

@@ -363,9 +363,13 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
     def _poly_factory(self):
         return Flatten()
 
-    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None):
+    def build_methods(
+        self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None, epsilon_iv_z=0.0
+    ):
         """Methods at explicit budgets. `n_jobs` overrides the toggle -- perf needs
-        serial models to time methods, not the harness."""
+        serial models to time methods, not the harness. `epsilon_iv_z` is accepted
+        because the runner hands it to every factory; the net backend has no
+        real-Z instrument and never reads it."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return MethodRegistry.build_methods(
             self.kwargs["methods"],

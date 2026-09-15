@@ -67,6 +67,22 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         the serial one. Leg (D) is serial now, so this is the only leg through loky.
         Catches: an unpicklable attribute on the fitted IV classes, a chunk that
         solves a different problem. Misses: timing.
+  (vii) the two budgets per SS2.6 row on the oracle path (the batch B rulings): the
+        runner hands the factory `epsilon_iv_z = eps_iv_z_star + EPS_TOL` beside the
+        T-side `epsilon_iv`; PI+IV, PI+INV+IV and the intersection's baseline branch
+        carry it, DA+PI+IV carries the T-side term, and the intersection is feasible
+        on every query under a real Z, both branches OK. Under an empty Z the term
+        is exactly 0.0 (inert). Catches: `epsilon_iv_z` not forwarded or ignored
+        (the baseline bound is then 0 and every query INFEASIBLE), the T-side term
+        leaking into the non-DA methods. Misses: a floor on this term, by ruling.
+  (viii) the declared path: with `declared_iv=True` and a declared gamma_z handed
+        to the registry (as the cigarette orchestrator will), the runner hands
+        `epsilon_iv_z = 0.0`, so standalone PI+IV solves at exactly r_Z = s sqrt(gamma_z)
+        to the bit, as does the intersection's baseline, while DA+PI+IV keeps
+        r_T = eps_iv_star + EPS_TOL and every one of them solves OK. Catches: the
+        T-side budget handed to the non-DA methods (their bound would read the joint
+        0.0699 rather than 0.0625 on the cigarette panel), the declared skip lost.
+        Misses: gamma_z's own route from the yaml (batch C).
 
     MPLBACKEND=Agg python scripts/a58_iv_plumbing.py [--seed 0] [--reference JSON] [--skip-digest]
 
@@ -105,15 +121,14 @@ from src.sem.abstract import StructuralEquationModel as SEM  # noqa: E402
 from src.sem.simulation import OUTCOME_NOISE_STD, LinearSimulationSEM  # noqa: E402
 
 BASE_COMMIT = "2f07683"
-N, K, M = 300, 6, 2
-TEST_FRACTION = 0.1
+# the oracle estimates the real-Z piece on CALIBRATION_SAMPLES rows, so the stub's
+# draw has the same n, or its moment noise outruns the oracle's plus the tolerance
+N, K, M = 2048, 6, 2
+TEST_FRACTION = 0.02
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
 NAMES = ["PI", "PI+INV", "PI+IV", "PI+INV+IV", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV", "ERM", "IV", "DA+IV"]
 IV_NAMES = ("PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
-# the three that solve on the oracle path; the intersection's baseline branch runs at
-# epsilon_iv 0 (batch A's ruling) and with gamma_z 0 its bound is exactly 0, which
-# SS3.3 makes INFEASIBLE, so it is recorded on that path and pinned on the declared one
-SOLVE_NAMES = ("PI+IV", "PI+INV+IV", "DA+PI+IV")
+NON_DA_IV = ("PI+IV", "PI+INV+IV")
 INTERSECTION = "PI&DA+PI+IV"
 DECLARED_GAMMA_Z = 2**-8
 METRICS = ("interval_width", "coverage", "worst_error", "approximation_error")
@@ -232,9 +247,18 @@ class Recorder:
 # ------------------------------------------------------------------ builders
 
 
-def factory(gamma, epsilon, epsilon_iv=None, rho=1.0, n_jobs=None, **kwargs):
+def factory(gamma, epsilon, epsilon_iv=None, rho=1.0, n_jobs=None, epsilon_iv_z=0.0, gamma_z=0.0, **kwargs):
     toggles = TOGGLES if n_jobs is None else {**TOGGLES, "n_jobs": n_jobs}
-    return MethodRegistry.build_methods(NAMES, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, rho=rho, **toggles)
+    return MethodRegistry.build_methods(
+        NAMES,
+        gamma=gamma,
+        epsilon=epsilon,
+        epsilon_iv=epsilon_iv,
+        epsilon_iv_z=epsilon_iv_z,
+        gamma_z=gamma_z,
+        rho=rho,
+        **toggles,
+    )
 
 
 def recorders(names):
@@ -249,8 +273,9 @@ def da_from_sem(sem):
     return NullSpaceTranslation(sem.W_XY, kernel_dim=0)
 
 
-def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, **extra):
-    """One configured strategy on a stub, the way the orchestrators build them."""
+def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, gamma_z=0.0, **extra):
+    """One configured strategy on a stub, the way the orchestrators build them; a
+    `gamma_z` closes over the factory as the cigarette orchestrator's will."""
     return STRATEGIES[param](
         sem_factory=sem_factory,
         da_factory=da_from_sem,
@@ -261,7 +286,7 @@ def sweep_runner(param, sem_factory, grid, seed=0, declared_iv=False, n_jobs=1, 
         experiment_name="simulation",
         param_grid_override=grid,
         methods=factory(GAMMA, EPSILON, n_jobs=n_jobs),
-        method_factory=lambda **kw: factory(**{**kw, "n_jobs": n_jobs}),
+        method_factory=lambda **kw: factory(**{**kw, "n_jobs": n_jobs, "gamma_z": gamma_z}),
         seed=seed,
         n_samples=N,
         n_experiments=1,
@@ -312,6 +337,7 @@ def budgets(runner, data):
         gamma=runner.fit_gamma(0),
         epsilon=runner.fit_epsilon(0, 0, data),
         epsilon_iv=runner.fit_epsilon_iv(0, 0, data),
+        epsilon_iv_z=runner.fit_epsilon_iv_z(0, data),
         rho=runner.fit_rho(0, data),
     )
 
@@ -345,10 +371,8 @@ def check_dispatch(tag, kws, Z, Z_solo, G):
 
 
 def finite_widths(results):
-    """The three standalone IV methods finite everywhere; the intersection recorded."""
-    widths = np.asarray(results[INTERSECTION]["interval_width"])
-    print(f"      {INTERSECTION} widths (recorded): {np.round(widths.ravel(), 4).tolist()}")
-    bad = [name for name in SOLVE_NAMES if not np.all(np.isfinite(results[name]["interval_width"]))]
+    """Every IV method's width finite at every step."""
+    bad = [name for name in IV_NAMES if not np.all(np.isfinite(results[name]["interval_width"]))]
     if bad:
         print(f"      non-finite widths: {bad}")
     return not bad
@@ -416,7 +440,7 @@ def leg_i(seed):
     # real solves, then the whole sweep
     runner = sweep_runner("gamma", lambda: sem, GAMMA_GRID, seed=seed)
     models = runner.build_models(0, 0, data)
-    for name in SOLVE_NAMES:
+    for name in IV_NAMES:
         bounds = models[name].predict(data.X_test)
         status = np.asarray(models[name].query_status)
         ok = np.all(status == SolveStatus.OK) and np.all(np.isfinite(bounds))
@@ -426,31 +450,6 @@ def leg_i(seed):
             f"statuses [OK, INFEASIBLE, FAILURE] {statuses(models[name])}",
         )
     check("(i) IV point estimate is finite", np.all(np.isfinite(models["IV"].predict(data.X_test))))
-    # the intersection on the oracle path (gamma_z 0): its baseline bound is exactly
-    # 0, so every query reads INFEASIBLE. Recorded, not pinned: the budget the
-    # baseline branch needs on this path is a registry and solver matter, escalated
-    # in the batch report. With a declared gamma_z the same data solves OK.
-    inter = models[INTERSECTION]
-    inter.predict(data.X_test)
-    print(
-        f"      {INTERSECTION} at gamma_z 0 (recorded): statuses [OK, INFEASIBLE, FAILURE] {statuses(inter)}, "
-        f"baseline bound {inter.baseline.iv_bound:.4g}, DA bound {inter.augmented.iv_bound:.4g}"
-    )
-    at = budgets(runner, data)
-    declared = MethodRegistry.build_methods([INTERSECTION], gamma_z=DECLARED_GAMMA_Z, **at, **TOGGLES)[INTERSECTION]()
-    fit_model(model=declared, method_name=INTERSECTION, **data.fit_arrays)
-    declared.predict(data.X_test)
-    # an empty intersection at a query is Cor. 1 arithmetic, not plumbing: what the
-    # carrier owes is two branches that each solve on their own instrument
-    branches_ok = all(
-        np.all(np.asarray(b.query_status) == SolveStatus.OK) for b in (declared.baseline, declared.augmented)
-    )
-    check(
-        f"(i) {INTERSECTION} at a declared gamma_z {DECLARED_GAMMA_Z:g}: both branches solve OK on every query",
-        branches_ok,
-        f"baseline {statuses(declared.baseline)}, DA {statuses(declared.augmented)}, intersection {statuses(declared)}"
-        f", baseline bound {declared.baseline.iv_bound:.4g}",
-    )
     check("(i) the gamma sweep runs end to end with the instrument", finite_widths(runner.run("gamma")[1]))
 
     # n-sweep: Z sliced with X
@@ -522,10 +521,20 @@ def leg_i(seed):
     source = inspect.getsource(DoMNISTMixin._draw_base) + inspect.getsource(DoMNISTQuerySweep._load_data)
     unaware = "split_instruments" not in source and "iv_" not in source
     check("(i) do-MNIST overrides know nothing of the carrier", unaware)
+    # the batch B ruling adds `epsilon_iv_z` to every orchestrator's `build_methods`;
+    # nothing else in do_mnist.py may move, the two overrides least of all
     diff = subprocess.run(
-        ["git", "-C", REPO, "diff", "--quiet", BASE_COMMIT, "--", "src/experiments/do_mnist.py"], check=False
+        ["git", "-C", REPO, "diff", BASE_COMMIT, "--", "src/experiments/do_mnist.py"], capture_output=True, text=True
+    ).stdout
+    changed = [line for line in diff.split("\n") if line[:1] in "+-" and line[:3] not in ("+++", "---")]
+    outside = [
+        line for line in changed if any(k in line for k in ("_draw_base", "_load_data", "sample_paired", "X_raw"))
+    ]
+    check(
+        f"(i) do_mnist.py since {BASE_COMMIT}: only the build_methods signature moved",
+        not outside and len(changed) <= 12 and all("build_methods" in diff for _ in [0]),
+        f"{len(changed)} changed lines",
     )
-    check(f"(i) do_mnist.py untouched since {BASE_COMMIT}", diff.returncode == 0)
 
     # the containers spell None as (n, 0)
     X = np.zeros((10, 3))
@@ -550,7 +559,7 @@ def leg_i(seed):
     pooled = PooledInstrumentedSEM()
     runner_pool = sweep_runner("gamma", lambda: pooled, [0.5, 1.0], seed=seed)
     data_pool = runner_pool.generate_data(0, 0.5)
-    n_train = N - int(TEST_FRACTION * N)
+    n_train = N - int(np.ceil(TEST_FRACTION * N))  # sklearn's test count
     check("(i) pool: a finite pool", runner_pool.finite_pool)
     check("(i) pool: `pool` stays treatment only", pooled.pool[0].shape == (N, K))
     check("(i) pool: Z_train beside X_train", data_pool.Z.shape == (n_train, M) and data_pool.X.shape == (n_train, K))
@@ -676,14 +685,16 @@ def leg_iv(seed):
     pooled = PooledInstrumentedSEM(bootstrap=True)
     runner = sweep_runner("gamma", lambda: pooled, [0.5, 1.0], seed=seed)
     X_raw, X, y, X_test, _, Z = runner._draw_base(0)
-    n_train = N - int(TEST_FRACTION * N)
+    n_train = N - int(np.ceil(TEST_FRACTION * N))  # sklearn's test count
     unique = len({tuple(row) for row in X_raw})
     check("(iv) the draw is a resample with repeated rows", unique < len(X_raw), f"{unique} unique of {len(X_raw)}")
     check("(iv) _draw_base: Z_train is 2 X_train_0 + 1 to the bit", aligned(Z, X_raw) and len(Z) == n_train)
     data = runner.generate_data(0, 0.5)
     check("(iv) _sweep_data: aligned", aligned(data.Z, data.X))
     data_n = sweep_runner("n", lambda: pooled, [64, 128], seed=seed).generate_data(0, 64)
-    check("(iv) n-slice: aligned", aligned(data_n.Z, data_n.X) and len(data_n.Z) == int(round(0.9 * 64)))
+    check(
+        "(iv) n-slice: aligned", aligned(data_n.Z, data_n.X) and len(data_n.Z) == int(round((1.0 - TEST_FRACTION) * 64))
+    )
     data_m = sweep_runner("m", lambda: pooled, [1, 3], seed=seed).generate_data(0, 3)
     both = aligned(data_m.Z, data_m.X) and aligned(data_m.Z_base, data_m.X_base)
     check("(iv) m-tiling: aligned, tiled and untiled", both)
@@ -769,23 +780,80 @@ def leg_vi(seed):
     for name in IV_NAMES:
         out = {}
         for n_jobs in (1, 4):
-            gamma_z = DECLARED_GAMMA_Z if name == INTERSECTION else 0.0
-            model = MethodRegistry.build_methods([name], gamma_z=gamma_z, **at, **{**TOGGLES, "n_jobs": n_jobs})[name]()
+            model = factory(**at, n_jobs=n_jobs)[name]()
             fit_model(model=model, method_name=name, **data.fit_arrays)
             out[n_jobs] = (np.asarray(model.predict(data.X_test)), np.asarray(model.query_status))
-        same = np.array_equal(out[1][0], out[4][0], equal_nan=True) and np.array_equal(out[1][1], out[4][1])
-        solved = np.all(out[1][1] == SolveStatus.OK) if name != INTERSECTION else np.any(out[1][1] == SolveStatus.OK)
-        check(
-            f"(vi) {name}: n_jobs 4 == n_jobs 1, bounds and statuses", same and solved, f"statuses {out[1][1].tolist()}"
-        )
+        same = np.array_equal(out[1][0], out[4][0]) and np.array_equal(out[1][1], out[4][1])
+        solved = np.all(out[1][1] == SolveStatus.OK)
+        check(f"(vi) {name}: n_jobs 4 == n_jobs 1, bounds and statuses", same and solved, f"statuses {statuses(model)}")
     serial = sweep_runner("gamma", lambda: sem, GAMMA_GRID, seed=seed).run("gamma")[1]
     parallel = sweep_runner("gamma", lambda: sem, GAMMA_GRID, seed=seed, n_jobs=4).run("gamma")[1]
-    same = all(
-        np.array_equal(serial[name][metric], parallel[name][metric], equal_nan=True)
-        for name in IV_NAMES
-        for metric in METRICS
-    )
+    same = all(np.array_equal(serial[name][metric], parallel[name][metric]) for name in IV_NAMES for metric in METRICS)
     check("(vi) a gamma sweep through the runner at n_jobs 4 equals the serial one", same)
+
+
+def leg_vii(seed):
+    print("(vii) the oracle path: non-DA +IV methods carry eps_iv_z_star + EPS_TOL, the intersection is feasible")
+    np.random.seed(seed)
+    runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed)
+    data = runner.generate_data(0, GAMMA_GRID[0])
+    oracle = runner.get_oracle(0)
+    want_z, want_t = float(oracle.eps_iv_z_star) + EPS_TOL, runner.fit_epsilon_iv(0, 0, data)
+    check("(vii) fit_epsilon_iv_z is eps_iv_z_star + EPS_TOL, unguarded", runner.fit_epsilon_iv_z(0, data) == want_z)
+    print(
+        f"      epsilon_iv_z {want_z:.6g}, T-side epsilon_iv {want_t:.6g} (the stub's h* is T-invariant, so they meet)"
+    )
+    models = runner.build_models(0, 0, data)
+    for name in NON_DA_IV:
+        check(f"(vii) {name} carries epsilon_iv_z", models[name].epsilon_iv == want_z, f"{models[name].epsilon_iv!r}")
+    inter = models[INTERSECTION]
+    check("(vii) the intersection's baseline carries epsilon_iv_z", inter.baseline.epsilon_iv == want_z)
+    t_side = inter.augmented.epsilon_iv == want_t == models["DA+PI+IV"].epsilon_iv
+    check("(vii) its DA branch and DA+PI+IV carry the T-side term", t_side)
+    inter.predict(data.X_test)
+    feasible = all(
+        np.all(np.asarray(m.query_status) == SolveStatus.OK) for m in (inter, inter.baseline, inter.augmented)
+    )
+    check(
+        "(vii) the intersection is feasible on every query under a real Z, both branches OK",
+        feasible,
+        f"intersection {statuses(inter)}, baseline {statuses(inter.baseline)}, DA {statuses(inter.augmented)}",
+    )
+    empty = production("simulation")
+    check(
+        "(vii) an empty Z gives epsilon_iv_z exactly 0.0", empty.fit_epsilon_iv_z(0, empty.generate_data(0, 1.0)) == 0.0
+    )
+    query = query_runner(make_generator(), seed=seed)
+    same_term = query.epsilon_iv_z == float(query.oracle.eps_iv_z_star) + EPS_TOL
+    check("(vii) the query runner's epsilon_iv_z is the same term", same_term)
+    check("(vii) and its PI+IV carries it", query.methods["PI+IV"]().epsilon_iv == query.epsilon_iv_z)
+
+
+def leg_viii(seed):
+    print("(viii) the declared path: PI+IV solves at exactly r_Z = s sqrt(gamma_z), DA+PI+IV keeps r_T")
+    np.random.seed(seed)
+    pooled = PooledInstrumentedSEM()
+    runner = sweep_runner("gamma", lambda: pooled, GAMMA_GRID, seed=seed, declared_iv=True, gamma_z=DECLARED_GAMMA_Z)
+    data = runner.generate_data(0, GAMMA_GRID[0])
+    check("(viii) fit_epsilon_iv_z is 0.0 on the declared path", runner.fit_epsilon_iv_z(0, data) == 0.0)
+    r_t = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
+    models = runner.build_models(0, 0, data)
+    for name in IV_NAMES:
+        model = models[name]
+        bounds = model.predict(data.X_test)
+        solved = np.all(np.asarray(model.query_status) == SolveStatus.OK) and np.all(np.isfinite(bounds))
+        check(f"(viii) {name} solves OK", solved, f"statuses {statuses(model)}")
+    baseline = models[INTERSECTION].baseline
+    for name, model in (
+        ("PI+IV", models["PI+IV"]),
+        ("PI+INV+IV", models["PI+INV+IV"]),
+        ("the baseline branch", baseline),
+    ):
+        r_z = np.sqrt(model.sigma_sq / model.rho * DECLARED_GAMMA_Z)
+        exact = model.epsilon_iv == 0.0 and model.iv_bound == r_z
+        check(f"(viii) {name}: epsilon_iv 0.0 and iv_bound exactly r_Z", exact, f"{model.iv_bound!r}")
+    for name, model in (("DA+PI+IV", models["DA+PI+IV"]), ("the DA branch", models[INTERSECTION].augmented)):
+        check(f"(viii) {name}: epsilon_iv is r_T, bound the joint", model.epsilon_iv == r_t and model.iv_bound > r_t)
 
 
 if __name__ == "__main__":
@@ -805,6 +873,8 @@ if __name__ == "__main__":
     leg_iv(args.seed)
     leg_v(args.seed)
     leg_vi(args.seed)
+    leg_vii(args.seed)
+    leg_viii(args.seed)
     if not args.skip_digest:
         leg_d(args.reference)
     else:

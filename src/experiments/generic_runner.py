@@ -185,6 +185,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 gamma=self.default_gamma,
                 epsilon=default_epsilon,
                 epsilon_iv=self.epsilon_iv,
+                epsilon_iv_z=self.epsilon_iv_z,
                 rho=self.fit_rho(),
             )
 
@@ -260,6 +261,18 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
         logger.info(f"epsilon_iv: oracle {budget:.6g} is INFEASIBLE (floor {floor:.4g}); raising to {guarded:.6g}.")
         return guarded
+
+    @property
+    def epsilon_iv_z(self) -> float:
+        """The non-DA +IV methods' own term, as `ParamSweepRunner.fit_epsilon_iv_z`:
+        0.0 under an empty Z or a declared budget, else the oracle real-Z piece
+        plus the tolerance, never floor-guarded."""
+        if self.declared_iv or np.shape(self.Z)[1] == 0:
+            return 0.0
+        z_piece = getattr(self.oracle, "eps_iv_z_star", None)
+        if z_piece is None or not np.isfinite(z_piece):
+            return 0.0
+        return float(z_piece) + self.eps_tol
 
     @property
     def _features(self) -> Callable | None:

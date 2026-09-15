@@ -772,11 +772,18 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     """Baseline PI+IV on the real Z intersected with DA+PI+IV on Z-tilde = (T, Z).
-    An empty set makes the baseline PI and Z-tilde the translation alone, today's run."""
+    An empty set makes the baseline PI and Z-tilde the translation alone, today's run.
 
-    def __init__(self, gamma_z=0.0, epsilon_iv=None, **kwargs):
+    Two budgets, one per SS2.6 row: `epsilon_iv` is the DA branch's T-side term
+    (joint bound sqrt(epsilon_iv^2 + s^2 gamma_z)); `epsilon_iv_z` is the baseline's
+    own term, so its bound is sqrt(epsilon_iv_z^2 + s^2 gamma_z): 0.0 under a
+    declared budget (exactly r_Z), the oracle real-Z piece plus the tolerance on
+    the simulation, and inert under an empty Z."""
+
+    def __init__(self, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, **kwargs):
         self.gamma_z = gamma_z
         self.epsilon_iv = epsilon_iv
+        self.epsilon_iv_z = epsilon_iv_z
         super().__init__(**kwargs)
 
     def _branch(self, pad, epsilon_iv):
@@ -798,9 +805,10 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         # identical QR and the baseline reduces to PI exactly
         Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
         # SS2.6 per branch: the baseline is a non-DA +IV method and carries no
-        # T-as-IV term, so its bound is exactly r_Z = s sqrt(gamma_z) (none at all
-        # under an empty Z); the DA branch keeps the joint root-sum-square bound
-        self.baseline = self._branch(pad=False, epsilon_iv=0.0).fit(X, y, Z=Z)
+        # T-as-IV term, only its own `epsilon_iv_z` (0.0 when the real-Z radius is
+        # declared, so the bound is exactly r_Z = s sqrt(gamma_z); none at all under
+        # an empty Z); the DA branch keeps the joint root-sum-square bound
+        self.baseline = self._branch(pad=False, epsilon_iv=self.epsilon_iv_z).fit(X, y, Z=Z)
         # the DA branch constrains the joint Z-tilde = (T, Z) of Asm. 3, T first
         self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv).fit(GX, y, Z=np.column_stack([G, Z]))
         # rho known once both noise levels are: the ball and the IV threshold are

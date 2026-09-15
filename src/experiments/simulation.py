@@ -93,12 +93,18 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
         return SimulationQuerySweep
 
-    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0):
+    def build_methods(self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, epsilon_iv_z=0.0):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
         toggle -- perf needs serial models to time methods, not the harness."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return MethodRegistry.build_methods(
-            self.kwargs["methods"], gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, rho=rho, **toggles
+            self.kwargs["methods"],
+            gamma=gamma,
+            epsilon=epsilon,
+            epsilon_iv=epsilon_iv,
+            epsilon_iv_z=epsilon_iv_z,
+            rho=rho,
+            **toggles,
         )
 
     def get_sweep_runner_cls(self, param: str) -> type:
