@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from .constants import parse_method
+
 
 def instrument_columns(Z, n: int) -> np.ndarray:
     """`Z` as the (n, m) float array the solvers take; None or an empty array is
@@ -53,6 +55,8 @@ def fit_model(
     - the +IV methods add an instrument: non-DA ones see the real Z alone,
       DA+ ones the joint Z-tilde = (G, Z), and the intersection takes the raw
       Z and stacks G onto its DA branch itself
+    - a DA+ IV method spelled `(Z)` (`parse_method`) sees the real Z alone,
+      no G; bare and `(T,Z)` are the joint instrument
 
     Args:
         model: Model instance to fit
@@ -69,7 +73,8 @@ def fit_model(
         hyperparameters: Training hyperparameters (optional)
         **kwargs: Additional arguments (e.g., pbar_manager, da)
     """
-    if method_name == "ATE":
+    base, mode = parse_method(method_name)
+    if base == "ATE":
         # ATE is computed analytically, no fitting required
         return
 
@@ -92,50 +97,54 @@ def fit_model(
         # hand-written call and it must say what it means
         raise ValueError("X_base without Z_base: pass the untiled instrument beside the untiled design.")
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
+    # the DA+ IV methods' instrument: Z-tilde = (T, Z) by default, the real Z
+    # alone in the (Z) mode
+    z_da = Z if mode == "Z" else _joint(G, Z)
 
-    # Dispatch based on method name to use correct data
-    if method_name == "PI":
+    # Dispatch based on the base name to use correct data
+    if base == "PI":
         # PI uses original data only
         model.fit(X=X_solo, y=y_solo, **fit_kwargs)
 
-    elif method_name == "DA+PI":
+    elif base == "DA+PI":
         # DA+PI uses augmented data only
         model.fit(X=GX, y=y, **fit_kwargs)
 
-    elif method_name == "PI+INV":
+    elif base == "PI+INV":
         # PI+INV uses both original and augmented data
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
 
-    elif method_name == "PI+IV":
+    elif base == "PI+IV":
         # the real instrument alone, never G; empty reduces it to PI exactly
         model.fit(X=X_solo, y=y_solo, Z=Z_solo, **fit_kwargs)
 
-    elif method_name == "PI+INV+IV":
+    elif base == "PI+INV+IV":
         # the INV cone needs GX, the IV cone the real Z; empty is PI+INV exactly
         model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
 
-    elif method_name == "DA+PI+IV":
-        # the DA ball on GX with the joint instrument Z-tilde = (T, Z)
-        model.fit(X=GX, y=y, Z=_joint(G, Z), **fit_kwargs)
+    elif base == "DA+PI+IV":
+        # the DA ball on GX with the joint instrument Z-tilde = (T, Z), or Z alone
+        model.fit(X=GX, y=y, Z=z_da, **fit_kwargs)
 
-    elif method_name == "PI&DA+PI":
+    elif base == "PI&DA+PI":
         # intersections fit a baseline branch on X and a DA branch on GX
         model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
 
-    elif method_name == "PI&DA+PI+IV":
+    elif base == "PI&DA+PI+IV":
         # raw Z: the class hands it to its baseline and stacks G onto its DA
-        # branch itself, so pre-stacking here would give that branch [G, G, Z]
+        # branch itself (or not, in the (Z) mode it was built for), so
+        # pre-stacking here would give that branch [G, G, Z]
         model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
 
-    elif method_name == "ERM":
+    elif base == "ERM":
         # ERM uses original data
         model.fit(X=X_solo, y=y_solo, **fit_kwargs)
 
-    elif method_name == "DA+ERM":
+    elif base == "DA+ERM":
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, **fit_kwargs)
 
-    elif method_name == "IV":
+    elif base == "IV":
         # 2SLS on the real instrument. With no instrument it would return W = 0 and
         # predict ybar at every query (regression.py); the config rejects that
         # upstream, and this stays loud in case a caller skips the config
@@ -143,9 +152,12 @@ def fit_model(
             raise ValueError("IV needs an instrument; the instrument set is empty.")
         model.fit(X=X_solo, y=y_solo, Z=Z_solo, **fit_kwargs)
 
-    elif method_name == "DA+IV":
-        # 2SLS on the augmented data with the joint instrument
-        model.fit(X=GX, y=y, Z=_joint(G, Z), **fit_kwargs)
+    elif base == "DA+IV":
+        # 2SLS on the augmented data with the joint instrument, or Z alone in the
+        # (Z) mode, where an empty set is the same silent W = 0 as for IV
+        if z_da.shape[1] == 0:
+            raise ValueError("DA+IV needs an instrument; the instrument set is empty.")
+        model.fit(X=GX, y=y, Z=z_da, **fit_kwargs)
 
     else:
         # Fallback for any custom methods - pass everything

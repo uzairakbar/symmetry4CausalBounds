@@ -32,10 +32,12 @@ Legs:
         PARTIAL_R2_NET_METHODS is the unchanged nine. Catches: a builder missing or
         out of sync, a name added to the do-MNIST backend. Misses: what a builder
         builds; that is (vi) and a57.
-  (v)   every ALL_METHODS name has a TEX_MAPPER, COLOR_MAP and ALPHA_MAP entry, the
-        new TeX strings compose from the building blocks, IV is a point estimate
-        and PI+INV+IV takes the one unused hue. Catches: a name that would KeyError
-        at plot time. Misses: how the figure looks.
+  (v)   every ALL_METHODS name and the six stored mode spellings (`base(Z)`,
+        `base(T,Z)` on the DA+ IV methods) have a TEX_MAPPER, COLOR_MAP and
+        ALPHA_MAP entry, the new TeX strings compose from the building blocks, IV
+        and DA+IV(Z) are point estimates and PI+INV+IV takes the one unused hue.
+        Catches: a name that would KeyError at plot time. Misses: how the figure
+        looks.
   (vi)  every `+IV` builder fits with a 1-column Z without raising, reads the
         instrument (`_has_iv`) and predicts finite bounds; `IV` requested under an
         empty set is a config error naming both `IV` and `iv`, and an omitted
@@ -82,7 +84,16 @@ from src.experiments.configs import (  # noqa: E402
     parse_experiment_plan,
     resolve_dataset_block,
 )
-from src.experiments.utils.constants import ALPHA_MAP, COLOR_MAP, INV, IV, PI, POINT_ESTIMATES, TEX_MAPPER  # noqa: E402
+from src.experiments.utils.constants import (  # noqa: E402
+    ALPHA_MAP,
+    COLOR_MAP,
+    INV,
+    IV,
+    IV_MODE_METHODS,
+    PI,
+    POINT_ESTIMATES,
+    TEX_MAPPER,
+)
 from src.sem.cigarettes import CigaretteSEM, V, build_design  # noqa: E402
 
 PLAN_METHODS = (
@@ -249,10 +260,12 @@ def leg_iv():
 
 
 def leg_v():
-    print("(v) every method has its display entries")
-    for name in ALL_METHODS:
+    print("(v) every method and every stored mode spelling has its display entries")
+    spelled = [f"{base}({mode})" for base in IV_MODE_METHODS for mode in ("Z", "T,Z")]
+    for name in ALL_METHODS + tuple(spelled):
         present = name in TEX_MAPPER and name in COLOR_MAP and name in ALPHA_MAP
         check(f"(v) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP", present)
+    check("(v) DA+IV(Z) is a point estimate", "DA+IV(Z)" in POINT_ESTIMATES)
     check("(v) IV tex", TEX_MAPPER.get("IV") == rf"${IV}$", TEX_MAPPER.get("IV"))
     check("(v) PI+INV+IV tex composes PI, INV, IV", TEX_MAPPER.get("PI+INV+IV") == rf"${PI}+{INV}+{IV}$")
     check("(v) IV shares DA+IV's hue 2", COLOR_MAP.get("IV") == COLOR_MAP.get("DA+IV") == 2)

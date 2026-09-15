@@ -22,7 +22,10 @@ cigarettes:
     sweep_samples: 128
     da_amplitude: 1.0
     sliver: false
-    methods: [PI+INV, PI, PI+IV, PI+INV+IV, DA+PI, DA+PI+IV, PI&DA+PI, PI&DA+PI+IV]
+    # a DA+ IV method takes an instrument mode: bare (or `"DA+PI+IV(T,Z)"`, quoted
+    # in a flow list, or the comma splits it) is the joint Z-tilde = (T, Z),
+    # `DA+PI+IV(Z)` the configured instrument alone with no T term
+    methods: [PI+INV, PI, PI+IV, PI+INV+IV, DA+PI, DA+PI+IV, DA+PI+IV(Z), PI&DA+PI, PI&DA+PI+IV]
     augmentation: translate
     experiment:
         query: true

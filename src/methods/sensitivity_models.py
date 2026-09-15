@@ -778,12 +778,14 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     (joint bound sqrt(epsilon_iv^2 + s^2 gamma_z)); `epsilon_iv_z` is the baseline's
     own term, so its bound is sqrt(epsilon_iv_z^2 + s^2 gamma_z): 0.0 under a
     declared budget (exactly r_Z), the oracle real-Z piece plus the tolerance on
-    the simulation, and inert under an empty Z."""
+    the simulation, and inert under an empty Z. `t_as_iv=False` is the (Z) mode:
+    the DA branch constrains the real Z alone at the baseline's budget, no T."""
 
-    def __init__(self, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, **kwargs):
+    def __init__(self, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, t_as_iv=True, **kwargs):
         self.gamma_z = gamma_z
         self.epsilon_iv = epsilon_iv
         self.epsilon_iv_z = epsilon_iv_z
+        self.t_as_iv = t_as_iv
         super().__init__(**kwargs)
 
     def _branch(self, pad, epsilon_iv):
@@ -809,8 +811,14 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         # declared, so the bound is exactly r_Z = s sqrt(gamma_z); none at all under
         # an empty Z); the DA branch keeps the joint root-sum-square bound
         self.baseline = self._branch(pad=False, epsilon_iv=self.epsilon_iv_z).fit(X, y, Z=Z)
-        # the DA branch constrains the joint Z-tilde = (T, Z) of Asm. 3, T first
-        self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv).fit(GX, y, Z=np.column_stack([G, Z]))
+        if self.t_as_iv:
+            # Z-tilde = (T, Z) of Asm. 3, T first, the joint budget
+            self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv).fit(
+                GX, y, Z=np.column_stack([G, Z])
+            )
+        else:
+            # the (Z) mode: the real Z alone at the non-DA budget, no T term
+            self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv_z).fit(GX, y, Z=Z)
         # rho known once both noise levels are: the ball and the IV threshold are
         # cvx Parameters, set at predict
         self.augmented.rho = self.rho

@@ -21,7 +21,7 @@ from src.experiments.configs import (
 )
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import PanelBuilder, create_query_sweep_plot, create_sweep_plot, save
-from src.experiments.utils.constants import SUBDIR_QUERY, TEX_MAPPER
+from src.experiments.utils.constants import SUBDIR_QUERY, TEX_MAPPER, iv_mode, parse_method
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import epsilon_star, preserve_rng
 from src.sem.cigarettes import (
@@ -529,7 +529,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         at the target marked, so the declared budget is seen against what a
         resampled panel would read. Every model's `gamma_z` is put back after.
         """
-        models = {name: panel.fitted_models[name] for name in HEADLINE_METHODS if name in panel.fitted_models}
+        # a spelled default (`DA+PI+IV(T,Z)`) is the headline `DA+PI+IV`; the
+        # `(Z)` variant is not a headline and the outcomes stay keyed by HEADLINE_METHODS
+        fitted = {parse_method(n)[0] if iv_mode(n) == "T,Z" else n: m for n, m in panel.fitted_models.items()}
+        models = {name: fitted[name] for name in HEADLINE_METHODS if name in fitted}
         if not models:
             logger.warning(f"headline figures need one of {HEADLINE_METHODS} in `methods`; skipping.")
             return

@@ -21,6 +21,7 @@ from .constants import (
     DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
+    INSTRUMENT_Z_STYLE,
     NORMALIZE_BASELINES,
     NORMALIZED_SWEEP_SUFFIXES,
     PAGE_WIDTH,
@@ -36,6 +37,7 @@ from .constants import (
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
+    iv_mode,
 )
 from .data_operations import bootstrap, save
 
@@ -463,8 +465,14 @@ def create_sweep_plot(
             if method_name in legend_items:
                 legend_items[legend_items.index(method_name)] = label
 
-            # Plot
-            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
+            # Plot: point estimates dashed, a (Z) sibling dash-dotted in its base's
+            # hue, everything else solid
+            if method_name in POINT_ESTIMATES:
+                linestyle = POINT_ESTIMATE_STYLE
+            elif iv_mode(method_name) == "Z":
+                linestyle = INSTRUMENT_Z_STYLE
+            else:
+                linestyle = PARTIAL_IDENTIFICATION_STYLE
             color = colors[COLOR_MAP[method_name]]
 
             handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=linestyle)[0]

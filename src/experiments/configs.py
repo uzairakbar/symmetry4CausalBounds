@@ -9,7 +9,13 @@ from typing import Any, Literal
 
 import numpy as np
 
-from src.experiments.utils.constants import _STYLE_KEYS, validate_plot_keys
+from src.experiments.utils.constants import (
+    _STYLE_KEYS,
+    IV_MODE_METHODS,
+    parse_method,
+    spelled_method,
+    validate_plot_keys,
+)
 from src.methods.partial_r2_net import (
     IntersectedIVPartialR2Net,
     IntersectedPartialR2Net,
@@ -750,6 +756,10 @@ class MethodRegistry:
         instrument in play is the DA's own translation amount T. Two IV budgets,
         one per SS2.6 row: `epsilon_iv` is the DA methods' T-side term, `epsilon_iv_z`
         the non-DA +IV methods' own (and the intersection's baseline branch).
+        A DA+ IV method may carry an instrument mode (`parse_method`): bare or
+        `DA+PI+IV(T,Z)` constrains the joint Z-tilde = (T, Z) at the joint budget,
+        `DA+PI+IV(Z)` the configured Z alone at the non-DA budget `epsilon_iv_z`
+        with no T term. Keys are the spellings as requested.
 
         Args:
             method_names: List of method names to build
@@ -855,7 +865,25 @@ class MethodRegistry:
         if set(all_builders) != set(ALL_METHODS):
             raise ValueError("ALL_METHODS out of sync.")
 
-        return {name: all_builders[name] for name in method_names if name in all_builders}
+        # the (Z) mode: the DA ball with the real Z alone, so it carries the non-DA
+        # row of SS2.6 (epsilon_iv_z, bound sqrt(epsilon_iv_z^2 + s^2 gamma_z)) and
+        # no T term
+        da_z_common = dict(common, epsilon_iv=epsilon_iv_z, gamma_z=gamma_z, rho=rho)
+        z_builders = {
+            "DA+IV": all_builders["DA+IV"],  # the mode is a fit-time choice for 2SLS
+            "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_z_common),
+            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, t_as_iv=False, **int_iv_common),
+        }
+        if set(z_builders) != set(IV_MODE_METHODS):
+            raise ValueError("IV_MODE_METHODS out of sync.")
+
+        built = {}
+        for name in method_names:
+            base, mode = parse_method(name)
+            if base not in all_builders:
+                continue
+            built[name] = all_builders[base] if mode == "T,Z" else z_builders[base]
+        return built
 
 
 # =============================================================================
@@ -1033,17 +1061,40 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     # fallback method list omits `IV` without one; listing it by hand is the error below
     has_instruments = _check_instruments(name, block)
     block.setdefault("methods", [method for method in ALL_METHODS if method != "IV" or has_instruments])
-    # a stale method name (e.g. an old underscore spelling) must be a config
-    # error here, not silently filtered out of the run by the registry
-    _reject_unknown(block["methods"], ALL_METHODS, f"config.{name}.methods")
+    # every entry parsed (`parse_method`): a stale method name (e.g. an old
+    # underscore spelling) or a malformed mode suffix must be a config error
+    # here, not silently filtered out of the run by the registry. Stored as
+    # `base`, `base(Z)` or `base(T,Z)`; two entries of one (base, mode) pair
+    # would collapse into one results key, so they are an error too
+    methods, seen = [], {}
+    for entry in block["methods"]:
+        if not isinstance(entry, str):
+            raise ValueError(f"config.{name}.methods must list method names; got {entry!r}.")
+        try:
+            base, mode = parse_method(entry)
+        except ValueError as error:
+            raise ValueError(f"config.{name}.methods: {error}") from None
+        if base not in ALL_METHODS:
+            _reject_unknown([entry], ALL_METHODS, f"config.{name}.methods")
+        if name == "do_mnist" and "(" in entry:
+            raise ValueError(f"config.do_mnist.methods: {entry!r} spells an instrument mode; that backend has none.")
+        if (base, mode) in seen:
+            raise ValueError(
+                f"config.{name}.methods lists {seen[(base, mode)]!r} and {entry!r}: the same method twice."
+            )
+        seen[(base, mode)] = entry
+        methods.append(spelled_method(entry))
+    block["methods"] = methods
 
     # 2SLS with no instrument returns W = 0 and predicts ybar at every query, a
     # flat line labelled as a point estimate: loud and up front, never silent.
-    # PI+IV and PI+INV+IV are fine under an empty set: they reduce to PI and PI+INV.
-    if "IV" in block["methods"] and not has_instruments:
-        raise ValueError(
-            f"config.{name}.methods lists 'IV' but the instrument set is empty "
-            f"(iv = {block.get('iv', 'absent')!r}); drop 'IV' or set `iv:`."
-        )
+    # PI+IV and PI+INV+IV are fine under an empty set: they reduce to PI and
+    # PI+INV, as DA+PI+IV(Z) reduces to DA+PI.
+    for two_stage in ("IV", "DA+IV(Z)"):
+        if two_stage in block["methods"] and not has_instruments:
+            raise ValueError(
+                f"config.{name}.methods lists {two_stage!r} but the instrument set is empty "
+                f"(iv = {block.get('iv', 'absent')!r}); drop {two_stage!r} or set `iv:`."
+            )
 
     return block
