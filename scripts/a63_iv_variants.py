@@ -60,11 +60,14 @@ alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
         same; a normalised width figure with DA+PI at 1.3 reads the same and the
         line is drawn to 1.3 (the frame clips it); the same figure un-normalised,
         a normalised worst-error figure with no baseline among the methods, and an
-        approx-error figure under the toggle are not clamped. Catches: the hook
-        above `_rescale` (the pad survives), keyed on the toggle rather than on a
-        baseline (the no-baseline and approx-error cases clamp), a dropped
-        `set_yscale` (the log config survives). Misses: a hook after the tick
-        helpers, which leaves the limits right and the minor labels re-blanked.
+        approx-error figure under the toggle are not clamped; on a sweep drawn
+        with `DA+PI+IV(Z)` beside `DA+PI+IV` the `(Z)` line carries the
+        `INSTRUMENT_Z_STYLE` dash pattern and the base line is solid. Catches: the
+        hook above `_rescale` (the pad survives), keyed on the toggle rather than
+        on a baseline (the no-baseline and approx-error cases clamp), a dropped
+        `set_yscale` (the log config survives), the `(Z)` sibling drawn solid.
+        Misses: a hook after the tick helpers, which leaves the limits right and
+        the minor labels re-blanked.
   (v)   both recipes resolve with `DA+PI+IV` and `DA+PI+IV(Z)` and no stored
         duplicate, and run at reduced scale (1 experiment, 4 sweep samples,
         n_jobs 1) through the production path: on the cigarette gamma sweep
@@ -75,11 +78,15 @@ alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
         under the same floor), T1 carries the `(Z)` row under its TeX label and
         F1's outcomes are keyed exactly `HEADLINE_METHODS`; the same block with
         `DA+PI+IV` respelled `DA+PI+IV(T,Z)` keeps F1's keys and its DA band to
-        1e-9; on the simulation gamma sweep both keys, finite `(Z)` widths, the
-        ordering `(Z) <= DA+PI` at every OK step, the OK counts recorded.
-        Catches: a recipe without the `(Z)` method, the headline lookup reverted
-        (the respelled run loses its DA band), a `(Z)` variant wider than `DA+PI`.
-        Misses: the full-scale sweeps.
+        1e-9, and the same block with `DA+PI+IV(Z)` removed keeps F1's DA band to
+        1e-9 as well (the `(Z)` entry, listed after the default, must not reach
+        the headline key); on the simulation gamma sweep both keys, finite `(Z)`
+        widths, the ordering `(Z) <= DA+PI` at every OK step, the OK counts
+        recorded. Catches: a recipe without the `(Z)` method, the headline lookup
+        reverted (the respelled run loses its DA band), the headline key resolved
+        for every mode (the `(Z)` band overwrites the default's, gap 0.9 on
+        beta_pn), a `(Z)` variant wider than `DA+PI`. Misses: the full-scale
+        sweeps.
 
     MPLBACKEND=Agg python scripts/a63_iv_variants.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -124,6 +131,7 @@ from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
     CLAMP_YLIM,
     COLOR_MAP,
+    INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
     NORMALIZED_SWEEP_SUFFIXES,
     PLOT_CONFIGS,
@@ -565,6 +573,26 @@ def leg_iv():
         scale == "asinh" and limits != CLAMP_YLIM,
         f"{scale} {limits}",
     )
+    # the (Z) sibling is told apart by its dash pattern, in the base's hue
+    plt.close("all")
+    with captured():
+        create_sweep_plot(
+            x, {"DA+PI+IV": y["PI"], "DA+PI+IV(Z)": y["DA+PI"]}, xlabel="x", fname="gamma_width", savefig=False
+        )
+    drawn = {line.get_label(): line for line in plt.gca().get_lines()}
+    base, sibling = drawn.get(TEX_MAPPER["DA+PI+IV"]), drawn.get(TEX_MAPPER["DA+PI+IV(Z)"])
+    check("(iv) a sweep draws DA+PI+IV and DA+PI+IV(Z) as two lines", base is not None and sibling is not None)
+    if base is not None and sibling is not None:
+        pattern = getattr(sibling, "_unscaled_dash_pattern", None)
+        check(
+            "(iv) the (Z) line carries INSTRUMENT_Z_STYLE",
+            sibling.get_linestyle() != "-" and pattern == INSTRUMENT_Z_STYLE,
+            f"{sibling.get_linestyle()} {pattern}",
+        )
+        check("(iv) the base line is solid", base.get_linestyle() == "-", base.get_linestyle())
+        check(
+            "(iv) in the same hue", base.get_color() == sibling.get_color(), f"{base.get_color()} {sibling.get_color()}"
+        )
     plt.close("all")
 
 
@@ -625,6 +653,22 @@ def leg_v():
         check("(v) and its DA band equals the bare run's to 1e-9", gap < 1e-9, f"{gap:.2e}")
     else:
         check("(v) and its DA band equals the bare run's to 1e-9", False, "no DA band")
+
+    # the (Z) entry sits after the default in the recipe: a headline lookup that
+    # collapsed every mode onto its base would draw the (Z) band as the default
+    methods = [m for m in recipe("cigarettes")["methods"] if m != "DA+PI+IV(Z)"]
+    folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
+    without = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
+    check(
+        "(v) with DA+PI+IV(Z) removed F1's outcomes are still keyed HEADLINE_METHODS",
+        tuple(without) == HEADLINE_METHODS,
+        f"{tuple(without)}",
+    )
+    if "DA+PI+IV" in without:
+        gap = float(np.nanmax(np.abs(np.asarray(without["DA+PI+IV"], dtype=float) - band)))
+        check("(v) and the DA band equals the run with (Z) present to 1e-9", gap < 1e-9, f"{gap:.2e}")
+    else:
+        check("(v) and the DA band equals the run with (Z) present to 1e-9", False, "no DA band")
 
     folder = run_reduced("simulation", query=False, sweep=True)
     x = load(folder, SUBDIR_SWEEP, "gamma_values.pkl")
