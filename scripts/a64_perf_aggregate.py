@@ -189,6 +189,17 @@ def captured():
         logger.remove(handle)
 
 
+class call_counter:
+    """Wraps a bound method and counts its calls."""
+
+    def __init__(self, method):
+        self.method, self.calls = method, []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append(1)
+        return self.method(*args, **kwargs)
+
+
 class prepare_spy:
     """Counts `PartialR2._prepare` calls, one per solve, on every ball and branch."""
 
@@ -261,25 +272,25 @@ def width(model, k):
     return model.Z_projector_R.shape[0] - k
 
 
-def sim_block(methods, **overrides):
+def sim_block(methods, dataset="simulation", **overrides):
     block = {
         **digest_leg.TOGGLES,
-        **digest_leg.BLOCKS["simulation"],
-        "iv": 0,
+        **digest_leg.BLOCKS[dataset],
+        **({"iv": 0} if dataset == "simulation" else {}),
         "methods": list(methods),
         "sweep_samples": 4,
         "n_experiments": 1,
         "n_jobs": 1,
         **overrides,
     }
-    return resolve_dataset_block("simulation", block)
+    return resolve_dataset_block(dataset, block)
 
 
-def perf_runner(block):
+def perf_runner(block, dataset="simulation"):
     """The runner `_run_perf` builds, on the block: the epsilon strategy, one
     experiment, serial models."""
     set_seed(block["seed"])
-    orchestrator = ORCHESTRATORS["simulation"](**block, hyperparameters=munchify(digest_leg.HYPERPARAMETERS))
+    orchestrator = ORCHESTRATORS[dataset](**block, hyperparameters=munchify(digest_leg.HYPERPARAMETERS))
     methods = {k: v for k, v in orchestrator.methods.items() if k != "ATE"}
     return orchestrator.get_sweep_runner_cls("epsilon")(
         methods=methods,
@@ -307,6 +318,12 @@ def legend_rows(legend):
 
 def marker_lines(ax):
     return [line for line in ax.get_lines() if line.get_linestyle() == "None" and line.get_marker() == "x"]
+
+
+def ticks_render(ax):
+    """Some y tick label on `ax` carries text once drawn."""
+    ax.figure.canvas.draw()
+    return any(t.get_text() for t in ax.get_yticklabels())
 
 
 def run_cli(artifacts, out):
@@ -395,6 +412,17 @@ def leg_i():
         order, gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=2**-8, **TOGGLES
     )
     check("(i) build_methods returns the (T) spellings in order", list(built) == order, f"{list(built)}")
+    # a non-DA method fits with no translation amounts at all, as before the (T) mode
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((64, 3))
+    y = X @ np.ones(3) + 0.1 * rng.standard_normal(64)
+    built = MethodRegistry.build_methods(["ERM", "PI"], gamma=GAMMA, epsilon=EPS_TOL, **TOGGLES)
+    for name in ("ERM", "PI"):
+        try:
+            fit_model(model=built[name](), method_name=name, X=X, y=y)
+            check(f"(i) fit_model on {name} with G=None fits", True)
+        except Exception as error:
+            check(f"(i) fit_model on {name} with G=None fits", False, f"{type(error).__name__}: {error}")
 
 
 def leg_ii(seed):
@@ -477,14 +505,37 @@ def leg_iii():
                 "(iii) PI's last within 1e-3 s of its first", abs(v[-1] - v[0]) < 1e-3, f"{v[0]:.4f} -> {v[-1]:.4f} s"
             )
         if len(methods) == 1 and methods[0] == "PI":
-            with prepare_spy() as spy:
-                seconds, per_solve = perf.normaliser(runner, data, repeats=3)
+            # the oracle budgets are the runner's, fitted once outside the timer
+            budget_spy = call_counter(runner.fit_epsilon_iv)
+            runner.fit_epsilon_iv = budget_spy
+            try:
+                with prepare_spy() as spy:
+                    seconds, per_solve = perf.normaliser(runner, data, repeats=3)
+            finally:
+                del runner.fit_epsilon_iv
+            calls = budget_spy.calls
             check(
                 "(iii) the normaliser records 4 seconds and 4 solves",
                 len(seconds) == 4 and spy.count == 4,
                 f"{spy.count}",
             )
+            check("(iii) and fits the oracle IV budget once, outside the timed block", len(calls) == 1, f"{len(calls)}")
             check("(iii) and keeps the median of the last 3", per_solve == float(np.median(seconds[1:])))
+            # the unit is one baseline PI solve, so PI's own step 0 reads 1 up to timing
+            # noise: on the simulation (oracle budgets, 0.1 s of quadrature that must
+            # stay outside the timer) and on cigarettes (declared budgets)
+            for dataset in ("simulation", "cigarettes"):
+                unit_runner = perf_runner(sim_block(["PI"], dataset=dataset), dataset=dataset)
+                grid = np.asarray(unit_runner.get_param_range(), dtype=float)
+                unit_data = unit_runner.generate_data(0, grid[0])
+                _, unit = perf.normaliser(unit_runner, unit_data, repeats=3)
+                timed, _ = perf.wall_clock(unit_runner, unit_data, grid, repeats=3, seconds_per_solve=unit)
+                ratio = float(timed["PI"][0, 0])
+                check(
+                    f"(iii) {dataset}: PI at step 0 reads 1.0 within [0.9, 1.1] baseline solves",
+                    0.9 <= ratio <= 1.1,
+                    f"{ratio:.3f} (unit {unit:.3f} s)",
+                )
             check(
                 "(iii) baseline_pi is serial under a block saying n_jobs -1", perf.baseline_pi(runner, data).n_jobs == 1
             )
@@ -597,6 +648,23 @@ def leg_v():
     check("(v) off: the mean lines and bands untouched", len(means_off) == 2 and bands_off == 2)
     check("(v) FAILURE_MARKER defaults to True", plotting.FAILURE_MARKER is True)
 
+    # a step where every run failed has no mean: the marker sits at the level of the
+    # nearest finite point of the same line (the first one after, here) with its count
+    seed["PI+INV"] = np.array([[np.nan] * 6, [np.nan] * 6, [1e-8] * 6, [2e-8] * 6])
+    failures["PI+INV"] = np.array([6, 6, 0, 0])
+    ax, markers, means, _ = render(True)
+    check(
+        "(v) all-failed steps: one marker line at the nearest finite level",
+        len(markers) == 1
+        and np.allclose(markers[0].get_xdata(), x[[0, 1]])
+        and np.allclose(markers[0].get_ydata(), 1e-8),
+        f"{[m.get_ydata() for m in markers]}",
+    )
+    texts = sorted(t.get_text() for t in ax.texts)
+    check("(v) all-failed steps: the counts are drawn", texts == ["6", "6"], f"{texts}")
+    seed["PI+INV"] = 3e-8 + 1e-10 * rng.random((4, 6))
+    failures["PI+INV"] = np.array([0, 2, 0, 1])
+
     wall = {"PI": np.array([[1.0], [1.0], [1.0], [1.0]]), "PI+INV": np.array([[1.0], [10.0], [50.0], [100.0]])}
     means = [wall["PI"][:, 0], wall["PI+INV"][:, 0]]
 
@@ -635,9 +703,19 @@ def leg_v():
     plt.close("all")
 
 
-def synthetic_tree(root, sim_inter="PI&DA+PI+IV(T)", cig_inter="DA+PI+IV(T)"):
-    """simulation gamma and trS, cigarettes gamma without coverage and no trS,
-    cigarettes perf; no optical."""
+TEN_PERF = ["ERM", "DA+ERM", "PI+INV", "PI", "PI+IV", "PI+INV+IV", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
+
+
+def synthetic_tree(
+    root,
+    sim_inter="PI&DA+PI+IV(T)",
+    cig_inter="DA+PI+IV(T)",
+    cig_drop=("coverage",),
+    sim_gamma=True,
+    perf_methods=("PI", "PI+INV"),
+):
+    """simulation gamma (unless `sim_gamma` is off) and trS, cigarettes gamma without
+    the `cig_drop` metrics and no trS, cigarettes perf on `perf_methods`; no optical."""
     rng = np.random.default_rng(1)
     x = PARAM_SPECS["gamma"].grid_fn("simulation", 4)
 
@@ -647,21 +725,23 @@ def synthetic_tree(root, sim_inter="PI&DA+PI+IV(T)", cig_inter="DA+PI+IV(T)"):
         }
 
     sim = f"{root}/simulation/{SUBDIR_SWEEP}"
-    dump(x, f"{sim}/gamma_values.pkl")
-    dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/gamma_results.pkl")
-    dump({name: np.zeros((4, 2, 4), dtype=int) for name in ("PI", "DA+PI", sim_inter)}, f"{sim}/gamma_statuses.pkl")
+    if sim_gamma:
+        dump(x, f"{sim}/gamma_values.pkl")
+        dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/gamma_results.pkl")
+        dump({name: np.zeros((4, 2, 4), dtype=int) for name in ("PI", "DA+PI", sim_inter)}, f"{sim}/gamma_statuses.pkl")
     trs_x = np.array([0.3, 0.1, 0.5, 0.2])  # not ascending, as a measured axis is
     dump(trs_x, f"{sim}/trS_values.pkl")
     dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/trS_results.pkl")
     dump({"knob": trs_x, "x": trs_x, "recalibrate": True, "xlabel": TRS_XLABEL[True]}, f"{sim}/trS_axis.pkl")
     cig = f"{root}/cigarettes/{SUBDIR_SWEEP}"
     dump(x, f"{cig}/gamma_values.pkl")
-    dump(record(["PI", cig_inter], drop=("coverage",)), f"{cig}/gamma_results.pkl")
+    dump(record(["PI", cig_inter], drop=cig_drop), f"{cig}/gamma_results.pkl")
     perf_dir = f"{root}/cigarettes/{SUBDIR_PERF}"
     eps = PARAM_SPECS["epsilon"].grid_fn("cigarettes", 4)
     dump(eps, f"{perf_dir}/epsilon_values.pkl")
     dump(
-        {"PI": np.ones((4, 1)), "PI+INV": np.cumsum(np.ones(4))[:, None]}, f"{perf_dir}/epsilon_wall_clock_results.pkl"
+        {name: (i + 1) * np.cumsum(np.ones(4))[:, None] for i, name in enumerate(perf_methods)},
+        f"{perf_dir}/epsilon_wall_clock_results.pkl",
     )
     dump(
         {"PI": np.full((4, 6), 1e-9), "PI+INV": 1e-8 + 1e-10 * rng.random((4, 6))},
@@ -766,14 +846,53 @@ def leg_vi():
     )
     check("(vi) the cigarette seed_var panel carries a marker line", bool(marker_lines(panels[1])))
     check(
-        "(vi) the perf y-label is the metric's",
-        panels[0].get_ylabel() == METRIC_SPECS["seed_var"].ylabel,
-        f"{panels[0].get_ylabel()!r}",
+        "(vi) the perf y-label and its tick numbers sit on the first panel that is on",
+        panels[1].get_ylabel() == METRIC_SPECS["seed_var"].ylabel
+        and not panels[0].get_ylabel()
+        and ticks_render(panels[1]),
+        f"{[p.get_ylabel() for p in panels]!r}",
     )
     plt.close(fig)
-    shutil.rmtree(root, ignore_errors=True)
-    shutil.rmtree(fold, ignore_errors=True)
-    shutil.rmtree(two, ignore_errors=True)
+
+    # a blank first column: the row labels and the y tick numbers move to the first
+    # column that is on
+    blank = synthetic_tree(tempfile.mkdtemp(prefix="blank_", dir=TMPROOT), cig_drop=(), sim_gamma=False)
+    fig = aggregate.sweep_grid("gamma", aggregate.columns(blank), blank)
+    axes = np.array(fig.axes[:6]).reshape(3, 2)
+    check(
+        "(vi) blank first column: every simulation cell off, every cigarette cell on",
+        not any(a.axison for a in axes[:, 0]) and all(a.axison for a in axes[:, 1]),
+    )
+    labels = [ax.get_ylabel() for ax in axes[:, 1]]
+    check(
+        "(vi) blank first column: the three y-labels are on the cigarette column",
+        labels == ["coverage", "width", "worst error"],
+        f"{labels}",
+    )
+    check("(vi) blank first column: its y tick numbers render", all(ticks_render(ax) for ax in axes[:, 1]))
+    plt.close(fig)
+
+    # a legend that wraps must not sit on the column titles: ten methods, two rows
+    ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF))
+    for label, fig in (
+        ("perf row", aggregate.perf_row("wall_clock", aggregate.columns(ten), ten)),
+        ("gamma grid", aggregate.sweep_grid("gamma", aggregate.columns(ten), ten)),
+    ):
+        fig.canvas.draw()
+        legend = fig.legends[0]
+        box = legend.get_window_extent()
+        titles = [ax.title.get_window_extent() for ax in fig.axes if ax.get_title()]
+        if label == "perf row":
+            n, rows = len(legend.get_texts()), legend_rows(legend)
+            check("(vi) ten methods: the perf legend wraps to two rows", rows == 2, f"{n} entries in {rows}")
+        check(
+            f"(vi) ten methods: the {label} legend clears the column titles",
+            bool(titles) and box.y0 > max(t.y1 for t in titles),
+            f"legend y0 {box.y0:.0f}, titles y1 {max(t.y1 for t in titles):.0f}",
+        )
+        plt.close(fig)
+    for folder in (root, fold, two, blank, ten):
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def leg_vii(shipped):
