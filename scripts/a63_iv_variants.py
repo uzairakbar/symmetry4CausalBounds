@@ -6,7 +6,7 @@ drawn normalised is clamped to a linear axis on `CLAMP_YLIM` (`create_sweep_plot
 a DA+ IV method may spell its instrument mode, `DA+PI+IV(Z)` for the configured Z
 alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
 (`parse_method` in `constants.py`, `resolve_dataset_block`, `build_methods`,
-`fit_model`, the intersection's `t_as_iv`, `_plot_headline`); both recipes list
+`fit_model`, the intersection's `instrument`, `_plot_headline`); both recipes list
 `DA+PI+IV(Z)` beside `DA+PI+IV`. Legs:
 
   (D)   the digest leg (scripts/digest_leg.py), as a56 to a61: no shipped block
@@ -14,10 +14,11 @@ alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
         Catches: a bare name parsed as the Z mode (every DA+PI+IV pkl moves), a
         moved number anywhere on the shipped path. Misses: the configured-set
         path and the figure bytes, which (i) to (v) cover.
-  (i)   the grammar: the 13 bare names parse as (base, "T,Z"), the six legal
-        spellings (whitespace inside the parentheses tolerated) and the twelve
-        rejections, through `parse_method` and through `resolve_dataset_block`,
-        where the stored spelling is `base`, `base(Z)` or `base(T,Z)`; a duplicate
+  (i)   the grammar: the 13 bare names parse as (base, "T,Z"), the eight legal
+        spellings (whitespace inside the parentheses tolerated; `(T)` since
+        round 12, a64 pins what it computes) and the twelve rejections, through
+        `parse_method` and through `resolve_dataset_block`, where the stored
+        spelling is `base`, `base(Z)`, `base(T)` or `base(T,Z)`; a duplicate
         (base, mode) pair raises naming both entries (`DA+PI+IV` beside
         `DA+PI+IV(T,Z)`, `PI` twice), `DA+PI+IV` beside `DA+PI+IV(Z)` resolves; a
         suffix on a non-DA method raises naming it; `DA+IV(Z)` under an empty set
@@ -44,7 +45,7 @@ alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
         empty Z `DA+PI+IV(Z)` is `DA+PI` and `PI&DA+PI+IV(Z)` is `PI&DA+PI` to
         exactly 0.0, and `fit_model` on `DA+IV(Z)` raises. Catches: G stacked in
         the Z mode (width 2), the Z variant built from `da_iv_common` (the T-side
-        term in its bound), the intersection ignoring `t_as_iv`. Misses: a wrong
+        term in its bound), the intersection ignoring `instrument`. Misses: a wrong
         `gamma_z` compensated by a wrong `epsilon_iv_z`, which nothing produces.
   (iii) the rollback: `NORMALIZED_SWEEP_SUFFIXES` is width and worst_error,
         `normalize_sweep` returns an `_approx_error` input untouched with one
@@ -151,12 +152,24 @@ from src.main import ORCHESTRATORS  # noqa: E402
 from src.methods.regression import TwoStageLeastSquaresIV  # noqa: E402
 from src.sem.cigarettes import CigaretteSEM, V, build_design  # noqa: E402
 
-SPELLED = ("DA+PI+IV(Z)", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(Z)", "PI&DA+PI+IV(T,Z)", "DA+IV(Z)", "DA+IV(T,Z)")
+SPELLED = (
+    "DA+PI+IV(Z)",
+    "DA+PI+IV(T,Z)",
+    "DA+PI+IV(T)",
+    "PI&DA+PI+IV(Z)",
+    "PI&DA+PI+IV(T,Z)",
+    "PI&DA+PI+IV(T)",
+    "DA+IV(Z)",
+    "DA+IV(T,Z)",
+    "DA+IV(T)",
+)
 LEGAL = {
     "DA+PI+IV(Z)": ("DA+PI+IV", "Z"),
     "DA+PI+IV( Z )": ("DA+PI+IV", "Z"),
     "DA+PI+IV(T,Z)": ("DA+PI+IV", "T,Z"),
     "DA+PI+IV(T, Z)": ("DA+PI+IV", "T,Z"),
+    "DA+PI+IV(T)": ("DA+PI+IV", "T"),
+    "DA+PI+IV( T )": ("DA+PI+IV", "T"),
     "PI&DA+PI+IV(Z)": ("PI&DA+PI+IV", "Z"),
     "PI&DA+PI+IV(T,Z)": ("PI&DA+PI+IV", "T,Z"),
     "DA+IV(Z)": ("DA+IV", "Z"),
@@ -172,7 +185,7 @@ REJECTED = (
     "DA+PI+IV(Z,T)",
     "DA+PI+IV()",
     "DA+PI+IV(Z)(Z)",
-    "DA+PI+IV(T)",
+    "DA+PI+IV(T,T)",
     "DA+PI+IV (Z)",
     "da+pi+iv(z)",
 )

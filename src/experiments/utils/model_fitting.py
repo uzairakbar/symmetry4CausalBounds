@@ -56,7 +56,8 @@ def fit_model(
       DA+ ones the joint Z-tilde = (G, Z), and the intersection takes the raw
       Z and stacks G onto its DA branch itself
     - a DA+ IV method spelled `(Z)` (`parse_method`) sees the real Z alone,
-      no G; bare and `(T,Z)` are the joint instrument
+      no G; `(T)` sees the translation amounts G alone, no Z; bare and `(T,Z)`
+      are the joint instrument
 
     Args:
         model: Model instance to fit
@@ -97,9 +98,9 @@ def fit_model(
         # hand-written call and it must say what it means
         raise ValueError("X_base without Z_base: pass the untiled instrument beside the untiled design.")
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
-    # the DA+ IV methods' instrument: Z-tilde = (T, Z) by default, the real Z
-    # alone in the (Z) mode
-    z_da = Z if mode == "Z" else _joint(G, Z)
+    # the DA+ IV methods' instrument by mode: Z-tilde = (T, Z) by default, the real Z
+    # alone in the (Z) mode, the translation amounts alone in the (T) mode
+    z_da = {"T,Z": _joint(G, Z), "Z": Z, "T": _translation(G, len(X))}[mode]
 
     # Dispatch based on the base name to use correct data
     if base == "PI":
@@ -168,3 +169,10 @@ def _joint(G, Z):
     """Z-tilde for a DA+ method; with no translation amounts the real Z alone,
     which under an empty Z is no instrument, as before."""
     return Z if G is None else joint_instrument(G, Z)
+
+
+def _translation(G, n):
+    """The translation amounts as the (n, k) instrument of the (T) mode."""
+    if G is None:
+        raise ValueError("the (T) mode needs the translation amounts G")
+    return np.asarray(G).reshape(n, -1)

@@ -759,7 +759,8 @@ class MethodRegistry:
         A DA+ IV method may carry an instrument mode (`parse_method`): bare or
         `DA+PI+IV(T,Z)` constrains the joint Z-tilde = (T, Z) at the joint budget,
         `DA+PI+IV(Z)` the configured Z alone at the non-DA budget `epsilon_iv_z`
-        with no T term. Keys are the spellings as requested.
+        with no T term, `DA+PI+IV(T)` the translation amounts alone at the T-side
+        term `epsilon_iv` with no Z term. Keys are the spellings as requested.
 
         Args:
             method_names: List of method names to build
@@ -869,20 +870,31 @@ class MethodRegistry:
         # row of SS2.6 (epsilon_iv_z, bound sqrt(epsilon_iv_z^2 + s^2 gamma_z)) and
         # no T term
         da_z_common = dict(common, epsilon_iv=epsilon_iv_z, gamma_z=gamma_z, rho=rho)
-        z_builders = {
-            "DA+IV": all_builders["DA+IV"],  # the mode is a fit-time choice for 2SLS
-            "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_z_common),
-            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, t_as_iv=False, **int_iv_common),
+        # the (T) mode: the DA ball with the translation amounts alone, the T-side
+        # term and no real-Z radius (gamma_z 0 makes `iv_bound` exactly `epsilon_iv`)
+        da_t_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=0.0, rho=rho)
+        mode_builders = {
+            "Z": {
+                "DA+IV": all_builders["DA+IV"],  # the mode is a fit-time choice for 2SLS
+                "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_z_common),
+                "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, instrument="Z", **int_iv_common),
+            },
+            "T": {
+                "DA+IV": all_builders["DA+IV"],
+                "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_t_common),
+                "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, instrument="T", **int_iv_common),
+            },
         }
-        if set(z_builders) != set(IV_MODE_METHODS):
-            raise ValueError("IV_MODE_METHODS out of sync.")
+        for builders in mode_builders.values():
+            if set(builders) != set(IV_MODE_METHODS):
+                raise ValueError("IV_MODE_METHODS out of sync.")
 
         built = {}
         for name in method_names:
             base, mode = parse_method(name)
             if base not in all_builders:
                 continue
-            built[name] = all_builders[base] if mode == "T,Z" else z_builders[base]
+            built[name] = all_builders[base] if mode == "T,Z" else mode_builders[mode][base]
         return built
 
 

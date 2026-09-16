@@ -42,11 +42,12 @@ INV = r"\textnormal{\i}\!\operatorname{nv}"
 
 # the DA+ methods ending in +IV take an instrument mode: bare or `(T,Z)` is the
 # joint Z-tilde = (T, Z) of Asm. 3 (the DA translation amount as an instrument
-# beside the configured Z), `(Z)` the configured Z alone with no T term
+# beside the configured Z), `(Z)` the configured Z alone with no T term, `(T)`
+# the translation amount alone, no Z term
 IV_MODE_METHODS: tuple[str, ...] = ("DA+IV", "DA+PI+IV", "PI&DA+PI+IV")
-IV_MODES: tuple[str, ...] = ("T,Z", "Z")
+IV_MODES: tuple[str, ...] = ("T,Z", "Z", "T")
 # `base(mode)`: no whitespace outside the parentheses, any inside them
-_METHOD_PATTERN = re.compile(r"^(?P<base>[^()\s]+)(?:\(\s*(?P<mode>Z|T\s*,\s*Z)\s*\))?$")
+_METHOD_PATTERN = re.compile(r"^(?P<base>[^()\s]+)(?:\(\s*(?P<mode>T\s*,\s*Z|Z|T)\s*\))?$")
 
 
 def parse_method(name: str) -> tuple[str, str]:
@@ -58,7 +59,7 @@ def parse_method(name: str) -> tuple[str, str]:
     if match is None:
         # a YAML flow list splits `DA+PI+IV(T,Z)` at its comma
         hint = "; quote the entry in a YAML flow list" if name.endswith("(T") else ""
-        raise ValueError(f"malformed method entry {name!r}: a mode suffix is `(Z)` or `(T,Z)`{hint}.")
+        raise ValueError(f"malformed method entry {name!r}: a mode suffix is `(Z)`, `(T)` or `(T,Z)`{hint}.")
     base, mode = match.group("base"), match.group("mode")
     if mode is None:
         return base, "T,Z"
@@ -68,8 +69,8 @@ def parse_method(name: str) -> tuple[str, str]:
 
 
 def spelled_method(name: str) -> str:
-    """The stored spelling: bare for the default, `base(Z)` for the Z mode,
-    `base(T,Z)` when the default is spelled out."""
+    """The stored spelling: bare for the default, `base(Z)` and `base(T)` for
+    the two single-instrument modes, `base(T,Z)` when the default is spelled out."""
     base, mode = parse_method(name)
     return base if "(" not in name else f"{base}({mode})"
 
@@ -137,26 +138,31 @@ ALPHA_MAP: dict[str, float] = {
     "PI&DA+PI+IV": 0.4,
 }
 
-# the spelled modes: `(T,Z)` is the bare entry under another name, `(Z)` keeps
-# the hue and alpha and shows the mode by dropping the tilde on the instrument
+# the spelled modes: `(T,Z)` is the bare entry under another name, `(Z)` and
+# `(T)` keep the hue and alpha and show the mode on the instrument
 for _base in IV_MODE_METHODS:
     TEX_MAPPER[f"{_base}(T,Z)"] = TEX_MAPPER[_base]
     for _table in (COLOR_MAP, ALPHA_MAP):
-        _table[f"{_base}(T,Z)"] = _table[_base]
-        _table[f"{_base}(Z)"] = _table[_base]
+        for _mode in IV_MODES:
+            _table[f"{_base}({_mode})"] = _table[_base]
 TEX_MAPPER.update(
     {
         "DA+PI+IV(Z)": rf"$\widetilde{{{PI}}}+{IV}$",
         "PI&DA+PI+IV(Z)": rf"${PI}\cap(\widetilde{{{PI}}}+{IV})$",
         "DA+IV(Z)": rf"$\widetilde{{{IV}}}_{{Z}}$",
+        "DA+PI+IV(T)": rf"$\widetilde{{{PI}}}+\widetilde{{{IV}}}_{{T}}$",
+        "PI&DA+PI+IV(T)": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}}_{{T}})$",
+        "DA+IV(T)": rf"$\widetilde{{{IV}}}_{{T}}$",
     }
 )
 
 # Visual style configuration
-POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV", "DA+IV(Z)", "DA+IV(T,Z)", "IV"]
+POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV", "DA+IV(Z)", "DA+IV(T)", "DA+IV(T,Z)", "IV"]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 # the (Z) siblings on the sweep lines: same hue, this dash-dot pattern
 INSTRUMENT_Z_STYLE: tuple[int, tuple[int, int, int, int]] = (0, (3, 1, 1, 1))
+# the (T) siblings: same hue, dotted
+INSTRUMENT_T_STYLE: tuple[int, tuple[int, int]] = (0, (1, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 
 # Plotting defaults

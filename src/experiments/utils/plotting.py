@@ -21,6 +21,7 @@ from .constants import (
     DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
+    INSTRUMENT_T_STYLE,
     INSTRUMENT_Z_STYLE,
     NORMALIZE_BASELINES,
     NORMALIZED_SWEEP_SUFFIXES,
@@ -313,6 +314,19 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
     return highlighted
 
 
+def _line_style(method_name: str):
+    """Point estimates dashed, a (Z) sibling dash-dotted and a (T) sibling dotted
+    in the base's hue, everything else solid."""
+    if method_name in POINT_ESTIMATES:
+        return POINT_ESTIMATE_STYLE
+    mode = iv_mode(method_name)
+    if mode == "Z":
+        return INSTRUMENT_Z_STYLE
+    if mode == "T":
+        return INSTRUMENT_T_STYLE
+    return PARTIAL_IDENTIFICATION_STYLE
+
+
 def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[dict[str, NDArray], str | None]:
     """Every series divided by the baseline's per-step mean (SS10.1); returns the
     new dict and the baseline's name, or the input untouched and None.
@@ -465,17 +479,9 @@ def create_sweep_plot(
             if method_name in legend_items:
                 legend_items[legend_items.index(method_name)] = label
 
-            # Plot: point estimates dashed, a (Z) sibling dash-dotted in its base's
-            # hue, everything else solid
-            if method_name in POINT_ESTIMATES:
-                linestyle = POINT_ESTIMATE_STYLE
-            elif iv_mode(method_name) == "Z":
-                linestyle = INSTRUMENT_Z_STYLE
-            else:
-                linestyle = PARTIAL_IDENTIFICATION_STYLE
+            # Plot
             color = colors[COLOR_MAP[method_name]]
-
-            handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=linestyle)[0]
+            handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=_line_style(method_name))[0]
             plot_handles.append(handle)
 
             # Confidence Intervals
