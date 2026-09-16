@@ -16,7 +16,6 @@ with a shared y axis, drawn only where some dataset ran the perf sweep.
 
 import argparse
 import glob
-import math
 import os
 
 import matplotlib.pyplot as plt
@@ -56,6 +55,7 @@ ROWS: tuple[tuple[str, str], ...] = (("coverage", "coverage"), ("width", "width"
 PERF_METRICS: tuple[str, ...] = ("wall_clock", "seed_var")
 # one legend row holds this many entries; more wrap
 LEGEND_MAX_COLS: int = 6
+LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column titles
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
 PERF_ROW_HEIGHT: float = 4.2  # room for the two-line wall-clock label
@@ -106,35 +106,53 @@ def _frame(ax, x, xscale: str, vlines) -> None:
             ax.axvline(v, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
 
 
-def _legend(fig, handles: dict) -> int:
+def _legend(fig, handles: dict):
     """One legend for the figure, keyed on (base, mode) so a bare name and its
-    `(T,Z)` spelling are one entry, in the repo's method order; returns the rows."""
+    `(T,Z)` spelling are one entry, in the repo's method order; returns the
+    legend, or None with nothing drawn."""
     keys = sorted(
         handles,
         key=lambda k: (ALL_METHODS.index(k[0]) if k[0] in ALL_METHODS else len(ALL_METHODS), IV_MODES.index(k[1])),
     )
     labels = [TEX_MAPPER.get(spelled_method(handles[k][1]), handles[k][1]) for k in keys]
-    ncol = min(len(keys), LEGEND_MAX_COLS)
-    if keys:
-        fig.legend(
-            [handles[k][0] for k in keys],
-            labels,
-            loc="upper center",
-            ncol=ncol,
-            bbox_to_anchor=(0.5, 1.0),
-            fontsize=FS_TICK,
-            frameon=True,
-            edgecolor="black",
-            fancybox=False,
-        )
-    return math.ceil(len(keys) / ncol) if keys else 0
+    if not keys:
+        return None
+    return fig.legend(
+        [handles[k][0] for k in keys],
+        labels,
+        loc="upper center",
+        ncol=min(len(keys), LEGEND_MAX_COLS),
+        bbox_to_anchor=(0.5, 1.0),
+        fontsize=FS_TICK,
+        frameon=True,
+        edgecolor="black",
+        fancybox=False,
+    )
 
 
-def _finish(fig, axes, xlabel: str, rows: int, path: str | None):
+def _label_rows(axes_rows, labels) -> None:
+    """The row label and the y tick numbers on the first axes of each row that is
+    on (`sharey` blanks the inner columns' tick labels; a blank first column must
+    not take the labels with it)."""
+    for row, label in zip(axes_rows, labels, strict=True):
+        first = next((ax for ax in row if ax.axison), None)
+        if first is not None:
+            first.set_ylabel(label, fontsize=FS_LABEL)
+            first.tick_params(labelleft=True)
+
+
+def _finish(fig, axes, xlabel: str, legend, path: str | None):
     fig.supxlabel(xlabel, fontsize=FS_LABEL)
     _label_major_ticks_only(*axes)
     _at_least_two_major_ticks(*axes)
-    fig.tight_layout(rect=(0, 0, 1, 0.93 if rows <= 1 else 0.90))
+    # the room the legend takes, as rendered, so a second or third row never sits
+    # on the column titles
+    top = 0.97
+    if legend is not None:
+        fig.canvas.draw()
+        box = legend.get_window_extent().transformed(fig.transFigure.inverted())
+        top = max(0.5, box.y0 - LEGEND_GAP)
+    fig.tight_layout(rect=(0, 0, 1, top))
     if path is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         fig.savefig(path, format=PLOT_FORMAT, dpi=PLOT_DPI)
@@ -201,11 +219,10 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
             _frame(ax, x, spec.xscale, spec.vlines)
             ax.set_yscale("linear")
             ax.set_ylim(*CLAMP_YLIM)
-    for r, (_, label) in enumerate(ROWS):
-        axes[r, 0].set_ylabel(label, fontsize=FS_LABEL)
-    rows = _legend(fig, handles)
+    _label_rows(axes, [label for _, label in ROWS])
+    legend = _legend(fig, handles)
     path = None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}"
-    return _finish(fig, axes.ravel(), xlabel or spec.xlabel, rows, path)
+    return _finish(fig, axes.ravel(), xlabel or spec.xlabel, legend, path)
 
 
 def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None = None):
@@ -240,10 +257,10 @@ def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None =
             handles.setdefault(parse_method(name), (handle, name))
         _frame(ax, x, pspec.xscale, pspec.vlines)
         ax.set_yscale(spec.yscale)
-    axes[0].set_ylabel(spec.ylabel, fontsize=FS_LABEL)
-    rows = _legend(fig, handles)
+    _label_rows([axes], [spec.ylabel])
+    legend = _legend(fig, handles)
     path = None if out is None else f"{out}/epsilon_{metric}.{PLOT_FORMAT}"
-    return _finish(fig, axes, xlabel or pspec.xlabel, rows, path)
+    return _finish(fig, axes, xlabel or pspec.xlabel, legend, path)
 
 
 # ------------------------------------------------------------------ cli

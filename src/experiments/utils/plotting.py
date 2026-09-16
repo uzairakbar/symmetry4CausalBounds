@@ -331,6 +331,18 @@ def _line_style(method_name: str):
     return PARTIAL_IDENTIFICATION_STYLE
 
 
+def _nearest_finite(values: NDArray) -> NDArray:
+    """Every NaN replaced by the last finite value before it, else the first after."""
+    out = np.array(values, dtype=float)
+    finite = np.flatnonzero(np.isfinite(out))
+    if not len(finite):
+        return out
+    for i in np.flatnonzero(~np.isfinite(out)):
+        before = finite[finite < i]
+        out[i] = out[before[-1]] if len(before) else out[finite[finite > i][0]]
+    return out
+
+
 def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], failures: dict[str, NDArray] | None = None):
     """One mean line and one 2.5 / 97.5 band per method on `ax`, in the method's
     hue and line style; a method with no finite mean is skipped. Returns the
@@ -365,8 +377,13 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], failures:
             counts = np.asarray(failures[method_name])
             marked = counts > 0
             if marked.any():
-                ax.plot(x_values[marked], mean_error[marked], linestyle="none", marker="x", markersize=7, color=color)
-                for x_i, y_i, count in zip(x_values[marked], mean_error[marked], counts[marked], strict=True):
+                # a step where every run failed has no mean to sit on: the marker
+                # goes at the level of the nearest finite point of the same line
+                # (the last one before it, else the first one after), the count says
+                # what happened there
+                level = _nearest_finite(mean_error)
+                ax.plot(x_values[marked], level[marked], linestyle="none", marker="x", markersize=7, color=color)
+                for x_i, y_i, count in zip(x_values[marked], level[marked], counts[marked], strict=True):
                     if np.isfinite(y_i):
                         ax.annotate(
                             str(int(count)),

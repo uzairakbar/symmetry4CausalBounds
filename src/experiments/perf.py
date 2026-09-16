@@ -66,14 +66,16 @@ def budgets(runner, data) -> dict[str, Any]:
     )
 
 
-def builders(runner, data) -> dict[str, Any]:
-    return runner.method_factory(**budgets(runner, data)) if runner.method_factory else runner.methods
+def builders(runner, data, b=None) -> dict[str, Any]:
+    b = budgets(runner, data) if b is None else b
+    return runner.method_factory(**b) if runner.method_factory else runner.methods
 
 
-def baseline_pi(runner, data) -> PartialR2:
+def baseline_pi(runner, data, b=None) -> PartialR2:
     """A fresh baseline PI with the registry's PI kwargs, serial whatever the
-    block's `n_jobs` says; it exists whether or not `PI` is in `methods`."""
-    b = budgets(runner, data)
+    block's `n_jobs` says; it exists whether or not `PI` is in `methods`. `b` is
+    the budgets dict, computed once by the caller when the build is timed."""
+    b = budgets(runner, data) if b is None else b
     return PartialR2(
         gamma=b["gamma"],
         epsilon=b["epsilon"],
@@ -135,12 +137,15 @@ def bounds_along(models: dict[str, Any], runner, data, x) -> dict[str, tuple[np.
 def normaliser(runner, data, repeats: int) -> tuple[list[float], float]:
     """Seconds of a single baseline PI solve, problem construction included: `repeats`
     fresh build + fit + predict calls after one warm-up call that is dropped;
-    returns every call's seconds and the median of the kept ones."""
+    returns every call's seconds and the median of the kept ones. The oracle
+    budgets are fitted once, outside the timer: they are the runner's, not the
+    solve's."""
     kw = runner.get_predict_kwargs(runner.get_param_range()[0], 0)
+    b = budgets(runner, data)
     seconds = []
     for _ in range(repeats + 1):
         start = time.perf_counter()
-        _fit(runner, data, "PI", baseline_pi(runner, data)).predict(data.X_test, **kw)
+        _fit(runner, data, "PI", baseline_pi(runner, data, b)).predict(data.X_test, **kw)
         seconds.append(time.perf_counter() - start)
     return seconds, float(np.median(seconds[1:]))
 
@@ -206,13 +211,14 @@ def seed_var(runner, data, x):
     backends = installed_backends()
     if len(backends) < 2:
         logger.warning(f"seed_var: {len(backends)} conic backend(s) installed; D(eps) needs two or more.")
-    build = builders(runner, data)
+    b = budgets(runner, data)
+    build = builders(runner, data, b)
     fixed = {
         name: _fit(runner, data, name, build[name]())
         for name in runner.methods
         if name != "ATE" and parse_method(name)[0] not in CONIC_FITS
     }
-    pi = _fit(runner, data, "PI", baseline_pi(runner, data))
+    pi = _fit(runner, data, "PI", baseline_pi(runner, data, b))
 
     runs = []
     for backend in backends:

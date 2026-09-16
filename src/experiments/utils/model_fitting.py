@@ -99,8 +99,14 @@ def fit_model(
         raise ValueError("X_base without Z_base: pass the untiled instrument beside the untiled design.")
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
     # the DA+ IV methods' instrument by mode: Z-tilde = (T, Z) by default, the real Z
-    # alone in the (Z) mode, the translation amounts alone in the (T) mode
-    z_da = {"T,Z": _joint(G, Z), "Z": Z, "T": _translation(G, len(X))}[mode]
+    # alone in the (Z) mode, the translation amounts alone in the (T) mode. Lazy:
+    # only the (T) mode needs G, and a non-DA method may be fitted without one
+    if mode == "Z":
+        z_da = Z
+    elif mode == "T":
+        z_da = _translation(G, len(X))
+    else:
+        z_da = _joint(G, Z)
 
     # Dispatch based on the base name to use correct data
     if base == "PI":

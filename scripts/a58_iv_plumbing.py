@@ -530,10 +530,10 @@ def leg_i(seed):
     check("(i) do-MNIST overrides know nothing of the carrier", unaware)
     # the batch B ruling adds `epsilon_iv_z` to every orchestrator's `build_methods`;
     # nothing else in do_mnist.py may move, the two overrides least of all. Round 12
-    # adds the `_run_perf` stub that logs and skips (and reworded the docstring's
-    # perf sentence); those lines, every one naming perf, are set aside before the
-    # count. Needs a checkout: on an archive copy (a break-it outside the worktree)
-    # it is skipped
+    # adds the `_run_perf` stub that logs and skips (the lines from its `def` to the
+    # blank line that ends it) and reworded the docstring's two "Phase" lines; those
+    # are set aside before the count, by anchor, not by word. Needs a checkout: on
+    # an archive copy (a break-it outside the worktree) it is skipped
     checkout = subprocess.run(["git", "-C", REPO, "rev-parse", "--git-dir"], capture_output=True, text=True)
     if checkout.returncode != 0:
         print(f"      (i) do_mnist.py diff since {BASE_COMMIT} SKIPPED: not a git checkout")
@@ -544,7 +544,21 @@ def leg_i(seed):
             text=True,
         ).stdout
         changed = [line for line in diff.split("\n") if line[:1] in "+-" and line[:3] not in ("+++", "---")]
-        changed = [line for line in changed if "perf" not in line.lower() and line.strip() not in ("+", "-")]
+        kept, in_stub = [], False
+        for line in changed:
+            if line.startswith("+") and "def _run_perf(" in line:
+                in_stub = True
+            if in_stub:
+                in_stub = line.strip() != "+"  # the stub ends at its blank line
+                continue
+            if (
+                "Phase 1 is the query sweep" in line
+                or "Phase 2 -- see" in line
+                or "for what each one still needs" in line
+            ):
+                continue
+            kept.append(line)
+        changed = kept
         outside = [
             line for line in changed if any(k in line for k in ("_draw_base", "_load_data", "sample_paired", "X_raw"))
         ]
