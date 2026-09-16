@@ -5,6 +5,20 @@ from loguru import logger
 from src.methods.abstract import pointEstimator
 
 
+def _solve_conic(prob, backend=None):
+    """One conic solve: the pinned `(name, opts)` backend when given (the perf
+    sweep's seed_var knob, no warm start), else the CLARABEL-then-ECOS chain."""
+    if backend is not None:
+        name, opts = backend
+        prob.solve(solver=name, warm_start=False, **opts)
+        return
+    try:
+        prob.solve(solver=cp.CLARABEL)
+    except cp.SolverError:
+        logger.warning("CLARABLE solver failed, falling back to ECOS.")
+        prob.solve(solver=cp.ECOS)
+
+
 class LeastSquaresClosedForm(pointEstimator):
     """Closed-form least squares regression.
 
@@ -33,16 +47,16 @@ class LeastSquaresClosedForm(pointEstimator):
 
 
 class LeastSquaresIterative(pointEstimator):
+    def __init__(self, backend: tuple[str, dict] | None = None):
+        self.backend = backend
+        super().__init__()
+
     def _fit(self, X, y, **kwargs):
         h0 = np.linalg.pinv(X) @ y
         h = cp.Variable(h0.shape)
         cost = cp.norm(y - X @ h)
         prob = cp.Problem(cp.Minimize(cost))
-        try:
-            prob.solve(solver=cp.CLARABEL)
-        except cp.SolverError:
-            logger.warning("CLARABLE solver failed, falling back to ECOS.")
-            prob.solve(solver=cp.ECOS)
+        _solve_conic(prob, self.backend)
         self._W = h.value
         return self
 
@@ -51,8 +65,9 @@ class LeastSquaresIterative(pointEstimator):
 
 
 class TwoStageLeastSquaresIV(pointEstimator):
-    def __init__(self, fit_intercept: bool = False, **kwargs):
+    def __init__(self, fit_intercept: bool = False, backend: tuple[str, dict] | None = None, **kwargs):
         self.fit_intercept = fit_intercept
+        self.backend = backend  # the second stage's conic solve honours it
         super().__init__(**kwargs)
 
     def _fit(self, X, y, Z, **kwargs):
@@ -65,7 +80,7 @@ class TwoStageLeastSquaresIV(pointEstimator):
         S1 = LeastSquaresClosedForm().fit(Zc, X - self._mu).solution
         Xhat = Zc @ S1
 
-        S2 = LeastSquaresIterative().fit(Xhat, np.asarray(y) - offset).solution
+        S2 = LeastSquaresIterative(backend=self.backend).fit(Xhat, np.asarray(y) - offset).solution
         self._W = S2
         self._offset = offset
 
@@ -211,7 +226,8 @@ class GradientDescentERM(pointEstimator):
 
 
 class GeneralizedMomentMethodIV(pointEstimator):
-    def __init__(self, **kwargs):
+    def __init__(self, backend: tuple[str, dict] | None = None, **kwargs):
+        self.backend = backend
         super().__init__(**kwargs)
 
     def _fit(self, X, y, Z, **kwargs):
@@ -221,11 +237,7 @@ class GeneralizedMomentMethodIV(pointEstimator):
         moment_vector = cp.Constant(y) - cp.Constant(X) @ h
         cost = cp.quad_form(moment_vector, cp.psd_wrap(cp.Constant(Pi_Z)))
         prob = cp.Problem(cp.Minimize(cost))
-        try:
-            prob.solve(solver=cp.CLARABEL)
-        except cp.SolverError:
-            logger.warning("CLARABLE solver failed, falling back to ECOS.")
-            prob.solve(solver=cp.ECOS)
+        _solve_conic(prob, self.backend)
         self._W = h.value
         return self
 

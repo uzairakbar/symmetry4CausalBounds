@@ -1,4 +1,4 @@
-"""End-to-end do-MNIST smoke run at reduced scale: query sweep + perf.
+"""End-to-end do-MNIST smoke run at reduced scale: query sweep (perf logs a warning and skips).
 
 python scripts/smoke_do_mnist.py [--full]
 """

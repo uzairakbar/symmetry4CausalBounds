@@ -212,10 +212,10 @@ PANEL_CONFIGS = {
 
 # Per-plot overrides for the sweep, perf and query-sweep figures. Keyed
 # experiment -> plot id, where the id is the `fname` the orchestrator builds:
-# '<param>_<metric>' (`_run_sweeps`), 'perf' (`_run_perf`) and 'query' (the
-# radial query sweep, `_plot_query_sweep`). No '_sweep' suffix on the id --
-# plotting.py appends that when writing the file, so
-# 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
+# '<param>_<metric>' (`_run_sweeps`), 'epsilon_wall_clock' and 'epsilon_seed_var'
+# (`_run_perf`, the two perf sweeps) and 'query' (the radial query sweep,
+# `_plot_query_sweep`). No '_sweep' suffix on the id -- plotting.py appends that
+# when writing the file, so 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
 # '*' applies to every experiment; a named entry wins key by key, and both win
 # over the plot function's own arguments (the query sweep's come from
 # configs.ANNOTATE_SWEEP_PLOT).
@@ -224,8 +224,8 @@ PANEL_CONFIGS = {
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
 #   normalize      width / worst_error sweeps only: divide every series by the
-#                  baseline's (SS10.1); a `_coverage` or `_approx_error` id rejects it
-#   bars           perf only; False retires the stacked reliability bars
+#                  baseline's (SS10.1); a `_coverage`, `_approx_error`, `_wall_clock`
+#                  or `_seed_var` id rejects it
 # Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
 #   legend         False hides it, True shows it, a str or (x, y) tuple is a
 #                  matplotlib loc. Absent: the plot function's own default (on).
@@ -239,14 +239,11 @@ PANEL_CONFIGS = {
 #   PLOT_CONFIGS["optical_device"]["query"] = {"title": r"radial sweep", "title_color": "tab:blue"}
 _STYLE_KEYS: set = {"legend", "x_color", "y_color", "title", "title_color"}
 _PLOT_KEYS: set = {"xlim", "ylim", "xscale", "yscale", "linear_width", "linthresh", "normalize"} | _STYLE_KEYS
-_PLOT_KEYS_PERF: set = (_PLOT_KEYS - {"xlim", "xscale", "normalize"}) | {"bars"}  # categorical x
 _PLOT_KEYS_QUERY: set = set(_STYLE_KEYS)  # limits and scale come from ANNOTATE_SWEEP_PLOT
 
 
 def plot_keys_for(plot_id: str) -> set:
     """The keys PLOT_CONFIGS accepts under this id."""
-    if plot_id == "perf":
-        return _PLOT_KEYS_PERF
     if plot_id == "query":
         return _PLOT_KEYS_QUERY
     return _PLOT_KEYS
@@ -264,16 +261,15 @@ def validate_plot_keys(name: str, table: dict[str, dict[str, Any]], allowed) -> 
         bad = set(cfg) - keys
         if bad:
             raise ValueError(f"{name}[{plot_id!r}]: unknown key(s) {sorted(bad)}.")
-        if "normalize" in cfg and plot_id.endswith(("_coverage", "_approx_error")):
-            # a rate divided by a rate means nothing, and a miss divided by a
-            # baseline that vanishes above gamma* reads as noise; loud, at import
-            raise ValueError(f"{name}[{plot_id!r}]: `normalize` is meaningless on a coverage or approx-error figure.")
+        if "normalize" in cfg and plot_id.endswith(("_coverage", "_approx_error", "_wall_clock", "_seed_var")):
+            # a rate divided by a rate means nothing, a miss divided by a
+            # baseline that vanishes above gamma* reads as noise, and the perf
+            # figures are already normalised; loud, at import
+            raise ValueError(f"{name}[{plot_id!r}]: `normalize` is meaningless on a coverage, error or perf figure.")
 
 
 PLOT_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
-    "*": {
-        "perf": {"bars": False},  # stacked reliability bars retired
-    },
+    "*": {},
 }
 
 for _exp, _plots in PLOT_CONFIGS.items():

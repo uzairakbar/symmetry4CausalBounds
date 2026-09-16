@@ -5,13 +5,14 @@ Every figure labels only its major ticks, and the five style keys of
 reach the figures through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`. Pkl-driven: it
 pairs `{param}_values.pkl` with `{param}_results.pkl` under `<artifacts>/<experiment>/
 sweep/` (so `trS_axis.pkl` and the statuses are ignored), and takes the query pair
-and `perf/perf.pkl` when present. No experiment is run.
+and the two perf sweep pkls (`perf/epsilon_values.pkl` with
+`perf/epsilon_{wall_clock,seed_var}_results.pkl`) when present. No experiment is run.
 
   (a) every re-rendered figure (each sweep param x metric, the query sweep, the
-      perf figure with its twin axis): zero non-empty minor tick labels on every
-      axes, both axes, at least one minor tick mark on every log axis, and at
-      least two major ticks inside the view on every axis; no plotting error
-      was swallowed;
+      two perf sweep figures): zero non-empty minor tick labels on every axes,
+      both axes, at least one minor tick mark on every log axis (the wall-clock
+      figure has one), and at least two major ticks inside the view on every
+      axis; no plotting error was swallowed;
   (b) `legend`: False removes the legend artist, a loc string places it, True
       shows it over a `hide_legend=True` argument, and the argument still hides
       it when the key is absent;
@@ -20,8 +21,8 @@ and `perf/perf.pkl` when present. No experiment is run.
   (d) `title` / `title_color`: the title text and colour; no title by default;
   (e) the same keys through `ANNOTATE_SWEEP_PLOT["pc12"]` kwargs on the query
       sweep, and `PLOT_CONFIGS[experiment]["query"]` overriding them key by key;
-  (f) the perf figure takes `title`, `x_color` (categorical tick labels) and
-      `y_color` (every y label, the twin included) from `PLOT_CONFIGS["*"]["perf"]`;
+  (f) the wall-clock perf figure takes `title`, `x_color` and `y_color` from
+      `PLOT_CONFIGS["*"]["epsilon_wall_clock"]`;
   (g) an unknown key is an import-time ValueError: copies of `constants.py` and
       `configs.py` with `legnd` injected fail to import in a subprocess, and
       `validate_plot_keys` raises when called directly;
@@ -63,7 +64,13 @@ sys.path.insert(0, REPO)
 
 from src.experiments.configs import ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
-from src.experiments.utils.constants import PANEL_CONFIGS, PLOT_CONFIGS, plot_keys_for, validate_plot_keys  # noqa: E402
+from src.experiments.utils.constants import (  # noqa: E402
+    PANEL_CONFIGS,
+    PLOT_CONFIGS,
+    SUBDIR_PERF,
+    plot_keys_for,
+    validate_plot_keys,
+)
 
 TMPROOT = os.path.expanduser("~/scratch/tmp/a32")
 SYNTHETIC = "_a32"
@@ -180,9 +187,33 @@ def render_query(experiment, x, results, save, **kwargs):
     return plt.gcf()
 
 
-def render_perf(experiment, record, save):
-    overlays = [m for m in ("wall_clock", "seed_var") if all(m in r for r in record.values())]
-    plotting.create_perf_plot(record, overlay_metrics=overlays, experiment=experiment, savefig=save)
+def render_perf(experiment, perf_dir, metric, save):
+    """One perf sweep figure from `perf/epsilon_values.pkl` and its `_results.pkl`,
+    as `_run_perf` draws it (the seed_var failures marked, no clip, no promotion)."""
+    x = load(f"{perf_dir}/epsilon_values.pkl")
+    results = load(f"{perf_dir}/epsilon_{metric}_results.pkl")
+    failures = f"{perf_dir}/epsilon_seed_var_failures.pkl"
+    meta = f"{perf_dir}/epsilon_perf_meta.pkl"
+    spec = METRIC_SPECS[metric]
+    plotting.create_sweep_plot(
+        x,
+        results,
+        experiment=experiment,
+        fname=f"epsilon_{metric}",
+        subdir=SUBDIR_PERF,
+        xlabel=load(meta).get("xlabel", PARAM_SPECS["epsilon"].xlabel)
+        if os.path.exists(meta)
+        else PARAM_SPECS["epsilon"].xlabel,
+        ylabel=spec.ylabel,
+        xscale=PARAM_SPECS["epsilon"].xscale,
+        yscale=spec.yscale,
+        vlines=PARAM_SPECS["epsilon"].vlines,
+        bootstrapped=(metric == "seed_var"),
+        clip_y=False,
+        promote_y=False,
+        failures=load(failures) if metric == "seed_var" and os.path.exists(failures) else None,
+        savefig=save,
+    )
     return plt.gcf()
 
 
@@ -251,23 +282,30 @@ def row_a(artifacts, experiments, save):
         else:
             print(f"  {experiment}: no query pkls")
 
-        perf = f"{artifacts}/{experiment}/perf/perf.pkl"
-        if os.path.exists(perf):
-            before = len(_errors)
-            fig = render_perf(experiment, load(perf), save)
-            labels, bare, n_log, fewest = tick_report(fig)
-            n_axes = len(fig.axes)
-            plt.close("all")
-            n_fig += 1
-            check(
-                "(a)",
-                f"{experiment} perf",
-                labels == 0 and bare == 0 and n_log >= 1 and fewest >= 2 and len(_errors) == before,
-                f"{n_axes} axes (twin included): minor labels {labels}, log axes without marks {bare}/{n_log}, "
-                f"fewest majors in view {fewest}",
-            )
+        perf_dir = f"{artifacts}/{experiment}/perf"
+        if os.path.exists(f"{perf_dir}/epsilon_values.pkl"):
+            for metric in ("wall_clock", "seed_var"):
+                if not os.path.exists(f"{perf_dir}/epsilon_{metric}_results.pkl"):
+                    print(f"  {experiment}: no perf {metric} pkl")
+                    continue
+                before = len(_errors)
+                fig = render_perf(experiment, perf_dir, metric, save)
+                labels, bare, n_log, fewest = tick_report(fig)
+                plt.close("all")
+                n_fig += 1
+                # the wall clock is the one perf figure drawn on a log y axis
+                check(
+                    "(a)",
+                    f"{experiment} perf {metric}",
+                    labels == 0
+                    and bare == 0
+                    and (n_log >= 1 or metric != "wall_clock")
+                    and fewest >= 2
+                    and len(_errors) == before,
+                    f"minor labels {labels}, log axes without marks {bare}/{n_log}, fewest majors in view {fewest}",
+                )
         else:
-            print(f"  {experiment}: no perf.pkl")
+            print(f"  {experiment}: no perf pkls")
     print(f"  {n_fig} figures re-rendered")
     if save:
         after = pdf_mtimes(artifacts)
@@ -436,38 +474,30 @@ def row_e(artifacts, experiments):
 
 
 def row_f(artifacts, experiments):
-    """The perf figure takes title, x_color and y_color from PLOT_CONFIGS['*']['perf']."""
-    path = None
+    """The wall-clock perf figure takes title, x_color and y_color from
+    PLOT_CONFIGS['*']['epsilon_wall_clock']."""
+    perf_dir = None
     for experiment in experiments:
-        if os.path.exists(f"{artifacts}/{experiment}/perf/perf.pkl"):
-            path, exp = f"{artifacts}/{experiment}/perf/perf.pkl", experiment
+        folder = f"{artifacts}/{experiment}/perf"
+        if os.path.exists(f"{folder}/epsilon_values.pkl") and os.path.exists(
+            f"{folder}/epsilon_wall_clock_results.pkl"
+        ):
+            perf_dir, exp = folder, experiment
             break
-    if path is None:
-        print("  (f) skipped: no perf.pkl under the artifacts")
+    if perf_dir is None:
+        print("  (f) skipped: no perf pkls under the artifacts")
         return
-    record = load(path)
-    base = dict(PLOT_CONFIGS.get("*", {}).get("perf", {}))
-    with injected(
-        "*", "perf", {**base, "title": "perf title", "title_color": "red", "x_color": "green", "y_color": "tab:blue"}
-    ):
-        fig = render_perf(exp, record, False)
-        fig.canvas.draw()
-        top = fig.axes[0]
-        title_ok = top.get_title() == "perf title" and same_colour(top.title.get_color(), "red")
-        y_ok = all(
-            same_colour(ax.yaxis.label.get_color(), "tab:blue")
-            and all(same_colour(t.get_color(), "tab:blue") for t in ax.get_yticklabels() if t.get_text())
-            for ax in fig.axes
-        )
-        # the twin shares the categorical labels but hides its x axis
-        xticks = [t for ax in fig.axes if ax.xaxis.get_visible() for t in ax.get_xticklabels() if t.get_text()]
-        x_ok = bool(xticks) and all(same_colour(t.get_color(), "green") for t in xticks)
+    cfg = {"title": "perf title", "title_color": "red", "x_color": "green", "y_color": "tab:blue"}
+    with injected("*", "epsilon_wall_clock", cfg):
+        report = style_report(render_perf(exp, perf_dir, "wall_clock", False).axes[0])
         plt.close("all")
+    ok_x, ok_y = colours_are(report, "green", "tab:blue")
+    title_ok = report["title"] == "perf title" and same_colour(report["title_color"], "red")
     check(
         "(f)",
-        f"{exp} perf title, x_color, y_color",
-        title_ok and y_ok and x_ok,
-        f"title {title_ok} y {y_ok} x {x_ok} on {len(fig.axes)} axes",
+        f"{exp} epsilon_wall_clock title, x_color, y_color",
+        title_ok and ok_x and ok_y,
+        f"title {report['title']!r} {report['title_color']} xlabel {report['xlabel']} ylabel {report['ylabel']}",
     )
 
 
@@ -483,8 +513,8 @@ def row_g():
     cases = {
         "constants": (
             "src/experiments/utils/constants.py",
-            '"perf": {"bars": False}',
-            '"perf": {"bars": False, "legnd": True}',
+            '    "*": {},',
+            '    "*": {"gamma_coverage": {"legnd": True}},',
         ),
         "configs": (
             "src/experiments/configs.py",

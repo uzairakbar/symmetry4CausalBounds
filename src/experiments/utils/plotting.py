@@ -34,7 +34,6 @@ from .constants import (
     POINT_ESTIMATE_STYLE,
     POINT_ESTIMATES,
     RC_PARAMS,
-    SUBDIR_PERF,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
@@ -54,6 +53,8 @@ X_MARK_MARGIN: float = 0.02
 # the frame, too little to read as widening (the 5 % `_pad` did).
 CLIP_PERCENTILE: float = 98.0
 X_MARGIN: float = 0.02
+# draw the seed_var failure counts as markers on the line; False hides them
+FAILURE_MARKER: bool = True
 # asinh knee, as a fraction of the upper limit. PANEL_CONFIGS' own ylim/linear_width.
 LINEAR_WIDTH_RATIO: float = 40.0
 # promote linear -> log past this dynamic range. Fires on nothing today; a guard.
@@ -219,15 +220,18 @@ def _rescale(
     yscale: PlotScale,
     pad_x: bool = True,
     promote_x: bool = True,
+    clip_y: bool = True,
+    promote_y: bool = True,
 ):
     """Limits -> cfg -> scale -> pad -> set. Limits never depend on the scale.
     x is the exact grid plus X_MARGIN (5 % when `pad_x`), y is top-clipped
-    (see CLIP_PERCENTILE)."""
+    (see CLIP_PERCENTILE) unless `clip_y` is off, and promoted to log past
+    LOG_PROMOTE_RATIO unless `promote_y` is off."""
     x_limits = _apply_cfg_limits(_limits(x_series, clip=False), cfg.get("xlim"), "xlim")
-    y_limits = _apply_cfg_limits(_limits(y_series), cfg.get("ylim"), "ylim")
+    y_limits = _apply_cfg_limits(_limits(y_series, clip=clip_y), cfg.get("ylim"), "ylim")
 
     xscale, x_kwargs = _resolve_scale(xscale, _finite(*x_series), cfg, "x", x_limits, promote=promote_x)
-    yscale, y_kwargs = _resolve_scale(yscale, _finite(*y_series), cfg, "y", y_limits)
+    yscale, y_kwargs = _resolve_scale(yscale, _finite(*y_series), cfg, "y", y_limits, promote=promote_y)
     ax.set_xscale(xscale, **x_kwargs)
     ax.set_yscale(yscale, **y_kwargs)
 
@@ -327,6 +331,55 @@ def _line_style(method_name: str):
     return PARTIAL_IDENTIFICATION_STYLE
 
 
+def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], failures: dict[str, NDArray] | None = None):
+    """One mean line and one 2.5 / 97.5 band per method on `ax`, in the method's
+    hue and line style; a method with no finite mean is skipped. Returns the
+    line handles keyed by method in drawing order and the mean series, which
+    alone decide the limits (the band is contextual and clips against the
+    frame). `failures` (method -> count per step) marks every step with a
+    positive count with a cross and the count above it, under FAILURE_MARKER."""
+    colors = sns.color_palette()
+    handles, means = {}, []
+    for method_name, errors in y_results.items():
+        # sanitize: float64, Infs to NaNs, then the mean over what is finite
+        clean_data = np.array(errors, dtype=np.float64)
+        clean_data[np.isinf(clean_data)] = np.nan
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            mean_error = np.nanmean(clean_data, axis=1)
+            low = np.nanpercentile(clean_data, 2.5, axis=1)
+            high = np.nanpercentile(clean_data, 97.5, axis=1)
+        if np.all(np.isnan(mean_error)):
+            continue
+        means.append(mean_error)
+
+        color = colors[COLOR_MAP[method_name]]
+        label = TEX_MAPPER.get(method_name, method_name)
+        handles[method_name] = ax.plot(
+            x_values, mean_error, color=color, label=label, linestyle=_line_style(method_name)
+        )[0]
+        if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
+            ax.fill_between(x_values, low, high, color=color, alpha=0.2)
+
+        if FAILURE_MARKER and failures and method_name in failures:
+            counts = np.asarray(failures[method_name])
+            marked = counts > 0
+            if marked.any():
+                ax.plot(x_values[marked], mean_error[marked], linestyle="none", marker="x", markersize=7, color=color)
+                for x_i, y_i, count in zip(x_values[marked], mean_error[marked], counts[marked], strict=True):
+                    if np.isfinite(y_i):
+                        ax.annotate(
+                            str(int(count)),
+                            (x_i, y_i),
+                            textcoords="offset points",
+                            xytext=(0, 5),
+                            ha="center",
+                            fontsize=FS_TICK * 0.6,
+                            color=color,
+                        )
+    return handles, means
+
+
 def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[dict[str, NDArray], str | None]:
     """Every series divided by the baseline's per-step mean (SS10.1); returns the
     new dict and the baseline's name, or the input untouched and None.
@@ -389,6 +442,9 @@ def create_sweep_plot(
     title: str | None = None,
     title_color: str = "k",
     normalize: bool = DEFAULT_NORMALIZE_SWEEP,
+    failures: dict[str, NDArray] | None = None,
+    clip_y: bool = True,
+    promote_y: bool = True,
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
@@ -396,6 +452,12 @@ def create_sweep_plot(
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold).
+
+    `failures`, `clip_y` and `promote_y` are the perf sweeps' knobs: the failure
+    counts per method and step drawn as markers (`_draw_series`, FAILURE_MARKER),
+    the top-tail clip of the y frame and the linear-to-log promotion, both on by
+    default and off on a figure whose slowest method or near-zero D(eps) is the
+    result rather than a runaway.
 
     `normalize` divides every series by the baseline's (`normalize_sweep`, SS10.1)
     on the width and worst-error figures and appends the baseline's name to the
@@ -447,52 +509,13 @@ def create_sweep_plot(
 
         plt.rcParams.update(RC_PARAMS)
         sns.set_palette("deep")
-        colors = sns.color_palette()
         fig = plt.figure()
 
-        # the mean lines, which alone decide the limits: the CI band is contextual
-        # and is left to clip against the frame
-        all_means = []
-
-        all_labels = []
-        plot_handles = []
-
-        for method_name, errors in y_results.items():
-            # 1. Sanitize Data: Convert to float64, replace Infs with NaNs
-            clean_data = np.array(errors, dtype=np.float64)
-            clean_data[np.isinf(clean_data)] = np.nan
-
-            # 2. Compute Mean (ignoring NaNs)
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                mean_error = np.nanmean(clean_data, axis=1)
-
-            # 3. Check if we have ANYTHING valid to plot
-            if np.all(np.isnan(mean_error)):
-                continue
-
-            all_means.append(mean_error)
-
-            # Labeling
-            label = TEX_MAPPER.get(method_name, method_name)
-            all_labels.append(label)
-            if method_name in legend_items:
-                legend_items[legend_items.index(method_name)] = label
-
-            # Plot
-            color = colors[COLOR_MAP[method_name]]
-            handle = plt.plot(x_values, mean_error, color=color, label=label, linestyle=_line_style(method_name))[0]
-            plot_handles.append(handle)
-
-            # Confidence Intervals
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                low = np.nanpercentile(clean_data, 2.5, axis=1)
-                high = np.nanpercentile(clean_data, 97.5, axis=1)
-
-            # Fill between requires matching shapes; if all NaNs, skip fill
-            if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
-                plt.fill_between(x_values, low, high, color=color, alpha=0.2)
+        # one line and band per method; the mean lines alone decide the limits
+        handles, all_means = _draw_series(plt.gca(), x_values, y_results, failures)
+        plot_handles = list(handles.values())
+        all_labels = [TEX_MAPPER.get(name, name) for name in handles]
+        legend_items = [TEX_MAPPER.get(item, item) if item in handles else item for item in legend_items]
 
         # Formatting
         style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
@@ -503,7 +526,18 @@ def create_sweep_plot(
         # off the frame; the 5 % pad would visibly widen every sweep.
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
         # (trS opts out to linear on purpose), not a default to be second-guessed.
-        _rescale(plt.gca(), cfg, [x_values], all_means, xscale, yscale, pad_x=False, promote_x=False)
+        _rescale(
+            plt.gca(),
+            cfg,
+            [x_values],
+            all_means,
+            xscale,
+            yscale,
+            pad_x=False,
+            promote_x=False,
+            clip_y=clip_y,
+            promote_y=promote_y,
+        )
         # coverage, and anything drawn as a fraction of the baseline, reads on one
         # fixed linear frame; the pad and the promotion of _rescale are undone here
         # on purpose, and a series above the frame clips (the user's call)
@@ -877,196 +911,6 @@ def create_panel_plot(
 
     fig.align_ylabels(axes[:, 0])
     save(fig, "query_sweep_panel", experiment_name, PLOT_FORMAT, subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
-
-
-# 4-way reliability split, in STATUS_CATEGORIES order
-PERF_CATEGORY_LABELS: tuple[str, ...] = (
-    "failure",
-    "infeasible",
-    "covered",
-    "not-covered",
-)
-# blue, orange, green, red
-PERF_CATEGORY_COLORS: tuple[str, ...] = ("#C44E52", "#DD8452", "#55A467", "#4C72B0")
-
-
-def create_perf_plot(
-    perf_record: dict[str, dict[str, object]],
-    overlay_metrics: list[str] | None = None,
-    savefig: bool = True,
-    format: str = PLOT_FORMAT,
-    hilight_ours: bool = DEFAULT_HILIGHT_OURS,
-    experiment: str = "simulation",
-    fname: str = "perf",
-):
-    """
-    Per-method reliability and cost.
-
-    Top (`bars`): 100%-stacked bars, the 4-way per-query split (mutually exclusive,
-    in precedence order, summing to 100 by construction). Retired by default --
-    PLOT_CONFIGS['*']['perf']['bars']; the split is still written to perf.pkl.
-    Bottom: cost and stability -- wall-clock per query (log) and the across-seed
-    SD of interval width, each on its own axis in its own units. With `bars` off
-    this is the whole figure, both series intact.
-
-    Overlaying both on the bars' percent axis was tried first and read as
-    clutter: it forced the SD to be rescaled, giving the left axis two
-    different meanings (PLAN 1).
-    """
-    overlay_metrics = list(overlay_metrics or [])
-    try:
-        cfg = _plot_config(experiment, fname)
-        bars = bool(cfg.get("bars", True))
-        # no function arguments here: the config keys or the defaults
-        style = _style(cfg, legend=None, x_color="k", y_color="k", title=None, title_color="k")
-
-        plt.rcParams.update(RC_PARAMS)
-
-        methods = list(perf_record)
-        labels = [TEX_MAPPER.get(m, m) for m in methods]
-        positions = np.arange(len(methods))
-
-        if bars and overlay_metrics:
-            fig, (ax, ax_cost) = plt.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [2.2, 1]})
-        elif bars:
-            fig, ax = plt.subplots()
-            ax_cost = None
-        elif overlay_metrics:
-            fig, ax_cost = plt.subplots()  # the cost panel, promoted
-            ax = None
-        else:
-            logger.warning("perf: bars off and no overlay metrics; nothing to draw.")
-            return
-
-        # ------------------------------------------------ reliability (top)
-        if ax is not None:
-            rates = np.array([perf_record[m]["rates"] for m in methods], dtype=float) * 100.0
-            bottom = np.zeros(len(methods))
-            bar_handles = []
-            for index, (_category, color) in enumerate(zip(PERF_CATEGORY_LABELS, PERF_CATEGORY_COLORS, strict=False)):
-                container = ax.bar(
-                    positions,
-                    rates[:, index],
-                    bottom=bottom,
-                    color=color,
-                    edgecolor="black",
-                    linewidth=0.4,
-                    width=0.7,
-                    zorder=2,
-                )
-                bottom += rates[:, index]
-                bar_handles.append(container)
-
-            ax.set_ylabel(r"test samples (\%)", fontsize=FS_LABEL)
-            ax.set_ylim(0, 100)
-            ax.tick_params(axis="y", labelsize=FS_TICK)
-            if cfg.get("legend") is not False:
-                ax.legend(
-                    handles=bar_handles,
-                    labels=list(PERF_CATEGORY_LABELS),
-                    fontsize=FS_TICK * 0.75,
-                    loc="lower left",
-                    bbox_to_anchor=(0.0, 1.02),
-                    ncol=4,
-                    frameon=True,
-                    edgecolor="black",
-                    fancybox=False,
-                    handlelength=1.4,
-                    columnspacing=1.0,
-                )
-
-        # ------------------------------------------------- cost (bottom)
-        axis_for_labels = ax
-        if ax_cost is not None:
-            axis_for_labels = ax_cost
-            cost_handles = []
-
-            if "wall_clock" in overlay_metrics:
-                seconds = np.array([perf_record[m]["wall_clock"] for m in methods], dtype=float)
-                handle = ax_cost.plot(
-                    positions,
-                    seconds,
-                    marker="o",
-                    linestyle="-",
-                    color="#3b3b6d",
-                    markersize=5,
-                    label="wall clock / query",
-                )[0]
-                # x is categorical, so only the cost axis is overridable here.
-                # No top-tail clip: on a per-method cost line the slowest method IS
-                # the result, not a runaway to be cropped.
-                finite = _finite(seconds)
-                limits = (
-                    (float(finite.min()), float(finite.max())) if len(finite) and finite.min() < finite.max() else None
-                )
-                limits = _apply_cfg_limits(limits, cfg.get("ylim"), "ylim")
-                scale, kwargs = _resolve_scale("log", seconds, cfg, "y", limits, promote=False)
-                ax_cost.set_yscale(scale, **kwargs)
-                if limits:
-                    ax_cost.set_ylim(_pad(ax_cost.yaxis, *limits))
-                ax_cost.set_ylabel("s / query", fontsize=FS_TICK)
-                ax_cost.tick_params(axis="y", labelsize=FS_TICK * 0.8)
-                cost_handles.append(handle)
-
-            if "seed_var" in overlay_metrics:
-                seed_sd = np.array([perf_record[m]["seed_var"] for m in methods], dtype=float)
-                twin = ax_cost.twinx()
-                handle = twin.plot(
-                    positions,
-                    seed_sd,
-                    marker="s",
-                    linestyle="--",
-                    color="black",
-                    markersize=4,
-                    label="width SD across seeds",
-                )[0]
-                twin.set_ylabel("width SD", fontsize=FS_TICK)
-                twin.tick_params(axis="y", labelsize=FS_TICK * 0.8)
-                cost_handles.append(handle)
-
-            if cost_handles and cfg.get("legend") is not False:
-                ax_cost.legend(
-                    handles=cost_handles,
-                    labels=[h.get_label() for h in cost_handles],
-                    fontsize=FS_TICK * 0.7,
-                    loc=cfg["legend"] if isinstance(cfg.get("legend"), (str, tuple)) else "upper left",
-                    frameon=True,
-                    edgecolor="black",
-                    fancybox=False,
-                    handlelength=1.6,
-                    framealpha=0.92,
-                )
-
-        axis_for_labels.set_xticks(positions)
-        axis_for_labels.set_xticklabels(
-            _apply_tex_highlighting(labels, hilight_ours),
-            fontsize=FS_TICK,
-            rotation=20,
-            ha="right",
-            color=style["x_color"],
-        )
-        for axis in fig.axes:  # the bars, the cost axis and its twin
-            axis.yaxis.label.set_color(style["y_color"])
-            plt.setp(axis.get_yticklabels(), color=style["y_color"])
-        if style["title"]:
-            fig.axes[0].set_title(style["title"], fontsize=FS_LABEL, color=style["title_color"])
-
-        if ax is not None and ax_cost is not None:
-            fig.align_ylabels([ax, ax_cost])
-        _label_major_ticks_only(*fig.axes)  # fig.axes includes the twin
-        # x is categorical (one fixed tick per method), never re-located
-        _at_least_two_major_ticks(*fig.axes, skip_x=tuple(fig.axes))
-        fig.tight_layout()
-        plt.show()
-
-        if savefig:
-            save(fig, fname, experiment, format, subdir=SUBDIR_PERF, dpi=PLOT_DPI)
-
-    except Exception as e:
-        logger.error(f"Failed to plot perf: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
 
 
 def create_digit_sweep_plot(

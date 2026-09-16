@@ -475,8 +475,11 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh"),
     "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
     "coverage": MetricSpec("coverage", r"coverage rate", include_ate=False),
-    "wall_clock": MetricSpec("wall_clock", r"seconds per query", "log", perf_only=True),
-    "seed_var": MetricSpec("seed_var", r"SD across seeds", perf_only=True),
+    # the two perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
+    # the QueryEval field the sweeps record. The label breaks in two: on one line
+    # it is taller than the figure at FS_LABEL
+    "wall_clock": MetricSpec("wall_clock", "cumulative time\n(baseline-solve equivalents)", "log", perf_only=True),
+    "seed_var": MetricSpec("seed_var", r"solver stability", "linear", perf_only=True),
 }
 
 
@@ -493,7 +496,8 @@ class SweepSpec:
 
 @dataclass(frozen=True)
 class PerfSpec:
-    metric: tuple[str, ...]  # overlay series; bar always drawn
+    metric: tuple[str, ...]  # the perf sweeps to run, `wall_clock` and/or `seed_var`
+    repeats: int = 3  # timed repeats per grid point (wall_clock), the median is kept
 
 
 @dataclass(frozen=True)
@@ -535,9 +539,14 @@ def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
 
     perf = block.get("perf")
     if perf is not None:
-        # `param` is meaningless for perf (1-point sweep); accepted and ignored
-        _reject_unknown(perf, {"param", "metric"}, "experiment.perf")
-        perf = PerfSpec(metric=_check_values(perf.get("metric", ()), perf_metrics, "experiment.perf.metric"))
+        # the perf sweeps run on the epsilon grid and nothing else, so no `param`
+        _reject_unknown(perf, {"metric", "repeats"}, "experiment.perf")
+        repeats = perf.get("repeats", 3)
+        if isinstance(repeats, bool) or not isinstance(repeats, int) or not 3 <= repeats <= 5:
+            raise ValueError(f"experiment.perf.repeats must be an int from 3 to 5; got {repeats!r}.")
+        perf = PerfSpec(
+            metric=_check_values(perf.get("metric", ()), perf_metrics, "experiment.perf.metric"), repeats=repeats
+        )
 
     return ExperimentPlan(
         query=bool(block.get("query", False)),

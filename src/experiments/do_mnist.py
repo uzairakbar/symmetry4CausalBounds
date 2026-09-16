@@ -15,8 +15,8 @@ Two things differ from the linear experiments and shape everything here.
    the ERM/PI matching. That inverts the usual build order: methods can only be
    built AFTER the data exists.
 
-Phase 1 is the query sweep + perf. The sweep grids are Phase 2 -- see
-`get_sweep_runner_cls` for what each one still needs.
+Phase 1 is the query sweep; perf waits on the epsilon sweep. The sweep grids are
+Phase 2 -- see `get_sweep_runner_cls` for what each one still needs.
 """
 
 import numpy as np
@@ -436,6 +436,11 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
                 )
 
         return ConfiguredSweep
+
+    def _run_perf(self, perf_spec):
+        """The perf sweeps run on the epsilon grid, which is Phase 2 here
+        (`get_sweep_runner_cls`); the init-seed seed_var is a later round."""
+        logger.warning("do-mnist: perf skipped, the epsilon sweep it runs on is not wired here.")
 
     # --------------------------------------------------------------------- plot
 

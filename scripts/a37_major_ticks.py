@@ -16,8 +16,11 @@ experiment. Three legs:
         texts, stripped of `$\\mathdefault{...}$`, read 200, 500, 1000;
   (iii) `create_query_sweep_plot` on synthetic positive angles with a log x scale
         (the function has no y-scale argument; y is a linear `plt.ylim`), and
-        `create_perf_plot` on a record in `_run_perf`'s schema: >= 2 in-view
-        majors on every axis, zero non-empty minor labels (a32's property);
+        the two perf sweep figures as `_run_perf` draws them: a `(4, 1)`
+        cumulative wall clock per method spanning 0.1, 1, 10 (log y, no clip)
+        and a `(4, 6)` seed_var block with one planted failure count (linear y,
+        no promotion): >= 2 in-view majors on every axis, zero non-empty minor
+        labels (a32's property);
   (iv)  every param on both datasets: xlim == `_pad(x.min(), x.max(), X_MARGIN)`
         (no top-tail clip on the x grid, the 2 % margin only), both grid
         endpoints strictly inside it, and the reference lines drawn are exactly
@@ -197,31 +200,40 @@ def leg_iii():
     plt.close("all")
 
     methods = ["PI", "DA+PI", "PI+INV"]
-    record = {
-        name: {
-            "rates": np.array([0.7, 0.1, 0.1, 0.1]),
-            "wall_clock": float(10.0 ** (i - 1)),  # 0.1, 1, 10 s: about a decade each
-            "seed_var": 0.1 * (i + 1),
-            "coverage_sd": 0.01,
-            "midpoint_sd": 0.05,
-            "n_experiments": 3,
-        }
-        for i, name in enumerate(methods)
-    }
-    before = len(_errors)
-    plotting.create_perf_plot(
-        record, overlay_metrics=["wall_clock", "seed_var"], experiment="simulation", savefig=False
+    grid = PARAM_SPECS["epsilon"].grid_fn("simulation", 4)
+    # a cumulative series per method at 0.1, 1, 10 baseline solves a step
+    wall = {name: np.cumsum(np.full(4, 10.0 ** (i - 1)))[:, None] for i, name in enumerate(methods)}
+    seed = {name: np.full((4, 6), 1e-8 * (i + 1)) for i, name in enumerate(methods)}
+    perf = (
+        ("wall_clock", wall, dict(bootstrapped=False, clip_y=False)),
+        ("seed_var", seed, dict(promote_y=False, failures={"PI+INV": np.array([0, 2, 0, 0])})),
     )
-    fig = plt.gcf()
-    counts = {i: (len(majors_in_view(ax.xaxis)), len(majors_in_view(ax.yaxis))) for i, ax in enumerate(fig.axes)}
-    fewest = min(min(v) for v in counts.values())
-    check(
-        "(iii) perf figure: >= 2 majors in view on every axis (twin included)",
-        fewest >= 2 and len(_errors) == before,
-        f"(x, y) per axes {counts}",
-    )
-    check("(iii) perf figure: no minor labels", minor_labels(fig) == 0)
-    plt.close("all")
+    for metric, y, kwargs in perf:
+        before = len(_errors)
+        plt.close("all")
+        plotting.create_sweep_plot(
+            grid,
+            y,
+            xlabel=PARAM_SPECS["epsilon"].xlabel,
+            ylabel=METRIC_SPECS[metric].ylabel,
+            xscale=PARAM_SPECS["epsilon"].xscale,
+            yscale=METRIC_SPECS[metric].yscale,
+            experiment="simulation",
+            fname=f"epsilon_{metric}",
+            vlines=PARAM_SPECS["epsilon"].vlines,
+            savefig=False,
+            **kwargs,
+        )
+        fig = plt.gcf()
+        counts = {i: (len(majors_in_view(ax.xaxis)), len(majors_in_view(ax.yaxis))) for i, ax in enumerate(fig.axes)}
+        fewest = min(min(v) for v in counts.values())
+        check(
+            f"(iii) perf {metric} figure: >= 2 majors in view on every axis",
+            fewest >= 2 and len(_errors) == before,
+            f"(x, y) per axes {counts}, y {fig.axes[0].get_yscale()}",
+        )
+        check(f"(iii) perf {metric} figure: no minor labels", minor_labels(fig) == 0)
+        plt.close("all")
 
 
 def leg_iv():

@@ -24,9 +24,10 @@ from loguru import logger  # noqa: E402
 
 from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
-from src.experiments.utils.constants import (
+from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
-    PLOT_CONFIGS,  # noqa: E402
+    PLOT_CONFIGS,
+    SUBDIR_PERF,
 )
 from src.experiments.utils.data_operations import bootstrap  # noqa: E402
 
@@ -150,14 +151,37 @@ def render():
             )
         print(f"  {name:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
 
+    # the two perf sweep figures: a cumulative wall clock per method (log y, no
+    # clip) and the seed_var terms per query with one planted failure count
+    grid = np.geomspace(2**-6, 1.0, 4)
     perf = {
-        "PI": {"rates": np.array([0.1, 0.2, 0.6, 0.1]), "wall_clock": 0.5, "seed_var": 0.02},
-        "DA+PI": {"rates": np.array([0.0, 0.0, 0.9, 0.1]), "wall_clock": 1e-4, "seed_var": 0.5},
+        "wall_clock": {
+            "PI": np.array([[1.0], [1.0], [1.0], [1.0]]),
+            "PI+INV": np.array([[1.0], [3.0], [10.0], [50.0]]),
+        },
+        "seed_var": {
+            "PI": np.full((4, 6), 1e-9),
+            "PI+INV": np.array([[np.nan] * 6, [np.nan] * 6, [1e-8] * 6, [2e-8] * 6]),
+        },
     }
-    for overlays in ([], ["wall_clock"], ["wall_clock", "seed_var"]):
+    for metric, y_results in perf.items():
         before = len(_errors)
-        plotting.create_perf_plot(perf, overlay_metrics=overlays, experiment=DIAG_EXPERIMENT)
-        print(f"  {'perf ' + (','.join(overlays) or 'no-overlay'):<16} {'ok' if len(_errors) == before else 'ERRORS'}")
+        plotting.create_sweep_plot(
+            grid,
+            y_results,
+            xlabel="epsilon",
+            ylabel=metric,
+            xscale="log",
+            yscale="log" if metric == "wall_clock" else "linear",
+            experiment=DIAG_EXPERIMENT,
+            fname=f"epsilon_{metric}",
+            subdir=SUBDIR_PERF,
+            bootstrapped=(metric == "seed_var"),
+            clip_y=False,
+            promote_y=False,
+            failures={"PI+INV": np.array([6, 6, 0, 0])} if metric == "seed_var" else None,
+        )
+        print(f"  {'perf ' + metric:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
     print()
 
 

@@ -59,6 +59,11 @@ class BoundedSA(SA):
         _begin_chunk()  -> per-chunk setup, run INSIDE the worker
     """
 
+    # the fitted program reads the predict-time epsilon: the INV cone does, the
+    # plain and IV balls only pad by it (the perf sweep re-solves the former and
+    # `repad`s the latter)
+    solves_on_epsilon: bool = False
+
     def __init__(
         self,
         gamma=None,
@@ -101,6 +106,10 @@ class BoundedSA(SA):
         self.mean_match = mean_match
         self.query_status = None  # per-query SolveStatus, set on every predict
         self.query_diagnostics = None  # optional per-query extras, set on predict
+        self.raw_bounds_ = None  # the last predict's unpadded bounds, for `repad`
+        # one `(name, opts)` conic backend for the seed_var sweep; None is the
+        # CLARABEL-then-ECOS chain
+        self.backend = None
         self.y_min = -np.inf
         self.y_max = np.inf
 
@@ -147,7 +156,15 @@ class BoundedSA(SA):
             self.epsilon = epsilon  # the CONSTRAINT RHS; `pad_epsilon` is separate
         if recalibrate is not None:
             self.recalibrate = recalibrate  # swept at predict time, like gamma
-        return self._finalize(self._raw_bounds(X, gamma))
+        self.raw_bounds_ = self._raw_bounds(X, gamma)
+        return self._finalize(self.raw_bounds_)
+
+    def repad(self, epsilon):
+        """The last predict's raw bounds finalised at another padding epsilon, no
+        solve; what the perf sweep times for a method whose program does not read
+        epsilon."""
+        self.epsilon = epsilon
+        return self._finalize(self.raw_bounds_)
 
     def _raw_bounds(self, X, gamma):
         """Unpadded, unclipped [lower, upper] per query; sets `query_status`."""
@@ -390,13 +407,13 @@ class PartialR2(BoundedSA):
 
         def solve_prob(prob):
             status = None
-            for solver in (cp.CLARABEL, cp.ECOS):
+            for solver, opts in self._solver_chain():
                 try:
                     # warm_start=False: queries must be independent (A5). The old
                     # flag was inert -- CLARABEL ignored warm starts before
                     # cvxpy 1.6 -- but now a solve inherits state from the
                     # previous one, so chunking would change bounds at ~1e-13.
-                    prob.solve(solver=solver, warm_start=False, verbose=False)
+                    prob.solve(solver=solver, warm_start=False, verbose=False, **opts)
                     status = prob.status
                 except Exception:
                     status = None
@@ -415,6 +432,12 @@ class PartialR2(BoundedSA):
         upper, status_hi = solve_prob(self.max_problem)
         # back to the outcome scale: the eliminated intercept is ybar - mu' h
         return lower + self.y_offset_, upper + self.y_offset_, max(status_lo, status_hi)
+
+    def _solver_chain(self):
+        """The pinned `(name, opts)` backend alone, else CLARABEL then ECOS."""
+        if self.backend is not None:
+            return (tuple(self.backend),)
+        return ((cp.CLARABEL, {}), (cp.ECOS, {}))
 
 
 def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
@@ -545,6 +568,8 @@ def iv_constraint_terms(X, y, Z):
 class InvarianceConstrainedPartialR2(PartialR2):
     """PI + explicit invariance-error constraint (§3.1): E_inv(h) <= epsilon^2."""
 
+    solves_on_epsilon = True  # `eps_param` is the constraint's RHS
+
     def __init__(self, gamma=None, epsilon=None, **kwargs):
         if epsilon is None:
             raise ValueError("epsilon required")
@@ -652,6 +677,8 @@ class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePar
     (`epsilon_iv` on the instrument moments). Two separate budgets, unlike the
     pooled one DA+PI+IV puts on Z-tilde. An empty Z reduces it to PI+INV exactly."""
 
+    solves_on_epsilon = True
+
     def __init__(self, gamma=None, epsilon=None, **kwargs):
         if epsilon is None:
             raise ValueError("epsilon required")
@@ -685,6 +712,11 @@ class IntersectionMixin:
     fact about h_*(x), not a geometric one.
     """
 
+    @property
+    def solves_on_epsilon(self) -> bool:
+        """The intersection re-solves when either branch does."""
+        return bool(self.baseline.solves_on_epsilon or self.augmented.solves_on_epsilon)
+
     def _predict(self, X, gamma=None, epsilon=None, recalibrate=None, **kwargs):
         if epsilon is not None:
             self.epsilon = epsilon
@@ -692,8 +724,17 @@ class IntersectionMixin:
             self.recalibrate = recalibrate
         # both branches see t; it is inert on the baseline (rho = 1)
         branch_kwargs = dict(gamma=gamma, epsilon=epsilon, recalibrate=recalibrate, **kwargs)
-        lower_base, upper_base = self.baseline.predict(X, **branch_kwargs).T
-        lower_da, upper_da = self.augmented.predict(X, **branch_kwargs).T
+        return self._combine(self.baseline.predict(X, **branch_kwargs), self.augmented.predict(X, **branch_kwargs))
+
+    def repad(self, epsilon):
+        """Both branches re-finalised at `epsilon` (the DA branch pads, the baseline
+        never does) and intersected again, no solve."""
+        self.epsilon = epsilon
+        return self._combine(self.baseline.repad(epsilon), self.augmented.repad(epsilon))
+
+    def _combine(self, base, da):
+        lower_base, upper_base = base.T
+        lower_da, upper_da = da.T
 
         lower = np.maximum(lower_base, lower_da)
         upper = np.minimum(upper_base, upper_da)

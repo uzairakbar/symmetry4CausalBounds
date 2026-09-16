@@ -21,6 +21,7 @@ from src.experiments.configs import (
     METRIC_SPECS,
     PARAM_SPECS,
 )
+from src.experiments.perf import perf_sweeps
 from src.experiments.utils import fit_model, save, set_seed
 from src.experiments.utils.constants import (
     SUBDIR_PERF,
@@ -30,7 +31,6 @@ from src.experiments.utils.constants import (
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries, rho_hat
 from src.experiments.utils.model_fitting import instrument_columns, joint_instrument
 from src.experiments.utils.plotting import (
-    create_perf_plot,
     create_query_sweep_plot,
     create_sweep_plot,
 )
@@ -678,62 +678,49 @@ class ExperimentOrchestrator(ABC):
                 )
 
     def _run_perf(self, perf_spec):
-        """
-        Per-method reliability + cost, at the dataset defaults.
-
-        A degenerate 1-point m-sweep (m=1) gives exactly the default operating
-        point, so this reuses the sweep machinery rather than a second path.
-        """
-        n_experiments = self.kwargs["n_experiments"]
-
-        # Always serial, never the cached sweep: n_jobs speeds up only the SOCP
-        # methods, so a parallel record would compare harnesses, not methods
-        # (measured: the PI/ERM wall_clock ratio moves 9.4x with the knob).
-        # ATE is the truth, not an estimator: no cost, no failure modes.
+        """Two epsilon sweeps that time the solves and cross-check the backends, on the
+        robustness sweep's own grid, data and models (`get_sweep_runner_cls("epsilon")`):
+        one experiment, serial, never the cached sweep record."""
+        # Always serial: n_jobs speeds up only the SOCP methods, so a parallel
+        # record would compare harnesses, not methods. The runner kwarg alone does
+        # NOT reach the models: build_methods reads the orchestrator's toggles, so
+        # force it on the factory too. ATE is the truth, not an estimator.
         methods = {k: v for k, v in self.methods.items() if k != "ATE"}
-        runner = self.get_sweep_runner_cls("m")(
+        runner = self.get_sweep_runner_cls("epsilon")(
             methods=methods,
-            # the runner kwarg alone does NOT reach the models: build_methods
-            # reads the orchestrator's toggles. Force it on the factory too.
             method_factory=partial(self.build_methods, n_jobs=1),
-            param_grid_override=[1],
-            **{**self._get_clean_kwargs(), "n_jobs": 1},
+            **{**self._get_clean_kwargs(), "n_jobs": 1, "n_experiments": 1},
         )
-        _, results, statuses = runner.run("perf")
+        record = perf_sweeps(runner, perf_spec.metric, repeats=perf_spec.repeats)
 
-        results = {k: v for k, v in results.items() if k != "ATE"}
-        overlay = list(perf_spec.metric)
-        if "seed_var" in overlay and n_experiments < 2:
-            logger.warning(f"n_experiments={n_experiments}: seed SD is undefined, dropping the seed_var series.")
-            overlay.remove("seed_var")
-
-        record = {}
-        for name, metrics in results.items():
-            counts = statuses[name][0]  # first step = m=1
-            total = max(int(counts.sum()), 1)
-            per_experiment_width = metrics["interval_width"][0]
-            record[name] = {
-                "rates": counts.sum(axis=0) / total,  # 4-way split, sums to 1
-                "wall_clock": float(np.nanmean(metrics["wall_clock"][0])),
-                # SD across seeds of the per-experiment means (PLAN 3)
-                "seed_var": float(np.nanstd(per_experiment_width)),
-                "coverage_sd": float(np.nanstd(metrics["coverage"][0])),
-                "midpoint_sd": float(np.nanstd(per_experiment_width) / 2.0),
-                "n_experiments": n_experiments,
-            }
-            # A method whose constraint set is empty returns before solving
-            # anything, so its wall_clock times the feasibility gate rather than a
-            # solve -- and comes out FASTEST on the plot. Say so.
-            infeasible_rate = record[name]["rates"][1]
-            if infeasible_rate > 0.99:
-                logger.warning(
-                    f"{name}: {infeasible_rate:.0%} infeasible, so its wall_clock "
-                    f"({record[name]['wall_clock'] * 1e3:.1f} ms/query) timed the "
-                    "feasibility gate, not a solve. Not comparable to the rest."
-                )
-
-        save(record, "perf", self.name, "pkl", subdir=SUBDIR_PERF)
-        create_perf_plot(record, overlay_metrics=overlay, experiment=self.name)
+        save(record.x, "epsilon_values", self.name, "pkl", subdir=SUBDIR_PERF)
+        save(record.meta, "epsilon_perf_meta", self.name, "pkl", subdir=SUBDIR_PERF)
+        for metric in perf_spec.metric:
+            save(record.results[metric], f"epsilon_{metric}_results", self.name, "pkl", subdir=SUBDIR_PERF)
+            if metric == "seed_var":
+                save(record.failures, "epsilon_seed_var_failures", self.name, "pkl", subdir=SUBDIR_PERF)
+                save(record.statuses, "epsilon_seed_var_statuses", self.name, "pkl", subdir=SUBDIR_PERF)
+            spec = METRIC_SPECS[metric]
+            create_sweep_plot(
+                record.x,
+                record.results[metric],
+                experiment=self.name,
+                fname=f"epsilon_{metric}",
+                subdir=SUBDIR_PERF,
+                xlabel=runner.xlabel,
+                ylabel=spec.ylabel,
+                xscale=PARAM_SPECS["epsilon"].xscale,
+                yscale=spec.yscale,
+                vlines=runner.vlines,
+                # the wall clock is one median line per method, the seed var a
+                # mean over queries with the bootstrap band over them; neither
+                # is clipped (the slowest method is the result) nor promoted to
+                # log (D(eps) spans decades near zero)
+                bootstrapped=(metric == "seed_var"),
+                clip_y=False,
+                promote_y=False,
+                failures=record.failures if metric == "seed_var" else None,
+            )
 
     def _run_query_sweep(self):
         """Query sweep + panel. The panel is a query-space view, so it is
