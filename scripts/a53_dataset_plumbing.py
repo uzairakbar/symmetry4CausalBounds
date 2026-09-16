@@ -352,11 +352,20 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
     def da_factory(sem=None, append=None):
         return ScaleTranslation(V, std=amplitude)
 
-    def method_factory(gamma, epsilon, epsilon_iv=None, rho=1.0):
+    def method_factory(gamma, epsilon, epsilon_iv=None, rho=1.0, epsilon_iv_z=0.0):
+        # the runner hands every factory `epsilon_iv_z` (the non-DA +IV term) since
+        # e4fb1a5; inert here, the SEM carries no real instrument under this design
         from src.experiments.configs import MethodRegistry
 
         return MethodRegistry.build_methods(
-            METHODS_IV, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, rho=rho, n_jobs=N_JOBS, **toggles
+            METHODS_IV,
+            gamma=gamma,
+            epsilon=epsilon,
+            epsilon_iv=epsilon_iv,
+            epsilon_iv_z=epsilon_iv_z,
+            rho=rho,
+            n_jobs=N_JOBS,
+            **toggles,
         )
 
     return STRATEGIES["epsilon"](
@@ -608,7 +617,8 @@ def leg_ix(draw, chain, seed, **toggles):
         not np.any(point_data.metric_extent),
         f"max {float(np.max(np.abs(point_data.metric_extent))):g}",
     )
-    check("(ix) an unfilled field still reads 0.0", SweepData(*([None] * 6)).metric_extent == 0.0)
+    # X is needed since the Z carrier: `__post_init__` spells a None Z as (n, 0)
+    check("(ix) an unfilled field still reads 0.0", SweepData(np.zeros((2, 1)), *([None] * 5)).metric_extent == 0.0)
     arrived = set_data.extent
     check(
         "(ix) a set target fills extent with its own half-width",
