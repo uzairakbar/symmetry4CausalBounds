@@ -19,6 +19,14 @@ ARTIFACTS_DIRECTORY: str = "artifacts"
 SUBDIR_QUERY: str = "query"
 SUBDIR_SWEEP: str = "sweep"
 SUBDIR_PERF: str = "perf"
+# the datasets as the aggregate grids order their columns, and their titles
+DATASET_ORDER: tuple[str, ...] = ("simulation", "optical_device", "cigarettes", "do_mnist")
+DATASET_TITLES: dict[str, str] = {
+    "simulation": "simulation",
+    "optical_device": "optical device",
+    "cigarettes": "cigarettes",
+    "do_mnist": "do-MNIST",
+}
 
 # Plotting style
 RC_PARAMS: dict[str, str | int | bool] = {
