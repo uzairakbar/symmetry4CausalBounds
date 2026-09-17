@@ -617,6 +617,15 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xlabel": r"$r_Z = s\sqrt{\gamma_z}$",
         "xscale": "log",
     },
+    # the own-price pair, same axes
+    "beta_p_gamma": {
+        "xlabel": r"$\gamma$",
+        "xscale": "linear",
+    },
+    "beta_p_budget": {
+        "xlabel": r"$r_Z = s\sqrt{\gamma_z}$",
+        "xscale": "log",
+    },
 }
 
 validate_plot_keys("ANNOTATE_SWEEP_PLOT", ANNOTATE_SWEEP_PLOT, {"xlabel", "xscale"} | _STYLE_KEYS)

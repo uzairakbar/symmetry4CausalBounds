@@ -69,15 +69,28 @@ RATIO_QUERIES: int = 512
 # coefficient table reports as CONTEXT beside the bounds
 NORMAL_95: float = 1.959963984540054
 
-# the headline figures under a configured instrument set (SS10). F1: beta_pn
-# against the confounding budget on the benchmarked range, 1x to 3x the
-# tax-differential benchmark. F2: beta_pn against the declared real-Z radius
-# r_Z = s sqrt(gamma_z) at the query budget, so the assumption is visible. Both
-# are read off the query panel's fitted models, one band per method.
+# the headline figures under a configured instrument set (SS10), one pair per
+# coefficient in HEADLINE_COEFFICIENTS. F1: the coefficient against the
+# confounding budget on the benchmarked range, 1x to 3x the tax-differential
+# benchmark. F2: the coefficient against the real-Z radius r_Z = s sqrt(gamma_z)
+# at the query budget, the declared radius, the cluster-bootstrap moment and the
+# gamma_z benchmarks marked, so the leak assumption is seen against what the
+# panel itself says. Both are read off the query panel's fitted models, one band
+# per method. The budget range reaches the addiction-stock leak (r_Z 0.558).
 HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV")
+HEADLINE_COEFFICIENTS: tuple[str, ...] = ("pn", "p")
+COEFFICIENT_LABELS: dict[str, str] = {"pn": r"$\beta_{p_n}$", "p": r"$\beta_{p}$"}
 GAMMA_RANGE: tuple[float, float] = (0.150, 0.450)
-BUDGET_RANGE: tuple[float, float] = (2**-8, 2**-2)
+BUDGET_RANGE: tuple[float, float] = (2**-8, 2**-0.5)
 PN: int = TREATMENTS.index("pn")
+# the gamma_z benchmarks marked on F2 and read in the IV benchmark table, by
+# BENCHMARK_NAMES key: the primary and the channel-specific one, as on F1
+IV_BENCHMARKS: tuple[str, ...] = ("lag_q", "tax_diff")
+# direct tax elasticities the IV benchmark table converts to gamma_z: a direct
+# effect delta of log tax on log sales OUTSIDE the price channel reads
+# gamma_z = (delta / sigma)^2 var(z_tax | C) (Conley, Hansen and Rossi's
+# plausibly-exogenous support, in the paper's units)
+DIRECT_EFFECTS: tuple[float, ...] = (0.01, 0.02, 0.05, 0.10)
 # the state-cluster bootstrap of the IV moment at the target, marked on F2: how
 # far a resampled panel's moment sits from the pool's (SS2.4)
 MOMENT_REPLICATES: int = 400
@@ -183,6 +196,22 @@ def benchmark_gamma(panel, w: np.ndarray, spec: str) -> tuple[int, float, float,
     (n sigma^2); gamma_CH is Cinelli and Hazlett's r2(W~X) r2(Y~W|X) / (1 - r2(W~X)).
     Plain OLS, no clustering: the point estimate of c is all that enters.
     """
+    ok, C, X, y, short, W, c = _benchmark_frame(panel, w, spec)
+    design = np.column_stack([X, W])
+    full = y - design @ np.linalg.lstsq(design, y, rcond=None)[0]
+    projected = X @ np.linalg.lstsq(X, W, rcond=None)[0]
+    n = int(ok.sum())
+    r2y = 1.0 - float(np.sum(full**2) / np.sum(short**2))
+    r2w = float(np.sum(projected**2) / np.sum(W**2))
+    gamma_ovb = float(c**2 * np.sum(projected**2) / n / (np.sum(short**2) / n))
+    gamma_ch = r2w * r2y / (1.0 - r2w)
+    return n, r2y, r2w, gamma_ovb, gamma_ch
+
+
+def _benchmark_frame(panel, w: np.ndarray, spec: str):
+    """The common sample of one benchmark: (rows, controls, X, y, short residual,
+    W, c), FWL'd inside W's rows and sigma-scaled, c the coefficient of W in the
+    long regression y ~ X + W."""
     ok = np.isfinite(w)
     C = controls(panel, spec)[ok]
     X = residualise(np.log(np.column_stack([panel[name] for name in TREATMENTS]))[ok], C)
@@ -191,16 +220,43 @@ def benchmark_gamma(panel, w: np.ndarray, spec: str) -> tuple[int, float, float,
     sigma = float(np.sqrt(np.mean(short**2)))
     y, short = y / sigma, short / sigma
     W = residualise(w[ok].reshape(-1, 1), C).ravel()
-    design = np.column_stack([X, W])
-    coefficients = np.linalg.lstsq(design, y, rcond=None)[0]
-    full = y - design @ coefficients
-    projected = X @ np.linalg.lstsq(X, W, rcond=None)[0]
+    c = float(np.linalg.lstsq(np.column_stack([X, W]), y, rcond=None)[0][-1])
+    return ok, C, X, y, short, W, c
+
+
+def benchmark_gamma_z(panel, w: np.ndarray, spec: str, iv) -> tuple[int, float, float, float]:
+    """(n, r2(W~Z|C), r2(W~tau_s|C), gamma_z) for one omitted W against the
+    configured instrument set: the leak of dropping W (SS6.1 with Z for X).
+
+    Same algebra as `benchmark_gamma`, same c, same sample, projection onto the
+    instruments instead of the treatments: with y = X b + c W + e and e clean of
+    Z, the moment at b is c Z'W / n, so gamma_z = c^2 ||P_Z W||^2 / (n sigma^2)
+    (Cinelli and Hazlett's IV framework, the paper's [12]). Nevo and Rosen's
+    imperfect-instrument premise is the ratio to `benchmark_gamma`: the set is
+    credible where the same W leaks it less than it confounds X. The third
+    column isolates the external excise, since a treatment instrumenting itself
+    inherits every confounder that touches it.
+    """
+    ok, C, X, y, short, W, c = _benchmark_frame(panel, w, spec)
+    excise = {name: residualise(np.log(panel[name])[ok], C) for name in iv if name not in TREATMENTS}
+    Z = np.column_stack([X[:, TREATMENTS.index(name)] if name in TREATMENTS else excise[name] for name in iv])
+    projected = Z @ np.linalg.lstsq(Z, W, rcond=None)[0]
+    external = np.column_stack(list(excise.values())) if excise else np.zeros((len(W), 0))
+    on_excise = external @ np.linalg.lstsq(external, W, rcond=None)[0] if excise else np.zeros_like(W)
     n = int(ok.sum())
-    r2y = 1.0 - float(np.sum(full**2) / np.sum(short**2))
-    r2w = float(np.sum(projected**2) / np.sum(W**2))
-    gamma_ovb = float(coefficients[-1] ** 2 * np.sum(projected**2) / n / (np.sum(short**2) / n))
-    gamma_ch = r2w * r2y / (1.0 - r2w)
-    return n, r2y, r2w, gamma_ovb, gamma_ch
+    r2z = float(np.sum(projected**2) / np.sum(W**2))
+    r2t = float(np.sum(on_excise**2) / np.sum(W**2))
+    gamma_z = float(c**2 * np.sum(projected**2) / n / (np.sum(short**2) / n))
+    return n, r2z, r2t, gamma_z
+
+
+def direct_effect_gamma_z(design, delta: float) -> float:
+    """gamma_z of a direct effect `delta` of log tax on log sales outside the
+    price channel: the moment at b is delta Z'z_tax / n, and z_tax lies in
+    span(Z), so gamma_z = (delta / sigma)^2 var(z_tax | C). The panel's y is
+    sigma-scaled and its excise column is not, hence the division."""
+    z_tax = design.Z[:, 0]
+    return float((delta / design.sigma) ** 2 * np.mean(z_tax**2))
 
 
 def feasibility_floor(design, Z: np.ndarray, bound: float) -> float:
@@ -270,6 +326,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         self.target, self.spec, self.anchor = target, spec, anchor
         self.sliver = bool(sliver)
         self._benchmarks = None
+        self._benchmarks_iv = None
         self.iv_columns = tuple(iv or ())
         # the real-Z radius s sqrt(gamma_z) is DECLARED, never oracle, and it
         # exists only with an instrument to declare it on; 0 keeps the IV classes
@@ -498,10 +555,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         self._plot_width_ratio(runner, panel)
         self._write_coefficients(runner, panel)
         if self.iv_columns:
-            # the phase-b figures and the benchmark table exist only under a
+            # the phase-b figures and the benchmark tables exist only under a
             # configured set: the shipped path writes nothing it did not before
             self._plot_headline(runner, panel)
             self._write_benchmarks()
+            self._write_benchmarks_iv(runner)
         self._write_ladder()
 
     # --------------------------------------------------------------- headline
@@ -515,19 +573,34 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             }
         return self._benchmarks
 
-    def _plot_headline(self, runner, panel):
-        """F1 and F2 (SS10), off the query panel's fitted models.
+    def benchmarks_iv(self) -> dict[str, tuple[int, float, float, float]]:
+        """The gamma_z rows against the configured set, same W's, computed once."""
+        if self._benchmarks_iv is None:
+            panel_data = SEM.panel()
+            self._benchmarks_iv = {
+                key: benchmark_gamma_z(panel_data, w, self.spec, self.iv_columns)
+                for key, w in benchmark_covariates(panel_data).items()
+            }
+        return self._benchmarks_iv
 
-        F1: the beta_pn interval of each headline method against gamma on the
-        benchmarked range, with the PI+IV feasibility floor, the two benchmarks
-        (1x tax-differential, 1x addiction stock), gamma*(b) and 3x the
-        tax-differential marked, the frame widened to show all five. Reading: the
-        lower bound flattens by 0.19 and only the upper end grows with the budget
-        (that PI never separates from PI+INV is T1's row, not a band here).
-        F2: the same methods against the declared radius r_Z = s sqrt(gamma_z)
-        at the query budget, the cluster-bootstrap median and p95 of the moment
-        at the target marked, so the declared budget is seen against what a
-        resampled panel would read. Every model's `gamma_z` is put back after.
+    def _plot_headline(self, runner, panel):
+        """F1 and F2 (SS10), off the query panel's fitted models, one pair per
+        HEADLINE_COEFFICIENTS entry (`beta_pn_*`, `beta_p_*`).
+
+        F1: the coefficient's interval of each headline method against gamma on
+        the benchmarked range, with the PI+IV feasibility floor, the two
+        benchmarks (1x tax-differential, 1x addiction stock), gamma*(b) and 3x the
+        tax-differential marked, the frame widened to show all five. Reading on
+        beta_pn: the lower bound flattens by 0.19 and only the upper end grows
+        with the budget (that PI never separates from PI+INV is T1's row, not a
+        band here).
+        F2: the same methods against the radius r_Z = s sqrt(gamma_z) at the query
+        budget. Marks, in order: the cluster-bootstrap median and p95 of the
+        moment at the target, the declared radius, then the radius of each
+        IV_BENCHMARKS leak, so the declared budget is seen against what a
+        resampled panel reads and against what the same omitted variables that
+        benchmark gamma would do to the instruments. Every model's `gamma_z` is
+        put back after.
         """
         # a spelled default (`DA+PI+IV(T,Z)`) is the headline `DA+PI+IV`; the
         # `(Z)` variant is not a headline and the outcomes stay keyed by HEADLINE_METHODS
@@ -537,25 +610,14 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             logger.warning(f"headline figures need one of {HEADLINE_METHODS} in `methods`; skipping.")
             return
         design, scale = runner.sem.design, runner.sem.design.sigma
-        query = np.eye(design.k)[PN][None, :]
         points = int(self.kwargs["sweep_samples"])
-
-        def interval(model, gamma):
-            return scale * model.predict(query, gamma=gamma)[0]
-
-        # F1
-        gammas = np.linspace(*GAMMA_RANGE, points)
-        results = {name: np.full((points, 1, 2), np.nan) for name in models}
-        for i, gamma in enumerate(gammas):
-            for name, model in models.items():
-                results[name][i, 0] = interval(model, float(gamma))
         Z, b = runner.sem.iv_pool, runner.sem.solution.ravel()
         tax_diff, lag = self.benchmarks()["tax_diff"][3], self.benchmarks()["lag_q"][3]
         # the floor at PI+IV's bound s sqrt(gamma_z): the panel is sigma-normalised
         # (`build_design` divides y by the OLS residual sd), so PI+IV's s is 1 and
         # the bound is sqrt(gamma_z) in outcome units, what SS3.3's 0.1107 was
         # measured at
-        vlines = (
+        f1_marks = (
             feasibility_floor(design, Z, np.sqrt(self.gamma_z)),
             tax_diff,
             lag,
@@ -563,51 +625,73 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             3.0 * tax_diff,
         )
         logger.info(
-            f"F1 marks: PI+IV floor {vlines[0]:.4f}, 1x tax-diff {vlines[1]:.4f}, 1x lag-q {vlines[2]:.4f}, "
-            f"gamma*(b) {vlines[3]:.4f}, 3x tax-diff {vlines[4]:.4f}"
+            f"F1 marks: PI+IV floor {f1_marks[0]:.4f}, 1x tax-diff {f1_marks[1]:.4f}, 1x lag-q {f1_marks[2]:.4f}, "
+            f"gamma*(b) {f1_marks[3]:.4f}, 3x tax-diff {f1_marks[4]:.4f}"
         )
-        save(gammas, "beta_pn_gamma_values", self.name, "pkl", subdir=SUBDIR_QUERY)
-        save(results, "beta_pn_gamma_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
-        save(np.array(vlines), "beta_pn_gamma_vlines", self.name, "pkl", subdir=SUBDIR_QUERY)
-        create_query_sweep_plot(
-            gammas,
-            results,
-            **ANNOTATE_SWEEP_PLOT["beta_pn_gamma"],
-            ylabel=r"$\beta_{p_n}$",
-            fname="beta_pn_gamma",
-            experiment=self.name,
-            vlines=vlines,
+        median, p95 = moment_quantiles(design, Z, b)
+        leaks = tuple(float(np.sqrt(self.benchmarks_iv()[key][3])) for key in IV_BENCHMARKS)
+        f2_marks = (median, p95, float(np.sqrt(self.gamma_z)), *leaks)
+        logger.info(
+            f"F2 marks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f}; declared r_Z "
+            f"{f2_marks[2]:.4f}; leak radii {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
         )
-
+        gammas = np.linspace(*GAMMA_RANGE, points)
         # F2: r_Z enters the bound as s sqrt(gamma_z), so each radius is one
         # gamma_z per model at that model's own s; PI carries no such term
         radii = np.geomspace(*BUDGET_RANGE, points)
-        results = {name: np.full((points, 1, 2), np.nan) for name in models}
-        for name, model in models.items():
-            if not hasattr(model, "gamma_z"):
-                results[name][:, 0] = interval(model, self.gamma)
-                continue
-            declared = model.gamma_z
-            try:
-                for i, radius in enumerate(radii):
-                    model.gamma_z = float(radius**2 / (model.sigma_sq / model.rho))
-                    results[name][i, 0] = interval(model, self.gamma)
-            finally:
-                model.gamma_z = declared
-        median, p95 = moment_quantiles(design, Z, b)
-        logger.info(f"F2 marks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f}")
-        save(radii, "beta_pn_budget_values", self.name, "pkl", subdir=SUBDIR_QUERY)
-        save(results, "beta_pn_budget_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
-        save(np.array([median, p95]), "beta_pn_budget_vlines", self.name, "pkl", subdir=SUBDIR_QUERY)
-        create_query_sweep_plot(
-            radii,
-            results,
-            **ANNOTATE_SWEEP_PLOT["beta_pn_budget"],
-            ylabel=r"$\beta_{p_n}$",
-            fname="beta_pn_budget",
-            experiment=self.name,
-            vlines=(median, p95),
-        )
+
+        for coefficient in HEADLINE_COEFFICIENTS:
+            query = np.eye(design.k)[TREATMENTS.index(coefficient)][None, :]
+            label = COEFFICIENT_LABELS[coefficient]
+
+            def interval(model, gamma, query=query):
+                return scale * model.predict(query, gamma=gamma)[0]
+
+            # F1
+            results = {name: np.full((points, 1, 2), np.nan) for name in models}
+            for i, gamma in enumerate(gammas):
+                for name, model in models.items():
+                    results[name][i, 0] = interval(model, float(gamma))
+            stem = f"beta_{coefficient}_gamma"
+            save(gammas, f"{stem}_values", self.name, "pkl", subdir=SUBDIR_QUERY)
+            save(results, f"{stem}_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
+            save(np.array(f1_marks), f"{stem}_vlines", self.name, "pkl", subdir=SUBDIR_QUERY)
+            create_query_sweep_plot(
+                gammas,
+                results,
+                **ANNOTATE_SWEEP_PLOT[stem],
+                ylabel=label,
+                fname=stem,
+                experiment=self.name,
+                vlines=f1_marks,
+            )
+
+            # F2
+            results = {name: np.full((points, 1, 2), np.nan) for name in models}
+            for name, model in models.items():
+                if not hasattr(model, "gamma_z"):
+                    results[name][:, 0] = interval(model, self.gamma)
+                    continue
+                declared = model.gamma_z
+                try:
+                    for i, radius in enumerate(radii):
+                        model.gamma_z = float(radius**2 / (model.sigma_sq / model.rho))
+                        results[name][i, 0] = interval(model, self.gamma)
+                finally:
+                    model.gamma_z = declared
+            stem = f"beta_{coefficient}_budget"
+            save(radii, f"{stem}_values", self.name, "pkl", subdir=SUBDIR_QUERY)
+            save(results, f"{stem}_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
+            save(np.array(f2_marks), f"{stem}_vlines", self.name, "pkl", subdir=SUBDIR_QUERY)
+            create_query_sweep_plot(
+                radii,
+                results,
+                **ANNOTATE_SWEEP_PLOT[stem],
+                ylabel=label,
+                fname=stem,
+                experiment=self.name,
+                vlines=f2_marks,
+            )
 
     def _write_benchmarks(self):
         """T2: the SS6.2 table, both gamma columns printed since their agreement
@@ -628,6 +712,43 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             lines.append(f"{label} & {n:d} & {r2y:.4f} & {r2w:.4f} & {gamma_ovb:.4f} & {gamma_ch:.4f} \\\\")
         lines += [r"\bottomrule", r"\end{tabular}"]
         save("\n".join(lines) + "\n", "benchmarks", self.name, "tex", subdir=SUBDIR_QUERY)
+
+    def _write_benchmarks_iv(self, runner):
+        """T3: the gamma_z rows of the same W's against the configured set, the
+        ratio to T2's gamma beside each (Nevo and Rosen's premise), then the
+        direct-effect rows: what a direct tax elasticity delta outside the price
+        channel costs in gamma_z, with the declared budget read back as a delta."""
+        design = runner.sem.design
+        rows, gammas = self.benchmarks_iv(), self.benchmarks()
+        z_var = float(np.mean(design.Z[:, 0] ** 2))
+        declared_delta = float(np.sqrt(self.gamma_z / z_var) * design.sigma)
+        lines = [
+            rf"% cigarette IV benchmark budgets at spec {design.spec}, instrument set {list(self.iv_columns)}:",
+            r"% gamma_z for dropping W, in the paper's units. Same sample, controls and c as benchmarks.tex;",
+            r"% gamma_z = c^2 ||P_Z W||^2 / (n sigma^2), r2(W~tau_s) the projection on the external excise alone.",
+            rf"% declared gamma_z = {self.gamma_z:g} (r_Z {np.sqrt(self.gamma_z):.4f}) reads as a direct tax "
+            rf"elasticity delta = {declared_delta:.4f}: gamma_z = (delta / {design.sigma:.4f})^2 * {z_var:.5f}.",
+            r"\begin{tabular}{lrrrrrr}",
+            r"\toprule",
+            r"benchmark $W$ & $n$ & $r^2(W \sim Z \mid C)$ & $r^2(W \sim \tau_s \mid C)$ "
+            r"& $\gamma_z$ & $r_Z = \sqrt{\gamma_z}$ & $\gamma_z / \gamma$ \\",
+            r"\midrule",
+        ]
+        for key, label in BENCHMARK_NAMES.items():
+            n, r2z, r2t, gamma_z = rows[key]
+            ratio = gamma_z / gammas[key][3] if gammas[key][3] > 0 else float("nan")
+            lines.append(
+                f"{label} & {n:d} & {r2z:.4f} & {r2t:.4f} & {gamma_z:.4f} & {np.sqrt(gamma_z):.4f} & {ratio:.3f} \\\\"
+            )
+        lines.append(r"\midrule")
+        for delta in DIRECT_EFFECTS:
+            gamma_z = direct_effect_gamma_z(design, delta)
+            lines.append(
+                rf"direct tax elasticity $\delta = {delta:g}$ & {design.n:d} & & & {gamma_z:.4f} "
+                rf"& {np.sqrt(gamma_z):.4f} & \\"
+            )
+        lines += [r"\bottomrule", r"\end{tabular}"]
+        save("\n".join(lines) + "\n", "benchmarks_iv", self.name, "tex", subdir=SUBDIR_QUERY)
 
     def _plot_width_ratio(self, runner, panel):
         """Width over PI's width against |cos(x, v)| in the Sigma^-1 metric.

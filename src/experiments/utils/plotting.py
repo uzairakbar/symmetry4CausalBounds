@@ -737,8 +737,14 @@ def create_query_sweep_plot(
     x_lo, x_hi = min(x_values), max(x_values)
     if marks:
         x_lo, x_hi = min(x_lo, min(marks)), max(x_hi, max(marks))
-        margin = X_MARK_MARGIN * (x_hi - x_lo)
-        x_lo, x_hi = x_lo - margin, x_hi + margin
+        if xscale == "log":
+            # a linear margin below a small left edge goes negative and a log
+            # axis then drops the frame; widen by the same fraction in decades
+            factor = (x_hi / x_lo) ** X_MARK_MARGIN
+            x_lo, x_hi = x_lo / factor, x_hi * factor
+        else:
+            margin = X_MARK_MARGIN * (x_hi - x_lo)
+            x_lo, x_hi = x_lo - margin, x_hi + margin
     plt.xlim([x_lo, x_hi])
 
     padding = 0.05 * max_mean
