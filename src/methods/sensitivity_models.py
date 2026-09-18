@@ -294,9 +294,10 @@ class PartialR2(BoundedSA):
         with-intercept ERM -- the centre Lem. 2 names. Bounds are returned on the
         original outcome scale by adding `y_offset_` back (Cor. 3).
 
-        `GX` rides along with the SAME mu, so the invariance constraint
-        `|| (GX - X) h ||` is untouched (the two intercepts cancel); `Z` and the
-        clipping limits stay on their raw scales.
+        `GX` and `X_pre` ride along with the SAME mu, so the invariance constraint
+        `|| (GX - X) h ||` and the augmentation shift `X - X_pre` are untouched
+        (the two intercepts cancel); `Z`, `T` and the clipping limits stay on
+        their raw scales.
         """
         if not self.mean_match:
             self.mu_ = np.zeros(X.shape[1])
@@ -305,9 +306,10 @@ class PartialR2(BoundedSA):
 
         self.mu_ = X.mean(axis=0)
         self.y_offset_ = float(np.mean(y))
-        GX = kwargs.get("GX")
-        if GX is not None:
-            kwargs = {**kwargs, "GX": np.asarray(GX).reshape(len(X), -1) - self.mu_}
+        for key in ("GX", "X_pre"):
+            value = kwargs.get(key)
+            if value is not None:
+                kwargs = {**kwargs, key: np.asarray(value).reshape(len(X), -1) - self.mu_}
         return X - self.mu_, np.asarray(y) - self.y_offset_, kwargs
 
     def _fit(self, X, y, **kwargs):
@@ -493,9 +495,13 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True
         design: the matrix the METHOD fits on -- X for `inv`, GX for `iv`
         y: outcomes, paired with `design`
         gamma: the ball this budget will be used with
-        kind: 'inv' (PI+INV) or 'iv' (DA+PI+IV)
+        kind: 'inv' (the invariance cone) or 'iv' (ONE instrument constraint)
         GX: augmented design, required for `inv`
-        Z: instrument, required for `iv`
+        Z: the instrument block of the ONE constraint being measured, required
+            for `iv`. The T budget's floor is measured with the translation amounts
+            alone, the Z radius is never guarded (SS2.6), and a PAIR's feasibility
+            is not a floor at all: it is the smallest Z moment on the ball cap the
+            T constraint.
         mean_match: measure the floor over the SAME ball the model solves on --
             Lem. 2's covariance ball. A floor from the other geometry would make
             the budget guard lie in both directions.
@@ -545,6 +551,20 @@ def _jittered(A, M):
     if jitter_strength < 1e-9:
         jitter_strength = 1e-6
     return np.vstack([A, np.sqrt(jitter_strength) * np.eye(M)])
+
+
+def _instrument_columns(Z, n):
+    """`Z` as the (n, m) float block a constraint takes; None or empty is (n, 0),
+    which contributes no constraint at all.
+
+    A local twin of `model_fitting.instrument_columns` on purpose: `src.methods`
+    does not import from `src.experiments`, and three lines are cheaper than that
+    dependency.
+    """
+    if Z is None:
+        return np.zeros((n, 0))
+    Z = np.asarray(Z, dtype=float)
+    return Z.reshape(n, -1) if Z.size else Z.reshape(n, 0)
 
 
 def inv_constraint_terms(X, GX):
@@ -599,83 +619,188 @@ class InvarianceConstrainedPartialR2(PartialR2):
 
 
 class InstrumentalVariablePartialR2(PartialR2):
-    """PI + leaky IV constraint (Asm. 3). Null/empty Z falls back to baseline PI."""
+    """PI + leaky IV constraints (Asm. 3), ONE PER INSTRUMENT.
 
-    def __init__(self, gamma=None, gamma_z=0.0, epsilon_iv=None, **kwargs):
+    Two instrument blocks reach `fit` by their own keyword: `T`, the DA
+    translation amounts of SS4.3, and `Z`, the observed instrument. Every block
+    that is present gets its own SOC constraint at its own radius -- `t_bound`
+    from `epsilon_iv`, `z_bound` from `epsilon_iv_z` and `gamma_z` -- so one
+    instrument's budget is never spent by the other. A missing block is (n, 0)
+    and contributes nothing; with both missing this is baseline PI exactly.
+
+    Each constraint is valid on its own by the contraction step of Thm. 3.B's
+    proof (E[U + xi | .] is conserved, T independent of (xi, U, Z)). The pair is
+    NOT in general inside the single constraint on Z-tilde = (T, Z) the paper
+    writes: that one admits every h whose joint moment norm is under
+    sqrt(r_T^2 + r_Z^2), which on the T side is looser than r_T. The two can also
+    be jointly infeasible where each alone is feasible, and no floor predicts
+    where: the binding quantity is the smallest Z moment on the ball intersected
+    with the T constraint. That reads INFEASIBLE per query, as any empty
+    constraint set does, and nothing is inflated to hide it.
+    """
+
+    def __init__(self, gamma=None, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, **kwargs):
         self.gamma_z = gamma_z
-        # epsilon_iv: the IV budget ||E[W#|Z-tilde]|| (oracle `eps_iv_star`).
-        # Distinct from `epsilon`, whose only role in this class is the +/-eps
-        # padding: padding validity is pointwise (Thm. 3.A Jensen step), the IV
-        # budget is a projection norm. One attribute per role, one consumer each.
+        # epsilon_iv: the T-as-IV budget ||E[W#|T]|| (oracle `eps_iv_star`), the
+        # radius of the T constraint and of nothing else. Distinct from
+        # `epsilon`, whose only role in this class is the +/-eps padding: padding
+        # validity is pointwise (Thm. 3.A Jensen step), an IV budget is a
+        # projection norm. One attribute per role, one consumer each.
         self.epsilon_iv = epsilon_iv
+        # epsilon_iv_z: the observed instrument's measured piece, beside the
+        # declared radius s sqrt(gamma_z) it is combined with (SS2.6)
+        self.epsilon_iv_z = epsilon_iv_z
         super().__init__(gamma=gamma, **kwargs)
+        self.T_projector_R = None
+        self.t_residual_base = None
         self.Z_projector_R = None
-        self.y_residual_base = None
-        self.iv_threshold_param = None
-        self._has_iv = False
+        self.z_residual_base = None
+        self.t_threshold_param = None
+        self.z_threshold_param = None
+        self._has_t = False
+        self._has_z = False
+        # how far the augmentation can move a DECLARED Z moment; set at fit
+        self._z_allowance = 0.0
         self._budget_logged = False
         self._supports_closed_form = False
 
     @property
-    def iv_bound(self):
-        """The radius on ||E[W#|Z-tilde]||: root sum square of the T-as-IV budget
-        `epsilon_iv` and the declared real-Z radius s sqrt(gamma_z) (SS2.6).
+    def _has_iv(self) -> bool:
+        """Any instrument at all; False leaves the Lem. 2 ball on its own."""
+        return self._has_t or self._has_z
 
-        The joint projector on span(T, Z) splits into P_T and P_(Z|T), so two
-        budgets on the two pieces admit exactly the h whose joint norm is under
-        their root sum square; the plain sum is conservative. Exact when span(T)
-        and span(Z) are orthogonal. Bit-identical to `epsilon_iv` at gamma_z = 0,
-        which is every shipped run (sqrt(e^2) is exact in binary arithmetic).
+    @property
+    def t_bound(self) -> float | None:
+        """Radius of the T constraint: the T-as-IV budget, alone. None when the
+        model was built without one (it then carries no T block either)."""
+        return None if self.epsilon_iv is None else float(self.epsilon_iv)
+
+    @property
+    def z_bound(self) -> float:
+        """Radius of the Z constraint: the measured piece `epsilon_iv_z` and the
+        declared one in root sum square, s = sigma-hat of the PRE-DA data.
+
+        The declared piece is `s sqrt(gamma_z) + _z_allowance`. The first term is
+        the leak the config declares, a statement about the instrument's moment on
+        the ORIGINAL design; the second pays for the Z moment the augmentation adds
+        to the element this design's program must admit (`_declared_allowance`).
+        Without that term the DA branch's constraint excludes h#, the element it
+        has to admit, however large gamma_z is -- measured, and it is what emptied
+        the decoupled pair on the plasmode sweep. `_z_allowance` is 0 for a model
+        fitted with no `X_pre` (every non-DA method) and at gamma_z = 0, so the
+        radius is then exactly what it was.
+
+        Exactly s sqrt(gamma_z) on a declared non-DA method, and exactly
+        `epsilon_iv_z` at gamma_z = 0.
         """
-        # s is the *pre*-DA sigma = sqrt(sigma_sq / rho)
         s_sq = self.sigma_sq / self.rho
-        return float(np.sqrt(self.epsilon_iv**2 + s_sq * self.gamma_z))
+        # the allowance rides with a DECLARED leak and disappears with it: the F2
+        # figure sweeps `gamma_z` on a fitted model down to 0, and there the radius
+        # must be exactly `epsilon_iv_z` again, not the fit-time allowance
+        allowance = self._z_allowance if self.gamma_z else 0.0
+        declared = np.sqrt(s_sq * self.gamma_z) + allowance
+        return float(np.sqrt(self.epsilon_iv_z**2 + declared**2))
 
-    def _precompute_matrices(self, X, y, Z=None, **kwargs):
-        self._has_iv = Z is not None and np.size(Z) > 0
-        if not self._has_iv:
-            return
-        if self.epsilon_iv is None:
-            raise ValueError(
-                "epsilon_iv is required when an instrument is supplied; pass the oracle `eps_iv_star` (+ EPS_TOL)."
+    def _precompute_matrices(self, X, y, Z=None, T=None, X_pre=None, **kwargs):
+        T, Z = _instrument_columns(T, len(X)), _instrument_columns(Z, len(X))
+        self._has_t, self._has_z = T.shape[1] > 0, Z.shape[1] > 0
+        if self._has_t and self.epsilon_iv is None:
+            raise ValueError("epsilon_iv is required with T-as-IV; pass the oracle `eps_iv_star` (+ EPS_TOL).")
+        if self._has_t:
+            self.T_projector_R, self.t_residual_base = iv_constraint_terms(X, y, T)
+        if self._has_z:
+            self.Z_projector_R, self.z_residual_base = iv_constraint_terms(X, y, Z)
+            self._z_allowance = self._declared_allowance(X, Z, X_pre)
+        if self._has_z and self.z_bound == 0.0:
+            # the usual cause is a caller handing the translation amounts as `Z`:
+            # T-as-IV goes in the `T` block, and the Z block's radius is 0 until
+            # `epsilon_iv_z` or `gamma_z` says otherwise
+            logger.warning(
+                "IV: an observed instrument with a zero radius (epsilon_iv_z 0, gamma_z 0) "
+                "forces its moment to hold exactly; every query will read INFEASIBLE."
             )
 
-        self.Z_projector_R, self.y_residual_base = iv_constraint_terms(X, y, Z)
+    def _declared_allowance(self, X, Z, X_pre) -> float:
+        """How much of the DECLARED Z radius the augmentation itself can consume.
+
+        The element this program must admit is not the target but h#, the target
+        plus what this design can absorb of the invariance signal w, and h# carries
+        w's residual Z moment || Q_Z' (I - P_X) w || / sqrt(N). Two facts bound it:
+        || w || <= sqrt(N) epsilon by the definition of the invariance budget, and w
+        lies in the span of what the augmentation moved, X - X_pre. So the worst
+        case over THAT subspace, after the projection the residual already carries,
+        is `|| Q_Z' (I - P_X) Q_D ||_2 * epsilon`. Bounding it over every direction
+        of norm epsilon instead (dropping Q_D) is also valid and measurably useless:
+        it takes the radius far enough that the constraint stops binding at all.
+
+        Without this term the DA branch's constraint excludes h# however large
+        gamma_z is, which is what a pooled radius used to hide (SS9.6 of the
+        round-14 plan). `epsilon` is the one this model was FITTED at, so the radius
+        does not move with the swept ratio (R2). Zero without a pre-augmentation
+        design, without a declared leak, or when the augmentation moved nothing.
+        """
+        if X_pre is None or not self.gamma_z:
+            return 0.0
+        X = np.asarray(X, dtype=float)
+        difference = X - np.asarray(X_pre, dtype=float).reshape(len(X), -1)
+        if not np.any(difference):
+            return 0.0
+        # an orthonormal basis of the SPAN of the shift, truncated: a plain QR of a
+        # rank deficient shift completes the basis arbitrarily, and those made-up
+        # directions would inflate kappa
+        left, singular, _ = np.linalg.svd(difference, full_matrices=False)
+        keep = singular > max(float(singular[0]), 1.0) * 1e-12
+        if not keep.any():
+            return 0.0
+        Q_Z, _ = np.linalg.qr(Z)
+        Q_X, _ = np.linalg.qr(X)
+        Q_D = left[:, keep]
+        residual_basis = Q_D - Q_X @ (Q_X.T @ Q_D)
+        kappa = float(np.linalg.svd(Q_Z.T @ residual_basis, compute_uv=False)[0])
+        return kappa * float(self.epsilon)
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
-        if not self._has_iv:
-            return constraints
-
-        self.iv_threshold_param = cp.Parameter(nonneg=True)
-        constraints.append(
-            cp.norm(cp.Constant(self.y_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var, 2)
-            <= self.iv_threshold_param
-        )
+        # one SOC per non-empty block, T first: the order the cvx problem carries
+        # is the ball, then the instrument blocks, then an INV cone on top
+        if self._has_t:
+            self.t_threshold_param = cp.Parameter(nonneg=True)
+            constraints.append(
+                cp.norm(cp.Constant(self.t_residual_base) - cp.Constant(self.T_projector_R) @ self.h_var, 2)
+                <= self.t_threshold_param
+            )
+        if self._has_z:
+            self.z_threshold_param = cp.Parameter(nonneg=True)
+            constraints.append(
+                cp.norm(cp.Constant(self.z_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var, 2)
+                <= self.z_threshold_param
+            )
         return constraints
 
     def _set_solver_parameters(self, gamma):
         super()._set_solver_parameters(gamma)
-        if self._has_iv:
-            self.iv_threshold_param.value = np.sqrt(self.N_samples) * self.iv_bound
+        if self._has_t:
+            self.t_threshold_param.value = np.sqrt(self.N_samples) * self.t_bound
+        if self._has_z:
+            self.z_threshold_param.value = np.sqrt(self.N_samples) * self.z_bound
             if self.gamma_z != 0.0 and not self._budget_logged:
                 # once per fitted model, at the first solve: rho is final here (an
-                # intersection sets its DA branch's after fit). The overlap of
-                # span(T) and span(Z) is not measurable in the solver, which sees
-                # the joint instrument only; a60 records it with G and Z apart
+                # intersection sets its DA branch's after fit), so s is too
                 self._budget_logged = True
                 logger.info(
-                    f"IV budget gamma_z={self.gamma_z:g}: epsilon_iv={self.epsilon_iv:g}, "
-                    f"s={np.sqrt(self.sigma_sq / self.rho):.6g}, joint bound sqrt(eps_iv^2 + s^2 gamma_z) = "
-                    f"{self.iv_bound:.6g}; exact when span(T) and span(Z) are orthogonal"
+                    f"IV: gamma_z={self.gamma_z:g}, s={np.sqrt(self.sigma_sq / self.rho):.6g}, "
+                    f"DA-side allowance {self._z_allowance:.6g}; r_Z={self.z_bound:.6g}, "
+                    f"r_T={'none' if self.t_bound is None else format(self.t_bound, '.6g')}. "
+                    "Two radii, one per instrument, never pooled."
                 )
 
 
 class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePartialR2):
     """PI + INV + IV on the ORIGINAL design: the Lem. 2 ball, the invariance cone
     of SS3.1 (`epsilon` on ||(GX - X) h||) and the leaky IV constraint of Asm. 3
-    (`epsilon_iv` on the instrument moments). Two separate budgets, unlike the
-    pooled one DA+PI+IV puts on Z-tilde. An empty Z reduces it to PI+INV exactly."""
+    on the observed instrument at `z_bound`. It is a non-DA method, so it carries
+    no T-as-IV moment: that condition holds on the augmented design, not on X.
+    An empty Z reduces it to PI+INV exactly."""
 
     solves_on_epsilon = True
 
@@ -686,8 +811,8 @@ class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePar
         self.R_diff = None
         self.eps_param = None
 
-    def _precompute_matrices(self, X, y, GX=None, Z=None, **kwargs):
-        super()._precompute_matrices(X, y, Z=Z, **kwargs)
+    def _precompute_matrices(self, X, y, GX=None, Z=None, T=None, **kwargs):
+        super()._precompute_matrices(X, y, Z=Z, T=T, **kwargs)
         self.R_diff, _ = inv_constraint_terms(X, X if GX is None else GX)
 
     def _get_constraints(self):
@@ -812,16 +937,17 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
 
 
 class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
-    """Baseline PI+IV on the real Z intersected with DA+PI+IV on Z-tilde = (T, Z).
-    An empty set makes the baseline PI and Z-tilde the translation alone, today's run.
+    """Baseline PI+IV on the observed Z intersected with DA+PI+IV on the
+    augmented design (Cor. 1).
 
-    Two budgets, one per SS2.6 row: `epsilon_iv` is the DA branch's T-side term
-    (joint bound sqrt(epsilon_iv^2 + s^2 gamma_z)); `epsilon_iv_z` is the baseline's
-    own term, so its bound is sqrt(epsilon_iv_z^2 + s^2 gamma_z): 0.0 under a
-    declared budget (exactly r_Z), the oracle real-Z piece plus the tolerance on
-    the simulation, and inert under an empty Z. `instrument` is the DA branch's
-    mode: "T,Z" the joint Z-tilde, "Z" the real Z alone at the baseline's budget
-    with no T, "T" the translation amounts alone at `epsilon_iv` with no Z."""
+    Each branch carries one constraint per instrument block it is handed. The
+    baseline only ever sees Z: no T-as-IV moment holds on the un-augmented
+    design. `instrument` says what the DA branch sees -- "T,Z" both (the
+    default), "Z" the observed instrument alone, "T" the translation amounts
+    alone. Both radii travel to both branches and each uses the ones its blocks
+    ask for: `epsilon_iv` is r_T, `epsilon_iv_z` with `gamma_z` is r_Z (0.0 under
+    a declared budget makes it exactly s sqrt(gamma_z)). An empty Z makes the
+    baseline plain PI and the DA branch T-only, which is today's run."""
 
     def __init__(self, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, instrument="T,Z", **kwargs):
         if instrument not in ("T,Z", "Z", "T"):
@@ -832,12 +958,15 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         self.instrument = instrument
         super().__init__(**kwargs)
 
-    def _branch(self, pad, epsilon_iv, gamma_z=None):
+    def _branch(self, pad):
+        # rho = 1 at construction: the DA branch's factor is only known once both
+        # branches are fitted (`_fit_branches` sets it)
         return InstrumentalVariablePartialR2(
             gamma=self.gamma,
-            gamma_z=self.gamma_z if gamma_z is None else gamma_z,
+            gamma_z=self.gamma_z,
             epsilon=self.epsilon,
-            epsilon_iv=epsilon_iv,
+            epsilon_iv=self.epsilon_iv,
+            epsilon_iv_z=self.epsilon_iv_z,
             pad=pad,
             recalibrate=self.recalibrate,
             rho=1.0,
@@ -847,28 +976,19 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         )
 
     def _fit_branches(self, X, y, GX, G, Z=None):
-        # empty is spelled (n, 0), so the stack below is G elementwise with an
-        # identical QR and the baseline reduces to PI exactly
-        Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
-        # SS2.6 per branch: the baseline is a non-DA +IV method and carries no
-        # T-as-IV term, only its own `epsilon_iv_z` (0.0 when the real-Z radius is
-        # declared, so the bound is exactly r_Z = s sqrt(gamma_z); none at all under
-        # an empty Z); the DA branch keeps the joint root-sum-square bound
-        self.baseline = self._branch(pad=False, epsilon_iv=self.epsilon_iv_z).fit(X, y, Z=Z)
-        if self.instrument == "T,Z":
-            # Z-tilde = (T, Z) of Asm. 3, T first, the joint budget
-            self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv).fit(
-                GX, y, Z=np.column_stack([G, Z])
-            )
-        elif self.instrument == "Z":
-            # the (Z) mode: the real Z alone at the non-DA budget, no T term
-            self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv_z).fit(GX, y, Z=Z)
-        else:
-            # the (T) mode: the translation amounts alone at the T-side term, no
-            # real-Z radius
-            self.augmented = self._branch(pad=self.pad, epsilon_iv=self.epsilon_iv, gamma_z=0.0).fit(
-                GX, y, Z=np.asarray(G).reshape(len(X), -1)
-            )
-        # rho known once both noise levels are: the ball and the IV threshold are
-        # cvx Parameters, set at predict
+        # empty is spelled (n, 0), and a branch handed it carries no constraint
+        Z = _instrument_columns(Z, len(X))
+        T = _instrument_columns(G, len(X))
+        self.baseline = self._branch(pad=False).fit(X, y, Z=Z)
+        # `X_pre` is the design before augmentation: the DA branch's declared Z
+        # radius needs it to carry the declaration across (D20)
+        self.augmented = self._branch(pad=self.pad).fit(
+            GX,
+            y,
+            Z=Z if self.instrument in ("T,Z", "Z") else None,
+            T=T if self.instrument in ("T,Z", "T") else None,
+            X_pre=X,
+        )
+        # rho known once both noise levels are: the ball and both IV thresholds
+        # are cvx Parameters, set at predict
         self.augmented.rho = self.rho

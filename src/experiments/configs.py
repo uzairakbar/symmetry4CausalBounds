@@ -771,14 +771,13 @@ class MethodRegistry:
         `pad` is applied to DA+ methods only; the baselines PI, PI+INV, PI+IV and
         PI+INV+IV never pad. `gamma_z` is the declared real-Z budget of a non-empty
         `iv:` (SS2.6); at its default 0, which is every shipped run, the only
-        instrument in play is the DA's own translation amount T. Two IV budgets,
-        one per SS2.6 row: `epsilon_iv` is the DA methods' T-side term, `epsilon_iv_z`
-        the non-DA +IV methods' own (and the intersection's baseline branch).
-        A DA+ IV method may carry an instrument mode (`parse_method`): bare or
-        `DA+PI+IV(T,Z)` constrains the joint Z-tilde = (T, Z) at the joint budget,
-        `DA+PI+IV(Z)` the configured Z alone at the non-DA budget `epsilon_iv_z`
-        with no T term, `DA+PI+IV(T)` the translation amounts alone at the T-side
-        term `epsilon_iv` with no Z term. Keys are the spellings as requested.
+        instrument in play is the DA's own translation amount T. Two budgets, one
+        per instrument, and they never mix: `epsilon_iv` is the radius of the
+        T-as-IV constraint, `epsilon_iv_z` with `gamma_z` the radius of the
+        observed instrument's. A DA+ IV method may carry an instrument mode
+        (`parse_method`): bare or `DA+PI+IV(T,Z)` constrains both, `DA+PI+IV(Z)`
+        the observed instrument alone, `DA+PI+IV(T)` the translation amounts
+        alone. Keys are the spellings as requested.
 
         Args:
             method_names: List of method names to build
@@ -797,17 +796,17 @@ class MethodRegistry:
                 the standalone DA+ balls only; the intersections measure their own
             pad: eps-pad DA+ intervals (Thm. 3.A)
             clipy: Clip intervals to the observed outcome range
-            epsilon_iv: IV budget ||E[W#|Z-tilde]||, i.e. oracle `eps_iv_star`
-                + EPS_TOL, the T-side term of the DA+ methods' joint bound
-                sqrt(epsilon_iv^2 + s^2 gamma_z). Reaches the IV constraint ONLY --
-                padding keeps the pointwise eps that Thm. 3.A requires.
-            epsilon_iv_z: the non-DA +IV methods' term (PI+IV, PI+INV+IV, the
-                intersection's baseline), bound sqrt(epsilon_iv_z^2 + s^2 gamma_z):
-                0.0 under a declared real-Z radius (exactly r_Z) and under an empty
-                set (inert), oracle `eps_iv_z_star` + EPS_TOL on the simulation
-            gamma_z: leakiness budget of the real instruments, `GAMMA_Z_DEFAULT`
-                under a non-empty `iv:`; the IV classes combine it with
-                `epsilon_iv` in root sum square (`iv_bound`)
+            epsilon_iv: the T-as-IV budget ||E[W#|T]||, oracle `eps_iv_star`
+                + EPS_TOL, and the radius of the T constraint alone. Reaches the
+                IV constraint ONLY -- padding keeps the pointwise eps that
+                Thm. 3.A requires.
+            epsilon_iv_z: the observed instrument's measured piece: 0.0 under a
+                declared radius (the Z radius is then exactly s sqrt(gamma_z)) and
+                under an empty set (inert), oracle `eps_iv_z_star` + EPS_TOL on the
+                simulation. One number for every Z constraint, non-DA and DA alike.
+            gamma_z: leakiness budget of the observed instruments, `GAMMA_Z_DEFAULT`
+                under a non-empty `iv:`; it enters the Z radius only
+                (`z_bound`), never the T one
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
@@ -849,14 +848,14 @@ class MethodRegistry:
             n_jobs=n_jobs,
             mean_match=mean_match,
         )
-        # the non-DA +IV balls carry their own real-Z term; the DA+ ones the T-side
-        # term of the joint bound, and the intersection both, one per branch
-        iv_common = dict(common, epsilon_iv=epsilon_iv_z, gamma_z=gamma_z)
+        # every IV ball carries BOTH radii; which constraints it ends up with
+        # follows from the instrument blocks it is FITTED with (`fit_model`), so
+        # one kwarg set serves the non-DA methods, the DA+ ones and every mode
+        iv_common = dict(common, epsilon_iv=epsilon_iv, epsilon_iv_z=epsilon_iv_z, gamma_z=gamma_z)
         # the standalone DA+ balls carry the step's rho; the intersections read
         # theirs off their two branches (`IntersectedPartialR2.rho`)
         da_common = dict(common, rho=rho)
-        da_iv_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=gamma_z, rho=rho)
-        int_iv_common = dict(common, epsilon_iv=epsilon_iv, epsilon_iv_z=epsilon_iv_z, gamma_z=gamma_z)
+        da_iv_common = dict(iv_common, rho=rho)
 
         all_builders = {
             "ATE": lambda: None,  # ATE computed analytically
@@ -878,30 +877,25 @@ class MethodRegistry:
             "DA+PI": lambda: PartialR2(gamma=gamma, pad=pad, **da_common),
             "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_iv_common),
             "PI&DA+PI": lambda: IntPartialR2(gamma=gamma, pad=pad, **common),
-            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **int_iv_common),
+            "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, **iv_common),
         }
 
         if set(all_builders) != set(ALL_METHODS):
             raise ValueError("ALL_METHODS out of sync.")
 
-        # the (Z) mode: the DA ball with the real Z alone, so it carries the non-DA
-        # row of SS2.6 (epsilon_iv_z, bound sqrt(epsilon_iv_z^2 + s^2 gamma_z)) and
-        # no T term
-        da_z_common = dict(common, epsilon_iv=epsilon_iv_z, gamma_z=gamma_z, rho=rho)
-        # the (T) mode: the DA ball with the translation amounts alone, the T-side
-        # term and no real-Z radius (gamma_z 0 makes `iv_bound` exactly `epsilon_iv`)
-        da_t_common = dict(common, epsilon_iv=epsilon_iv, gamma_z=0.0, rho=rho)
+        # the instrument MODE is a fit-time choice (`fit_model` picks the blocks),
+        # so only the intersection needs a builder per mode: it fits its own two
+        # branches and has to be told what its DA branch sees. `mode=mode` binds
+        # the loop variable into the lambda, which is called with no arguments
         mode_builders = {
-            "Z": {
-                "DA+IV": all_builders["DA+IV"],  # the mode is a fit-time choice for 2SLS
-                "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_z_common),
-                "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, instrument="Z", **int_iv_common),
-            },
-            "T": {
+            mode: {
                 "DA+IV": all_builders["DA+IV"],
-                "DA+PI+IV": lambda: IVPartialR2(gamma=gamma, pad=pad, **da_t_common),
-                "PI&DA+PI+IV": lambda: IntIVPartialR2(gamma=gamma, pad=pad, instrument="T", **int_iv_common),
-            },
+                "DA+PI+IV": all_builders["DA+PI+IV"],
+                "PI&DA+PI+IV": (
+                    lambda mode=mode: IntIVPartialR2(gamma=gamma, pad=pad, instrument=mode, **iv_common)
+                ),
+            }
+            for mode in ("Z", "T")
         }
         for builders in mode_builders.values():
             if set(builders) != set(IV_MODE_METHODS):

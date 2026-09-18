@@ -917,7 +917,12 @@ class RecentredInvPartialR2Net(PartialR2Net):
 class IVConstrainedPartialR2Net(PartialR2Net):
     """PI + leaky-IV constraint (Asm. 3): || Qz'(y - h(X)) ||^2 / n <= eps_iv^2,
     the GMM form with phi_z(z) = z and W = Sigma_z^+ -- the pseudo-inverse weight
-    collapses to the same QR geometry as `iv_constraint_terms`."""
+    collapses to the same QR geometry as `iv_constraint_terms`.
+
+    ONE constraint: this backend only ever sees the translation amounts. It takes
+    them as `T`, the keyword the linear solver's T block uses, and still accepts
+    `Z` for a caller that hands it an instrument under the old name. do-MNIST has
+    no observed instrument, so the decoupling of SS2.6 has nothing to split here."""
 
     def __init__(self, gamma=None, epsilon_iv=None, **kwargs):
         if epsilon_iv is None:
@@ -925,12 +930,16 @@ class IVConstrainedPartialR2Net(PartialR2Net):
         self.epsilon_iv = epsilon_iv
         super().__init__(gamma=gamma, **kwargs)
 
-    def _precompute(self, X, y, Z=None, **kwargs):
-        if Z is None:
+    def _precompute(self, X, y, Z=None, T=None, **kwargs):
+        # an EMPTY block is not an instrument either: `fit_model` spells a missing
+        # observed instrument (n, 0), and reading that as a constraint would make
+        # this class a plain PartialR2Net without saying so
+        instrument = T if T is not None and np.size(T) else Z
+        if instrument is None or not np.size(instrument):
             # a baseline branch wants a plain PartialR2Net, not a silently
             # self-instrumented constraint
             raise ValueError("IVConstrainedPartialR2Net needs an instrument; use PartialR2Net for a null-IV baseline.")
-        self.Qz_, _ = np.linalg.qr(np.asarray(Z, dtype=float).reshape(len(Z), -1))
+        self.Qz_, _ = np.linalg.qr(np.asarray(instrument, dtype=float).reshape(len(instrument), -1))
 
     def _extra_value(self, theta):
         residual = self.y_ - self._link_np(head_index(theta, self.phi_, self.head_shapes_))
@@ -1023,4 +1032,4 @@ class IntersectedIVPartialR2Net(IntersectedPartialR2Net):
         # the baseline carries no instrument, so it is a PLAIN PartialR2Net
         self.baseline = PartialR2Net(**self._branch_kwargs("X", pad=False)).fit(X, y)
         branch_kwargs = self._branch_kwargs("GX", pad=self.pad)
-        self.augmented = IVConstrainedPartialR2Net(epsilon_iv=self.epsilon_iv, **branch_kwargs).fit(GX, y, Z=G)
+        self.augmented = IVConstrainedPartialR2Net(epsilon_iv=self.epsilon_iv, **branch_kwargs).fit(GX, y, T=G)

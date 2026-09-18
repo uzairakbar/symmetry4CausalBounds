@@ -25,8 +25,10 @@ def instrument_columns(Z, n: int) -> np.ndarray:
 
 
 def joint_instrument(G, Z) -> np.ndarray:
-    """Z-tilde = (T, Z) of Asm. 3 for the DA+ methods: the translation amounts G
-    first, then the real instrument. With Z (n, 0) this is exactly G (SS2.5)."""
+    """Z-tilde = (T, Z) of Asm. 3 as ONE matrix, for the 2SLS point estimators:
+    the translation amounts G first, then the observed instrument. With Z (n, 0)
+    this is exactly G. The PI classes do NOT use this -- they take the two blocks
+    as separate constraints with separate budgets (SS2.6)."""
     G = np.asarray(G).reshape(len(G), -1)
     return np.column_stack([G, instrument_columns(Z, len(G))])
 
@@ -52,12 +54,12 @@ def fit_model(
     - PI uses original data X
     - DA+PI uses augmented data GX
     - PI+INV uses both X and GX
-    - the +IV methods add an instrument: non-DA ones see the real Z alone,
-      DA+ ones the joint Z-tilde = (G, Z), and the intersection takes the raw
-      Z and stacks G onto its DA branch itself
-    - a DA+ IV method spelled `(Z)` (`parse_method`) sees the real Z alone,
-      no G; `(T)` sees the translation amounts G alone, no Z; bare and `(T,Z)`
-      are the joint instrument
+    - the +IV methods add an instrument: the non-DA ones see the observed Z
+      alone, the DA+ ones get one constraint per block, T (the translation
+      amounts) and Z, and the intersection takes the raw Z and splits its own
+      branches
+    - a DA+ IV method spelled `(Z)` (`parse_method`) gets the Z block only,
+      `(T)` the T block only, bare and `(T,Z)` both
 
     Args:
         model: Model instance to fit
@@ -98,15 +100,12 @@ def fit_model(
         # hand-written call and it must say what it means
         raise ValueError("X_base without Z_base: pass the untiled instrument beside the untiled design.")
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
-    # the DA+ IV methods' instrument by mode: Z-tilde = (T, Z) by default, the real Z
-    # alone in the (Z) mode, the translation amounts alone in the (T) mode. Lazy:
-    # only the (T) mode needs G, and a non-DA method may be fitted without one
-    if mode == "Z":
-        z_da = Z
-    elif mode == "T":
-        z_da = _translation(G, len(X))
-    else:
-        z_da = _joint(G, Z)
+    # the DA+ methods' instrument blocks by mode (SS4.3): `(T,Z)` both, `(Z)` the
+    # observed instrument alone, `(T)` the translation amounts alone. The PI
+    # classes take them as SEPARATE constraints with separate budgets; 2SLS takes
+    # the one stacked matrix. Lazy: a non-DA method may be fitted without a G
+    t_da = None if mode == "Z" else _translation(G, len(X), required=mode == "T")
+    z_da = None if mode == "T" else Z
 
     # Dispatch based on the base name to use correct data
     if base == "PI":
@@ -130,8 +129,10 @@ def fit_model(
         model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
 
     elif base == "DA+PI+IV":
-        # the DA ball on GX with the joint instrument Z-tilde = (T, Z), or Z alone
-        model.fit(X=GX, y=y, Z=z_da, **fit_kwargs)
+        # the DA ball on GX with one constraint per block it is handed; an empty
+        # block is (n, 0) and contributes nothing. `X_pre` is the un-augmented
+        # design: a declared Z radius needs it to cross over to GX (SS2.6)
+        model.fit(X=GX, y=y, Z=z_da, T=t_da, X_pre=X, **fit_kwargs)
 
     elif base == "PI&DA+PI":
         # intersections fit a baseline branch on X and a DA branch on GX
@@ -160,25 +161,29 @@ def fit_model(
         model.fit(X=X_solo, y=y_solo, Z=Z_solo, **fit_kwargs)
 
     elif base == "DA+IV":
-        # 2SLS on the augmented data with the joint instrument, or Z alone in the
-        # (Z) mode, where an empty set is the same silent W = 0 as for IV
-        if z_da.shape[1] == 0:
+        # 2SLS on the augmented data with ONE instrument matrix: Z-tilde = (T, Z),
+        # or whichever block the mode leaves. With none it would return W = 0 and
+        # predict ybar at every query, so it stays a hard error here
+        z_2sls = _stacked(t_da, z_da, len(X))
+        if z_2sls.shape[1] == 0:
             raise ValueError("DA+IV needs an instrument; the instrument set is empty.")
-        model.fit(X=GX, y=y, Z=z_da, **fit_kwargs)
+        model.fit(X=GX, y=y, Z=z_2sls, **fit_kwargs)
 
     else:
         # Fallback for any custom methods - pass everything
         model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
 
 
-def _joint(G, Z):
-    """Z-tilde for a DA+ method; with no translation amounts the real Z alone,
-    which under an empty Z is no instrument, as before."""
-    return Z if G is None else joint_instrument(G, Z)
+def _stacked(T, Z, n):
+    """One instrument matrix for 2SLS: the T block first, then Z (Asm. 3)."""
+    return instrument_columns(Z, n) if T is None else joint_instrument(T, Z)
 
 
-def _translation(G, n):
-    """The translation amounts as the (n, k) instrument of the (T) mode."""
+def _translation(G, n, required: bool = True):
+    """The translation amounts as the (n, k) T block of a DA+ IV method; None when
+    the caller has none and the mode does not insist on one."""
     if G is None:
-        raise ValueError("the (T) mode needs the translation amounts G")
+        if required:
+            raise ValueError("the (T) mode needs the translation amounts G")
+        return None
     return np.asarray(G).reshape(n, -1)
