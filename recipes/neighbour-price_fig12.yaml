@@ -29,6 +29,3 @@ cigarettes:
     augmentation: translate
     experiment:
         query: true
-        sweep:
-            param:  [epsilon, gamma, trS, n, m, recalibrate]
-            metric: [coverage, approx_error, worst_error, width]
