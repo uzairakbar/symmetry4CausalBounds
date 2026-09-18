@@ -7,10 +7,13 @@ same ratio grid, x-label and r = 1 line as the `epsilon` sweep figure.
 
 Wall clock times what a method has to do at each grid point and cumulates it:
 a fresh build + fit + predict at point 0, then a re-solve where the fitted program
-reads the predict-time epsilon (`solves_on_epsilon`, the INV cone) and a `repad`
-(the last raw bounds finalised at the new epsilon, no solve) everywhere else,
-each point the median of `repeats` repeats, the total in units of one baseline PI
-solve (`normaliser`). Seed var holds everything fixed and varies the conic backend
+reads a predict-time budget (`solves_on_epsilon`: the INV cone reads epsilon, a
+T-as-IV constraint reads the T budget) and a `repad` (the last raw bounds
+finalised at the new epsilon, no solve) everywhere else, each point the median of
+`repeats` repeats, the total in units of one baseline PI solve (`normaliser`).
+The grid is centred on the oracle budget, so point 0 is an UNDER-budget solve and
+can be an infeasibility proof, which is cheaper than a solve; the cumulative curve
+is what the figure reads, not the first increment. Seed var holds everything fixed and varies the conic backend
 over the installed subset of BACKENDS at tight, comparable tolerances; the metric
 is D(eps) of `solver_stability`, failures counted per (run, query) pair.
 """

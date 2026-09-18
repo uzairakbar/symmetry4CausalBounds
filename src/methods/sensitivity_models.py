@@ -59,9 +59,9 @@ class BoundedSA(SA):
         _begin_chunk()  -> per-chunk setup, run INSIDE the worker
     """
 
-    # the fitted program reads the predict-time epsilon: the INV cone does, the
-    # plain and IV balls only pad by it (the perf sweep re-solves the former and
-    # `repad`s the latter)
+    # the fitted program reads a predict-time budget: the INV cone reads epsilon,
+    # the T-as-IV constraint reads `epsilon_iv`, and a plain ball only pads (the
+    # perf sweep re-solves the former two and `repad`s the rest)
     solves_on_epsilon: bool = False
 
     def __init__(
@@ -670,6 +670,14 @@ class InstrumentalVariablePartialR2(PartialR2):
         return self._has_t or self._has_z
 
     @property
+    def solves_on_epsilon(self) -> bool:
+        """The T threshold is read at predict time (the epsilon sweep moves the T
+        budget with the ratio), so a model with a T constraint re-solves per grid
+        point; one without it only pads. `PI+INV` and `PI+INV+IV` keep the class
+        attribute, which shadows this."""
+        return self._has_t
+
+    @property
     def t_bound(self) -> float | None:
         """Radius of the T constraint: the T-as-IV budget, alone. None when the
         model was built without one (it then carries no T block either)."""
@@ -794,6 +802,14 @@ class InstrumentalVariablePartialR2(PartialR2):
                     "Two radii, one per instrument, never pooled."
                 )
 
+    def _predict(self, X, epsilon_iv=None, **kwargs):
+        """`epsilon_iv` is the T budget at predict time; it reaches the T threshold
+        and nothing else, and a model without a T constraint ignores it. The program
+        is unchanged, so this re-solves without re-canonicalising."""
+        if epsilon_iv is not None and self._has_t:
+            self.epsilon_iv = float(epsilon_iv)
+        return super()._predict(X, **kwargs)
+
 
 class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePartialR2):
     """PI + INV + IV on the ORIGINAL design: the Lem. 2 ball, the invariance cone
@@ -847,7 +863,8 @@ class IntersectionMixin:
             self.epsilon = epsilon
         if recalibrate is not None:
             self.recalibrate = recalibrate
-        # both branches see t; it is inert on the baseline (rho = 1)
+        # both branches see t and the T budget; the baseline has no T constraint,
+        # so only the DA branch acts on the latter
         branch_kwargs = dict(gamma=gamma, epsilon=epsilon, recalibrate=recalibrate, **kwargs)
         return self._combine(self.baseline.predict(X, **branch_kwargs), self.augmented.predict(X, **branch_kwargs))
 

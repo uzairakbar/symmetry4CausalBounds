@@ -235,8 +235,10 @@ class DoMNISTMixin:
         for these ops, since none of them can change E[Y|do(x)]."""
         return self.default_epsilon
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
-        """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either."""
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
+        """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either, so
+        the budget is the configured one and `ratio` (the epsilon sweep's per-step
+        call) does not move it."""
         return self.default_epsilon
 
     def fit_rho(self, experiment_index: int, data=None) -> float:

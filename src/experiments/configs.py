@@ -353,9 +353,33 @@ QUERY_GAMMA: dict[str, float] = {"s": 2**-1, "t1": 2**-1, "t2": 2**-2, "t3": 2**
 SPECTRUM_KEEP: float = 0.999
 
 
-# budget-ratio grid: centred on 1, i.e. on the oracle value
+# budget-ratio grid for the VALIDITY sweep: ratios from 2^-6 up to the oracle
+# value, which is the right edge. `gamma` keeps this; the robustness sweep has its
+# own, centred on 1 (below)
 def _RATIO_GRID(dataset, n):
     return np.geomspace(2**-6, 2**0, num=n)
+
+
+# how far either side of the oracle budget the ROBUSTNESS grid runs, in octaves.
+# 1 puts four under-budget points at 0.500, 0.595, 0.707, 0.841 and four over at
+# 1.189, 1.414, 1.682, 2.000. Below 1 that reaches the refutation cliff, where a
+# misstated budget excludes h_* and every query reads INFEASIBLE, without spending
+# most of the grid there; above 1 it reaches far enough for the over-budget half
+# to be visibly monotone. At two octaves four of nine points sit in the
+# all-infeasible region.
+EPSILON_RATIO_OCTAVES: float = 1.0
+
+
+def _EPSILON_RATIO_GRID(dataset, n):
+    """Budget-ratio grid for the robustness sweep: log-symmetric about 1, with 1
+    exactly ON it. An even number of points straddles 1 instead of landing on it
+    and `sweep_samples` is even both shipped and in the live config, so the count
+    is forced odd: the oracle budget is where the vline sits, where the fitted
+    models' budgets are, and where every "r = 1 is the fitted budget" check reads."""
+    points = int(n) | 1
+    grid = np.geomspace(2.0**-EPSILON_RATIO_OCTAVES, 2.0**EPSILON_RATIO_OCTAVES, num=points)
+    grid[points // 2] = 1.0  # exact, whatever the log round trip leaves
+    return grid
 
 
 # trS x-axis label by the `recalibrate` toggle: the ball in force decides which
@@ -388,7 +412,7 @@ PARAM_SPECS: dict[str, ParamSpec] = {
     ),
     "epsilon": ParamSpec(
         xlabel=r"$\varepsilon / \varepsilon^\star$",
-        grid_fn=_RATIO_GRID,
+        grid_fn=_EPSILON_RATIO_GRID,
         vlines=(1.0,),
         include_ate=False,
         data_constant=True,

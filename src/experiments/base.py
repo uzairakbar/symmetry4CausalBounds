@@ -418,17 +418,31 @@ class ParamSweepRunner(BaseExperimentRunner):
         )
         return guarded
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
-        """The T-as-IV budget r_T for this experiment, off the knife edge, floor-guarded
-        exactly as `fit_epsilon` is. It is the oracle T piece `eps_iv_star` + EPS_TOL on
-        every path: the observed instrument has its own constraint and its own budget
-        (`fit_epsilon_iv_z`), so nothing is pooled here. Declared path: logged against
-        the T floor and never raised (SS2.6)."""
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
+        """The ASSUMED T-as-IV budget r_T: `ratio` times the oracle T piece
+        `eps_iv_star`, plus EPS_TOL. The observed instrument has its own constraint
+        and its own budget (`fit_epsilon_iv_z`), so nothing is pooled here.
+
+        `ratio` is 1 at FIT, where `data` is present and the floor guard applies: a
+        fitted model must not be born infeasible. The epsilon sweep passes its grid
+        ratio at PREDICT, with no data, and the budget is then raw -- exactly what
+        the code does for the swept epsilon (`fit_epsilon` guards,
+        `EpsilonRatioStrategy` passes `r eps* + EPS_TOL` unguarded). Guarding per
+        step would pin the budget at sqrt(FLOOR_GUARD_R * floor) wherever the ratio
+        is small, i.e. at a constant, and the sweep would show nothing. Where the
+        fit-time guard DOES fire, the r = 1 column is the raw budget and not the
+        fitted one, as it already is for epsilon.
+        """
         budget = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
             return None
         return self._floor_guard(
-            float(budget) + EPS_TOL, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
+            float(ratio) * float(budget) + EPS_TOL,
+            data,
+            "iv",
+            experiment_index,
+            "epsilon_iv",
+            declared=self.declared_iv,
         )
 
     def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:

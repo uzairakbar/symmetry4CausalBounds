@@ -482,6 +482,14 @@ class EpsilonRatioStrategy(GenericParamSweep):
     axis meaningful, and the only one that appends
     ROBUSTNESS_AUGMENTATION[experiment_name] to the configured DA chain where
     that is set (optical: the configured chain has no knob to tune).
+
+    The T-as-IV budget follows the same ratio (`fit_epsilon_iv(..., ratio=r)`),
+    since it is the same misspecification measured on the same DA draw; the
+    observed instrument's budget and gamma_z do not move. Below r = 1 the assumed
+    budgets can fall under what the constraints can attain on the ball, and the
+    queries then read INFEASIBLE -- which is what an under-budget ratio means and
+    what `PI+INV` has always done at the left of this grid. The grid itself is
+    centred on r = 1 (`_EPSILON_RATIO_GRID`), so both halves are on the figure.
     """
 
     param_key = "epsilon"
@@ -515,7 +523,13 @@ class EpsilonRatioStrategy(GenericParamSweep):
 
     def get_predict_kwargs(self, param, experiment_index: int):
         eps_star = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*")
-        return {"epsilon": float(param) * eps_star + EPS_TOL}
+        # the T-as-IV budget is misstated by the same ratio, through the same
+        # pipeline and unguarded, as the epsilon beside it: a DA+ method with a T
+        # constraint re-solves at it, everything else ignores the kwarg
+        return {
+            "epsilon": float(param) * eps_star + EPS_TOL,
+            "epsilon_iv": self.fit_epsilon_iv(experiment_index, ratio=float(param)),
+        }
 
 
 class ExpansionStrategy(GenericParamSweep):
