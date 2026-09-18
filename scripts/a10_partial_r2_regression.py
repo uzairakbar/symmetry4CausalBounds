@@ -48,7 +48,7 @@ def direct_solves():
     cases = {
         "PI": lambda nj: sm.PartialR2(n_jobs=nj, **common).fit(X, y),
         "PI+INV": lambda nj: sm.InvarianceConstrainedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX),
-        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(epsilon_iv=0.2, n_jobs=nj, **common).fit(GX, y, Z=GX),
+        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(epsilon_iv=0.2, n_jobs=nj, **common).fit(GX, y, T=GX),
         "PI&DA+PI": lambda nj: sm.IntersectedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX, G=GX),
     }
     out = {}

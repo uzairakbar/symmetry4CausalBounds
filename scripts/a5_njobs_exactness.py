@@ -75,7 +75,7 @@ def main(micro=False):
         ),
         "DA+PI+IV": lambda nj: IVConstrainedPartialR2Net(
             outcome_model=nets["GX"], epsilon_iv=0.12, n_jobs=nj, **common
-        ).fit(GX, y, Z=G),
+        ).fit(GX, y, T=G),
     }
 
     for name, build in cases.items():

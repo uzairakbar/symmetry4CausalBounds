@@ -201,12 +201,17 @@ def leg_iii():
 
     methods = ["PI", "DA+PI", "PI+INV"]
     grid = PARAM_SPECS["epsilon"].grid_fn("simulation", 4)
+    # the epsilon grid's own length: it is forced ODD (`_EPSILON_RATIO_GRID`), so
+    # a hard-coded 4 here would hand `create_sweep_plot` mismatched x and y
+    points = len(grid)
     # a cumulative series per method at 0.1, 1, 10 baseline solves a step
-    wall = {name: np.cumsum(np.full(4, 10.0 ** (i - 1)))[:, None] for i, name in enumerate(methods)}
-    seed = {name: np.full((4, 6), 1e-8 * (i + 1)) for i, name in enumerate(methods)}
+    wall = {name: np.cumsum(np.full(points, 10.0 ** (i - 1)))[:, None] for i, name in enumerate(methods)}
+    seed = {name: np.full((points, 6), 1e-8 * (i + 1)) for i, name in enumerate(methods)}
+    failures = np.zeros(points, dtype=int)
+    failures[1] = 2
     perf = (
         ("wall_clock", wall, dict(bootstrapped=False, clip_y=False)),
-        ("seed_var", seed, dict(promote_y=False, failures={"PI+INV": np.array([0, 2, 0, 0])})),
+        ("seed_var", seed, dict(promote_y=False, failures={"PI+INV": failures})),
     )
     for metric, y, kwargs in perf:
         before = len(_errors)

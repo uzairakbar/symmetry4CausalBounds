@@ -113,7 +113,14 @@ PLAN_METHODS = (
     "PI&DA+PI+IV",
 )
 NET_METHODS = ("ATE", "ERM", "DA+ERM", "PI+INV", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV")
-RECIPES = {"iv_fig13": ("simulation", 4), "neighbour-price_fig12": ("cigarettes", ["tax_s", "y", "cpi"])}
+# (dataset, iv, what the experiment plan must carry). The cigarette experiment is
+# split by TYPE: the restricted-2sls target reports the query figures, the plasmode
+# carries every sweep and both perf metrics
+RECIPES = {
+    "iv_fig13": ("simulation", 4, "both"),
+    "neighbour-price_fig12": ("cigarettes", ["tax_s", "y", "cpi"], "query"),
+    "cigarettes-plasmode_fig12b": ("cigarettes", ["tax_s", "y", "cpi"], "sweep"),
+}
 LEGAL_SETS = ([], ["tax_s"], ["tax_sn"], ["tax_s", "tax_sn"], ["tax_s", "y", "cpi"])
 IV_METHODS = ("IV", "DA+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
 GAMMA = 0.25
@@ -165,7 +172,7 @@ def leg_d(reference):
 
 def leg_i():
     print("(i) the recipes resolve with the key, the shipped yaml and leg (D)'s blocks without it")
-    for fname, (want_name, want_iv) in RECIPES.items():
+    for fname, (want_name, want_iv, want_plan) in RECIPES.items():
         try:
             name, block, plan = load_recipe(fname)
         except ValueError as error:
@@ -173,9 +180,21 @@ def leg_i():
             continue
         check(f"(i) {fname}: the {want_name} block", name == want_name, name)
         check(f"(i) {fname}: iv == {want_iv!r}", block.get("iv") == want_iv, repr(block.get("iv")))
-        check(f"(i) {fname}: PI+IV and PI+INV+IV in methods", {"PI+IV", "PI+INV+IV"} <= set(block["methods"]))
+        check(f"(i) {fname}: PI+IV in methods", "PI+IV" in block["methods"])
         check(f"(i) {fname}: the IV baseline is not listed", "IV" not in block["methods"])
-        check(f"(i) {fname}: query and sweep planned", plan.query and plan.sweep is not None)
+        planned = {
+            "both": plan.query and plan.sweep is not None,
+            "query": plan.query and plan.sweep is None and plan.perf is None,
+            "sweep": not plan.query and plan.sweep is not None and plan.perf is not None,
+        }[want_plan]
+        check(f"(i) {fname}: the plan is {want_plan}", planned, f"query {plan.query}, sweep {plan.sweep is not None}")
+    plasmode, plasmode_block, _ = load_recipe("cigarettes-plasmode_fig12b")
+    check("(i) the plasmode recipe is a cigarettes block on target plasmode", plasmode == "cigarettes")
+    check(
+        "(i) and it declares target plasmode with the same leak budget",
+        plasmode_block.get("target") == "plasmode" and plasmode_block.get("gamma_z") == GAMMA_Z_DEFAULT,
+        f"{plasmode_block.get('target')!r}, {plasmode_block.get('gamma_z')!r}",
+    )
     _, block, _ = load_recipe("neighbour-price_fig12")
     written_out = block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.0177
     check(

@@ -266,9 +266,11 @@ def fitted(names, X, y, GX, G, da, Z, rho, gamma_z=2**-8):
     return models
 
 
-def width(model, k):
-    """Instrument columns of a fitted IV ball: the jitter block adds k rows."""
-    return model.Z_projector_R.shape[0] - k
+def width(model, k, block="Z"):
+    """Instrument columns of one block on a fitted IV ball: the jitter block adds
+    k rows, and an absent block is 0 columns."""
+    arr = model.Z_projector_R if block == "Z" else model.T_projector_R
+    return 0 if arr is None else arr.shape[0] - k
 
 
 def sim_block(methods, dataset="simulation", **overrides):
@@ -428,19 +430,29 @@ def leg_ii(seed):
     names = ("DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "PI&DA+PI+IV(T)", "DA+IV", "DA+IV(T)")
     models = fitted(names, X, y, GX, G, da, Z, rho)
     t = models["DA+PI+IV(T)"]
-    check(f"(ii) DA+PI+IV(T) instrument width {n_g} (G alone)", width(t, k) == n_g, f"{width(t, k)}")
-    check(f"(ii) bare DA+PI+IV instrument width {n_g + 1}", width(models["DA+PI+IV"], k) == n_g + 1)
-    check("(ii) DA+PI+IV(T) epsilon_iv 2^-5", t.epsilon_iv == 2**-5, f"{t.epsilon_iv!r}")
-    check("(ii) DA+PI+IV(T) gamma_z 0.0", t.gamma_z == 0.0, f"{t.gamma_z!r}")
-    check("(ii) DA+PI+IV(T) iv_bound exactly 2^-5", t.iv_bound == 2**-5, f"{t.iv_bound!r}")
+    check(f"(ii) DA+PI+IV(T) T width {n_g} (G alone), no Z block", width(t, k, block="T") == n_g and not t._has_z)
+    bare = models["DA+PI+IV"]
+    check(
+        f"(ii) bare DA+PI+IV carries Z 1 and T {n_g}",
+        (width(bare, k), width(bare, k, block="T")) == (1, n_g),
+        f"{(width(bare, k), width(bare, k, block='T'))}",
+    )
+    check("(ii) DA+PI+IV(T) t_bound exactly 2^-5", t.t_bound == 2**-5, f"{t.t_bound!r}")
     inter = models["PI&DA+PI+IV(T)"]
     check(
-        f"(ii) PI&DA+PI+IV(T) DA branch: width {n_g}, gamma_z 0, iv_bound 2^-5",
-        width(inter.augmented, k) == n_g and inter.augmented.gamma_z == 0.0 and inter.augmented.iv_bound == 2**-5,
+        f"(ii) PI&DA+PI+IV(T) DA branch: T width {n_g}, no Z block, t_bound 2^-5",
+        width(inter.augmented, k, block="T") == n_g and not inter.augmented._has_z and inter.augmented.t_bound == 2**-5,
+    )
+    base = inter.baseline
+    want = float(np.hypot(2**-6, np.sqrt(base.sigma_sq / base.rho * 2**-8)))
+    check(
+        "(ii) PI&DA+PI+IV(T) baseline: Z width 1, epsilon_iv_z 2^-6, no T block",
+        width(base, k) == 1 and base.epsilon_iv_z == 2**-6 and not base._has_t,
     )
     check(
-        "(ii) PI&DA+PI+IV(T) baseline: width 1, epsilon_iv 2^-6",
-        width(inter.baseline, k) == 1 and inter.baseline.epsilon_iv == 2**-6,
+        "(ii) and its Z radius is the declared one at its own s",
+        abs(base.z_bound - want) < 1e-12,
+        f"{base.z_bound:.9f}",
     )
     queries = np.eye(k)
     t_pred = np.asarray(t.predict(queries, gamma=GAMMA), dtype=float)
@@ -480,7 +492,9 @@ def leg_ii(seed):
 
 def leg_iii():
     print("(iii) the cumulation table on fitted call counts")
-    expected = {("PI",): 3, ("PI+INV",): 12, ("DA+PI+IV(T)",): 3, ("PI&DA+PI+IV(T)",): 6, tuple(TEN): 48}
+    # the epsilon grid is now 5 points at sweep_samples 4 (`_EPSILON_RATIO_GRID`
+    # forces the count odd), and a T-mode method re-solves per point like PI+INV
+    expected = {("PI",): 3, ("PI+INV",): 15, ("DA+PI+IV(T)",): 15, ("PI&DA+PI+IV(T)",): 30, tuple(TEN): 123}
     for methods, want in expected.items():
         runner = perf_runner(sim_block(methods, n_samples=512, treatment_dim=32, pad=True, clipy=False, n_jobs=-1))
         x = np.asarray(runner.get_param_range(), dtype=float)
@@ -514,7 +528,9 @@ def leg_iii():
                 len(seconds) == 4 and spy.count == 4,
                 f"{spy.count}",
             )
-            check("(iii) and fits the oracle IV budget once, outside the timed block", len(calls) == 1, f"{len(calls)}")
+            # twice now: once for the fitted budgets and once for the predict
+            # kwargs, both OUTSIDE the timed block (`perf.normaliser`)
+            check("(iii) and fits the T budget twice, both outside the timed block", len(calls) == 2, f"{len(calls)}")
             check("(iii) and keeps the median of the last 3", per_solve == float(np.median(seconds[1:])))
             # the unit is one baseline PI solve, so PI's own step 0 reads 1 up to timing
             # noise: on the simulation (oracle budgets, 0.1 s of quadrature that must
@@ -590,9 +606,13 @@ def leg_iv():
 def leg_v():
     print("(v) FAILURE_MARKER and clip_y on rendered artists")
     x = PARAM_SPECS["epsilon"].grid_fn("simulation", 4)
+    # the epsilon grid's own length: `_EPSILON_RATIO_GRID` forces it odd
+    points = len(x)
     rng = np.random.default_rng(0)
-    seed = {"PI": 1e-8 + 1e-10 * rng.random((4, 6)), "PI+INV": 3e-8 + 1e-10 * rng.random((4, 6))}
-    failures = {"PI+INV": np.array([0, 2, 0, 1])}
+    seed = {"PI": 1e-8 + 1e-10 * rng.random((points, 6)), "PI+INV": 3e-8 + 1e-10 * rng.random((points, 6))}
+    marks = np.zeros(points, dtype=int)
+    marks[1], marks[3 % points] = 2, 1
+    failures = {"PI+INV": marks}
     plt.rcParams.update(plotting.RC_PARAMS)
     import seaborn as sns
 
@@ -618,7 +638,7 @@ def leg_v():
         finally:
             plotting.FAILURE_MARKER = saved
         ax = plt.gca()
-        means = [line for line in ax.get_lines() if line.get_linestyle() != "None" and len(line.get_xdata()) == 4]
+        means = [line for line in ax.get_lines() if line.get_linestyle() != "None" and len(line.get_xdata()) == points]
         return ax, marker_lines(ax), means, len(ax.collections)
 
     ax, markers, means, bands = render(True)
@@ -645,8 +665,13 @@ def leg_v():
 
     # a step where every run failed has no mean: the marker sits at the level of the
     # nearest finite point of the same line (the first one after, here) with its count
-    seed["PI+INV"] = np.array([[np.nan] * 6, [np.nan] * 6, [1e-8] * 6, [2e-8] * 6])
-    failures["PI+INV"] = np.array([6, 6, 0, 0])
+    all_failed = np.full((points, 6), 2e-8)
+    all_failed[:2] = np.nan
+    all_failed[2] = 1e-8
+    seed["PI+INV"] = all_failed
+    counts = np.zeros(points, dtype=int)
+    counts[:2] = 6
+    failures["PI+INV"] = counts
     ax, markers, means, _ = render(True)
     check(
         "(v) all-failed steps: one marker line at the nearest finite level",
@@ -657,10 +682,13 @@ def leg_v():
     )
     texts = sorted(t.get_text() for t in ax.texts)
     check("(v) all-failed steps: the counts are drawn", texts == ["6", "6"], f"{texts}")
-    seed["PI+INV"] = 3e-8 + 1e-10 * rng.random((4, 6))
-    failures["PI+INV"] = np.array([0, 2, 0, 1])
+    seed["PI+INV"] = 3e-8 + 1e-10 * rng.random((points, 6))
+    failures["PI+INV"] = marks
 
-    wall = {"PI": np.array([[1.0], [1.0], [1.0], [1.0]]), "PI+INV": np.array([[1.0], [10.0], [50.0], [100.0]])}
+    wall = {
+        "PI": np.ones((points, 1)),
+        "PI+INV": np.linspace(1.0, 100.0, points)[:, None],
+    }
     means = [wall["PI"][:, 0], wall["PI+INV"][:, 0]]
 
     def frame(**kwargs):
@@ -733,16 +761,20 @@ def synthetic_tree(
     dump(record(["PI", cig_inter], drop=cig_drop), f"{cig}/gamma_results.pkl")
     perf_dir = f"{root}/cigarettes/{SUBDIR_PERF}"
     eps = PARAM_SPECS["epsilon"].grid_fn("cigarettes", 4)
+    # the epsilon grid's own length, not 4: `_EPSILON_RATIO_GRID` forces it odd
+    points = len(eps)
     dump(eps, f"{perf_dir}/epsilon_values.pkl")
     dump(
-        {name: (i + 1) * np.cumsum(np.ones(4))[:, None] for i, name in enumerate(perf_methods)},
+        {name: (i + 1) * np.cumsum(np.ones(points))[:, None] for i, name in enumerate(perf_methods)},
         f"{perf_dir}/epsilon_wall_clock_results.pkl",
     )
     dump(
-        {"PI": np.full((4, 6), 1e-9), "PI+INV": 1e-8 + 1e-10 * rng.random((4, 6))},
+        {"PI": np.full((points, 6), 1e-9), "PI+INV": 1e-8 + 1e-10 * rng.random((points, 6))},
         f"{perf_dir}/epsilon_seed_var_results.pkl",
     )
-    dump({"PI": np.zeros(4, dtype=int), "PI+INV": np.array([0, 2, 0, 1])}, f"{perf_dir}/epsilon_seed_var_failures.pkl")
+    marks = np.zeros(points, dtype=int)
+    marks[1], marks[3 % points] = 2, 1
+    dump({"PI": np.zeros(points, dtype=int), "PI+INV": marks}, f"{perf_dir}/epsilon_seed_var_failures.pkl")
     dump({"xlabel": PARAM_SPECS["epsilon"].xlabel, "repeats": 3}, f"{perf_dir}/epsilon_perf_meta.pkl")
     return root
 
@@ -972,15 +1004,18 @@ def leg_viii():
         f"{files}",
     )
     x = load(f"{folder}/epsilon_values.pkl")
+    # the epsilon grid's OWN length: `_EPSILON_RATIO_GRID` forces the count odd, so
+    # sweep_samples 4 gives 5 points centred on r = 1
+    points = len(x)
     check(
-        "(viii) epsilon_values is the 4-point epsilon grid",
+        "(viii) epsilon_values is the epsilon grid at this sweep_samples",
         np.array_equal(x, PARAM_SPECS["epsilon"].grid_fn("simulation", 4)),
-        f"{x}",
+        f"{np.round(x, 4).tolist()}",
     )
     wall = load(f"{folder}/epsilon_wall_clock_results.pkl")
     check(
-        "(viii) wall_clock keys are the five methods, shape (4, 1)",
-        list(wall) == PERF_METHODS and all(v.shape == (4, 1) for v in wall.values()),
+        f"(viii) wall_clock keys are the five methods, shape ({points}, 1)",
+        list(wall) == PERF_METHODS and all(v.shape == (points, 1) for v in wall.values()),
     )
     check("(viii) PI flat after step 0 to 1e-3", np.ptp(wall["PI"][:, 0]) < 1e-3, f"{np.round(wall['PI'][:, 0], 4)}")
     check(
@@ -994,12 +1029,15 @@ def leg_viii():
     meta = load(f"{folder}/epsilon_perf_meta.pkl")
     n_queries = meta["n_queries"]
     check(
-        f"(viii) seed_var terms shape (4, {n_queries})",
-        all(v.shape == (4, n_queries) for v in seed.values()),
+        f"(viii) seed_var terms shape ({points}, {n_queries})",
+        all(v.shape == (points, n_queries) for v in seed.values()),
         f"{ {k: v.shape for k, v in seed.items()} }",
     )
     n_runs = len(meta["backends"])
-    check("(viii) statuses shape (R, 4, n_queries)", all(v.shape == (n_runs, 4, n_queries) for v in statuses.values()))
+    check(
+        f"(viii) statuses shape (R, {points}, n_queries)",
+        all(v.shape == (n_runs, points, n_queries) for v in statuses.values()),
+    )
 
     # re-derive the bounds per backend, as the seed_var loop does, and count the pairs
     runner = perf_runner(block)
@@ -1026,7 +1064,7 @@ def leg_viii():
         upper = np.array([run[name][1] for run in runs])
         status = np.array([run[name][2] for run in runs])
         failed = (status != SolveStatus.OK) | ~np.isfinite(lower) | ~np.isfinite(upper) | (lower > upper)
-        survivors = (~failed).sum(axis=0)  # (4, n_queries)
+        survivors = (~failed).sum(axis=0)  # (points, n_queries)
         finite = np.isfinite(seed[name])
         check(f"(viii) {name}: terms finite exactly where two runs survive", np.array_equal(finite, survivors >= 2))
         check(f"(viii) {name}: statuses pkl equals the re-derived codes", np.array_equal(statuses[name], status))
@@ -1037,15 +1075,18 @@ def leg_viii():
             f"{failures[name]} (RECORDED)",
         )
         d = np.nanmean(seed[name], axis=1)
-        check(f"(viii) {name}: D finite at r = 1", np.isfinite(d[-1]), f"{d}")
-        if name == "PI+INV":
-            check(
-                "(viii) PI+INV: D NaN at the three INFEASIBLE steps",
-                np.all(np.isnan(d[:3])) and np.all(failures[name][:3] == n_runs * n_queries),
-                f"{d} failures {failures[name]}",
-            )
-        else:
-            check(f"(viii) {name}: D finite at every step", np.all(np.isfinite(d)), f"{d}")
+        check(f"(viii) {name}: D finite at r = 1 and above", np.all(np.isfinite(d[points // 2 :])), f"{d}")
+        # the grid now starts BELOW the oracle budget, so a method that re-solves
+        # can be refuted over a prefix of it and its D line is empty there. The leg
+        # pins that D is NaN exactly where every run failed, whichever methods those
+        # are, and RECORDS the prefix rather than hard-coding one
+        refuted = failures[name] == n_runs * n_queries
+        check(
+            f"(viii) {name}: D is NaN exactly at the all-failed steps",
+            np.array_equal(np.isnan(d), refuted),
+            f"D {np.round(d, 12)} failures {failures[name]}",
+        )
+        print(f"      RECORDED {name}: refuted at r = {np.round(np.asarray(x)[refuted], 3).tolist()}")
     names = [name for name, _ in meta["backends"]]
     check(
         "(viii) meta backends are the installed names with the tolerances",

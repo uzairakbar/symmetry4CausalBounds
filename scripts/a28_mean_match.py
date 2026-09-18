@@ -190,7 +190,7 @@ def leg_i():
             "DA+PI+IV": (
                 lambda nj, c=common, y=y, GX=GX: sm.InstrumentalVariablePartialR2(
                     epsilon_iv=EPSILON_IV, n_jobs=nj, **c
-                ).fit(GX, y, Z=GX),
+                ).fit(GX, y, T=GX),
                 dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV),
             ),
         }

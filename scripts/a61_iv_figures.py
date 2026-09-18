@@ -173,12 +173,21 @@ def check(name, ok, detail=""):
 # ------------------------------------------------------------------ helpers
 
 
-def recipe(name):
-    fname = {"cigarettes": "neighbour-price_fig12", "simulation": "iv_fig13"}[name]
+def recipe(name, fname=None):
+    fname = fname or {"cigarettes": "neighbour-price_fig12", "simulation": "iv_fig13"}[name]
     with open(os.path.join(REPO, "recipes", f"{fname}.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     return {**defaults, **config[name]}
+
+
+def sweep_metrics(name):
+    """The sweep metrics of whichever recipe OWNS the sweeps for this dataset: the
+    cigarette experiment is split by type, so its sweeps live in the plasmode
+    recipe while the restricted-2sls one this gate fixtures on reports the query
+    figures alone."""
+    fname = {"cigarettes": "cigarettes-plasmode_fig12b", "simulation": "iv_fig13"}[name]
+    return recipe(name, fname)["experiment"]["sweep"]["metric"]
 
 
 # the recorded tables of legs (iii) and (v) are at the 2^-8 leak radius (r_Z =
@@ -198,9 +207,7 @@ def reduced_block(name, **overrides):
 def run_reduced(name):
     """The recipe through the production path, query panel and the gamma sweep,
     with `create_sweep_plot` spied on for the `normalize` kwarg."""
-    plan = parse_experiment_plan(
-        {"query": True, "sweep": {"param": ["gamma"], "metric": recipe(name)["experiment"]["sweep"]["metric"]}}
-    )
+    plan = parse_experiment_plan({"query": True, "sweep": {"param": ["gamma"], "metric": sweep_metrics(name)}})
     block = reduced_block(name)
     folder = os.path.join(ARTIFACTS_DIRECTORY, name)
     shutil.rmtree(folder, ignore_errors=True)
