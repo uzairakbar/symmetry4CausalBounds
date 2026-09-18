@@ -22,7 +22,7 @@ from src.experiments.configs import (
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
-from src.experiments.utils.model_fitting import instrument_columns, joint_instrument
+from src.experiments.utils.model_fitting import instrument_columns
 from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
@@ -217,16 +217,15 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv(self) -> float:
-        """IV budget, off the knife edge (same guard as PI+INV), then raised to the
-        constraint's own floor if it lands under it (`FLOOR_GUARD_R`). The floor
-        is that of the joint constraint on Z-tilde = (T, Z). Oracle path: the two
-        oracle pieces in quadrature (`OracleParameters.iv_budget`); declared path
-        (`declared_iv`, SS2.6): the T piece alone, logged against the floor and
-        never raised, the solver adding s sqrt(gamma_z) in root sum square."""
-        field = "eps_iv_star" if self.declared_iv else "iv_budget"
-        budget = getattr(self.oracle, field, None)
+        """The T-as-IV budget r_T, off the knife edge (same guard as PI+INV), then
+        raised to the T CONSTRAINT'S OWN floor if it lands under it (`FLOOR_GUARD_R`),
+        the floor measured with the translation amounts alone. The oracle T piece
+        `eps_iv_star` on every path; the observed instrument carries its own budget
+        (`epsilon_iv_z`). Declared path (`declared_iv`, SS2.6): logged against that
+        floor and never raised."""
+        budget = getattr(self.oracle, "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
-            logger.warning(f"oracle {field} unavailable; IV budget falls back to the tolerance.")
+            logger.warning("oracle eps_iv_star unavailable; the T budget falls back to the tolerance.")
             budget = 0.0
         budget = float(budget) + self.eps_tol
 
@@ -238,7 +237,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 self.y,
                 self.default_gamma,
                 kind="iv",
-                Z=joint_instrument(self.G, self.Z),
+                Z=np.asarray(self.G).reshape(len(self.GX), -1),
                 mean_match=self.mean_match,
                 rho=self.fit_rho(),
                 recalibrate=self.recalibrate,
@@ -250,9 +249,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         if self.declared_iv:
             side = "above" if budget**2 >= floor else "BELOW"
             logger.info(
-                f"epsilon_iv: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the joint "
-                f"constraint's floor {floor:.4g} on its own; left as declared, never raised. The real-Z "
-                "radius s sqrt(gamma_z) joins it in root sum square in the solver."
+                f"epsilon_iv: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the T "
+                f"constraint's own floor {floor:.4g}; left as declared, never raised. The observed "
+                "instrument has its own constraint at r_Z."
             )
             return budget
 
@@ -265,9 +264,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv_z(self) -> float:
-        """The non-DA +IV methods' own term, as `ParamSweepRunner.fit_epsilon_iv_z`:
-        0.0 under an empty Z or a declared budget, else the oracle real-Z piece
-        plus the tolerance, never floor-guarded."""
+        """The observed instrument's own budget, as `ParamSweepRunner.fit_epsilon_iv_z`:
+        0.0 under an empty Z or a declared radius, else the measured piece plus the
+        tolerance, never floor-guarded."""
         if self.declared_iv or np.shape(self.Z)[1] == 0:
             return 0.0
         z_piece = getattr(self.oracle, "eps_iv_z_star", None)

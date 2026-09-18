@@ -29,7 +29,7 @@ from src.experiments.utils.constants import (
     SUBDIR_SWEEP,
 )
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries, rho_hat
-from src.experiments.utils.model_fitting import instrument_columns, joint_instrument
+from src.experiments.utils.model_fitting import instrument_columns
 from src.experiments.utils.plotting import (
     create_query_sweep_plot,
     create_sweep_plot,
@@ -170,11 +170,11 @@ class BaseExperimentRunner(ABC):
         self.clipy = clipy
         self.mean_match = mean_match
         # the IV budget rule of SS2.6, set per dataset by the orchestrator like
-        # `raw_gamma` and `eps_tol` are. False: oracle, the T-as-IV piece and the
-        # real-Z piece in quadrature, floor-guarded. True: declared, a non-empty
-        # `iv:` asserting near-perfect instruments; the runner hands the solver
-        # the T piece alone, the solver adds s sqrt(gamma_z) in root sum square,
-        # and the floor guard never raises it (decision 8)
+        # `raw_gamma` and `eps_tol` are. False: oracle, the T piece from
+        # `eps_iv_star` and the Z piece from `eps_iv_z_star`, each guarding its own
+        # constraint. True: declared, a non-empty `iv:` asserting near-perfect
+        # instruments; the Z radius is then exactly s sqrt(gamma_z) and the T
+        # budget is logged against its floor and never raised (decision 8)
         self.declared_iv = bool(declared_iv)
 
     @abstractmethod
@@ -362,21 +362,23 @@ class ParamSweepRunner(BaseExperimentRunner):
         where to put it, so it goes to `sqrt(FLOOR_GUARD_R * floor)` -- far enough
         off the knife edge to cover (`configs.py` has the calibration).
 
-        The IV floor is that of the joint constraint on Z-tilde = (T, Z), the one
-        the DA+ methods solve. `declared` (SS2.6, a non-empty `iv:`): the floor is
-        measured and logged beside the budget, but the budget is NEVER raised.
-        It is the T-as-IV term r_T; the declared real-Z radius joins it in root
-        sum square inside the solver, and a declared budget that turns out
+        The IV floor is the T CONSTRAINT'S OWN, measured with the translation
+        amounts alone, as if the observed instrument was never there; the Z radius
+        is never guarded (SS2.6). A T and a Z constraint can still be jointly
+        infeasible with both floors cleared, and that is left to read INFEASIBLE.
+        `declared` (a non-empty `iv:`): the floor is measured and logged beside the
+        budget, and the budget is NEVER raised -- a declared budget that turns out
         infeasible is information, not something to inflate away (decision 8).
+
+        No `data` means no measurement and no guard: that is the epsilon sweep's
+        per-step call, where the budget is an ASSUMPTION the figure exists to test
+        (decision 16), exactly as the swept epsilon is.
         """
         if data is None:
             return budget
         design = getattr(data, "X" if kind == "inv" else "GX", None)
-        if kind == "inv":
-            extra = {"GX": getattr(data, "GX", None)}
-        else:
-            G = getattr(data, "G", None)
-            extra = {"Z": None if G is None else joint_instrument(G, getattr(data, "Z", None))}
+        # 'iv' measures the T constraint's own geometry: the translation amounts alone
+        extra = {"GX": getattr(data, "GX", None)} if kind == "inv" else {"Z": getattr(data, "G", None)}
         if design is None or next(iter(extra.values())) is None:
             return budget
         # the DA ball ('iv': DA+PI+IV fits on GX) is recalibrated; the baseline
@@ -399,9 +401,9 @@ class ParamSweepRunner(BaseExperimentRunner):
         if declared:
             side = "above" if budget**2 >= floor else "BELOW"
             logger.info(
-                f"{label}: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the joint "
-                f"constraint's floor {floor:.4g} on its own; left as declared, never raised. The real-Z "
-                "radius s sqrt(gamma_z) joins it in root sum square in the solver."
+                f"{label}: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the T "
+                f"constraint's own floor {floor:.4g}; left as declared, never raised. The observed "
+                "instrument has its own constraint at r_Z and its own budget."
             )
             return budget
 
@@ -417,12 +419,12 @@ class ParamSweepRunner(BaseExperimentRunner):
         return guarded
 
     def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None) -> float | None:
-        """IV budget for this experiment, off the knife edge, floor-guarded exactly
-        as `fit_epsilon` is. Oracle path: the T-as-IV piece and the real-Z piece
-        in quadrature (`OracleParameters.iv_budget`, SS2.3). Declared path: the T
-        piece alone, r_T, never raised (SS2.6); the solver adds s sqrt(gamma_z)."""
-        oracle = self.get_oracle(experiment_index)
-        budget = getattr(oracle, "eps_iv_star" if self.declared_iv else "iv_budget", None)
+        """The T-as-IV budget r_T for this experiment, off the knife edge, floor-guarded
+        exactly as `fit_epsilon` is. It is the oracle T piece `eps_iv_star` + EPS_TOL on
+        every path: the observed instrument has its own constraint and its own budget
+        (`fit_epsilon_iv_z`), so nothing is pooled here. Declared path: logged against
+        the T floor and never raised (SS2.6)."""
+        budget = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
             return None
         return self._floor_guard(
@@ -430,10 +432,10 @@ class ParamSweepRunner(BaseExperimentRunner):
         )
 
     def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
-        """The non-DA +IV methods' own term (SS2.6, one budget per row): 0.0 under an
-        empty instrument (inert) and on the declared path (the bound is then exactly
-        r_Z = s sqrt(gamma_z)); on the oracle path the real-Z piece off the knife edge,
-        `eps_iv_z_star + EPS_TOL`, never floor-guarded (the T-side guard stays)."""
+        """The observed instrument's own budget, one number for every Z constraint
+        (SS2.6): 0.0 under an empty instrument (inert) and on the declared path (the
+        radius is then exactly r_Z = s sqrt(gamma_z)); on the oracle path the measured
+        piece off the knife edge, `eps_iv_z_star + EPS_TOL`, never floor-guarded."""
         Z = getattr(data, "Z", None)
         if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
             return 0.0

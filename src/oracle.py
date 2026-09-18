@@ -38,8 +38,9 @@ class OracleParameters:
     bias_sq: float
     sigma_sq: float
     rho: float | None
-    # IV budget (Thm. 3.B, exact at gamma_z* = 0) and its byproducts: the T-as-IV
-    # piece on span(G), the real-Z piece on span(Z|G) (SS2.3), and RMS(W#), eta
+    # IV budgets (Thm. 3.B, exact at gamma_z* = 0), one per instrument and never
+    # pooled: the T-as-IV piece on span(T), the observed instrument's piece on
+    # span(Z) (SS2.6), plus RMS(W#) and eta
     eps_iv_star: float | None = None
     eps_iv_z_star: float | None = None
     eps_rms: float | None = None
@@ -47,18 +48,6 @@ class OracleParameters:
     # SHELVED: eps* under the perturb convention (exactly-invariant components
     # excluded). Recorded, never consumed -- lets the padding choice be revisited.
     epsilon_star_pointwise: float | None = None
-
-    @property
-    def iv_budget(self) -> float | None:
-        """The IV budget on the joint instrument Z-tilde = (T, Z): the two pieces
-        combined in quadrature per SS2.3, sqrt(eps_iv_star^2 + eps_iv_z_star^2).
-        The pieces are norms of different residuals (W# on span(G), y - GX h_* on
-        span(Z|G)), so this is the plan's arithmetic, not one projector identity.
-        With an empty Z it is `eps_iv_star` to the bit. The runner adds the tolerance."""
-        if self.eps_iv_star is None:
-            return None
-        z = 0.0 if self.eps_iv_z_star is None else float(self.eps_iv_z_star)
-        return float(np.sqrt(float(self.eps_iv_star) ** 2 + z**2))
 
 
 # Draw-pooled fields and how they pool: a NORM pools in the square (an RMS of RMSs),
@@ -381,16 +370,19 @@ def eps_iv_star(
     mean_match: bool = False,
 ) -> tuple:
     """
-    The IV budget: || E-hat[W# | Z-tilde] || / sqrt(N).
+    The T-as-IV budget: || E-hat[W# | T] || / sqrt(N).
 
     Exact expansion of C.3 Part (B) at gamma_z* = 0. Every experiment here uses
-    T as the instrument with T independent of (U, xi) by construction, so
-    E[U + xi | Z-tilde] = 0, the Minkowski cross-term vanishes identically, and
-    this IS the budget h# requires -- no correlation (r) assumption anywhere.
+    T as an instrument with T independent of (U, xi) by construction, so
+    E[U + xi | T] = 0, the Minkowski cross-term vanishes identically, and this IS
+    the budget h# requires -- no correlation (r) assumption anywhere. It is the
+    radius of the T constraint and of nothing else: the observed instrument has
+    its own constraint and `eps_iv_z_star` is its budget, measured at the same
+    two elements, h_* and h#.
 
         w    = f(Phi(X)) - f(Phi(GX))
         W#   = w - OLS fit of w on Phi(GX)
-        eps_iv_star = RMS of the projection of W# onto span(G)
+        eps_iv_star = RMS of the projection of W# onto span(T)
 
     Returns:
         (eps_iv_star, eps_rms, eta) -- eps_rms = RMS(W#) and eta =
@@ -428,34 +420,64 @@ def eps_iv_z_star(
     mean_match: bool = False,
 ) -> float:
     """
-    The real-Z piece of the IV budget (SS2.3):
+    The observed instrument's budget (SS2.6), the radius of the Z constraint:
 
-        eps_iv_z_star = || Q_{Z|G}' (y - h_*(Phi(GX))) || / sqrt(N)
+        eps_iv_z_star = max( || Q_Z' r_* ||, || Q_Z' (r_* + W#) || ) / sqrt(N),
+        r_* = y - h_*(Phi(X)),   W# as in `eps_iv_star`
 
-    the residual of the target on the augmented design, projected on the real
-    instrument orthogonalised against the translation amounts G. The projector
-    on span(G, Z) splits as ||Q'r||^2 = ||Q_G'r||^2 + ||Q_{Z|G}'r||^2, so this
-    and `eps_iv_star` (the G piece) add in quadrature (`OracleParameters.iv_budget`).
-    On a simulation with a valid instrument it is sampling noise, which is why
-    it is measured rather than declared there (0.0552 at d 32, m 4, n 2048,
-    against EPS_TOL 0.03125). Under `mean_match` the residual is centred, as the
-    solver centres y and the design. Exactly 0.0 for an empty Z: nothing is
-    computed, so today's budget is untouched to the bit.
+    the Z moment of the residual at the element each Z constraint has to admit:
+    h_* in the PI+IV and PI+INV+IV programs, which solve on the original design,
+    and h# = h_* + OLS(w | Phi(GX)) in a DA+ method's, which solves on the
+    augmented one. There
+
+        y - Phi(GX) h# = (y - Phi(X) h_*) + w - P_GX w = r_* + W#,
+
+    since y - Phi(GX) h_* = r_* + w by the definition of w. Same element, same
+    residual, same convention as `eps_iv_star`, which is the T moment of W#
+    itself, and the same displacement `_declared_allowance` bounds on the
+    declared path.
+
+    ONE number serves every Z constraint (SS2.6), hence the max: the budget has to
+    admit both. They differ only by the DA's own misspecification. MEASURED on the
+    simulation at `iv: 4` (d 32, m 4, n 2048): 0.031089 and 0.031089 under the
+    shipped, exactly invariant DA, 0.031089 and 0.557738 under the robustness
+    sweep's retuned one. No orthogonalisation against the translation amounts:
+    the T constraint is a separate constraint with a separate budget, and nothing
+    is added in quadrature any more.
+
+    Under `mean_match` the residuals are centred, as the solver centres y and the
+    design. Exactly 0.0 for an empty Z: nothing is computed, so today's budget is
+    untouched to the bit.
     """
     Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
     if Z.shape[1] == 0:
         return 0.0
     if y is None:
-        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(GX)).")
+        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(X)).")
     features = features or _identity
-    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples)
-    # y - h_*(Phi(GX)) = (y - h_*(Phi(X))) + w, w being the invariance signal
-    residual = np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel() + w
+    w, Phi, _ = _invariance_signal(sem, da, X, features, n_samples)
     if mean_match:
-        residual = residual - np.mean(residual)
-    Q_G, _ = np.linalg.qr(G)
-    Q, _ = np.linalg.qr(Z - Q_G @ (Q_G.T @ Z))
-    return float(np.linalg.norm(Q.T @ residual) / np.sqrt(len(residual)))
+        Phi = Phi - Phi.mean(axis=0)
+        w = w - np.mean(w)
+    W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
+    residual = np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel()
+    Q, _ = np.linalg.qr(Z)
+
+    def moment(r):
+        r = r - np.mean(r) if mean_match else r
+        return float(np.linalg.norm(Q.T @ r) / np.sqrt(len(r)))
+
+    on_x, on_gx = moment(residual), moment(residual + W_sharp)
+    if on_gx > 3.0 * on_x:
+        # the DA-side term is what the budget becomes, and at this ratio the Z
+        # constraint has stopped binding on the un-augmented design: the only
+        # signal anyone gets that PI+IV is now the plain ball
+        logger.info(
+            f"eps_iv_z_star: the augmented design's Z moment {on_gx:.6g} is more than 3x the "
+            f"original design's {on_x:.6g}; the shared budget is the larger and the Z constraint "
+            "is slack on the non-DA methods."
+        )
+    return max(on_x, on_gx)
 
 
 # =============================================================================
@@ -596,10 +618,10 @@ def compute_oracle_parameters(
 ) -> OracleParameters:
     """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units.
 
-    `Z` is the real instrument row-aligned with `X` (a recorded SEM's `iv_pool`);
+    `Z` is the observed instrument row-aligned with `X` (a recorded SEM's `iv_pool`);
     when X is drawn here, the draw's own trailing columns are it. It reaches
-    `eps_iv_z_star` only, so `eps_iv_star` stays the T-as-IV piece and the two
-    combine in `OracleParameters.iv_budget`."""
+    `eps_iv_z_star` only, so `eps_iv_star` stays the T-as-IV piece; the two are the
+    radii of two separate constraints and are never combined."""
     features = features or _identity
 
     if X is None:
@@ -608,7 +630,7 @@ def compute_oracle_parameters(
         if Z is None:
             Z = drawn
 
-    iv_budget, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
+    t_piece, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
     iv_z = eps_iv_z_star(sem, da, X=X, y=y, Z=Z, features=features, n_samples=n_samples, mean_match=mean_match)
 
     return OracleParameters(
@@ -618,7 +640,7 @@ def compute_oracle_parameters(
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
         rho=_noise_ratio(sem, da, X, y, features, n_samples, mean_match=mean_match),
-        eps_iv_star=iv_budget,
+        eps_iv_star=t_piece,
         eps_iv_z_star=iv_z,
         eps_rms=eps_rms,
         eta=eta,
