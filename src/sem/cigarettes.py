@@ -70,6 +70,15 @@ NEIGHBOURS: dict[str, tuple[str, str]] = {"min": ("pn", "tax_sn"), "mean": ("pn_
 GAMMA_TRUE: float = 0.25
 OUTCOME_NOISE_STD: float = 0.1
 CONFOUND_DIRECTIONS: tuple[str, ...] = ("v", "own_price", "worst_case")
+# a confounder almost entirely inside the declared-exogenous block leaves nothing
+# to confound with; below this surviving fraction the plasmode raises rather than
+# inject a rounding error. MEASURED on the shipped panel: 0.954 at `[tax_s]`,
+# 0.829 at `[tax_s, y, cpi]`, 1.0 with nothing declared. In practice `_calibrate`'s
+# kappa^2 > 1 guard trips FIRST (at gamma_true 0.25 it trips near q = 0.25, a
+# surviving fraction around 0.5); this one is the cruder tripwire for the
+# degenerate case where the direction is inside the block and standardising the
+# leftover is meaningless.
+MIN_CONFOUNDER_SURVIVING: float = 0.10
 # the leaky-IV guard (SS5): FIXED, never swept
 GAMMA_Z: float = 2**-8
 # one state history; the cluster bootstrap deals in these, not in rows
@@ -513,10 +522,19 @@ class CigaretteSEM(SEM):
         else:
             self.W_XY = self._plasmode_target().reshape(-1, 1)
             self._noise_std = float(outcome_noise_std)
-            self._kappa_sq = self._calibrate(float(gamma_true))
-            self.y = self._draw_outcome(confound_direction)
-            self._bias_sq = self._kappa_sq
-            self._sigma_sq = 1.0 - self._kappa_sq + self._noise_std**2
+            # the confounder first: the calibration inverts against the share of
+            # it the treatments explain, which the projection changes
+            confounder, q, surviving = self._confounder(confound_direction)
+            self._kappa_sq = self._calibrate(float(gamma_true), q)
+            self.y = self._draw_outcome(confounder)
+            self._bias_sq = self._kappa_sq * q
+            self._sigma_sq = 1.0 - self._kappa_sq * q + self._noise_std**2
+            logger.info(
+                f"plasmode: confounder along {confound_direction} projected off "
+                f"{self._exogenous_block().shape[1]} declared-exogenous column(s), "
+                f"{100 * surviving:.1f}% surviving; kappa^2 {self._kappa_sq:.6f}, "
+                f"q {q:.6f}, gamma* {self._bias_sq / self._sigma_sq:.6f}"
+            )
 
     # ------------------------------------------------------------- plasmode
 
@@ -528,18 +546,60 @@ class CigaretteSEM(SEM):
         b_u, _ = two_stage_fit(self.design)
         return N @ (N.T @ b_u)
 
-    def _calibrate(self, gamma_true: float) -> float:
-        """kappa^2 = gamma (1 + s^2) / (1 + gamma), the simulation's inversion, so
-        gamma* = bias^2/sigma^2 comes out at `gamma_true` exactly."""
+    def _calibrate(self, gamma_true: float, q: float = 1.0) -> float:
+        """kappa^2 such that gamma* = bias^2/sigma^2 comes out at `gamma_true` exactly.
+
+        With Y = h_*(X) + kappa u + sqrt(1 - kappa^2) e + s nu and u standardised,
+        the OLS bias is kappa Sigma^-1 X'u/n, so bias^2 = kappa^2 q with
+        q = ||P_X u||^2 / n, and the residual keeps u's orthogonal part, so
+        sigma^2 = 1 - kappa^2 q + s^2. Inverting,
+
+            kappa^2 = gamma (1 + s^2) / ((1 + gamma) q).
+
+        q is 1 when u lies in span(X), which is every run with nothing declared
+        exogenous, and there this is the old inversion to the bit (x * 1.0 and
+        x / 1.0 are exact). Projecting u off the declared-exogenous block takes q
+        below 1, and without this factor gamma* would drift under it.
+        """
         if gamma_true < 0.0:
             raise ValueError("`gamma_true` must be non-negative.")
+        if q <= 0.0:
+            raise ValueError("the confounder has no component in the treatments; gamma* is undefined.")
         s_sq = self._noise_std**2
-        return float(min(gamma_true * (1.0 + s_sq) / (1.0 + gamma_true), 1.0))
+        kappa_sq = gamma_true * (1.0 + s_sq) / (1.0 + gamma_true) / q
+        if kappa_sq > 1.0:
+            raise ValueError(
+                f"gamma_true {gamma_true:g} needs kappa^2 {kappa_sq:.4g} > 1 once the confounder is "
+                f"projected off the declared-exogenous block (q {q:.4g}): ask for less confounding, "
+                "or declare fewer columns exogenous."
+            )
+        return float(kappa_sq)
 
-    def _draw_outcome(self, direction: str) -> NDArray:
-        """Y = h_*(X) + kappa u_d + sqrt(1 - kappa^2) e + s nu, with u_d the design
-        projected on `direction` and STANDARDISED: without the unit variance the
-        confounding no longer has the magnitude gamma_true was inverted for."""
+    def _exogenous_block(self) -> NDArray:
+        """Everything a solver may be told is exogenous: the configured instrument
+        set and the anchor excise. Empty (n, 0) without a configured set, where no
+        solver sees an instrument at all and nothing is projected off."""
+        if not self.iv_columns:
+            return np.zeros((len(self.X), 0))
+        # the anchor excise may repeat a configured column (it does under
+        # `own-tax` with `tax_s` in the set), so this block can be rank deficient.
+        # That is harmless: the projection below is `lstsq`'s minimum-norm
+        # solution, which is the projection onto the column SPACE at any rank
+        blocks = [np.asarray(b, dtype=float).reshape(len(self.X), -1) for b in (self._Z_iv, self._Z) if np.size(b)]
+        return np.column_stack(blocks) if blocks else np.zeros((len(self.X), 0))
+
+    def _confounder(self, direction: str) -> tuple:
+        """(u, q, surviving): the unit-variance confounder, the share of it the
+        treatments explain, and the fraction of it the projection left.
+
+        u is the design along `direction`, orthogonalised against the
+        declared-exogenous block and then standardised. Without the projection the
+        confounder contains income and the CPI outright and correlates with the
+        excise, so the instrument set the config declares is invalid at the very
+        target the experiment measures coverage of (R8.0). Projected, what is left
+        touches own price and neighbour price alone -- the two endogenous
+        coefficients the experiment reports -- which is the design's own story.
+        """
         if direction not in CONFOUND_DIRECTIONS:
             raise ValueError(f"confound_direction {direction!r} is not one of {list(CONFOUND_DIRECTIONS)}.")
         if direction == "v":
@@ -550,8 +610,31 @@ class CigaretteSEM(SEM):
             d = np.eye(self.design.k)[0]
         else:
             d = np.linalg.solve(self.design.Sigma, self.W_XY.ravel())
-        confounder = self.X @ d
-        confounder = confounder / confounder.std()
+
+        raw = self.X @ d
+        exogenous = self._exogenous_block()
+        if exogenous.shape[1] == 0:
+            # nothing declared exogenous: no projection, and q is 1 BY
+            # CONSTRUCTION (u stays in span(X)), so the calibration is the old one
+            # to the bit and every shipped plasmode number is untouched
+            return raw / raw.std(), 1.0, 1.0
+
+        residual = raw - exogenous @ np.linalg.lstsq(exogenous, raw, rcond=None)[0]
+        surviving = float(np.linalg.norm(residual) / np.linalg.norm(raw))
+        if surviving < MIN_CONFOUNDER_SURVIVING:
+            raise ValueError(
+                f"the confounding direction {direction!r} is {100 * (1 - surviving):.1f}% inside the "
+                "declared-exogenous block; there is almost no confounder left to inject. Choose "
+                "another `confound_direction` or declare fewer columns exogenous."
+            )
+        u = residual / residual.std()
+        fitted = self.X @ np.linalg.lstsq(self.X, u, rcond=None)[0]
+        return u, float(fitted @ fitted / len(u)), surviving
+
+    def _draw_outcome(self, confounder: NDArray) -> NDArray:
+        """Y = h_*(X) + kappa u + sqrt(1 - kappa^2) e + s nu, with u the
+        unit-variance confounder `_confounder` built: without the unit variance the
+        confounding no longer has the magnitude gamma_true was inverted for."""
         kappa = np.sqrt(self._kappa_sq)
         n = len(self.X)
         noise = np.sqrt(1.0 - self._kappa_sq) * np.random.randn(n) + self._noise_std * np.random.randn(n)
