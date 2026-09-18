@@ -48,10 +48,10 @@ IV = r"\textnormal{\i}\!\operatorname{v}"
 PI = r"\operatorname{p}\!\textnormal{\i}"
 INV = r"\textnormal{\i}\!\operatorname{nv}"
 
-# the DA+ methods ending in +IV take an instrument mode: bare or `(T,Z)` is the
-# joint Z-tilde = (T, Z) of Asm. 3 (the DA translation amount as an instrument
-# beside the configured Z), `(Z)` the configured Z alone with no T term, `(T)`
-# the translation amount alone, no Z term
+# the DA+ methods ending in +IV take an instrument mode: bare or `(T,Z)` is one
+# constraint per instrument, the DA translation amount T and the configured Z,
+# each at its own radius (Asm. 3, SS2.6); `(Z)` the configured Z alone, `(T)` the
+# translation amount alone
 IV_MODE_METHODS: tuple[str, ...] = ("DA+IV", "DA+PI+IV", "PI&DA+PI+IV")
 IV_MODES: tuple[str, ...] = ("T,Z", "Z", "T")
 # `base(mode)`: no whitespace outside the parentheses, any inside them
@@ -164,9 +164,9 @@ TEX_MAPPER.update(
         "DA+IV(Z)": rf"$\widetilde{{{IV}}}_{{Z}}$",
     }
 )
-# the (Z) spellings are the DA family plus a real Z: DA+PI's hue and alpha, told
-# apart by the line style; the (T) spellings ARE the base (Z-tilde with an empty
-# Z), same label, same hue, same line
+# the (Z) spellings are the DA family plus an observed Z: DA+PI's hue and alpha,
+# told apart by the line style; the (T) spellings ARE the base whenever the
+# instrument set is empty, same label, same hue, same line
 for _z, _family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI")):
     COLOR_MAP[_z], ALPHA_MAP[_z] = COLOR_MAP[_family], ALPHA_MAP[_family]
 for _base in IV_MODE_METHODS:

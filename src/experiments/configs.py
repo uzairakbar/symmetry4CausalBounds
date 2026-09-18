@@ -231,11 +231,16 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 # keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
 EPS_TOL: float = 2**-5
 
-# the IV leakiness budget of a non-empty `iv:` (SS2.6). The real-Z radius is
-# s sqrt(gamma_z), a fraction of the residual sd; 2^-8 gives 6.25%. DECLARED on
-# every path, never oracle: listing instruments asserts they are near perfect.
-# Read only when the instrument set is non-empty; an absent key means this.
-GAMMA_Z_DEFAULT: float = 2**-8
+# the IV leakiness budget of a non-empty `iv:` (SS2.6). The observed instrument's
+# radius is s sqrt(gamma_z), a fraction of the residual sd. DECLARED on every
+# path, never oracle: listing instruments asserts they are near perfect. Read only
+# when the instrument set is non-empty; an absent key means this.
+#
+# the DECLARED leak budget of a configured instrument set: Conley's direct-effect
+# scale at delta = 0.05, i.e. doubling the excise moves taxed sales by at most 5%
+# outside the four prices (r_Z = s sqrt(gamma_z) = 0.133). 2^-8 shipped before and
+# sat below the bootstrap noise floor 0.104 of the moment it bounds.
+GAMMA_Z_DEFAULT: float = 0.0177
 
 # Floor guard. An auto-set budget below the constraint's own attainable floor is not
 # a tighter bound, it is NO bound: every query comes back INFEASIBLE and the method
@@ -863,8 +868,9 @@ class MethodRegistry:
             # under `mean_match` the plotted point estimators carry one too
             "ERM": lambda: ERM(fit_intercept=mean_match),
             "DA+ERM": lambda: ERM(fit_intercept=mean_match),
-            # the point estimates fit with the real Z, DA+IV with Z-tilde; `IV`
-            # under an empty set is a config error (`resolve_dataset_block`)
+            # the point estimates fit with the observed Z, DA+IV with the stacked
+            # Z-tilde; `IV` under an empty set is a config error
+            # (`resolve_dataset_block`)
             "IV": lambda: IV(fit_intercept=mean_match),
             "DA+IV": lambda: IV(fit_intercept=mean_match),
             "PI+INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
@@ -891,9 +897,7 @@ class MethodRegistry:
             mode: {
                 "DA+IV": all_builders["DA+IV"],
                 "DA+PI+IV": all_builders["DA+PI+IV"],
-                "PI&DA+PI+IV": (
-                    lambda mode=mode: IntIVPartialR2(gamma=gamma, pad=pad, instrument=mode, **iv_common)
-                ),
+                "PI&DA+PI+IV": (lambda mode=mode: IntIVPartialR2(gamma=gamma, pad=pad, instrument=mode, **iv_common)),
             }
             for mode in ("Z", "T")
         }

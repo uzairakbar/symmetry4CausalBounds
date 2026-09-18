@@ -11,9 +11,9 @@ defaults:
                         # false = the pre-2026-09 uncentred, intercept-free ball.
     n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
-# The IV budget is not a toggle: it is the oracle ||E[W#|Z-tilde]||
-# (`eps_iv_star`), exact at gamma_z = 0, which is how every experiment here
-# runs. See oracle.eps_iv_star.
+# The IV budgets are not toggles: the T-as-IV radius is the oracle
+# ||E[W#|T]|| (`eps_iv_star`), and an observed instrument gets its own
+# constraint at its own radius. See oracle.eps_iv_star.
 
 # `experiment:` selects what to run. Omitted n_samples/n_experiments/
 # sweep_samples fall back to DatasetDefaults, omitted `methods` to the full
@@ -188,8 +188,8 @@ cigarettes:
     # iv: [tax_s, y, cpi]
     # the IV leakiness budget for the instruments listed in `iv:`, DECLARED on every
     # path (SS2.6). The radius is s*sqrt(gamma_z), a fraction of the residual sd;
-    # 2^-8 gives 6.25%. Omit the key and that default is used. For DA+...+IV the
-    # T-as-IV budget is combined with it in root sum square on Z-tilde.
+    # 2^-8 gives 6.25%. Omit the key and that default is used. It is the radius of
+    # the observed instrument's own constraint; the T-as-IV budget is separate.
     # gamma_z: 0.00390625     # 2^-8, the default; present here only to be explicit
     methods:
         # - ATE

@@ -14,17 +14,17 @@ cigarettes:
     # the instrument set: the own excise, with income and the CPI instrumenting
     # themselves (included exogenous). Decides the target and reaches every solver.
     iv: [tax_s, y, cpi]
-    # the declared IV leakiness budget, the default written out: radius
-    # s sqrt(gamma_z) = 6.25% of the residual sd
-    gamma_z: 0.00390625
+    # Conley's direct-effect scale at delta = 0.05: r_Z = s sqrt(gamma_z) = 0.133,
+    # above the bootstrap noise floor 0.104 of the moment it bounds (ANALYSIS.md SS5)
+    gamma_z: 0.0177
     n_samples: 2_450
     n_experiments: 8
     sweep_samples: 128
     da_amplitude: 1.0
     sliver: false
     # a DA+ IV method takes an instrument mode: bare (or `"DA+PI+IV(T,Z)"`, quoted
-    # in a flow list, or the comma splits it) is the joint Z-tilde = (T, Z),
-    # `DA+PI+IV(Z)` the configured instrument alone with no T term
+    # in a flow list, or the comma splits it) constrains BOTH instruments, each at
+    # its own radius; `DA+PI+IV(Z)` the configured instrument alone, no T term
     methods: [PI+INV, PI, PI+IV, PI+INV+IV, DA+PI, DA+PI+IV, DA+PI+IV(Z), PI&DA+PI, PI&DA+PI+IV]
     augmentation: translate
     experiment:

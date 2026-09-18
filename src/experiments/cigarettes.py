@@ -327,9 +327,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         self._benchmarks = None
         self._benchmarks_iv = None
         self.iv_columns = tuple(iv or ())
-        # the real-Z radius s sqrt(gamma_z) is DECLARED, never oracle, and it
-        # exists only with an instrument to declare it on; 0 keeps the IV classes
-        # bit-identical to today's (`iv_bound` is then exactly `epsilon_iv`)
+        # the observed instrument's radius s sqrt(gamma_z) is DECLARED, never
+        # oracle, and it exists only with an instrument to declare it on; 0 keeps
+        # the IV classes bit-identical to today's (with no observed instrument
+        # there is no Z constraint)
         self.gamma_z = float(GAMMA_Z_DEFAULT if gamma_z is None else gamma_z) if self.iv_columns else 0.0
         if self.iv_columns:
             logger.info(
@@ -665,7 +666,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 vlines=f1_marks,
             )
 
-            # F2
+            # F2. The x-axis is the DECLARED leak radius s sqrt(gamma_z). A DA+
+            # method solves on the augmented design, so the radius it actually
+            # carries is that plus its DA-side allowance (`_z_allowance`, SS2.6),
+            # a fit-time constant: those rows sit a little to the right of their
+            # x-coordinate, and `_z_allowance` is logged at the first solve
             results = {name: np.full((points, 1, 2), np.nan) for name in models}
             for name, model in models.items():
                 if not hasattr(model, "gamma_z"):

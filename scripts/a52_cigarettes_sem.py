@@ -240,8 +240,7 @@ def leg_ii():
         distinct.append(len(np.unique(states[[lookup[row.tobytes()] for row in sample_X]])))
     mean = float(np.mean(distinct))
     print(
-        f"      distinct states over {BOOTSTRAP_SEEDS} seeds: "
-        f"min {min(distinct)} mean {mean:.1f} max {max(distinct)}"
+        f"      distinct states over {BOOTSTRAP_SEEDS} seeds: min {min(distinct)} mean {mean:.1f} max {max(distinct)}"
     )
     check("(ii) mean distinct-state count", DISTINCT_MEAN[0] <= mean <= DISTINCT_MEAN[1], f"{mean:.1f}, expected 31.2")
     check(
@@ -261,10 +260,13 @@ def sample_ratio(sem):
 
 def plasmode_band(direction, tag):
     np.random.seed(SEED)
-    ratios = np.array([sample_ratio(CigaretteSEM(target="plasmode", confound_direction=direction))
-                       for _ in range(PLASMODE_DRAWS)])
-    print(f"      {tag}: gamma-hat*/gamma_true over {PLASMODE_DRAWS} draws "
-          f"min {ratios.min():.3f} mean {ratios.mean():.3f} max {ratios.max():.3f}")
+    ratios = np.array(
+        [sample_ratio(CigaretteSEM(target="plasmode", confound_direction=direction)) for _ in range(PLASMODE_DRAWS)]
+    )
+    print(
+        f"      {tag}: gamma-hat*/gamma_true over {PLASMODE_DRAWS} draws "
+        f"min {ratios.min():.3f} mean {ratios.mean():.3f} max {ratios.max():.3f}"
+    )
     check(f"{tag} mean sample ratio", BAND_MEAN[0] <= ratios.mean() <= BAND_MEAN[1], f"{ratios.mean():.4f}")
     check(
         f"{tag} every draw in band",
@@ -329,7 +331,7 @@ def leg_v(sem):
         model = builders[name]()
         fit_model(model=model, method_name=name, X=X, y=y, GX=GX, G=G)
         # DA+PI+IV IS the IV method; the intersection holds it on `.augmented`
-        built = model.augmented.Z_projector_R if name.startswith("PI&") else model.Z_projector_R
+        built = model.augmented.T_projector_R if name.startswith("PI&") else model.T_projector_R
         difference = float(np.abs(np.asarray(built) - want).max())
         check(f"(v) {name}: the IV constraint is built from G", difference < 1e-12, f"max |diff| {difference:.2e}")
 

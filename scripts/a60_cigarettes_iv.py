@@ -213,8 +213,8 @@ def leg_i():
     data = runner.generate_data(0, 1.0)
     models = runner.build_models(0, 0, data)
     da_iv = models["DA+PI+IV"]
-    on_t_only = da_iv.gamma_z == 0.0 and da_iv.Z_projector_R.shape[0] == 1 + design.k
-    check("(i) DA+PI+IV carries gamma_z 0 and projects on T alone", on_t_only, f"{da_iv.Z_projector_R.shape}")
+    on_t_only = da_iv.gamma_z == 0.0 and not da_iv._has_z and da_iv.T_projector_R.shape[0] == 1 + design.k
+    check("(i) DA+PI+IV carries gamma_z 0 and one T constraint, no Z one", on_t_only, f"{da_iv.T_projector_R.shape}")
     query = query_runner(orch)
     check(
         "(i) the query runner reads declared_iv False and Z (n, 0)",
@@ -331,25 +331,21 @@ def leg_v():
     pi_iv, da_pi_iv = models["PI+IV"], models["DA+PI+IV"]
     r_z = np.sqrt(pi_iv.sigma_sq / pi_iv.rho * GAMMA_Z_DEFAULT)
     check(
-        "(v) PI+IV: gamma_z 2^-8, epsilon_iv 0, bound exactly s sqrt(gamma_z)",
-        pi_iv.gamma_z == GAMMA_Z_DEFAULT and pi_iv.epsilon_iv == 0.0 and pi_iv.iv_bound == r_z,
-        f"{pi_iv.iv_bound:.6f}",
+        "(v) PI+IV: gamma_z declared, no T block, Z radius exactly s sqrt(gamma_z)",
+        pi_iv.gamma_z == GAMMA_Z_DEFAULT and not pi_iv._has_t and pi_iv.z_bound == r_z,
+        f"{pi_iv.z_bound:.6f}",
     )
     r_t = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
+    r_z_own = np.sqrt(da_pi_iv.sigma_sq / da_pi_iv.rho * GAMMA_Z_DEFAULT) + da_pi_iv._z_allowance
     check(
-        "(v) DA+PI+IV: epsilon_iv is r_T = eps_iv_star + EPS_TOL, never raised",
-        da_pi_iv.epsilon_iv == r_t and abs(r_t - EPS_TOL) < 1e-12,
-        f"{da_pi_iv.epsilon_iv!r}",
+        "(v) DA+PI+IV: two constraints, r_T and r_Z",
+        abs(da_pi_iv.t_bound - r_t) < 1e-12 and abs(da_pi_iv.z_bound - r_z_own) < 1e-12,
+        f"r_T {da_pi_iv.t_bound:.6f}, r_Z {da_pi_iv.z_bound:.6f}",
     )
-    joint = np.sqrt(r_t**2 + da_pi_iv.sigma_sq / da_pi_iv.rho * GAMMA_Z_DEFAULT)
+    check("(v) and r_T is eps_iv_star + EPS_TOL, never raised", abs(r_t - EPS_TOL) < 1e-12, f"{r_t!r}")
     check(
-        "(v) DA+PI+IV: the joint root-sum-square bound",
-        abs(da_pi_iv.iv_bound - joint) < 1e-12,
-        f"{da_pi_iv.iv_bound:.6f}",
-    )
-    check(
-        "(v) the intersection's baseline is at r_Z, its DA branch at the joint",
-        models["PI&DA+PI+IV"].baseline.epsilon_iv == 0.0 and models["PI&DA+PI+IV"].augmented.epsilon_iv == r_t,
+        "(v) the intersection's baseline carries no T block, its DA branch r_T",
+        not models["PI&DA+PI+IV"].baseline._has_t and models["PI&DA+PI+IV"].augmented.t_bound == r_t,
     )
 
     split = coverage_over_replicates(runner, target)
@@ -395,11 +391,15 @@ def leg_v():
         and fitted["PI&DA+PI+IV"].baseline._has_iv
     )
     check("(v) the query panel's +IV models are fitted on the real Z (batch B ruling 2)", on_z)
-    rows = fitted["PI+IV"].Z_projector_R.shape[0], fitted["DA+PI+IV"].Z_projector_R.shape[0]
-    check("(v) PI+IV projects on 3 moments, DA+PI+IV on 4 (T first)", rows == (3 + 4, 4 + 4), f"{rows}")
-    bounds = fitted["PI+IV"].iv_bound, fitted["DA+PI+IV"].iv_bound
+    rows = (
+        fitted["PI+IV"].Z_projector_R.shape[0],
+        fitted["DA+PI+IV"].Z_projector_R.shape[0],
+        fitted["DA+PI+IV"].T_projector_R.shape[0],
+    )
+    check("(v) PI+IV projects on 3 Z moments, DA+PI+IV on 3 Z and 1 T", rows == (3 + 4, 3 + 4, 1 + 4), f"{rows}")
     print(
-        f"      RECORDED query-path IV bounds: PI+IV {bounds[0]:.6f}, DA+PI+IV {bounds[1]:.6f} "
+        f"      RECORDED query-path radii: PI+IV r_Z {fitted['PI+IV'].z_bound:.6f}, "
+        f"DA+PI+IV r_T {fitted['DA+PI+IV'].t_bound:.6f} r_Z {fitted['DA+PI+IV'].z_bound:.6f} "
         f"(r_T there is the query tolerance {query.eps_tol:g})"
     )
 

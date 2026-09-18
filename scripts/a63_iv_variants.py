@@ -4,7 +4,7 @@ Four commits on refactor6/iv-figures: `_approx_error` leaves the normalised ids
 (`constants.py`, `plotting.py`, a61-vi); every `_coverage` figure and every figure
 drawn normalised is clamped to a linear axis on `CLAMP_YLIM` (`create_sweep_plot`);
 a DA+ IV method may spell its instrument mode, `DA+PI+IV(Z)` for the configured Z
-alone at the non-DA budget and `DA+PI+IV(T,Z)` for the default joint Z-tilde
+alone and `DA+PI+IV(T,Z)` for both constraints
 (`parse_method` in `constants.py`, `resolve_dataset_block`, `build_methods`,
 `fit_model`, the intersection's `instrument`, `_plot_headline`); both recipes list
 `DA+PI+IV(Z)` beside `DA+PI+IV`. Legs:
@@ -314,9 +314,11 @@ def fitted(names, X, y, GX, G, da, Z, rho):
     return models
 
 
-def width(model, k):
-    """Instrument columns of a fitted IV ball: the jitter block adds k rows."""
-    return model.Z_projector_R.shape[0] - k
+def width(model, k, block="Z"):
+    """Instrument columns of one block on a fitted IV ball: the jitter block adds
+    k rows, and an absent block is 0 columns."""
+    arr = model.Z_projector_R if block == "Z" else model.T_projector_R
+    return 0 if arr is None else arr.shape[0] - k
 
 
 def synthetic(top):
@@ -442,22 +444,47 @@ def leg_ii(seed):
     rho = float(rho_hat(X, GX, y, intercept=True))
     print(f"      rho_hat of the draw {rho:.6f}")
     models = fitted(MODE_NAMES, X, y, GX, G, da, Z, rho)
-    for name, want in (("PI+IV", 1), ("DA+PI+IV", 2), ("DA+PI+IV(T,Z)", 2), ("DA+PI+IV(Z)", 1)):
-        check(f"(ii) {name} instrument width {want}", width(models[name], k) == want, f"{width(models[name], k)}")
-    for name, want in (("PI&DA+PI+IV", 2), ("PI&DA+PI+IV(Z)", 1)):
+    # one width per BLOCK now: the (Z) spellings carry no T block at all
+    for name, z_want, t_want in (
+        ("PI+IV", 1, 0),
+        ("DA+PI+IV", 1, 1),
+        ("DA+PI+IV(T,Z)", 1, 1),
+        ("DA+PI+IV(Z)", 1, 0),
+    ):
+        got = width(models[name], k), width(models[name], k, block="T")
+        check(f"(ii) {name} blocks Z {z_want} / T {t_want}", got == (z_want, t_want), f"{got}")
+    for name, t_want in (("PI&DA+PI+IV", 1), ("PI&DA+PI+IV(Z)", 0)):
         model = models[name]
+        got = width(model.augmented, k), width(model.augmented, k, block="T")
+        base = width(model.baseline, k), width(model.baseline, k, block="T")
         check(
-            f"(ii) {name} DA branch width {want}, baseline 1",
-            width(model.augmented, k) == want and width(model.baseline, k) == 1,
+            f"(ii) {name} DA branch Z 1 / T {t_want}, baseline Z 1 / T 0",
+            got == (1, t_want) and base == (1, 0),
+            f"DA {got}, baseline {base}",
         )
-    for name, want in (("DA+PI+IV", 2**-5), ("DA+PI+IV(T,Z)", 2**-5), ("DA+PI+IV(Z)", 2**-6)):
-        check(f"(ii) {name} epsilon_iv {want}", models[name].epsilon_iv == want, f"{models[name].epsilon_iv!r}")
-    check("(ii) PI&DA+PI+IV(Z) DA branch epsilon_iv 2^-6", models["PI&DA+PI+IV(Z)"].augmented.epsilon_iv == 2**-6)
-    check("(ii) PI&DA+PI+IV DA branch epsilon_iv 2^-5", models["PI&DA+PI+IV"].augmented.epsilon_iv == 2**-5)
-    gap = abs(models["DA+PI+IV(Z)"].iv_bound - models["PI+IV"].iv_bound)
-    check("(ii) DA+PI+IV(Z) bound equals PI+IV's to 1e-12", gap < 1e-12, f"{gap:.2e}")
-    joint = abs(models["DA+PI+IV"].iv_bound - models["PI+IV"].iv_bound)
-    check("(ii) DA+PI+IV's joint bound differs from PI+IV's (the T term)", joint > 1e-6, f"{joint:.2e}")
+    # every IV ball carries BOTH radii; what tells the modes apart is which blocks
+    # they were FITTED with, so the (Z) spellings have no T constraint at all
+    for name in ("DA+PI+IV", "DA+PI+IV(T,Z)"):
+        check(f"(ii) {name} T radius is 2^-5", models[name].t_bound == 2**-5, f"{models[name].t_bound!r}")
+    check("(ii) DA+PI+IV(Z) carries no T constraint", not models["DA+PI+IV(Z)"]._has_t)
+    check("(ii) PI&DA+PI+IV(Z) DA branch carries no T constraint", not models["PI&DA+PI+IV(Z)"].augmented._has_t)
+    check("(ii) PI&DA+PI+IV DA branch T radius is 2^-5", models["PI&DA+PI+IV"].augmented.t_bound == 2**-5)
+    # a DA+ method solves on the AUGMENTED design, so its declared radius carries
+    # the DA-side allowance (SS2.6) and PI+IV's does not; the two are otherwise the
+    # same number, which is what this pins
+    for name in ("DA+PI+IV(Z)", "DA+PI+IV"):
+        model = models[name]
+        declared = np.sqrt(model.sigma_sq / model.rho * model.gamma_z)
+        base = models["PI+IV"].epsilon_iv_z
+        want = float(np.hypot(base, declared + model._z_allowance))
+        without = float(np.hypot(base, declared))
+        gap = abs(model.z_bound - want)
+        check(f"(ii) {name} Z radius is PI+IV's plus the DA-side allowance", gap < 1e-12, f"{gap:.2e}")
+        check("(ii) and the allowance is what separates them", model.z_bound > without, f"{model.z_bound:.6f}")
+    check(
+        "(ii) the T constraint is what tells bare DA+PI+IV from DA+PI+IV(Z)",
+        models["DA+PI+IV"]._has_t and not models["DA+PI+IV(Z)"]._has_t,
+    )
 
     queries = np.eye(k)
     for base in ("DA+PI+IV", "PI&DA+PI+IV"):

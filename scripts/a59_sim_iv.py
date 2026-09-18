@@ -77,11 +77,18 @@ from threadpoolctl import threadpool_limits  # noqa: E402
 
 import src.sem.simulation as sim_module  # noqa: E402
 from src.data_augmentors.simulation import NullSpaceTranslation  # noqa: E402
-from src.experiments.configs import EPS_TOL, SIMULATION_CONFIG, MethodRegistry, resolve_dataset_block  # noqa: E402
+from src.experiments.configs import (  # noqa: E402
+    EPS_TOL,
+    FLOOR_GUARD_R,
+    SIMULATION_CONFIG,
+    MethodRegistry,
+    resolve_dataset_block,
+)
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
+from src.methods.sensitivity_models import constraint_floor  # noqa: E402
 from src.oracle import gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
@@ -288,8 +295,30 @@ def leg_vi(seed):
         oracle.eps_iv_z_star > 0.01,
         f"{oracle.eps_iv_z_star:.5f}",
     )
-    print(f"      RECORDED: epsilon_iv (DA, guarded) {eps_da:.6f}, epsilon_iv_z (non-DA) {eps_z:.6f}")
-    check("(vi) the two IV terms coincide on the sim unless the floor guard fired", eps_da == eps_z or eps_da > eps_z)
+    print(f"      RECORDED: epsilon_iv (T budget, guarded) {eps_da:.6f}, epsilon_iv_z (Z budget) {eps_z:.6f}")
+    # the two no longer coincide: the T budget is `eps_iv_star` alone and the Z one
+    # is `eps_iv_z_star`, each the radius of its own constraint
+    floor_t = constraint_floor(
+        data.GX,
+        data.y,
+        runner.fit_gamma(0),
+        kind="iv",
+        Z=np.asarray(data.G).reshape(len(data.GX), -1),
+        mean_match=runner.mean_match,
+        rho=runner.fit_rho(0, data),
+        recalibrate=runner.recalibrate,
+    )
+    raw_t = float(oracle.eps_iv_star) + EPS_TOL
+    check(
+        "(vi) epsilon_iv is the T piece + EPS_TOL, or the guard's sqrt(9 floor_T)",
+        eps_da == raw_t or abs(eps_da - np.sqrt(FLOOR_GUARD_R * floor_t)) < 1e-12,
+        f"{eps_da:.6f} vs raw {raw_t:.6f}",
+    )
+    check(
+        "(vi) epsilon_iv_z is the Z piece + EPS_TOL",
+        abs(eps_z - (float(oracle.eps_iv_z_star) + EPS_TOL)) < 1e-12,
+        f"{eps_z:.6f}",
+    )
 
     query = orchestrator.get_query_runner_cls()(
         methods=orchestrator.methods, **{**orchestrator._get_clean_kwargs(), "n_experiments": 1}

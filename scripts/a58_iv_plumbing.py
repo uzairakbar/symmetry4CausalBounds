@@ -39,12 +39,11 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         that no longer QRs the same, the intersection pre-stacked to [G, G, Z].
         Misses: the numbers, (D).
   (iii) `eps_iv_z_star` is exactly 0.0 for an empty Z (None and (n, 0), touching
-        no RNG), so the oracle's `iv_budget` is `eps_iv_star` to the bit and the
-        runner's `epsilon_iv` (param sweeps and the query runner, all three
-        datasets) is bit-identical to the old formula recomputed here from the
-        oracle, EPS_TOL and the floor on (GX, G). Catches: a tolerance or a jitter
-        inside the Z piece, a floor that moved when Z-tilde replaced G. Misses: a
-        wrong Z piece under a real Z, which (i)'s independent norm covers.
+        no RNG), and the runner's `epsilon_iv` (param sweeps and the query runner,
+        all three datasets) is bit-identical to the old formula recomputed here from
+        the oracle, EPS_TOL and the floor on (GX, G). Catches: a tolerance or a
+        jitter inside the Z piece, a floor that moved off G alone. Misses: a wrong Z
+        piece under a real Z, which (i)'s independent norm covers.
   (iv)  row alignment survives a bootstrap: on a pool whose Z column is 2 X_0 + 1
         and whose `sample` resamples rows with replacement, the rows come off
         `train_test_split` before the columns do, so Z_train is 2 X_train_0 + 1 to
@@ -52,12 +51,13 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         Catches: columns split before rows (the plan's break-it), Z sliced or tiled
         differently from X. Misses: the cigarette SEM's own bootstrap (batch C).
   (v)   the floor guard is skipped exactly when the budget is declared, and the
-        floor is logged: on a pool with an INVALID instrument the joint constraint's
+        floor is logged: on a pool with an INVALID instrument the T constraint's own
         floor sits above r_T^2; `declared_iv=True` returns r_T = eps_iv_star + EPS_TOL
-        untouched and logs one INFO line naming that floor (the one on Z-tilde, not
-        on G alone) and "never raised"; `declared_iv=False` reads the joint oracle
-        budget and would raise a budget under the floor to sqrt(9 floor); the query
-        runner does the same. The oracle measures `eps_iv_z_star` on both paths.
+        untouched and logs one INFO line naming that floor (the one on G alone, not
+        on the stacked instrument) and "never raised"; `declared_iv=False` reads the
+        same T piece and would raise a budget under the floor to sqrt(9 floor); the
+        query runner does the same. The oracle measures `eps_iv_z_star` on both
+        paths, and it is the radius of a separate constraint.
         Catches: the skip dropped, the declared path reading the joint budget, the
         floor computed on G alone. Misses: the declared gamma_z reaching the
         solver, which is the orchestrator's (batch C).
@@ -115,6 +115,9 @@ from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep  # noqa
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model, instrument_columns, joint_instrument  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
+from src.methods.sensitivity_models import (  # noqa: E402
+    InstrumentalVariablePartialR2 as IVPartialR2,
+)
 from src.methods.sensitivity_models import SolveStatus, constraint_floor  # noqa: E402
 from src.oracle import eps_iv_z_star  # noqa: E402
 from src.sem.abstract import StructuralEquationModel as SEM  # noqa: E402
@@ -356,33 +359,59 @@ def recorded(runner, data):
 
 
 def expected_instrument(name, Z, Z_solo, G):
-    """What SS2.5 and SS8 say each method's `Z` must be; None means no Z at all."""
+    """The instrument BLOCKS each method must be handed (SS2.6): the PI classes take
+    `T` and `Z` separately, 2SLS takes the one stacked matrix. `{}` means no
+    instrument at all."""
+    T = np.reshape(G, (len(G), -1))
     if name in ("PI+IV", "IV"):
-        return Z_solo
+        return {"Z": Z_solo}
     if name in ("PI+INV+IV", "PI&DA+PI+IV"):
-        return Z
-    if name in ("DA+PI+IV", "DA+IV"):
-        return np.column_stack([np.reshape(G, (len(G), -1)), Z])
-    return None
+        return {"Z": Z}
+    if name == "DA+PI+IV":
+        return {"Z": Z, "T": T}
+    if name == "DA+IV":
+        return {"Z": np.column_stack([T, Z])}
+    return {}
 
 
 def check_dispatch(tag, kws, Z, Z_solo, G):
     for name, kw in kws.items():
         want = expected_instrument(name, Z, Z_solo, G)
-        got = kw.get("Z")
-        if want is None:
-            check(f"{tag} {name}: no instrument handed", got is None)
-        else:
-            same = got is not None and np.shape(got) == np.shape(want) and np.array_equal(got, want)
-            check(f"{tag} {name}: instrument {np.shape(want)} handed exactly", same, f"got {np.shape(got)}")
+        if not want:
+            handed = [key for key in ("Z", "T") if kw.get(key) is not None]
+            check(f"{tag} {name}: no instrument handed", not handed, f"got {handed}")
+            continue
+        for key, block in want.items():
+            got = kw.get(key)
+            same = got is not None and np.shape(got) == np.shape(block) and np.array_equal(got, block)
+            check(f"{tag} {name}: {key} block {np.shape(block)} handed exactly", same, f"got {np.shape(got)}")
+        for key in {"Z", "T"} - set(want):
+            check(f"{tag} {name}: no {key} block", kw.get(key) is None, f"got {np.shape(kw.get(key))}")
 
 
-def finite_widths(results):
-    """Every IV method's width finite at every step."""
-    bad = [name for name in IV_NAMES if not np.all(np.isfinite(results[name]["interval_width"]))]
+def finite_widths(results, expect_empty=()):
+    """Every IV method's width finite at every step, except the families named in
+    `expect_empty`, which must be EMPTY at every step.
+
+    On this fixture's n-sweep they are, and the cause is the floor guard, which now
+    measures the T CONSTRAINT'S OWN floor (SS2.6): on G alone that floor is ~1e-7,
+    so the guard does not fire and `epsilon_iv` stays at the oracle 0.03125, where
+    it used to be raised to ~0.4 off the STACKED instrument's floor of ~0.019. The
+    inflation was never the T constraint's to claim. At the honest budget the
+    program is empty here -- and so is the OLD pooled one at the pooled radius, so
+    this is a budget fact, not a decoupling one. RECORDED rather than asserted
+    away; the shipped `iv_fig13` n-sweep is unaffected."""
+    bad = [
+        name
+        for name in IV_NAMES
+        if name not in expect_empty and not np.all(np.isfinite(results[name]["interval_width"]))
+    ]
+    still_finite = [name for name in expect_empty if np.any(np.isfinite(results[name]["interval_width"]))]
     if bad:
         print(f"      non-finite widths: {bad}")
-    return not bad
+    if still_finite:
+        print(f"      expected empty but finite: {still_finite}")
+    return not bad and not still_finite
 
 
 def statuses(model):
@@ -390,18 +419,27 @@ def statuses(model):
 
 
 def independent_z_piece(sem, da, X, y, Z, draws, seed):
-    """|| Q_{Z|G}' (y - GX h_*) || / sqrt(n), centred, RMS-pooled over the seeded
-    DA draws the oracle pools; written out here, no oracle code."""
+    """SS2.6's Z budget written out with no oracle code: the larger of the Z moment
+    of r_* = y - h_*(X) and of r_* - W#, centred, RMS-pooled over the seeded DA
+    draws the oracle pools. W# is w minus its OLS fit on the augmented design, the
+    same residual the T budget projects."""
     values = []
     state = np.random.get_state()
+    Q = np.linalg.qr(Z)[0]
+
+    def moment(r):
+        r = r - r.mean()
+        return float(np.linalg.norm(Q.T @ r) / np.sqrt(len(r)))
+
+    residual = np.asarray(y).ravel() - (np.asarray(X) @ sem.W_XY).ravel()
     for draw in range(draws):
         np.random.seed(seed + draw)
-        GX, G = da(X)
-        residual = np.asarray(y).ravel() - (GX @ sem.W_XY).ravel()
-        residual = residual - residual.mean()
-        Q_G = np.linalg.qr(np.reshape(G, (len(G), -1)))[0]
-        Q = np.linalg.qr(Z - Q_G @ (Q_G.T @ Z))[0]
-        values.append(np.sum((Q.T @ residual) ** 2) / len(residual))
+        GX, _ = da(X)
+        w = ((np.asarray(X) - GX) @ sem.W_XY).ravel()
+        Phi = GX - GX.mean(axis=0)
+        w_centred = w - w.mean()
+        sharp = w_centred - Phi @ np.linalg.lstsq(Phi, w_centred, rcond=None)[0]
+        values.append(max(moment(residual), moment(residual - sharp)) ** 2)
     np.random.set_state(state)
     return float(np.sqrt(np.mean(values)))
 
@@ -435,9 +473,9 @@ def leg_i(seed):
         f"{z_piece!r}",
     )
     check(
-        "(i) oracle: iv_budget is the two pieces in quadrature",
-        abs(oracle.iv_budget - np.hypot(oracle.eps_iv_star, z_piece)) < 1e-15,
-        f"{oracle.iv_budget:.6g}",
+        "(i) oracle: the two pieces are separate",
+        oracle.eps_iv_star > 0 and z_piece > 0 and not hasattr(oracle, "iv_budget"),
+        f"T {oracle.eps_iv_star:.6g}, Z {z_piece:.6g}",
     )
     G = np.asarray(data.G)
     kws = recorded(runner, data)
@@ -466,9 +504,68 @@ def leg_i(seed):
     check("(i) n-sweep: Z sliced to n_train beside X", data_n.Z.shape == (64, M) and data_n.X.shape[0] == 64)
     check("(i) n-sweep: the slice is the first rows of the base Z", np.array_equal(data_n.Z, base_Z[:64]))
     check_dispatch("(i) n-sweep", recorded(runner_n, data_n), data_n.Z, data_n.Z, np.asarray(data_n.G))
+    # RECORDED: on this fixture the pair is empty at both n. The block below shows
+    # why: the guard no longer inflates the T budget off the stacked floor
     check(
-        "(i) n-sweep runs end to end", finite_widths(sweep_runner("n", lambda: sem, [64, 128], seed=seed).run("n")[1])
+        "(i) n-sweep runs end to end, the decoupled pair empty throughout",
+        finite_widths(
+            sweep_runner("n", lambda: sem, [64, 128], seed=seed).run("n")[1],
+            expect_empty=("DA+PI+IV", INTERSECTION),
+        ),
     )
+
+    # a FRESH runner: `recorded` above replaced the other one's method_factory
+    solo_runner = sweep_runner("n", lambda: sem, [64, 128], seed=seed)
+    data_solo = solo_runner.generate_data(0, 64)
+    solo_builders = MethodRegistry.build_methods(
+        ["DA+PI+IV(T)", "DA+PI+IV(Z)"], **budgets(solo_runner, data_solo), **TOGGLES
+    )
+    for name, solo in (("DA+PI+IV(T)", "T"), ("DA+PI+IV(Z)", "Z")):
+        model = solo_builders[name]()
+        fit_model(model=model, method_name=name, **data_solo.fit_arrays)
+        model.predict(data_solo.X_test)
+        solved = np.all(np.asarray(model.query_status) == SolveStatus.OK)
+        check(f"(i) n-sweep: the {solo} constraint ALONE is feasible at these budgets", solved)
+    # the cause, measured: the T constraint's own floor is ~1e-7 on G alone against
+    # ~1e-2 on the stacked instrument, so the guard has nothing to raise
+    common_floor = dict(
+        mean_match=solo_runner.mean_match,
+        rho=solo_runner.fit_rho(0, data_solo),
+        recalibrate=solo_runner.recalibrate,
+        kind="iv",
+    )
+    G_solo = np.reshape(np.asarray(data_solo.G), (len(data_solo.X), -1))
+    floor_t = constraint_floor(data_solo.GX, data_solo.y, solo_runner.fit_gamma(0), Z=G_solo, **common_floor)
+    floor_stacked = constraint_floor(
+        data_solo.GX,
+        data_solo.y,
+        solo_runner.fit_gamma(0),
+        Z=np.column_stack([G_solo, data_solo.Z]),
+        **common_floor,
+    )
+    budget = solo_runner.fit_epsilon_iv(0, 0, data_solo)
+    print(f"      RECORDED n-sweep: r_T {budget:.6g}, floor on G {floor_t:.3g}, on [G, Z] {floor_stacked:.3g}")
+    check(
+        "(i) n-sweep: the guard has nothing to raise, the T floor being far under r_T^2",
+        budget**2 >= floor_t and floor_stacked > floor_t,
+        f"r_T^2 {budget**2:.3g} vs {floor_t:.3g}",
+    )
+    # and the OLD pooled program is equally empty at the pooled radius, so nothing
+    # about the PAIR is what empties it
+    pooled = float(np.hypot(budget, solo_runner.fit_epsilon_iv_z(0, data_solo)))
+    old = IVPartialR2(
+        gamma=solo_runner.fit_gamma(0),
+        epsilon=solo_runner.fit_epsilon(0, 0, data_solo),
+        epsilon_iv=pooled,
+        epsilon_iv_z=0.0,
+        gamma_z=0.0,
+        rho=solo_runner.fit_rho(0, data_solo),
+        pad=TOGGLES.get("pad", False),
+        **{k: v for k, v in TOGGLES.items() if k != "pad"},
+    ).fit(data_solo.GX, data_solo.y, T=np.column_stack([G_solo, data_solo.Z]))
+    old.predict(data_solo.X_test)
+    old_empty = np.all(np.asarray(old.query_status) == SolveStatus.INFEASIBLE)
+    check("(i) n-sweep: the OLD pooled program is empty at the pooled radius too", old_empty, f"{statuses(old)}")
 
     # m-sweep: Z tiled with X, the untiled copy beside X_base
     runner_m = sweep_runner("m", lambda: sem, [1, 2], seed=seed)
@@ -562,9 +659,12 @@ def leg_i(seed):
         outside = [
             line for line in changed if any(k in line for k in ("_draw_base", "_load_data", "sample_paired", "X_raw"))
         ]
+        # 12 became 20 when `fit_epsilon_iv` gained its `ratio` argument and the
+        # docstring that explains why the do-MNIST override ignores it (SS2.6); the
+        # data path is still what this pins, through `outside`
         check(
-            f"(i) do_mnist.py since {BASE_COMMIT}: only the build_methods signature moved (the perf stub set aside)",
-            not outside and len(changed) <= 12 and "build_methods" in diff,
+            f"(i) do_mnist.py since {BASE_COMMIT}: only the budget overrides moved (the perf stub set aside)",
+            not outside and len(changed) <= 20 and "build_methods" in diff,
             f"{len(changed)} changed lines",
         )
 
@@ -603,11 +703,11 @@ def leg_i(seed):
         abs(oracle.eps_iv_z_star - want) < 1e-12,
         f"{oracle.eps_iv_z_star:.9f} vs {want:.9f}",
     )
-    check("(i) pool: eps_iv_star is the G piece alone (unchanged routine)", 0.0 < oracle.eps_iv_star < oracle.iv_budget)
+    check("(i) pool: eps_iv_star is the T piece alone (unchanged routine)", oracle.eps_iv_star > 0.0)
 
 
 def leg_ii():
-    print("(ii) an empty set on sim, optical and cigarettes: Z is (n, 0) and Z-tilde is exactly G")
+    print("(ii) an empty set on sim, optical and cigarettes: Z is (n, 0) and the T block is exactly G")
     for name in digest_leg.DATASETS:
         runner = production(name)
         data = runner.generate_data(0, 1.0)
@@ -627,24 +727,28 @@ def leg_ii():
         at = budgets(runner, data)
         builders = runner.method_factory(**at)
         kws = recorded(runner, data)
-        check(f"(ii) {name}: DA+PI+IV is handed exactly G", np.array_equal(kws["DA+PI+IV"]["Z"], G))
+        check(f"(ii) {name}: DA+PI+IV is handed exactly G in its T block", np.array_equal(kws["DA+PI+IV"]["T"], G))
         raw = kws["PI&DA+PI+IV"]["Z"]
         check(f"(ii) {name}: the intersection is handed the raw (n, 0) Z", raw.shape == (len(data.X), 0))
         check(f"(ii) {name}: PI is handed no instrument", "Z" not in kws["PI"])
         # the fitted arrays against today's direct Z=G fit
-        direct = builders["DA+PI+IV"]().fit(data.GX, data.y, Z=data.G)
+        direct = builders["DA+PI+IV"]().fit(data.GX, data.y, T=data.G)
         runner.methods = {key: builders[key] for key in kws}
         models = runner.build_models(0, 0, data)
         through, intersection = models["DA+PI+IV"], models["PI&DA+PI+IV"]
         same = all(
             np.array_equal(getattr(through, field), getattr(direct, field))
-            for field in ("Z_projector_R", "y_residual_base", "R_constraint", "h_erm")
+            for field in ("T_projector_R", "t_residual_base", "R_constraint", "h_erm")
         )
-        check(f"(ii) {name}: DA+PI+IV through fit_model equals today's direct Z=G fit, bit for bit", same)
+        check(f"(ii) {name}: DA+PI+IV through fit_model equals a direct T=G fit, bit for bit", same)
+        check(
+            f"(ii) {name}: and it carries a T constraint and no Z one",
+            through._has_t and not through._has_z and through.Z_projector_R is None,
+        )
         check(
             f"(ii) {name}: the intersection's DA branch equals that fit and its baseline reads no instrument",
-            np.array_equal(intersection.augmented.Z_projector_R, direct.Z_projector_R)
-            and np.array_equal(intersection.augmented.y_residual_base, direct.y_residual_base)
+            np.array_equal(intersection.augmented.T_projector_R, direct.T_projector_R)
+            and np.array_equal(intersection.augmented.t_residual_base, direct.t_residual_base)
             and not intersection.baseline._has_iv,
         )
         query = production(name, "query")
@@ -699,7 +803,7 @@ def leg_iii(seed):
         data = runner.generate_data(0, 1.0)
         oracle = runner.get_oracle(0)
         check(f"(iii) {name}: oracle eps_iv_z_star == 0.0", oracle.eps_iv_z_star == 0.0, f"{oracle.eps_iv_z_star!r}")
-        check(f"(iii) {name}: iv_budget is eps_iv_star to the bit", oracle.iv_budget == oracle.eps_iv_star)
+        check(f"(iii) {name}: eps_iv_z_star is 0.0 under an empty set", oracle.eps_iv_z_star == 0.0)
         new, old = runner.fit_epsilon_iv(0, 0, data), old_param_budget(runner, data)
         check(f"(iii) {name}: sweep epsilon_iv bit-identical to today's", new == old, f"{new!r} vs {old!r}")
         query = production(name, "query")
@@ -757,25 +861,35 @@ def leg_v(seed):
     measured = o_declared.eps_iv_z_star > 0.0 and o_declared.eps_iv_z_star == o_oracle.eps_iv_z_star
     check("(v) both paths measure eps_iv_z_star", measured, f"{o_declared.eps_iv_z_star:.6g}")
     common = dict(mean_match=True, rho=declared.fit_rho(0, data), recalibrate=True)
-    floor = constraint_floor(
+    floor = constraint_floor(data.GX, data.y, declared.fit_gamma(0), kind="iv", Z=data.G, **common)
+    floor_stacked = constraint_floor(
         data.GX, data.y, declared.fit_gamma(0), kind="iv", Z=joint_instrument(data.G, data.Z), **common
     )
-    floor_g = constraint_floor(data.GX, data.y, declared.fit_gamma(0), kind="iv", Z=data.G, **common)
     want = float(o_declared.eps_iv_star) + EPS_TOL
-    detail = f"r_T^2 {want**2:.4g} vs floor {floor:.4g}"
-    check("(v) the invalid instrument puts the joint floor above r_T^2", want**2 < floor, detail)
+    detail = f"r_T^2 {want**2:.4g} vs T floor {floor:.4g}, stacked floor {floor_stacked:.4g}"
+    # the whole point of measuring the floor on G alone: the INVALID instrument
+    # lifts the STACKED floor above r_T^2 and leaves the T constraint's own below it
+    check(
+        "(v) the invalid instrument lifts the stacked floor above r_T^2, not the T constraint's own",
+        want**2 < floor_stacked and want**2 >= floor,
+        detail,
+    )
     check("(v) declared: epsilon_iv is r_T = eps_iv_star + EPS_TOL, not raised", r_t == want, f"{r_t!r} vs {want!r}")
     check("(v) declared: one INFO line", len(declared_lines) == 1 and declared_lines[0]["level"].name == "INFO")
     message = declared_lines[0]["message"] if declared_lines else ""
-    printed = float(message.split("floor ")[1].split(" ")[0]) if "floor " in message else np.nan
+    printed = float(message.split("floor ")[1].split(";")[0].strip()) if "floor " in message else np.nan
     # the line prints the floor to 4 significant digits, so 5e-4 relative is its precision
     named = abs(printed - floor) <= 6e-4 * max(floor, 1e-12)
-    check("(v) declared: the line names the joint constraint's floor", named, message)
-    check("(v) declared: that floor is on Z-tilde, not on G alone", abs(floor - floor_g) > 1e-9, f"vs {floor_g:.4g}")
+    check("(v) declared: the line names the T constraint's own floor", named, message)
+    check(
+        "(v) declared: that floor is on G alone, not on the stacked instrument",
+        abs(floor - floor_stacked) > 1e-9,
+        f"vs stacked {floor_stacked:.4g}",
+    )
     check("(v) declared: the line says never raised", "never raised" in message)
     check("(v) oracle path: no declared line", not oracle_lines)
-    joint_ok = joint == float(o_oracle.iv_budget) + EPS_TOL and joint**2 >= floor
-    check("(v) oracle path: the joint budget, feasible", joint_ok, f"{joint:.6g}")
+    joint_ok = joint == float(o_oracle.eps_iv_star) + EPS_TOL
+    check("(v) oracle path: the T budget is eps_iv_star + EPS_TOL", joint_ok, f"{joint:.6g}")
     small = 0.5 * np.sqrt(floor)
     raised = oracle_path._floor_guard(small, data, "iv", 0, "epsilon_iv")
     kept = declared._floor_guard(small, data, "iv", 0, "epsilon_iv", declared=True)
@@ -799,7 +913,13 @@ def leg_v(seed):
     check("(v) query declared: epsilon_iv is r_T, not raised", q_declared.epsilon_iv == want)
     logged_once = len(q_lines) == 1 and "never raised" in q_lines[0]["message"]
     check("(v) query declared: the floor is logged once at build", logged_once)
-    check("(v) query oracle path: no declared line, budget differs", not q_oracle_lines and q_oracle.epsilon_iv != want)
+    # both paths read `eps_iv_star` now, so the budgets AGREE unless the oracle
+    # path's guard fires; what still separates them is the declared log line
+    check(
+        "(v) query oracle path: no declared line, and the same T piece unless the guard fired",
+        not q_oracle_lines and q_oracle.epsilon_iv >= want,
+        f"{q_oracle.epsilon_iv:.6g} vs {want:.6g}",
+    )
 
 
 def leg_vi(seed):
@@ -838,11 +958,17 @@ def leg_vii(seed):
     check("(vii) fit_epsilon_iv_z is eps_iv_z_star + EPS_TOL, unguarded", runner.fit_epsilon_iv_z(0, data) == want_z)
     models = runner.build_models(0, 0, data)
     for name in NON_DA_IV:
-        check(f"(vii) {name} carries epsilon_iv_z", models[name].epsilon_iv == want_z, f"{models[name].epsilon_iv!r}")
+        model = models[name]
+        carries = model.epsilon_iv_z == want_z and model.z_bound == want_z and not model._has_t
+        check(f"(vii) {name} carries epsilon_iv_z as its Z radius, with no T block", carries, f"{model.z_bound!r}")
     inter = models[INTERSECTION]
-    check("(vii) the intersection's baseline carries epsilon_iv_z", inter.baseline.epsilon_iv == want_z)
-    t_side = inter.augmented.epsilon_iv == want_t == models["DA+PI+IV"].epsilon_iv
-    check("(vii) its DA branch and DA+PI+IV carry the T-side term", t_side)
+    baseline = inter.baseline
+    check(
+        "(vii) the intersection's baseline carries epsilon_iv_z and no T block",
+        baseline.epsilon_iv_z == want_z and baseline.z_bound == want_z and not baseline._has_t,
+    )
+    t_side = inter.augmented.t_bound == want_t == models["DA+PI+IV"].t_bound
+    check("(vii) its DA branch and DA+PI+IV carry the T budget on their T constraint", t_side)
     # feasibility on the WELL-SPECIFIED symmetry, the ruling's case: both budgets
     # admit h* there, so the two branches overlap at every query. (Under the
     # misspecified DA above the recalibrated DA ball can exclude h*, Thm. 1's
@@ -868,7 +994,7 @@ def leg_vii(seed):
     same_term = query.epsilon_iv_z == float(query.oracle.eps_iv_z_star) + EPS_TOL
     check("(vii) the query runner's epsilon_iv_z is the same term", same_term)
     check("(vii) and it differs from the query runner's T-side budget", query.epsilon_iv_z != query.epsilon_iv)
-    check("(vii) and its PI+IV carries it", query.methods["PI+IV"]().epsilon_iv == query.epsilon_iv_z)
+    check("(vii) and its PI+IV carries it", query.methods["PI+IV"]().epsilon_iv_z == query.epsilon_iv_z)
 
 
 def leg_viii(seed):
@@ -892,10 +1018,10 @@ def leg_viii(seed):
         ("the baseline branch", baseline),
     ):
         r_z = np.sqrt(model.sigma_sq / model.rho * DECLARED_GAMMA_Z)
-        exact = model.epsilon_iv == 0.0 and model.iv_bound == r_z
-        check(f"(viii) {name}: epsilon_iv 0.0 and iv_bound exactly r_Z", exact, f"{model.iv_bound!r}")
+        exact = not model._has_t and model.z_bound == r_z
+        check(f"(viii) {name}: no T block and z_bound exactly r_Z", exact, f"{model.z_bound!r}")
     for name, model in (("DA+PI+IV", models["DA+PI+IV"]), ("the DA branch", models[INTERSECTION].augmented)):
-        check(f"(viii) {name}: epsilon_iv is r_T, bound the joint", model.epsilon_iv == r_t and model.iv_bound > r_t)
+        check(f"(viii) {name}: t_bound is r_T and z_bound is its own", model.t_bound == r_t and model.z_bound > 0.0)
 
 
 if __name__ == "__main__":

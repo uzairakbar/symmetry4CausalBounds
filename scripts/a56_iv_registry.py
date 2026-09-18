@@ -177,8 +177,12 @@ def leg_i():
         check(f"(i) {fname}: the IV baseline is not listed", "IV" not in block["methods"])
         check(f"(i) {fname}: query and sweep planned", plan.query and plan.sweep is not None)
     _, block, _ = load_recipe("neighbour-price_fig12")
-    written_out = block.get("gamma_z") == GAMMA_Z_DEFAULT == 2**-8
-    check("(i) neighbour-price: gamma_z written out as the default 2^-8", written_out, repr(block.get("gamma_z")))
+    written_out = block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.0177
+    check(
+        "(i) neighbour-price: gamma_z written out as the default, Conley delta 0.05",
+        written_out,
+        repr(block.get("gamma_z")),
+    )
 
     with open(os.path.join(REPO, "config.yaml")) as handle:
         config = yaml.safe_load(handle)
@@ -353,18 +357,17 @@ def leg_vi(seed):
     for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
         model = fitted[name]
         r_z = float(np.sqrt(model.sigma_sq / model.rho * 2**-8))
-        exact = model.epsilon_iv == 0.0 and model.iv_bound == r_z
-        check(f"(vi) {name}: epsilon_iv 0.0 and bound exactly r_Z = s sqrt(gamma_z)", exact, f"{model.iv_bound!r}")
+        exact = model.t_bound == EPS_TOL and model.z_bound == r_z
+        check(f"(vi) {name}: epsilon_iv inert and the Z radius exactly r_Z", exact, f"{model.z_bound!r}")
     for name in ("DA+PI+IV", "PI&DA+PI+IV DA branch"):
         model = fitted[name]
-        want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
-        check(
-            f"(vi) {name} bound is the joint at its own s", abs(model.iv_bound - want) < 1e-12, f"{model.iv_bound:.9f}"
-        )
-    got = fitted["PI&DA+PI+IV baseline"].iv_bound
+        want = float(np.sqrt(model.sigma_sq / model.rho * 2**-8))
+        check(f"(vi) {name} Z radius is r_Z at its own s", abs(model.z_bound - want) < 1e-12, f"{model.z_bound:.9f}")
+        check(f"(vi) {name} T radius is epsilon_iv alone", model.t_bound == EPS_TOL, f"{model.t_bound!r}")
+    got = fitted["PI&DA+PI+IV baseline"].z_bound
     check("(vi) PI&DA+PI+IV baseline bound is r_Z = 0.0625 to 1e-6", abs(got - 0.0625) < 1e-6, f"{got:.9f}")
-    # with a positive `epsilon_iv_z` the non-DA classes read the joint 0.069877
-    # (s = 1 on this panel) and `epsilon_iv_z` never reaches the DA class
+    # with a positive `epsilon_iv_z` every Z constraint reads the same radius
+    # 0.069877 on this panel (s = 1), and the T radius never moves
     both = MethodRegistry.build_methods(
         ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
         gamma=GAMMA,
@@ -382,15 +385,15 @@ def leg_vi(seed):
     fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline
     joint = float(np.hypot(EPS_TOL, np.sqrt(2**-8)))
     for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
-        got = fitted[name].iv_bound
-        ok = fitted[name].epsilon_iv == EPS_TOL and abs(got - joint) < 1e-6
-        check(f"(vi) {name} with epsilon_iv_z 2^-5: bound is the joint 0.069877 to 1e-6", ok, f"{got:.9f}")
+        got = fitted[name].z_bound
+        ok = abs(got - joint) < 1e-6
+        check(f"(vi) {name} with epsilon_iv_z 2^-5: the Z radius is 0.069877 to 1e-6", ok, f"{got:.9f}")
     model = fitted["DA+PI+IV"]
     want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
     check(
-        "(vi) DA+PI+IV with epsilon_iv_z 2^-5: still the joint at its own s, epsilon_iv_z never reaches it",
-        abs(model.iv_bound - want) < 1e-12 and model.epsilon_iv == EPS_TOL,
-        f"{model.iv_bound:.9f}",
+        "(vi) DA+PI+IV with epsilon_iv_z 2^-5: the same Z radius at its own s, the T radius unmoved",
+        abs(model.z_bound - want) < 1e-12 and model.t_bound == EPS_TOL,
+        f"{model.z_bound:.9f}",
     )
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))
     for name, extra in empty:

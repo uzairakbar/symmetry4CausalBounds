@@ -47,8 +47,8 @@ toggle) and both recipes (`normalize: true`). Legs:
   (v)   the SS4.1 width table AT THE SHIPPED BUDGET RULE, on the seed-0 DA draw and
         the SS4.1 convention: PI to 1e-3 of p5, PI+IV and PI+INV+IV lower bounds to
         1e-6 of p8 and upper bounds to 1e-3 of p5 at the five gammas, and the
-        DA+PI+IV row RECORDED at its joint bound 0.069877 (r_T EPS_TOL and r_Z
-        0.0625 in root sum square) beside the review's numbers. The same table on
+        DA+PI+IV row RECORDED at its two radii, 0.0625 as the Z radius and 0.03125
+        as the T radius, beside the review's numbers. The same table on
         F1's query-path models is recorded too. Catches: a moved IV or INV
         arithmetic, a wrong instrument matrix. Misses: a solver bump under 1e-6.
   (vi)  the normalise rule (SS10.1): on a synthetic sweep the baseline reads
@@ -108,7 +108,6 @@ from src.experiments.cigarettes import (  # noqa: E402
 )
 from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
-    GAMMA_Z_DEFAULT,
     MethodRegistry,
     parse_experiment_plan,
     resolve_dataset_block,
@@ -126,7 +125,7 @@ from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot, normalize_sweep  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
-from src.methods.sensitivity_models import SolveStatus  # noqa: E402
+from src.methods.sensitivity_models import InstrumentalVariablePartialR2, SolveStatus  # noqa: E402
 from src.sem.cigarettes import CigaretteSEM, V, build_design, instrument_set  # noqa: E402
 
 PHASE_B = ("tax_s", "y", "cpi")
@@ -182,9 +181,17 @@ def recipe(name):
     return {**defaults, **config[name]}
 
 
+# the recorded tables of legs (iii) and (v) are at the 2^-8 leak radius (r_Z =
+# 0.0625), which is what p5 and p8 measured; the shipped default has since moved to
+# the Conley scale, so this gate PINS its own radius rather than tracking it
+GATE_GAMMA_Z = 2**-8
+
+
 def reduced_block(name, **overrides):
     block = recipe(name)
     block.pop("experiment", None)
+    if name == "cigarettes":
+        overrides = {"gamma_z": GATE_GAMMA_Z, **overrides}
     return resolve_dataset_block(name, {**block, "n_experiments": 1, "sweep_samples": 4, "n_jobs": 1, **overrides})
 
 
@@ -227,7 +234,8 @@ def panel_models(orch):
 
 def convention_models(design, Z):
     """The SS4.1 convention on the seed-0 DA draw: INV epsilon and r_T at EPS_TOL,
-    no pad, r_Z declared at 2^-8, rho_hat of the draw; through the registry and
+    no pad, r_Z declared at `GATE_GAMMA_Z` (2^-8, the radius p5 and p8 measured at),
+    rho_hat of the draw; through the registry and
     `fit_model` as the runners fit."""
     np.random.seed(0)
     da = ScaleTranslation(V, std=float(np.std(design.X @ (V / np.linalg.norm(V)))))
@@ -239,7 +247,7 @@ def convention_models(design, Z):
         epsilon=EPS_TOL,
         epsilon_iv=EPS_TOL,
         epsilon_iv_z=0.0,
-        gamma_z=GAMMA_Z_DEFAULT,
+        gamma_z=GATE_GAMMA_Z,
         rho=rho,
         pad=False,
         **TOGGLES,
@@ -461,7 +469,7 @@ def leg_ii_iii():
         else:
             print(
                 f"        (review: DA+PI+IV flat {REVIEW_DA['flat']}, binding between {REVIEW_DA['binding']}, "
-                f"at the joint bound {conv[name].iv_bound:.6f})"
+                f"at r_T {conv[name].t_bound:.6f}, r_Z {conv[name].z_bound:.6f})"
             )
     leg_ii_iii.convention = conv
 
@@ -528,12 +536,52 @@ def leg_v():
     da = table["DA+PI+IV"]
     width = da[1, 1] - da[1, 0]
     print(
-        f"      RECORDED DA+PI+IV at the joint bound {conv['DA+PI+IV'].iv_bound:.6f}: width at 0.25 {width:.4f} "
+        f"      RECORDED DA+PI+IV at r_T {conv['DA+PI+IV'].t_bound:.6f}, r_Z {conv['DA+PI+IV'].z_bound:.6f}: "
+        f"width at 0.25 {width:.4f} "
         f"(review {REVIEW_DA['width_at_0.25']}), lower bounds {np.round(da[:, 0], 6).tolist()}"
     )
+    widths = {name: float(table[name][1, 1] - table[name][1, 0]) for name in ("PI+IV", "PI+INV+IV", "DA+PI+IV")}
+    print("      RECORDED widths at 0.25: " + ", ".join(f"{n} {w:.4f}" for n, w in widths.items()))
     check(
-        "(v) DA+PI+IV is the tightest of the three IV methods at 0.25 at the convention",
-        width < table["PI+INV+IV"][1, 1] - table["PI+INV+IV"][1, 0],
+        "(v) DA+PI+IV is tighter than PI+IV at 0.25 at the convention",
+        widths["DA+PI+IV"] < widths["PI+IV"],
+        f"{widths['DA+PI+IV']:.4f} vs {widths['PI+IV']:.4f}",
+    )
+    # it is NOT tighter than PI+INV+IV any more, and that is the decoupling, not a
+    # defect: the DA branch solves on the augmented design, so its declared Z radius
+    # carries the D20 allowance that a non-DA method does not pay. The leg records
+    # the gap rather than asserting an ordering the two radii no longer support
+    # It is NO LONGER tighter than PI+INV+IV, and the leg pins WHY rather than
+    # dropping the claim: refit the same DA+PI+IV with no `X_pre`, i.e. decoupled
+    # but paying no DA-side allowance. That model IS tighter, so the flip is the
+    # allowance alone and not the decoupling. A future change that made the
+    # allowance vanish, or that made the decoupling itself lose the ordering, fails
+    # here instead of passing quietly
+    Z_set = instrument_set(design, PHASE_B)
+    np.random.seed(0)
+    da = ScaleTranslation(V, std=float(np.std(design.X @ (V / np.linalg.norm(V)))))
+    GX, G = da(design.X)
+    no_allowance = InstrumentalVariablePartialR2(
+        gamma=0.25,
+        epsilon=EPS_TOL,
+        epsilon_iv=EPS_TOL,
+        epsilon_iv_z=0.0,
+        gamma_z=GATE_GAMMA_Z,
+        rho=conv["DA+PI+IV"].rho,
+        pad=False,
+        **TOGGLES,
+    ).fit(GX, design.y, T=np.reshape(G, (len(design.X), -1)), Z=Z_set)
+    bare = beta_pn({"bare": no_allowance}, np.array([0.25]), design.sigma)["bare"][0]
+    bare_width = float(bare[1] - bare[0])
+    check("(v) and that refit really carries no allowance", no_allowance._z_allowance == 0.0)
+    print(
+        f"      RECORDED the flip: with the D20 allowance {widths['DA+PI+IV']:.4f}, without it "
+        f"{bare_width:.4f}, PI+INV+IV {widths['PI+INV+IV']:.4f} (allowance {conv['DA+PI+IV']._z_allowance:.6f})"
+    )
+    check(
+        "(v) it is no longer the tightest, and the DA-side allowance is why",
+        widths["DA+PI+IV"] > widths["PI+INV+IV"] > bare_width,
+        f"{widths['DA+PI+IV']:.4f} > {widths['PI+INV+IV']:.4f} > {bare_width:.4f}",
     )
     query_path = getattr(leg_ii_iii, "query_path", None)
     if query_path is not None:
