@@ -21,7 +21,7 @@ from src.experiments.configs import (
 )
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import PanelBuilder, create_query_sweep_plot, create_sweep_plot, save
-from src.experiments.utils.constants import SUBDIR_QUERY, TEX_MAPPER, iv_mode, parse_method
+from src.experiments.utils.constants import COEFFICIENT_LABELS, SUBDIR_QUERY, TEX_MAPPER, iv_mode, parse_method
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import epsilon_star, preserve_rng
 from src.sem.cigarettes import (
@@ -77,9 +77,8 @@ NORMAL_95: float = 1.959963984540054
 # gamma_z benchmarks marked, so the leak assumption is seen against what the
 # panel itself says. Both are read off the query panel's fitted models, one band
 # per method. The budget range reaches the addiction-stock leak (r_Z 0.558).
-HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV")
+HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "DA+PI+IV")
 HEADLINE_COEFFICIENTS: tuple[str, ...] = ("pn", "p")
-COEFFICIENT_LABELS: dict[str, str] = {"pn": r"$\beta_{p_n}$", "p": r"$\beta_{p}$"}
 GAMMA_RANGE: tuple[float, float] = (0.150, 0.450)
 BUDGET_RANGE: tuple[float, float] = (2**-8, 2**-0.5)
 PN: int = TREATMENTS.index("pn")
@@ -603,7 +602,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         put back after.
         """
         # a spelled default (`DA+PI+IV(T,Z)`) is the headline `DA+PI+IV`; the
-        # `(Z)` variant is not a headline and the outcomes stay keyed by HEADLINE_METHODS
+        # `(Z)` variant is its own headline, PI+IV on the DA'd data with no T term
         fitted = {parse_method(n)[0] if iv_mode(n) == "T,Z" else n: m for n, m in panel.fitted_models.items()}
         models = {name: fitted[name] for name in HEADLINE_METHODS if name in fitted}
         if not models:
@@ -823,7 +822,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         benchmark = self.benchmarks()["lag_q"][3] if self.iv_columns else None
         extra_head, extra_cells = [], {}
         if benchmark is not None:
-            extra_head = [rf"$\beta_{{p_n}}$ at $\gamma_{{\mathrm{{lag}}}} = {benchmark:.3f}$"]
+            extra_head = [rf"{COEFFICIENT_LABELS['pn']} at $\gamma_{{\mathrm{{lag}}}} = {benchmark:.3f}$"]
             query = queries[PN][None, :]
             for name in results:
                 model = panel.fitted_models.get(name)

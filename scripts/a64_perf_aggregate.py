@@ -130,11 +130,10 @@ from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
     CLAMP_YLIM,
     COLOR_MAP,
-    INSTRUMENT_T_STYLE,
     INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
     IV_MODES,
-    POINT_ESTIMATE_STYLE,
+    PARTIAL_IDENTIFICATION_STYLE,
     POINT_ESTIMATES,
     SUBDIR_PERF,
     SUBDIR_SWEEP,
@@ -396,16 +395,12 @@ def leg_i():
             f"(i) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP on {base}'s hue",
             present and COLOR_MAP[name] == COLOR_MAP[base],
         )
-        check(f"(i) {name} differs from {base} in TeX", present and TEX_MAPPER[name] != TEX_MAPPER[base])
+        check(f"(i) {name} is labelled as {base}", present and TEX_MAPPER[name] == TEX_MAPPER[base])
     check("(i) DA+IV(T) is a point estimate", "DA+IV(T)" in POINT_ESTIMATES)
     check(
-        "(i) INSTRUMENT_T_STYLE is neither solid, the Z pattern nor the point-estimate dash",
-        INSTRUMENT_T_STYLE not in ("-", INSTRUMENT_Z_STYLE, POINT_ESTIMATE_STYLE),
-        f"{INSTRUMENT_T_STYLE}",
-    )
-    check(
-        "(i) _line_style draws a (T) name with INSTRUMENT_T_STYLE",
-        plotting._line_style("DA+PI+IV(T)") == INSTRUMENT_T_STYLE,
+        "(i) _line_style draws a (T) name as its base, a (Z) name with INSTRUMENT_Z_STYLE",
+        plotting._line_style("DA+PI+IV(T)") == plotting._line_style("DA+PI+IV") == PARTIAL_IDENTIFICATION_STYLE
+        and plotting._line_style("DA+PI+IV(Z)") == INSTRUMENT_Z_STYLE,
     )
     order = ["PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)", "DA+IV(T)"]
     built = MethodRegistry.build_methods(

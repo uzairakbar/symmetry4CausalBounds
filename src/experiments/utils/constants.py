@@ -110,7 +110,11 @@ TEX_MAPPER: dict[str, str] = {
     "PI&DA+PI+IV": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}})$",
 }
 
-# Color mapping for methods
+# Color mapping for methods. The hue is the FAMILY (baseline, DA, INV, T-as-IV,
+# intersection); a real Z on top of a family keeps the hue and changes the line
+# style (REAL_Z_METHODS below), so PI and PI+IV are one blue, DA+PI and
+# DA+PI+IV(Z) one red, PI+INV and PI+INV+IV one grey. DA+PI+IV and DA+PI+IV(T)
+# are the same family whether or not Z is empty, one green, one line, one label.
 COLOR_MAP: dict[str, int] = {
     "ATE": 3,
     "ERM": 0,
@@ -119,8 +123,8 @@ COLOR_MAP: dict[str, int] = {
     "DA+IV": 2,
     "PI+INV": 7,
     "PI": 0,
-    "PI+IV": 1,
-    "PI+INV+IV": 5,
+    "PI+IV": 0,
+    "PI+INV+IV": 7,
     "DA+PI": 3,
     "DA+PI+IV": 2,
     "PI&DA+PI": 4,
@@ -158,19 +162,29 @@ TEX_MAPPER.update(
         "DA+PI+IV(Z)": rf"$\widetilde{{{PI}}}+{IV}$",
         "PI&DA+PI+IV(Z)": rf"${PI}\cap(\widetilde{{{PI}}}+{IV})$",
         "DA+IV(Z)": rf"$\widetilde{{{IV}}}_{{Z}}$",
-        "DA+PI+IV(T)": rf"$\widetilde{{{PI}}}+\widetilde{{{IV}}}_{{T}}$",
-        "PI&DA+PI+IV(T)": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}}_{{T}})$",
-        "DA+IV(T)": rf"$\widetilde{{{IV}}}_{{T}}$",
     }
 )
+# the (Z) spellings are the DA family plus a real Z: DA+PI's hue and alpha, told
+# apart by the line style; the (T) spellings ARE the base (Z-tilde with an empty
+# Z), same label, same hue, same line
+for _z, _family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI")):
+    COLOR_MAP[_z], ALPHA_MAP[_z] = COLOR_MAP[_family], ALPHA_MAP[_family]
+for _base in IV_MODE_METHODS:
+    TEX_MAPPER[f"{_base}(T)"] = TEX_MAPPER[_base]
+# a real Z on top of a family: the family's hue, this line style
+REAL_Z_METHODS: frozenset[str] = frozenset({"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)", "DA+IV(Z)"})
+# the coefficient labels of the cigarette price elasticities, paper notation
+# h_*(x) = theta_*' x on the four log treatments
+COEFFICIENT_LABELS: dict[str, str] = {
+    "p": r"$\theta_{\mathrm{state\,price}}$",
+    "pn": r"$\theta_{\mathrm{neighbour\,price}}$",
+}
 
 # Visual style configuration
 POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV", "DA+IV(Z)", "DA+IV(T)", "DA+IV(T,Z)", "IV"]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
-# the (Z) siblings on the sweep lines: same hue, this dash-dot pattern
+# REAL_Z_METHODS on the lines and band edges: the family's hue, this dash-dot pattern
 INSTRUMENT_Z_STYLE: tuple[int, tuple[int, int, int, int]] = (0, (3, 1, 1, 1))
-# the (T) siblings: same hue, dotted
-INSTRUMENT_T_STYLE: tuple[int, tuple[int, int]] = (0, (1, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 
 # Plotting defaults

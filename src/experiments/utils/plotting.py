@@ -21,7 +21,6 @@ from .constants import (
     DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
-    INSTRUMENT_T_STYLE,
     INSTRUMENT_Z_STYLE,
     NORMALIZE_BASELINES,
     NORMALIZED_SWEEP_SUFFIXES,
@@ -34,10 +33,11 @@ from .constants import (
     POINT_ESTIMATE_STYLE,
     POINT_ESTIMATES,
     RC_PARAMS,
+    REAL_Z_METHODS,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
-    iv_mode,
+    spelled_method,
 )
 from .data_operations import bootstrap, save
 
@@ -45,6 +45,8 @@ PlotScale = Literal["linear", "log", "symlog", "asinh"]
 # margin beyond the outermost mark on a query figure that carries marks, as a
 # fraction of the framed span, so no mark lies on the frame
 X_MARK_MARGIN: float = 0.02
+# the band edges of the query figures, in the method's line style
+BAND_EDGE_WIDTH: float = 1.2
 
 # clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
 # large is the runaway. A symmetric floor crops the TIGHTEST method, which is the
@@ -319,16 +321,70 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
 
 
 def _line_style(method_name: str):
-    """Point estimates dashed, a (Z) sibling dash-dotted and a (T) sibling dotted
-    in the base's hue, everything else solid."""
+    """Point estimates dashed, a family with a real Z on top (REAL_Z_METHODS)
+    dash-dotted in the family's hue, everything else solid; a (T) or (T,Z)
+    spelling draws as its base."""
     if method_name in POINT_ESTIMATES:
         return POINT_ESTIMATE_STYLE
-    mode = iv_mode(method_name)
-    if mode == "Z":
+    if spelled_method(method_name) in REAL_Z_METHODS:
         return INSTRUMENT_Z_STYLE
-    if mode == "T":
-        return INSTRUMENT_T_STYLE
     return PARTIAL_IDENTIFICATION_STYLE
+
+
+def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray]):
+    """One band per interval method on `ax` (the fill at its alpha, both edges
+    in its line style, the family's hue) and one line per point estimate.
+    Returns {method: legend handle} in drawing order and the nan-aware (min,
+    max) of what was drawn; an interval-against-a-budget figure carries NaN
+    cells where a solve was INFEASIBLE."""
+    colors = sns.color_palette()
+    handles, lo, hi = {}, float("inf"), float("-inf")
+    for method_name, predictions in y_results.items():
+        color = colors[COLOR_MAP[method_name]]
+        label = TEX_MAPPER.get(method_name, method_name)
+        if "PI" in method_name:
+            lower = predictions[:, :, 0].mean(axis=1)
+            upper = predictions[:, :, 1].mean(axis=1)
+            style = _line_style(method_name)
+            patch = ax.fill_between(
+                x_values, lower, upper, color=color, alpha=ALPHA_MAP.get(method_name, 0.2), linewidth=0
+            )
+            edge = ax.plot(x_values, lower, color=color, linestyle=style, linewidth=BAND_EDGE_WIDTH, label=label)[0]
+            ax.plot(x_values, upper, color=color, linestyle=style, linewidth=BAND_EDGE_WIDTH)
+            handles[method_name] = (patch, edge)
+        else:
+            lower = upper = predictions.mean(axis=1)
+            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
+            handles[method_name] = ax.plot(
+                x_values,
+                lower,
+                color="black" if method_name == "ATE" else color,
+                label=label,
+                linestyle=linestyle,
+                linewidth=2,
+                solid_capstyle="round",
+            )[0]
+        lo, hi = min(lo, float(np.nanmin(lower))), max(hi, float(np.nanmax(upper)))
+    return handles, lo, hi
+
+
+def _mark_frame(x_values: NDArray, vlines, xscale: str) -> tuple[float, float, list[float]]:
+    """(x_lo, x_hi, marks): the grid, widened to cover every finite mark with a
+    small margin, so a mark beyond the solved grid (F1's feasibility floor, its
+    3x benchmark) sits inside the frame over empty axis. The margin is a fraction
+    of the span, in decades on a log axis, where a linear margin below a small
+    left edge goes negative and the axis drops the frame."""
+    marks = [float(x) for x in vlines if np.isfinite(x)]
+    x_lo, x_hi = float(np.min(x_values)), float(np.max(x_values))
+    if marks:
+        x_lo, x_hi = min(x_lo, min(marks)), max(x_hi, max(marks))
+        if xscale == "log":
+            factor = (x_hi / x_lo) ** X_MARK_MARGIN
+            x_lo, x_hi = x_lo / factor, x_hi * factor
+        else:
+            margin = X_MARK_MARGIN * (x_hi - x_lo)
+            x_lo, x_hi = x_lo - margin, x_hi + margin
+    return x_lo, x_hi, marks
 
 
 def _nearest_finite(values: NDArray) -> NDArray:
@@ -677,74 +733,16 @@ def create_query_sweep_plot(
     # Setup plot
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
-    colors = sns.color_palette()
     fig = plt.figure()
 
-    # Track bounds
-    max_mean = float("-inf")
-    min_mean = float("inf")
-    all_labels = []
-    plot_handles = []
-
-    # Plot each method
-    for method_name, predictions in y_results.items():
-        # Handle interval estimates (PI methods) vs point estimates
-        if "PI" in method_name:
-            lower_bound = predictions[:, :, 0].mean(axis=1)
-            upper_bound = predictions[:, :, 1].mean(axis=1)
-            mean_pred = None
-        else:
-            mean_pred = predictions.mean(axis=1)
-            lower_bound = upper_bound = mean_pred
-
-        label = TEX_MAPPER.get(method_name, method_name)
-        all_labels.append(label)
-        if method_name in legend_items:
-            legend_items[legend_items.index(method_name)] = label
-
-        # Update bounds. nan-aware: an interval-against-a-budget figure carries
-        # a gap where a solve was INFEASIBLE, and a NaN limit would raise
-        max_mean = max(max_mean, float(np.nanmax(upper_bound)))
-        min_mean = min(min_mean, float(np.nanmin(lower_bound)))
-
-        color = colors[COLOR_MAP[method_name]]
-
-        # Plot based on method type
-        if "PI" in method_name:
-            alpha = ALPHA_MAP.get(method_name, 0.2)
-            handle = plt.fill_between(x_values, lower_bound, upper_bound, color=color, alpha=alpha)
-        else:
-            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
-            line_color = "black" if method_name == "ATE" else color
-            handle = plt.plot(
-                x_values,
-                mean_pred,
-                color=line_color,
-                label=label,
-                linestyle=linestyle,
-                linewidth=2,
-                solid_capstyle="round",
-            )[0]
-
-        plot_handles.append(handle)
+    drawn, min_mean, max_mean = _draw_bands(plt.gca(), x_values, y_results)
+    all_labels = [TEX_MAPPER.get(name, name) for name in drawn]
+    plot_handles = list(drawn.values())
+    legend_items = [TEX_MAPPER.get(item, item) for item in legend_items if item in drawn]
 
     # Formatting
     _apply_style(plt.gca(), style, xlabel, ylabel)
-    # the frame is the grid, as always; with marks it widens to cover every one
-    # of them, with a small margin, so a mark beyond the solved grid (F1's
-    # feasibility floor, its 3x benchmark) sits inside the frame over empty axis
-    marks = [x for x in vlines if np.isfinite(x)]
-    x_lo, x_hi = min(x_values), max(x_values)
-    if marks:
-        x_lo, x_hi = min(x_lo, min(marks)), max(x_hi, max(marks))
-        if xscale == "log":
-            # a linear margin below a small left edge goes negative and a log
-            # axis then drops the frame; widen by the same fraction in decades
-            factor = (x_hi / x_lo) ** X_MARK_MARGIN
-            x_lo, x_hi = x_lo / factor, x_hi * factor
-        else:
-            margin = X_MARK_MARGIN * (x_hi - x_lo)
-            x_lo, x_hi = x_lo - margin, x_hi + margin
+    x_lo, x_hi, marks = _mark_frame(x_values, vlines, xscale)
     plt.xlim([x_lo, x_hi])
 
     padding = 0.05 * max_mean

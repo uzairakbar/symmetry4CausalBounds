@@ -272,7 +272,11 @@ def leg_v():
     check("(v) PI+INV+IV tex composes PI, INV, IV", TEX_MAPPER.get("PI+INV+IV") == rf"${PI}+{INV}+{IV}$")
     check("(v) IV shares DA+IV's hue 2", COLOR_MAP.get("IV") == COLOR_MAP.get("DA+IV") == 2)
     hue = COLOR_MAP.get("PI+INV+IV")
-    check("(v) PI+INV+IV takes the unused hue 5", hue == 5 and list(COLOR_MAP.values()).count(5) == 1, repr(hue))
+    check(
+        "(v) PI+INV+IV shares PI+INV's hue, PI+IV shares PI's",
+        hue == COLOR_MAP["PI+INV"] and COLOR_MAP["PI+IV"] == COLOR_MAP["PI"],
+        repr(hue),
+    )
     check("(v) alphas: IV solid, PI+INV+IV as PI+INV", ALPHA_MAP.get("IV") == 1.0 and ALPHA_MAP.get("PI+INV+IV") == 0.8)
     point = "IV" in POINT_ESTIMATES and "PI+INV+IV" not in POINT_ESTIMATES
     check("(v) IV is a point estimate, PI+INV+IV is not", point)

@@ -11,7 +11,11 @@ columns the datasets in `DATASET_ORDER` that are present, x shared within a colu
 y shared across the grid on `CLAMP_YLIM`, one x-label, three y-labels without the
 "/ PI" suffix, one legend above the titles. A missing pkl leaves its cells blank.
 Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`)
-with a shared y axis, drawn only where some dataset ran the perf sweep.
+with a shared y axis, drawn only where some dataset ran the perf sweep. From the
+cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
+rows the state and neighbour price coefficients, columns the confounding budget
+and the leak radius, x shared within a column, y within a row, the reference marks
+of each panel, one legend inside the first panel.
 """
 
 import argparse
@@ -23,9 +27,10 @@ import numpy as np
 import seaborn as sns
 from loguru import logger
 
-from src.experiments.configs import ALL_METHODS, METRIC_SPECS, PARAM_SPECS
+from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
 from src.experiments.utils.constants import (
     CLAMP_YLIM,
+    COEFFICIENT_LABELS,
     DATASET_ORDER,
     DATASET_TITLES,
     FS_LABEL,
@@ -35,6 +40,7 @@ from src.experiments.utils.constants import (
     PLOT_FORMAT,
     RC_PARAMS,
     SUBDIR_PERF,
+    SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
     parse_method,
@@ -44,8 +50,10 @@ from src.experiments.utils.data_operations import bootstrap, load
 from src.experiments.utils.plotting import (
     X_MARGIN,
     _at_least_two_major_ticks,
+    _draw_bands,
     _draw_series,
     _label_major_ticks_only,
+    _mark_frame,
     _pad,
     normalize_sweep,
 )
@@ -59,6 +67,11 @@ LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column ti
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
 PERF_ROW_HEIGHT: float = 4.2  # room for the two-line wall-clock label
+# the elasticity grid: (coefficient id, row label) and (axis id, column stem)
+ELASTICITY_ROWS: tuple[tuple[str, str], ...] = (("p", COEFFICIENT_LABELS["p"]), ("pn", COEFFICIENT_LABELS["pn"]))
+ELASTICITY_AXES: tuple[str, ...] = ("gamma", "budget")
+ELASTICITY_LEGEND_PANEL: tuple[int, int] = (0, 0)
+ELASTICITY_Y_PAD: float = 0.05  # of the row's span
 
 
 # ------------------------------------------------------------------ discovery
@@ -85,6 +98,18 @@ def sweep_params(artifacts: str, datasets: list[str]) -> list[str]:
     if unknown:
         logger.warning(f"aggregate: sweep pkls {unknown} are not PARAM_SPECS params; skipped.")
     return sorted(stems & set(PARAM_SPECS))
+
+
+def _elasticity_stem(artifacts: str, coefficient: str, axis: str) -> str:
+    return f"{artifacts}/cigarettes/{SUBDIR_QUERY}/beta_{coefficient}_{axis}"
+
+
+def _has_elasticities(artifacts: str) -> bool:
+    return any(
+        os.path.exists(f"{_elasticity_stem(artifacts, c, a)}_outcomes.pkl")
+        for c, _ in ELASTICITY_ROWS
+        for a in ELASTICITY_AXES
+    )
 
 
 def _has_perf(artifacts: str, dataset: str, metric: str) -> bool:
@@ -263,6 +288,69 @@ def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None =
     return _finish(fig, axes, xlabel or pspec.xlabel, legend, path)
 
 
+def elasticity_grid(artifacts: str, out: str | None = None):
+    """The 2 x 2 grid of the cigarette price elasticities against gamma and r_Z;
+    saved under `out` when given. A missing pkl pair leaves its panel blank."""
+    plt.rcParams.update(RC_PARAMS)
+    sns.set_palette("deep")
+    fig, axes = plt.subplots(
+        len(ELASTICITY_ROWS),
+        len(ELASTICITY_AXES),
+        figsize=(PANEL_WIDTH * len(ELASTICITY_AXES), PANEL_WIDTH * len(ELASTICITY_ROWS)),
+        sharex="col",
+        sharey="row",
+        squeeze=False,
+    )
+    handles = {}
+    for r, (coefficient, _) in enumerate(ELASTICITY_ROWS):
+        lo, hi = float("inf"), float("-inf")
+        for c, axis in enumerate(ELASTICITY_AXES):
+            ax, stem = axes[r, c], _elasticity_stem(artifacts, coefficient, axis)
+            spec = ANNOTATE_SWEEP_PLOT[f"beta_{coefficient}_{axis}"]
+            if not (os.path.exists(f"{stem}_values.pkl") and os.path.exists(f"{stem}_outcomes.pkl")):
+                ax.axis("off")
+                continue
+            x = np.asarray(load(f"{stem}_values.pkl"), dtype=float)
+            drawn, panel_lo, panel_hi = _draw_bands(ax, x, load(f"{stem}_outcomes.pkl"))
+            for name, handle in drawn.items():
+                handles.setdefault(name, handle)
+            lo, hi = min(lo, panel_lo), max(hi, panel_hi)
+            marks = load(f"{stem}_vlines.pkl") if os.path.exists(f"{stem}_vlines.pkl") else ()
+            x_lo, x_hi, marks = _mark_frame(x, marks, spec["xscale"])
+            ax.set_xscale(spec["xscale"])
+            ax.set_xlim(x_lo, x_hi)
+            ax.tick_params(labelsize=FS_TICK)
+            for v in marks:
+                ax.axvline(v, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
+            if r == len(ELASTICITY_ROWS) - 1:
+                ax.set_xlabel(spec["xlabel"], fontsize=FS_LABEL)
+        if np.isfinite(lo) and np.isfinite(hi):
+            pad = ELASTICITY_Y_PAD * (hi - lo)
+            axes[r, 0].set_ylim(lo - pad, hi + pad)
+    _label_rows(axes, [label for _, label in ELASTICITY_ROWS])
+    legend_ax = axes[ELASTICITY_LEGEND_PANEL]
+    if handles and legend_ax.axison:
+        legend_ax.legend(
+            list(handles.values()),
+            [TEX_MAPPER.get(name, name) for name in handles],
+            loc="best",
+            fontsize=FS_TICK,
+            frameon=True,
+            edgecolor="black",
+            fancybox=False,
+        )
+    live = [ax for ax in axes.ravel() if ax.axison]
+    _label_major_ticks_only(*live)
+    _at_least_two_major_ticks(*live)
+    fig.tight_layout()
+    path = None if out is None else f"{out}/cigarettes_elasticities.{PLOT_FORMAT}"
+    if path is not None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fig.savefig(path, format=PLOT_FORMAT, dpi=PLOT_DPI)
+        logger.info(f"aggregate: wrote {path}")
+    return fig
+
+
 # ------------------------------------------------------------------ cli
 
 
@@ -275,7 +363,7 @@ def main(argv=None) -> None:
     out = os.path.abspath(args.out) if args.out else f"{artifacts}/aggregate"
 
     datasets = columns(artifacts)
-    if not datasets:
+    if not datasets and not _has_elasticities(artifacts):
         logger.warning(f"aggregate: nothing to draw under {artifacts}.")
         return
     for param in sweep_params(artifacts, datasets):
@@ -283,6 +371,8 @@ def main(argv=None) -> None:
     for metric in PERF_METRICS:
         if any(_has_perf(artifacts, d, metric) for d in datasets):
             plt.close(perf_row(metric, datasets, artifacts, out))
+    if _has_elasticities(artifacts):
+        plt.close(elasticity_grid(artifacts, out))
 
 
 if __name__ == "__main__":

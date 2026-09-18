@@ -105,6 +105,7 @@ from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import yaml
 from loguru import logger
 
@@ -420,9 +421,11 @@ def leg_i():
             TEX_MAPPER[tz] == TEX_MAPPER[base] and COLOR_MAP[tz] == COLOR_MAP[base] and ALPHA_MAP[tz] == ALPHA_MAP[base]
         )
         check(f"(i) {tz} copies {base}'s display entries", same)
+        # a real Z on the DA family: the family's hue (DA+PI's, PI&DA+PI's, DA+IV's own)
+        family = {"DA+PI+IV": "DA+PI", "PI&DA+PI+IV": "PI&DA+PI"}.get(base, base)
         check(
-            f"(i) {z} shares {base}'s hue and differs in TeX",
-            COLOR_MAP[z] == COLOR_MAP[base] and TEX_MAPPER[z] != TEX_MAPPER[base],
+            f"(i) {z} shares {family}'s hue and differs from {base} in TeX",
+            COLOR_MAP[z] == COLOR_MAP[family] and TEX_MAPPER[z] != TEX_MAPPER[base],
         )
     check("(i) DA+IV(Z) is a point estimate", "DA+IV(Z)" in POINT_ESTIMATES)
     order = ["PI&DA+PI+IV(Z)", "PI", "DA+PI+IV(T,Z)", "DA+PI+IV", "DA+IV(Z)", "ATE"]
@@ -603,8 +606,13 @@ def leg_iv():
             f"{sibling.get_linestyle()} {pattern}",
         )
         check("(iv) the base line is solid", base.get_linestyle() == "-", base.get_linestyle())
+        # the (Z) sibling is PI+IV on the DA'd data: DA+PI's hue, not DA+PI+IV's
+        palette = sns.color_palette()
         check(
-            "(iv) in the same hue", base.get_color() == sibling.get_color(), f"{base.get_color()} {sibling.get_color()}"
+            "(iv) the (Z) line in DA+PI's hue, the base in DA+PI+IV's",
+            tuple(sibling.get_color()) == tuple(palette[COLOR_MAP["DA+PI"]])
+            and tuple(base.get_color()) == tuple(palette[COLOR_MAP["DA+PI+IV"]]),
+            f"{base.get_color()} {sibling.get_color()}",
         )
     plt.close("all")
 
@@ -673,8 +681,8 @@ def leg_v():
     folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
     without = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
     check(
-        "(v) with DA+PI+IV(Z) removed F1's outcomes are still keyed HEADLINE_METHODS",
-        tuple(without) == HEADLINE_METHODS,
+        "(v) with DA+PI+IV(Z) removed F1's outcomes are keyed HEADLINE_METHODS less that entry",
+        tuple(without) == tuple(m for m in HEADLINE_METHODS if m != "DA+PI+IV(Z)"),
         f"{tuple(without)}",
     )
     if "DA+PI+IV" in without:
