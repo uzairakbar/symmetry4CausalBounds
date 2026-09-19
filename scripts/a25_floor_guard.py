@@ -13,11 +13,12 @@ import sys
 
 import cvxpy as cp
 import numpy as np
+import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R  # noqa: E402
+from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, resolve_dataset_block  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
@@ -29,6 +30,9 @@ from src.methods.sensitivity_models import (
     iv_constraint_terms,
 )
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# the trS figure's recipe, named ONCE: a68 leg (ix) fits the same fixture
+TRS_RECIPE = "sharpnessInformativenessFig10.yaml"
 METHODS = ["PI", "DA+PI", "PI+INV", "DA+PI+IV"]
 FAIL = []
 
@@ -120,6 +124,48 @@ def sim_runner(steps=12):
     )
 
 
+def trs_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides):
+    """A trS runner on the trS figure's own block, cut to gate scale.
+
+    The one definition of that fixture: a68 leg (ix) imports this rather than
+    keeping a second copy, so `TRS_RECIPE` is the only place the file name
+    appears. A rename must land as a named FAIL, never as a traceback out of a
+    gate that then looks merely broken.
+
+    `sim_runner` above is a hand-rolled orchestrator with no instrument, no
+    padding and no mean matching, and on it the T floor sits four orders of
+    magnitude under the budget at every knob, so leg 3 had nothing to rescue.
+    The recipe block does go infeasible over the low third of the grid, which is
+    the case the guard exists for.
+    """
+    path = os.path.join(REPO, "recipes", TRS_RECIPE)
+    if not os.path.exists(path):
+        available = sorted(f for f in os.listdir(os.path.join(REPO, "recipes")) if f.endswith(".yaml"))
+        raise FileNotFoundError(
+            f"recipes/{TRS_RECIPE} is gone; a25 leg 3 and a68 leg (ix) both fit their "
+            f"trS fixture on it. recipes/ carries {available}. Re-point TRS_RECIPE."
+        )
+    with open(path) as handle:
+        config = yaml.safe_load(handle)
+    defaults = config.pop("defaults", {}) or {}
+    if dataset not in config:
+        raise KeyError(f"recipes/{TRS_RECIPE} carries no `{dataset}:` block, only {sorted(config)}")
+    block = {**defaults, **config[dataset]}
+    block.pop("experiment", None)
+    block.update(n_experiments=1, n_samples=512, sweep_samples=steps, n_jobs=1, **overrides)
+    if methods is not None:
+        block["methods"] = list(methods)
+    block = resolve_dataset_block(dataset, block)
+    set_seed(block["seed"])
+    Orchestrator = SimulationOrchestrator if dataset == "simulation" else OpticalOrchestrator
+    orch = Orchestrator(**block, hyperparameters={})
+    return orch.get_sweep_runner_cls("trS")(
+        methods={k: v for k, v in orch.methods.items() if k != "ATE"},
+        method_factory=orch.build_methods,
+        **orch._get_clean_kwargs(),
+    )
+
+
 # ------------------------------------------------------- 1. closed form == solver
 
 
@@ -206,7 +252,11 @@ def a25_noop_when_feasible():
 
 
 def a25_rescues_infeasible():
-    runner = sim_runner()
+    try:
+        runner = trs_recipe_runner("simulation", methods=METHODS)
+    except (FileNotFoundError, KeyError) as error:  # a renamed recipe is a FAIL, not a traceback
+        check("A25 the trS fixture recipe is present", False, str(error))
+        return
     rescued = nan_steps = 0
     for index, knob in enumerate(runner.get_param_range()):
         data = SweepData.coerce(runner.generate_data(0, index and knob or knob))
@@ -221,11 +271,23 @@ def a25_rescues_infeasible():
             rho=runner.fit_rho(0, data),
             recalibrate=runner.recalibrate,
         )
-        oracle_iv = float(getattr(runner.get_oracle(0), "eps_iv_star", 0.0)) + EPS_TOL
+        # the UNGUARDED budget for THIS step. `_floor_guard` is a no-op without
+        # data, so this is the same pipeline minus the guard -- the setup-time
+        # oracle is the wrong reference now that the trS sweep refits the T
+        # budget per step, and branching on it would count a step as infeasible
+        # that the refit already solved
+        oracle_iv = float(runner.fit_epsilon_iv(0, index))
         guarded = runner.fit_epsilon_iv(0, index, data)
 
         if oracle_iv**2 < floor:
             nan_steps += 1
+            # the rescue is the GUARD's, not the refit's: the guarded budget has
+            # to be sqrt(FLOOR_GUARD_R * floor), which nothing else produces
+            check(
+                f"A25 knob {knob:.4g} was raised by the guard",
+                abs(guarded - np.sqrt(FLOOR_GUARD_R * floor)) < 1e-12 and guarded > oracle_iv,
+                f"{guarded:.6f} vs {np.sqrt(FLOOR_GUARD_R * floor):.6f}",
+            )
             models = runner.build_models(0, index, data)
             record = evaluate_queries(
                 data.estimand,

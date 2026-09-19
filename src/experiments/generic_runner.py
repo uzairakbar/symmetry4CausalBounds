@@ -26,6 +26,7 @@ from src.experiments.utils.model_fitting import instrument_columns
 from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
+    eps_iv_star,
     epsilon_star,
     pool_oracles,
     preserve_rng,
@@ -555,6 +556,7 @@ class ExpansionStrategy(GenericParamSweep):
         self._measured = {}
         self._factors = {}  # (experiment, knob) -> (rho, tr(S)/k)
         self._step_epsilon = {}
+        self._step_epsilon_iv = {}
         super().__init__(**kwargs)
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
@@ -583,16 +585,35 @@ class ExpansionStrategy(GenericParamSweep):
         # does NOT persist on the DA, so omitting them would silently measure
         # eps* at scale=1.0 for every step.
         X_raw = self._base_data(experiment_index)[0]
+        augment_kwargs = self.augment_kwargs_fn(param)
         self._step_epsilon[experiment_index] = (
             epsilon_star(
                 self.sems[experiment_index],
                 self.das[experiment_index],
                 X=X_raw,
                 features=self._features,
-                **self.augment_kwargs_fn(param),
+                **augment_kwargs,
             )
             + EPS_TOL
         )
+        # The T-as-IV budget is driven by the same knob, so a setup-time
+        # eps_iv* is stale for the same reason. Same X and same augment kwargs
+        # as the eps* call above, and `_invariance_signal` draws the
+        # augmentation under `preserve_rng`, so both budgets read the SAME draw
+        # -- that is a property of the helper, not luck. RAW here: `ratio` and
+        # EPS_TOL are applied in `fit_epsilon_iv`, as the base does.
+        self._step_epsilon_iv[experiment_index] = eps_iv_star(
+            self.sems[experiment_index],
+            self.das[experiment_index],
+            X=X_raw,
+            features=self._features,
+            mean_match=self.mean_match,
+            **augment_kwargs,
+        )[0]
+        # On a recorded SEM the setup oracle pools ORACLE_POOL_DRAWS seeded
+        # draws while this is a single one, so both per-step budgets carry
+        # sampling noise the setup numbers do not. `_step_epsilon` has always
+        # had that asymmetry; the two caches stay consistent with each other.
 
         return data
 
@@ -603,6 +624,26 @@ class ExpansionStrategy(GenericParamSweep):
         # the knob drives eps*, but it can still land under the floor -- guard it
         # exactly as the base does, or this sweep alone bypasses the guard
         return self._floor_guard(per_step, data, "inv", experiment_index, "epsilon")
+
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
+        """The per-step T budget, shaped exactly like `base.fit_epsilon_iv`:
+        `ratio * raw + EPS_TOL` (the cache holds the raw oracle piece, so the
+        tolerance is never scaled), through the floor guard on the DECLARED
+        path too. Without this the knob would move eps* and leave r_T frozen at
+        the setup-time value."""
+        per_step = self._step_epsilon_iv.get(experiment_index)
+        if per_step is None:
+            return super().fit_epsilon_iv(experiment_index, step_index, data, ratio)
+        if not np.isfinite(per_step):
+            return None
+        return self._floor_guard(
+            float(ratio) * float(per_step) + EPS_TOL,
+            data,
+            "iv",
+            experiment_index,
+            "epsilon_iv",
+            declared=self.declared_iv,
+        )
 
     @property
     def xlabel(self) -> str:

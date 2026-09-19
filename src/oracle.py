@@ -368,6 +368,7 @@ def eps_iv_star(
     features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
     mean_match: bool = False,
+    **augment_kwargs,
 ) -> tuple:
     """
     The T-as-IV budget: || E-hat[W# | T] || / sqrt(N).
@@ -387,8 +388,12 @@ def eps_iv_star(
     Returns:
         (eps_iv_star, eps_rms, eta) -- eps_rms = RMS(W#) and eta =
         eps_iv_star / eps_rms are free byproducts, logged for the record.
+
+    `augment_kwargs` go straight to the DA call, exactly as `epsilon_star`
+    forwards them: a sweep whose knob IS the DA strength has to measure this
+    budget at the step's augmentation, not at the DA's default.
     """
-    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples)
+    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
 
     # W#: what the augmented design cannot explain. The -f(Phi(GX)) term is
     # exactly linear in Phi(GX), so OLS absorbs it and this is the part of

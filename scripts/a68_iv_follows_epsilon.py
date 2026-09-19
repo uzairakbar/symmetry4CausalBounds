@@ -27,6 +27,15 @@ both halves of the robustness axis are on the figure. Legs:
         same grid point, against RECORDED integers so a family that empties at a
         NEW point fails even when the ordering still holds.
   (viii) ruff and ASCII on the touched files.
+  (ix)  the trS sweep refits the T budget per step, not only the epsilon sweep.
+        On OPTICAL, the one trS dataset whose h_* is not exactly invariant: the
+        returned budget moves across knobs, is not the frozen setup one, and is
+        `ratio * raw + EPS_TOL` with the tolerance unscaled. Then on simulation,
+        which carries an observed instrument: r_Z does not follow the knob, and
+        the recorded fact that bounds the fix -- eps_iv* is 0 to machine
+        precision at every knob there, so that panel cannot move. Catches:
+        `ExpansionStrategy.fit_epsilon_iv` missing, so the budget falls back to
+        the setup-time oracle.
 
     MPLBACKEND=Agg python scripts/a68_iv_follows_epsilon.py [--only LEG]
 """
@@ -44,6 +53,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
+import a25_floor_guard as a25  # noqa: E402
 import a59_sim_iv as a59  # noqa: E402
 import a60_cigarettes_iv as a60  # noqa: E402
 import a64_perf_aggregate as a64  # noqa: E402
@@ -59,11 +69,13 @@ from src.experiments.configs import (  # noqa: E402
     PARAM_SPECS,
     resolve_dataset_block,
 )
+from src.experiments.generic_runner import ExpansionStrategy  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import IV_MODE_METHODS, REAL_Z_METHODS  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
+from src.oracle import eps_iv_star  # noqa: E402
 
 # the recorded infeasible-query counts per (method, grid point). Measured on this
 # tree at the fixtures leg (vii) names; a family that empties at a NEW point fails
@@ -391,6 +403,118 @@ def leg_viii():
     check("(viii) the added lines are ASCII, no em dash", not bad, str(bad[:2]))
 
 
+def leg_ix():
+    print("(ix) the trS sweep refits the T budget per step")
+
+    def budgets(dataset):
+        runner = a25.trs_recipe_runner(dataset, steps=4)
+        raw, budget, z_budget, eps, expect = [], [], [], [], []
+        for index, knob in enumerate(runner.get_param_range()):
+            data = runner.generate_data(0, knob)
+            raw.append(float(runner._step_epsilon_iv[0]))
+            eps.append(float(runner._step_epsilon[0]) - EPS_TOL)
+            # no data: `_floor_guard` is a no-op, so this is the budget itself
+            budget.append(float(runner.fit_epsilon_iv(0, index)))
+            z_budget.append(float(runner.fit_epsilon_iv_z(0, data)))
+            # the budget restated from the runner's own state, independent of
+            # what `generate_data` chose to pass. `preserve_rng` makes the draw
+            # reproducible, so this is an equality and not a tolerance
+            expect.append(
+                float(
+                    eps_iv_star(
+                        runner.sems[0],
+                        runner.das[0],
+                        X=runner._base_data(0)[0],
+                        features=runner._features,
+                        mean_match=runner.mean_match,
+                        **runner.augment_kwargs_fn(knob),
+                    )[0]
+                )
+            )
+        check(
+            f"(ix) {dataset}: the cache is eps_iv* at the step's X, kwargs and mean_match",
+            all(r == e for r, e in zip(raw, expect, strict=True)),
+            f"{np.round(raw, 8).tolist()} vs {np.round(expect, 8).tolist()}",
+        )
+        # ||E[W#|T]|| <= ||W#|| <= ||W|| = eps*, and only if both budgets read the
+        # same draw of the same X -- which is the whole point of the shared local
+        check(
+            f"(ix) {dataset}: 0 <= eps_iv* <= eps* at every knob",
+            all(0.0 <= r <= e for r, e in zip(raw, eps, strict=True)),
+            f"{np.round(raw, 8).tolist()} vs {np.round(eps, 8).tolist()}",
+        )
+        return runner, raw, budget, z_budget, eps
+
+    runner, raw, budget, z_budget, eps = budgets("optical_device")
+    frozen = float(runner.get_oracle(0).eps_iv_star)
+    print(f"      RECORDED optical frozen eps_iv* {frozen:.6g}, per-step {np.round(raw, 6).tolist()}")
+    check("(ix) the trS runner IS an ExpansionStrategy", isinstance(runner, ExpansionStrategy))
+
+    # MOVES: EPS_TOL (2^-5) is far bigger than the optical budget itself, so the
+    # threshold is absolute and well clear of solver noise, which is ~1e-12 here
+    spread = float(np.max(budget) - np.min(budget))
+    check(f"(ix) the refit budget moves across knobs (spread {spread:.4g}, frozen {frozen:.4g})", spread > 1e-3)
+    moved = float(np.max(np.abs(np.asarray(budget) - (frozen + EPS_TOL))))
+    check(f"(ix) and it is not the frozen setup budget (max gap {moved:.4g})", moved > 1e-3)
+    check(
+        "(ix) each step is its own raw budget + EPS_TOL, the tolerance unscaled",
+        all(b == r + EPS_TOL for b, r in zip(budget, raw, strict=True)),
+        f"{np.round(budget, 6).tolist()}",
+    )
+    ratio = 0.5
+    # only the LAST step's cache survives the loop, so compare against it
+    scaled = float(runner.fit_epsilon_iv(0, len(raw) - 1, ratio=ratio))
+    check(
+        "(ix) ratio scales the budget and not the tolerance",
+        scaled == ratio * raw[-1] + EPS_TOL,
+        f"{scaled!r} vs {ratio * raw[-1] + EPS_TOL!r}",
+    )
+    # edit (a): `eps_iv_star` must FORWARD its augment kwargs. No fixture in the
+    # repo makes that observable -- optical's DA persists `p` and `eps_iv*` is 0
+    # on the other two -- so it is pinned at the call itself, with a DA that
+    # records what it was handed
+    seen = {}
+
+    def recording_da(X, **kwargs):
+        seen.update(kwargs)
+        return X + 1.0, np.ones((len(X), 1))
+
+    class _StubSEM:
+        def f(self, X):
+            return np.asarray(X).sum(axis=1, keepdims=True)
+
+    eps_iv_star(_StubSEM(), recording_da, X=np.eye(8), mean_match=False, scale=0.25)
+    check("(ix) eps_iv_star forwards its augment kwargs to the DA", seen == {"scale": 0.25}, f"{seen}")
+
+    resolved = type(runner).fit_epsilon_iv
+    source = inspect.getsource(resolved)
+    check(
+        "(ix) the override is the one in force, and it guards on the declared path",
+        resolved is ExpansionStrategy.fit_epsilon_iv and "declared=self.declared_iv" in source,
+        f"{resolved.__qualname__}",
+    )
+
+    # RECORDED, because it bounds what this fix can do: on the simulation SEM
+    # h_* is exactly invariant under `translate`, so eps_iv* is 0 to machine
+    # precision at EVERY knob and the T budget is pure EPS_TOL before and after
+    # the refit. The sim and cigarettes trS panels therefore do NOT move; only
+    # optical does. Whatever bends those two panels, it is not a frozen budget.
+    _, sim_raw, sim_budget, sim_z, _ = budgets("simulation")
+    print(f"      RECORDED simulation per-step eps_iv* {sim_raw}")
+    check(
+        "(ix) on simulation h_* is exactly invariant, so the T budget is EPS_TOL at every knob",
+        float(np.max(np.abs(sim_raw))) < 1e-9 and max(abs(b - EPS_TOL) for b in sim_budget) < 1e-12,
+        f"{sim_budget}",
+    )
+    # simulation is the one of the two that carries an observed instrument, so
+    # the decoupling is testable here and vacuous on optical (r_Z is 0 there)
+    check(
+        "(ix) the observed instrument's radius is non-zero and untouched by the knob",
+        min(sim_z) > 0.0 and max(sim_z) - min(sim_z) == 0.0,
+        f"{np.round(sim_z, 8).tolist()}",
+    )
+
+
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -408,6 +532,7 @@ if __name__ == "__main__":
         ("vi", leg_vi),
         ("vii", leg_vii),
         ("viii", leg_viii),
+        ("ix", leg_ix),
     ]
     if args.only:
         legs = [(tag, leg) for tag, leg in legs if tag.lower() == args.only.lower()]
