@@ -70,6 +70,7 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import PanelBuilder, set_seed  # noqa: E402
+from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
@@ -95,7 +96,7 @@ GAMMA_Z = 2**-8
 TOGGLES = dict(clipy=False, mean_match=True, n_jobs=1, recalibrate=True)
 SPELLINGS = ("PI+IV", "PI+INV+IV", "DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "PI&DA+PI+IV")
 # RECORDED on this tree at the adopted leak budget (gamma_z 0.0177), the query
-# panel of recipes/neighbour-price_fig12.yaml at n_experiments 1, sweep_samples 8
+# panel of recipes/cigarettesFig7.yaml at n_experiments 1, sweep_samples 8
 QUERY_ROWS = {
     "PI+IV": (0.108698, 1.652794),
     "DA+PI+IV(Z)": (0.163583, 1.655723),
@@ -112,6 +113,25 @@ def check(name, ok, detail=""):
 
 
 # ------------------------------------------------------------------ fixture
+
+
+def fold_default_mode(name):
+    """`DA+PI+IV(T,Z)` and the bare `DA+PI+IV` are the SAME estimator, spelled two
+    ways; the recipes spell it out and the recorded rows key on the bare name
+    (`src/experiments/cigarettes.py` folds it the same way before the headline
+    lookup). Fold before keying on a method name, never respell the recipe."""
+    return parse_method(name)[0] if iv_mode(name) == "T,Z" else name
+
+
+def fold_keys(mapping):
+    """`mapping` re-keyed through `fold_default_mode`, loud on a collision."""
+    folded = {}
+    for name, value in mapping.items():
+        key = fold_default_mode(name)
+        if key in folded:
+            check(f"fold_keys: {name!r} and another spelling both fold onto {key!r}", False, f"{sorted(mapping)}")
+        folded[key] = value
+    return folded
 
 
 def fixture(seed=42):
@@ -335,25 +355,41 @@ def leg_iv():
     query = a60.query_runner(orch)
     panel = PanelBuilder(query, "cigarettes", False)
     panel._fit_all_models()
-    models = panel.fitted_models
+    # which methods run is the recipe's, and it spells the default `DA+PI+IV(T,Z)`
+    # while the rows below key on the bare name: fold, then take the recorded rows
+    # the block actually lists, asserted non-empty so the loop cannot go vacuous
+    models = fold_keys(panel.fitted_models)
+    listed = {fold_default_mode(name) for name in block["methods"]}
+    rows = {name: want for name, want in QUERY_ROWS.items() if name in listed}
+    check(
+        f"(iv) the block lists at least one of the recorded rows {list(QUERY_ROWS)}",
+        bool(rows),
+        f"{block['methods']}",
+    )
+    missing = [name for name in rows if name not in models]
+    check("(iv) every recorded row the block lists was fitted", not missing, f"missing {missing}")
     # the panel is sigma-normalised; the reported figures are in RAW log units
     scale = query.sem.design.sigma
     queries = np.eye(query.X.shape[1])
-    for name, want in QUERY_ROWS.items():
-        model = models[name]
-        got = scale * np.asarray(model.predict(queries, gamma=GAMMA), dtype=float)[2]
+    for name, want in rows.items():
+        if name not in models:
+            continue
+        got = scale * np.asarray(models[name].predict(queries, gamma=GAMMA), dtype=float)[2]
         gap = float(np.abs(got - np.asarray(want)).max())
         check(
             f"(iv) {name} neighbour price [{want[0]:.3f}, {want[1]:.3f}] to 1e-3",
             gap < QUERY_TOL,
             f"got [{got[0]:.6f}, {got[1]:.6f}], gap {gap:.2e}",
         )
-    da = models["DA+PI+IV"]
-    check(
-        "(iv) DA+PI+IV carries two radii and the allowance",
-        da._has_t and da._has_z and da._z_allowance > 0.0,
-        f"r_T {da.t_bound:.6f}, r_Z {da.z_bound:.6f}, allowance {da._z_allowance:.6f}",
-    )
+    if "DA+PI+IV" in models:
+        da = models["DA+PI+IV"]
+        check(
+            "(iv) DA+PI+IV carries two radii and the allowance",
+            da._has_t and da._has_z and da._z_allowance > 0.0,
+            f"r_T {da.t_bound:.6f}, r_Z {da.z_bound:.6f}, allowance {da._z_allowance:.6f}",
+        )
+    else:
+        print("      report: the block draws no DA default; its two-radii check does not apply")
 
 
 def leg_v(seed):

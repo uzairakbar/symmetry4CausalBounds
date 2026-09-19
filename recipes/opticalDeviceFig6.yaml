@@ -1,10 +1,11 @@
+# global toggles, overridable per experiment
 defaults:
-    calibrate: false
+    recalibrate: true
     pad: true
     clipy: false
     mean_match: false
     n_jobs: -1
-
+    normalize: true
 optical_device:
     seed: 42
     n_samples: 1_000
@@ -14,11 +15,11 @@ optical_device:
         - ATE
         - ERM
         - DA+ERM
-        - DA+IV
+        - DA+IV(T)
         - PI+INV
         - PI
         - DA+PI
-        - DA+PI+IV
+        - DA+PI+IV(T)
     augmentation: rotation > hflip > vflip > random-permutation
     experiment:
         query: true

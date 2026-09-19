@@ -77,7 +77,8 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         step is OK, the OK counts of `PI+IV`, `DA+PI+IV` and `DA+PI+IV(Z)` are
         RECORDED (the `(Z)` variant runs at `PI+IV`'s bound and is INFEASIBLE
         under the same floor), T1 carries the `(Z)` row under its TeX label and
-        F1's outcomes are keyed exactly `HEADLINE_METHODS`; the same block with
+        F1's outcomes are keyed exactly the headline methods THE RECIPE LISTS,
+        asserted non-empty; the same block with
         `DA+PI+IV` respelled `DA+PI+IV(T,Z)` keeps F1's keys and its DA band to
         1e-9, and the same block with `DA+PI+IV(Z)` removed keeps F1's DA band to
         1e-9 as well (the `(Z)` entry, listed after the default, must not reach
@@ -141,6 +142,7 @@ from src.experiments.utils.constants import (  # noqa: E402
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
+    iv_mode,
     parse_method,
     plot_keys_for,
     spelled_method,
@@ -245,8 +247,74 @@ def rejection(name, **extra):
     return None
 
 
+def fold_default_mode(name):
+    """`DA+PI+IV(T,Z)` and the bare `DA+PI+IV` are the SAME estimator, spelled two
+    ways; the recipes spell it out and the headline figures key on the bare name
+    (`src/experiments/cigarettes.py` folds it the same way before the lookup). Fold
+    before keying on a method name, never respell the recipe."""
+    return parse_method(name)[0] if iv_mode(name) == "T,Z" else name
+
+
+def fold_keys(mapping):
+    """`mapping` re-keyed through `fold_default_mode`.
+
+    A block listing BOTH `DA+PI+IV` and `DA+PI+IV(T,Z)` folds them onto one key, so
+    one of the two would vanish without a word. Production has the same collision
+    (`src/experiments/cigarettes.py`), so this is a pre-existing hole the fold
+    inherits rather than a new one -- but silent is what makes it a hole, and `a63`'s
+    duplicate check is on the RAW list and cannot see it. Say so instead."""
+    folded = {}
+    for name, value in mapping.items():
+        key = fold_default_mode(name)
+        if key in folded:
+            check(f"fold_keys: {name!r} and another spelling both fold onto {key!r}", False, f"{sorted(mapping)}")
+        folded[key] = value
+    return folded
+
+
+# (wider, narrower) in FOLDED spelling: the narrower solves the SAME ball with one
+# more constraint, so its interval sits inside the wider one's. The recipe decides
+# which of these are present; the gate asserts whichever pairs it lists, and asserts
+# it listed at least one, which is what stops the derivation going vacuous.
+NESTED_PAIRS = (
+    ("DA+PI", "DA+PI+IV(Z)"),
+    ("DA+PI", "DA+PI+IV(T)"),
+    ("DA+PI", "DA+PI+IV"),
+    ("DA+PI+IV(Z)", "DA+PI+IV"),
+    ("DA+PI+IV(T)", "DA+PI+IV"),
+)
+
+
+def nested_pairs(available, label):
+    """The `NESTED_PAIRS` both of whose members are present.
+
+    Reports rather than FAILS when none is drawable: a block listing `DA+PI+IV(Z)`
+    alone, with no DA default and no `DA+PI`, is a legal configuration with nothing
+    to nest. Leg (v) asserts at the end that it nested something on at least one of
+    its two datasets, which is what stops the per-dataset skip going vacuous."""
+    kept = tuple(pair for pair in NESTED_PAIRS if pair[0] in available and pair[1] in available)
+    if not kept:
+        print(f"      report: {label} draws no nested DA pair; {sorted(available)}")
+    return kept
+
+
+def headline_listed(methods):
+    """The headline methods a block lists, in `HEADLINE_METHODS` order. The figures
+    draw the INTERSECTION (`src/experiments/cigarettes.py`), so the gate derives its
+    expectation the same way instead of pinning the full five."""
+    have = {fold_default_mode(name) for name in methods}
+    return tuple(name for name in HEADLINE_METHODS if name in have)
+
+
+def expected(methods, label):
+    """`headline_listed`, asserted non-empty."""
+    want = headline_listed(methods)
+    check(f"{label}: the block lists at least one headline method", bool(want), f"{list(methods)}")
+    return want
+
+
 def recipe(name, fname=None):
-    fname = fname or {"cigarettes": "neighbour-price_fig12", "simulation": "iv_fig13"}[name]
+    fname = fname or {"cigarettes": "cigarettesFig7", "simulation": "validityFig9"}[name]
     with open(os.path.join(REPO, "recipes", f"{fname}.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
@@ -254,12 +322,11 @@ def recipe(name, fname=None):
 
 
 def sweep_metrics(name):
-    """The sweep metrics of whichever recipe OWNS the sweeps for this dataset: the
-    cigarette experiment is split by type, so its sweeps live in the plasmode
-    recipe while the restricted-2sls one this gate fixtures on reports the query
-    figures alone."""
-    fname = {"cigarettes": "cigarettes-plasmode_fig12b", "simulation": "iv_fig13"}[name]
-    return recipe(name, fname)["experiment"]["sweep"]["metric"]
+    """The sweep metrics of the recipe that OWNS the gamma sweep this gate drives.
+    The recipes are split by experiment type, so the cigarette sweeps live in the
+    plasmode block of `validityFig9` while the restricted-2sls recipe this gate
+    fixtures the query path on reports the query figures alone."""
+    return recipe(name, "validityFig9")["experiment"]["sweep"]["metric"]
 
 
 def reduced_block(name, **overrides):
@@ -655,103 +722,171 @@ def leg_iv():
 
 def leg_v():
     print("(v) both recipes resolve and run")
+    # this leg is ABOUT the `(Z)` variant, so a block that lists none has nothing
+    # here to check. The recipe is the owner's to change, so the leg follows it per
+    # dataset and asserts at the end that it exercised `(Z)` on at least one of them
+    carries_z, carries_pair = {}, {}
     for name in ("cigarettes", "simulation"):
         methods = reduced_block(name)["methods"]
-        check(
-            f"(v) the {name} recipe lists DA+PI+IV and DA+PI+IV(Z) with no stored duplicate",
-            "DA+PI+IV" in methods and "DA+PI+IV(Z)" in methods and len(set(methods)) == len(methods),
-            f"{methods}",
-        )
+        folded = [fold_default_mode(m) for m in methods]
+        carries_z[name] = "DA+PI+IV(Z)" in folded
+        carries_pair[name] = carries_z[name] and "DA+PI+IV" in folded
+        check(f"(v) the {name} recipe stores no duplicate method", len(set(methods)) == len(methods), f"{methods}")
+        if not carries_z[name]:
+            print(f"      report: the {name} block lists no DA+PI+IV(Z); the (Z) checks do not apply to it")
+        elif not carries_pair[name]:
+            # which methods a block lists is the owner's, so a block carrying `(Z)`
+            # WITHOUT the default is a legal configuration with nothing to pair; the
+            # leg-level anchor below is what stops that going vacuous
+            print(f"      report: the {name} block lists DA+PI+IV(Z) but no DA default; nothing to pair there")
+    check(
+        "(v) at least one block carries DA+PI+IV(Z), so the leg is not vacuous", any(carries_z.values()), f"{carries_z}"
+    )
+    check(
+        "(v) at least one block carries DA+PI+IV(Z) beside the DA default, so the pairing is not vacuous",
+        any(carries_pair.values()),
+        f"{carries_pair}",
+    )
 
     folder = run_reduced("cigarettes", query=True, sweep=True)
     x = load(folder, SUBDIR_SWEEP, "gamma_values.pkl")
-    results = load(folder, SUBDIR_SWEEP, "gamma_results.pkl")
-    statuses = load(folder, SUBDIR_SWEEP, "gamma_statuses.pkl")
-    check("(v) cigarettes gamma_results.pkl carries both keys", "DA+PI+IV" in results and "DA+PI+IV(Z)" in results)
-    ok = {name: ok_steps(statuses, name) for name in ("PI+IV", "DA+PI+IV", "DA+PI+IV(Z)", "DA+PI")}
+    results = fold_keys(load(folder, SUBDIR_SWEEP, "gamma_results.pkl"))
+    statuses = fold_keys(load(folder, SUBDIR_SWEEP, "gamma_statuses.pkl"))
+    if carries_pair["cigarettes"]:
+        check("(v) cigarettes gamma_results.pkl carries both keys", "DA+PI+IV" in results and "DA+PI+IV(Z)" in results)
+    ok = {name: ok_steps(statuses, name) for name in results}
     widths = {name: results[name]["interval_width"][:, 0] for name in ok}
-    z_ok = ok["DA+PI+IV(Z)"]
     print(
         "      RECORDED cigarettes gamma sweep OK steps of "
-        + ", ".join(f"{name} {int(ok[name].sum())}/{len(x)}" for name in ("PI+IV", "DA+PI+IV", "DA+PI+IV(Z)"))
+        + ", ".join(f"{name} {int(ok[name].sum())}/{len(x)}" for name in sorted(ok))
         + f" on the ratio grid {np.round(x, 4).tolist()}"
     )
-    print(
-        "      RECORDED (Z) widths "
-        + ", ".join(f"{w:.4f}" for w in widths["DA+PI+IV(Z)"])
-        + "; DA+PI "
-        + ", ".join(f"{w:.4f}" for w in widths["DA+PI"])
-    )
-    check("(v) the ratio-1 step is OK for DA+PI+IV(Z)", bool(z_ok[-1]), f"{statuses['DA+PI+IV(Z)'][-1, 0]}")
-    check("(v) the (Z) widths are finite at every OK step", bool(np.all(np.isfinite(widths["DA+PI+IV(Z)"][z_ok]))))
-    nested = np.all(widths["DA+PI+IV(Z)"][z_ok] <= widths["DA+PI"][z_ok] + 1e-6)
-    check("(v) and at most DA+PI's there (the same ball, one more constraint)", bool(nested))
+    if carries_z["cigarettes"]:
+        z_ok = ok["DA+PI+IV(Z)"]
+        check("(v) the ratio-1 step is OK for DA+PI+IV(Z)", bool(z_ok[-1]), f"{statuses['DA+PI+IV(Z)'][-1, 0]}")
+        check("(v) the (Z) widths are finite at every OK step", bool(np.all(np.isfinite(widths["DA+PI+IV(Z)"][z_ok]))))
+    nested = {"cigarettes": nested_pairs(widths, "(v) cigarettes nesting")}
+    for wide, narrow in nested["cigarettes"]:
+        both = ok[wide] & ok[narrow]
+        print(
+            f"      RECORDED cigarettes {narrow} widths "
+            + ", ".join(f"{w:.4f}" for w in widths[narrow])
+            + f"; {wide} "
+            + ", ".join(f"{w:.4f}" for w in widths[wide])
+        )
+        check(
+            f"(v) {narrow} is at most {wide}'s at every commonly OK step (the same ball, one more constraint)",
+            bool(both.any()) and bool(np.all(widths[narrow][both] <= widths[wide][both] + 1e-6)),
+            f"{int(both.sum())} common steps",
+        )
     with open(os.path.join(folder, SUBDIR_QUERY, "coefficients.tex")) as handle:
         table = handle.read()
-    check("(v) T1 carries the (Z) row under its TeX label", f"{TEX_MAPPER['DA+PI+IV(Z)']} & " in table)
+    if carries_z["cigarettes"]:
+        check("(v) T1 carries the (Z) row under its TeX label", f"{TEX_MAPPER['DA+PI+IV(Z)']} & " in table)
     outcomes = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
+    want_f1 = expected(recipe("cigarettes")["methods"], "(v) F1")
     check(
-        "(v) F1's outcomes are keyed exactly HEADLINE_METHODS",
-        tuple(outcomes) == HEADLINE_METHODS,
+        "(v) F1's outcomes are keyed exactly the headline methods the recipe lists",
+        tuple(outcomes) == want_f1,
         f"{tuple(outcomes)}",
     )
-    band = np.asarray(outcomes["DA+PI+IV"], dtype=float)
-
-    methods = [m if m != "DA+PI+IV" else "DA+PI+IV(T,Z)" for m in recipe("cigarettes")["methods"]]
-    folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
-    respelled = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
-    check(
-        "(v) with DA+PI+IV respelled (T,Z) F1's outcomes are still keyed HEADLINE_METHODS",
-        tuple(respelled) == HEADLINE_METHODS,
-        f"{tuple(respelled)}",
-    )
-    if "DA+PI+IV" in respelled:
-        gap = float(np.nanmax(np.abs(np.asarray(respelled["DA+PI+IV"], dtype=float) - band)))
-        check("(v) and its DA band equals the bare run's to 1e-9", gap < 1e-9, f"{gap:.2e}")
+    # the respelling checks below compare against the DA default's band, so like the
+    # (Z) half above they apply only to a block that draws one. Report and skip, do
+    # not FAIL: which methods the block lists is the owner's call, and the two halves
+    # of this leg answer that question the same way
+    band = np.asarray(outcomes["DA+PI+IV"], dtype=float) if "DA+PI+IV" in outcomes else None
+    # the recipe spells the default `DA+PI+IV(T,Z)`; the OTHER spelling must land on
+    # the same headline key and the same band. Respelling towards whichever one the
+    # recipe already carries would be a no-op and the leg would pass vacuously
+    spelling = {"DA+PI+IV": "DA+PI+IV(T,Z)", "DA+PI+IV(T,Z)": "DA+PI+IV"}
+    methods = [spelling.get(m, m) for m in recipe("cigarettes")["methods"]]
+    moved = [m for m in methods if m not in recipe("cigarettes")["methods"]]
+    # a GUARDED BLOCK, never a `return`: everything below -- the (Z)-removal half with
+    # its own guard, and the whole simulation dataset -- must still run whatever the
+    # cigarette block happens to list
+    if band is None:
+        print("      report: the cigarettes block draws no DA default; the respelling checks do not apply to it")
     else:
-        check("(v) and its DA band equals the bare run's to 1e-9", False, "no DA band")
+        # reachable whenever the block DOES draw the default, so a spelling map gone
+        # stale (a default drawn with nothing to respell) still fails here
+        check("(v) the respelling leg actually respells something", bool(moved), f"{moved}")
+    if band is not None and moved:
+        folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
+        respelled = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
+        check(
+            f"(v) with the default respelled {moved} F1's outcomes are still keyed the same way",
+            tuple(respelled) == expected(methods, "(v) the respelled run"),
+            f"{tuple(respelled)}",
+        )
+        if "DA+PI+IV" in respelled:
+            gap = float(np.nanmax(np.abs(np.asarray(respelled["DA+PI+IV"], dtype=float) - band)))
+            check("(v) and its DA band equals the other spelling's to 1e-9", gap < 1e-9, f"{gap:.2e}")
+        else:
+            check("(v) and its DA band equals the other spelling's to 1e-9", False, "no DA band")
 
     # the (Z) entry sits after the default in the recipe: a headline lookup that
     # collapsed every mode onto its base would draw the (Z) band as the default
     methods = [m for m in recipe("cigarettes")["methods"] if m != "DA+PI+IV(Z)"]
-    folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
-    without = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
-    check(
-        "(v) with DA+PI+IV(Z) removed F1's outcomes are keyed HEADLINE_METHODS less that entry",
-        tuple(without) == tuple(m for m in HEADLINE_METHODS if m != "DA+PI+IV(Z)"),
-        f"{tuple(without)}",
-    )
-    if "DA+PI+IV" in without:
-        gap = float(np.nanmax(np.abs(np.asarray(without["DA+PI+IV"], dtype=float) - band)))
-        check("(v) and the DA band equals the run with (Z) present to 1e-9", gap < 1e-9, f"{gap:.2e}")
+    if not carries_z["cigarettes"]:
+        print("      report: the cigarettes block lists no DA+PI+IV(Z); the removal checks do not apply to it")
     else:
-        check("(v) and the DA band equals the run with (Z) present to 1e-9", False, "no DA band")
+        # reachable whenever the block DOES list `(Z)`, so a run that removed nothing
+        # and then compared a list to itself still fails here
+        check(
+            "(v) the (Z)-removal leg actually removes something",
+            len(methods) < len(recipe("cigarettes")["methods"]),
+            f"{methods}",
+        )
+        folder = run_reduced("cigarettes", query=True, sweep=False, methods=methods)
+        without = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
+        check(
+            "(v) with DA+PI+IV(Z) removed F1's outcomes are keyed the same way less that entry",
+            tuple(without) == expected(methods, "(v) the run without (Z)"),
+            f"{tuple(without)}",
+        )
+        if band is not None and "DA+PI+IV" in without:
+            gap = float(np.nanmax(np.abs(np.asarray(without["DA+PI+IV"], dtype=float) - band)))
+            check("(v) and the DA band equals the run with (Z) present to 1e-9", gap < 1e-9, f"{gap:.2e}")
+        elif band is not None:
+            check("(v) and the DA band equals the run with (Z) present to 1e-9", False, "no DA band")
 
     folder = run_reduced("simulation", query=False, sweep=True)
     x = load(folder, SUBDIR_SWEEP, "gamma_values.pkl")
-    results = load(folder, SUBDIR_SWEEP, "gamma_results.pkl")
-    statuses = load(folder, SUBDIR_SWEEP, "gamma_statuses.pkl")
-    check("(v) simulation gamma_results.pkl carries both keys", "DA+PI+IV" in results and "DA+PI+IV(Z)" in results)
-    ok = {name: ok_steps(statuses, name) for name in ("DA+PI+IV", "DA+PI+IV(Z)", "DA+PI")}
+    results = fold_keys(load(folder, SUBDIR_SWEEP, "gamma_results.pkl"))
+    statuses = fold_keys(load(folder, SUBDIR_SWEEP, "gamma_statuses.pkl"))
+    ok = {name: ok_steps(statuses, name) for name in results}
     widths = {name: results[name]["interval_width"][:, 0] for name in ok}
-    z_ok = ok["DA+PI+IV(Z)"]
     print(
         "      RECORDED simulation gamma sweep OK steps of "
-        + ", ".join(f"{name} {int(ok[name].sum())}/{len(x)}" for name in ("DA+PI+IV", "DA+PI+IV(Z)"))
+        + ", ".join(f"{name} {int(ok[name].sum())}/{len(x)}" for name in sorted(ok))
         + f" on the ratio grid {np.round(x, 4).tolist()}"
     )
-    print(
-        "      RECORDED (Z) widths "
-        + ", ".join(f"{w:.4f}" for w in widths["DA+PI+IV(Z)"])
-        + "; DA+PI "
-        + ", ".join(f"{w:.4f}" for w in widths["DA+PI"])
-    )
+    if carries_z["simulation"]:
+        check("(v) simulation gamma_results.pkl carries both keys", "DA+PI+IV" in results and "DA+PI+IV(Z)" in results)
+        z_ok = ok["DA+PI+IV(Z)"]
+        check(
+            "(v) the simulation (Z) widths are finite at every OK step",
+            bool(z_ok.any()) and bool(np.all(np.isfinite(widths["DA+PI+IV(Z)"][z_ok]))),
+        )
+    nested["simulation"] = nested_pairs(widths, "(v) simulation nesting")
+    for wide, narrow in nested["simulation"]:
+        both = ok[wide] & ok[narrow]
+        print(
+            f"      RECORDED simulation {narrow} widths "
+            + ", ".join(f"{w:.4f}" for w in widths[narrow])
+            + f"; {wide} "
+            + ", ".join(f"{w:.4f}" for w in widths[wide])
+        )
+        check(
+            f"(v) simulation {narrow} is at most {wide}'s at every commonly OK step",
+            bool(both.any()) and bool(np.all(widths[narrow][both] <= widths[wide][both] + 1e-6)),
+            f"{int(both.sum())} common steps",
+        )
     check(
-        "(v) the simulation (Z) widths are finite at every OK step",
-        bool(z_ok.any()) and bool(np.all(np.isfinite(widths["DA+PI+IV(Z)"][z_ok]))),
+        "(v) at least one dataset drew a nested DA pair, so the nesting is not vacuous",
+        any(nested.values()),
+        f"{ {name: len(pairs) for name, pairs in nested.items()} }",
     )
-    nested = np.all(widths["DA+PI+IV(Z)"][z_ok] <= widths["DA+PI"][z_ok] + 1e-6)
-    check("(v) and at most DA+PI's there", bool(nested))
 
 
 if __name__ == "__main__":

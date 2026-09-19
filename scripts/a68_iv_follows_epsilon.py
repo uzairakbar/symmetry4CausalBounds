@@ -61,6 +61,7 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.experiments.utils.constants import IV_MODE_METHODS, REAL_Z_METHODS  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
 
@@ -121,7 +122,7 @@ def plasmode_runner(**overrides):
 def plasmode_block(**overrides):
     import yaml
 
-    with open(os.path.join(REPO, "recipes", "cigarettes-plasmode_fig12b.yaml")) as handle:
+    with open(os.path.join(REPO, "recipes", "robustnessFig11.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     block = {**defaults, **config["cigarettes"], **overrides}
@@ -195,7 +196,16 @@ def leg_ii():
     data = runner.generate_data(0, 1.0)
     runner.build_models(0, 0, data)
     star = float(runner.get_oracle(0).eps_iv_star)
-    z_budget, gamma_z = runner.fit_epsilon_iv_z(0, data), runner.methods["PI+IV"]().gamma_z
+    # any class carrying the OBSERVED instrument's constraint declares gamma_z: the
+    # (Z)-only spellings, plus the bare IV_MODE_METHODS defaults, whose mode is (T,Z)
+    # and so carries Z beside T. The recipe decides which of them run, so the gate
+    # takes the first it lists rather than pinning PI+IV
+    z_constrained = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
+    witness = next((name for name in runner.methods if name in z_constrained), None)
+    check("(ii) the block lists a +IV class carrying gamma_z", witness is not None, f"{sorted(runner.methods)}")
+    if witness is None:
+        return
+    z_budget, gamma_z = runner.fit_epsilon_iv_z(0, data), runner.methods[witness]().gamma_z
     grid = np.asarray(runner.get_param_range(), dtype=float)
     exact = all(runner.get_predict_kwargs(r, 0)["epsilon_iv"] == float(r) * star + EPS_TOL for r in grid)
     check("(ii) every per-step T budget is r * eps_iv_star + EPS_TOL exactly", exact)
@@ -209,7 +219,7 @@ def leg_ii():
     )
     check(
         "(ii) and the Z budget and gamma_z are what they were",
-        runner.fit_epsilon_iv_z(0, data) == z_budget and runner.methods["PI+IV"]().gamma_z == gamma_z,
+        runner.fit_epsilon_iv_z(0, data) == z_budget and runner.methods[witness]().gamma_z == gamma_z,
     )
     epsilons = [runner.get_predict_kwargs(r, 0)["epsilon"] for r in grid]
     check("(ii) the epsilon beside it still moves", len(set(epsilons)) == len(grid))

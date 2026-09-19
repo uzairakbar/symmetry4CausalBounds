@@ -1,0 +1,69 @@
+# global toggles, overridable per experiment
+defaults:
+    recalibrate: true
+    pad: true
+    clipy: false
+    mean_match: true
+    n_jobs: -1
+    normalize: true
+simulation:
+    seed: 42
+    n_samples: 2_048
+    kernel_dim: 0
+    treatment_dim: 32
+    iv: 4
+    n_experiments: 8
+    sweep_samples: 32
+    methods:
+        - PI+INV+IV
+        - PI+IV
+        - DA+PI+IV(Z)
+        - DA+PI+IV(T,Z)
+        - PI&DA+PI+IV(Z)
+        - PI&DA+PI+IV(T,Z)
+    augmentation: translate
+    experiment:
+        sweep:
+            param:  [gamma]
+            metric: [coverage, approx_error, worst_error, width]
+optical_device:
+    seed: 42
+    n_samples: 1_000
+    n_experiments: 8
+    sweep_samples: 32
+    methods:
+        - PI+INV
+        - PI
+        - DA+PI
+        - DA+PI+IV(T)
+        - PI&DA+PI
+        - PI&DA+PI+IV(T)
+    augmentation: rotation > hflip > vflip > random-permutation
+    experiment:
+        sweep:
+            param:  [gamma]
+            metric: [coverage, approx_error, worst_error, width]
+cigarettes:
+    seed: 42
+    target: plasmode
+    spec: t3
+    anchor: own-tax
+    iv: [tax_s, y, cpi]
+    gamma_z: 0.0177
+    n_samples: 2_450
+    n_experiments: 8
+    sweep_samples: 32
+    da_amplitude: 1.0
+    sliver: false
+    methods:
+        - PI+INV+IV
+        - PI+IV
+        - DA+PI+IV(Z)
+        - DA+PI+IV(T,Z)
+        - PI&DA+PI+IV(Z)
+        - PI&DA+PI+IV(T,Z)
+    augmentation: translate
+    experiment:
+        sweep:
+            param:  [gamma]
+            metric: [coverage, approx_error, worst_error, width]

@@ -81,6 +81,7 @@ from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import EPS_TOL, GAMMA_Z_DEFAULT, resolve_dataset_block  # noqa: E402
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.utils import PanelBuilder, set_seed  # noqa: E402
+from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.methods.sensitivity_models import SolveStatus, constraint_floor  # noqa: E402
 from src.sem.cigarettes import TREATMENTS, CigaretteSEM, build_design, instrument_set, null_basis  # noqa: E402
 
@@ -109,8 +110,55 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
+def fold_default_mode(name):
+    """`DA+PI+IV(T,Z)` and the bare `DA+PI+IV` are the SAME estimator, spelled two
+    ways; the recipes spell it out and the headline figures key on the bare name
+    (`src/experiments/cigarettes.py` folds it the same way before the lookup). Fold
+    before keying on a method name, never respell the recipe."""
+    return parse_method(name)[0] if iv_mode(name) == "T,Z" else name
+
+
+def fold_keys(mapping):
+    """`mapping` re-keyed through `fold_default_mode`.
+
+    A block listing BOTH `DA+PI+IV` and `DA+PI+IV(T,Z)` folds them onto one key, so
+    one of the two would vanish without a word. Production has the same collision
+    (`src/experiments/cigarettes.py`), so this is a pre-existing hole the fold
+    inherits rather than a new one -- but silent is what makes it a hole, and `a63`'s
+    duplicate check is on the RAW list and cannot see it. Say so instead."""
+    folded = {}
+    for name, value in mapping.items():
+        key = fold_default_mode(name)
+        if key in folded:
+            check(f"fold_keys: {name!r} and another spelling both fold onto {key!r}", False, f"{sorted(mapping)}")
+        folded[key] = value
+    return folded
+
+
+def recipe_methods(**overrides):
+    """The block's own method list, folded. The EXPECTATION is read from here, never
+    from what production happened to build: intersecting production with itself
+    cannot notice a method that stopped being built, it just drops the check."""
+    return {fold_default_mode(name) for name in recipe_block(**overrides)["methods"]}
+
+
+def listed(names, block_methods, produced, label):
+    """`names` restricted to what the RECIPE lists, asserted non-empty, and asserted
+    to have actually been produced.
+
+    The recipe decides which methods run and the owner changes it freely, so the gate
+    derives its expectation from the block; the non-emptiness check stops the
+    derivation going vacuous, and the `produced` check stops a method the recipe lists
+    disappearing from the run without a word."""
+    kept = tuple(name for name in names if name in block_methods)
+    check(f"{label}: the block lists at least one of {list(names)}", bool(kept), f"lists {sorted(block_methods)}")
+    missing = [name for name in kept if name not in produced]
+    check(f"{label}: every listed one was built", not missing, f"missing {missing} from {sorted(produced)}")
+    return tuple(name for name in kept if name in produced)
+
+
 def recipe_block(**overrides):
-    with open(os.path.join(REPO, "recipes", "neighbour-price_fig12.yaml")) as handle:
+    with open(os.path.join(REPO, "recipes", "cigarettesFig7.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     block = {**defaults, **config["cigarettes"]}
@@ -171,13 +219,25 @@ def covers(model, queries, target, gamma):
 
 def coverage_over_replicates(runner, target):
     """Coverage of `target` on the coefficient queries at gamma*(b), one draw per
-    experiment through the runner's own `generate_data` and `build_models`."""
-    runner.methods = {name: runner.methods[name] for name in ("PI", "PI+IV")}
-    hits = {"PI": [], "PI+IV": []}
+    experiment through the runner's own `generate_data` and `build_models`.
+
+    Over whichever of the two uncovered baselines the recipe lists: the block is the
+    owner's to change, so the gate follows it rather than pinning both. `wanted` comes
+    from the RECIPE, and a name the recipe lists but the runner has not got is a FAIL,
+    not a silently smaller loop."""
+    wanted = [name for name in ("PI", "PI+IV") if name in recipe_methods()]
+    check(
+        "(v) coverage replicates: the runner carries every baseline the block lists",
+        all(name in runner.methods for name in wanted),
+        f"wants {wanted}, has {sorted(runner.methods)}",
+    )
+    keep = [name for name in wanted if name in runner.methods]
+    runner.methods = {name: runner.methods[name] for name in keep}
+    hits = {name: [] for name in keep}
     queries = np.eye(len(target))
     for j in range(runner.n_experiments):
         data = runner.generate_data(j, 1.0)
-        models = runner.build_models(j, 0, data)
+        models = fold_keys(runner.build_models(j, 0, data))
         gamma = runner.fit_gamma(j)
         for name in hits:
             hits[name].append(covers(models[name], queries, target, gamma))
@@ -311,6 +371,7 @@ def runner_draws():
 
 def leg_v():
     print("(v) the replicate mechanism of decision 9, and the declared budget in the solver")
+    block_methods = recipe_methods()
     orch = orchestrator(recipe_block(n_experiments=REPLICATES, sweep_samples=4, n_jobs=1))
     check(
         "(v) the orchestrator reads iv and gamma_z 2^-8", orch.iv_columns == PHASE_B and orch.gamma_z == GAMMA_Z_DEFAULT
@@ -327,30 +388,35 @@ def leg_v():
         "(v) a split carries 90% of the panel rows and a 3-column Z",
         len(data.X) == n_train and data.Z.shape == (n_train, 3),
     )
-    models = runner.build_models(0, 0, data)
-    pi_iv, da_pi_iv = models["PI+IV"], models["DA+PI+IV"]
-    r_z = np.sqrt(pi_iv.sigma_sq / pi_iv.rho * GAMMA_Z_DEFAULT)
-    check(
-        "(v) PI+IV: gamma_z declared, no T block, Z radius exactly s sqrt(gamma_z)",
-        pi_iv.gamma_z == GAMMA_Z_DEFAULT and not pi_iv._has_t and pi_iv.z_bound == r_z,
-        f"{pi_iv.z_bound:.6f}",
-    )
+    models = fold_keys(runner.build_models(0, 0, data))
     r_t = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
-    r_z_own = np.sqrt(da_pi_iv.sigma_sq / da_pi_iv.rho * GAMMA_Z_DEFAULT) + da_pi_iv._z_allowance
-    check(
-        "(v) DA+PI+IV: two constraints, r_T and r_Z",
-        abs(da_pi_iv.t_bound - r_t) < 1e-12 and abs(da_pi_iv.z_bound - r_z_own) < 1e-12,
-        f"r_T {da_pi_iv.t_bound:.6f}, r_Z {da_pi_iv.z_bound:.6f}",
-    )
+    gated = listed(("PI+IV", "DA+PI+IV", "PI&DA+PI+IV"), block_methods, models, "(v) the declared budget")
+    if "PI+IV" in gated:
+        pi_iv = models["PI+IV"]
+        r_z = np.sqrt(pi_iv.sigma_sq / pi_iv.rho * GAMMA_Z_DEFAULT)
+        check(
+            "(v) PI+IV: gamma_z declared, no T block, Z radius exactly s sqrt(gamma_z)",
+            pi_iv.gamma_z == GAMMA_Z_DEFAULT and not pi_iv._has_t and pi_iv.z_bound == r_z,
+            f"{pi_iv.z_bound:.6f}",
+        )
+    if "DA+PI+IV" in gated:
+        da_pi_iv = models["DA+PI+IV"]
+        r_z_own = np.sqrt(da_pi_iv.sigma_sq / da_pi_iv.rho * GAMMA_Z_DEFAULT) + da_pi_iv._z_allowance
+        check(
+            "(v) DA+PI+IV: two constraints, r_T and r_Z",
+            abs(da_pi_iv.t_bound - r_t) < 1e-12 and abs(da_pi_iv.z_bound - r_z_own) < 1e-12,
+            f"r_T {da_pi_iv.t_bound:.6f}, r_Z {da_pi_iv.z_bound:.6f}",
+        )
     check("(v) and r_T is eps_iv_star + EPS_TOL, never raised", abs(r_t - EPS_TOL) < 1e-12, f"{r_t!r}")
-    check(
-        "(v) the intersection's baseline carries no T block, its DA branch r_T",
-        not models["PI&DA+PI+IV"].baseline._has_t and models["PI&DA+PI+IV"].augmented.t_bound == r_t,
-    )
+    if "PI&DA+PI+IV" in gated:
+        check(
+            "(v) the intersection's baseline carries no T block, its DA branch r_T",
+            not models["PI&DA+PI+IV"].baseline._has_t and models["PI&DA+PI+IV"].augmented.t_bound == r_t,
+        )
 
     split = coverage_over_replicates(runner, target)
-    check(f"(v) row splits: PI coverage 1.000 over {REPLICATES}", split["PI"] == 1.0, f"{split['PI']:.3f}")
-    check(f"(v) row splits: PI+IV coverage 1.000 over {REPLICATES}", split["PI+IV"] == 1.0, f"{split['PI+IV']:.3f}")
+    for name in listed(("PI", "PI+IV"), block_methods, split, "(v) row-split coverage"):
+        check(f"(v) row splits: {name} coverage 1.000 over {REPLICATES}", split[name] == 1.0, f"{split[name]:.3f}")
 
     # the same runner class on the state-cluster bootstrap: the flip refactor7 makes
     forced = STRATEGIES["gamma"](
@@ -367,16 +433,17 @@ def leg_v():
         **orch._get_clean_kwargs(),
     )
     boot = coverage_over_replicates(forced, target)
+    reported = listed(("PI", "PI+IV"), block_methods, boot, "(v) cluster-bootstrap coverage")
     print(
-        f"      RECORDED cluster-bootstrap coverage at gamma*(b) over {REPLICATES}: PI {boot['PI']:.3f}, "
-        f"PI+IV {boot['PI+IV']:.3f} (p10: PI {P10_BOOTSTRAP_COVERAGE['PI']:.3f}, "
-        f"PI+IV {P10_BOOTSTRAP_COVERAGE['PI+IV']:.3f})"
+        f"      RECORDED cluster-bootstrap coverage at gamma*(b) over {REPLICATES}: "
+        + ", ".join(f"{name} {boot[name]:.3f} (p10 {P10_BOOTSTRAP_COVERAGE[name]:.3f})" for name in reported)
     )
-    check(
-        "(v) cluster bootstrap: PI+IV coverage reads a resampling rate, under 1",
-        boot["PI+IV"] < 1.0,
-        f"{boot['PI+IV']:.3f}",
-    )
+    if "PI+IV" in reported:
+        check(
+            "(v) cluster bootstrap: PI+IV coverage reads a resampling rate, under 1",
+            boot["PI+IV"] < 1.0,
+            f"{boot['PI+IV']:.3f}",
+        )
 
     query = query_runner(orch)
     check(
@@ -385,22 +452,27 @@ def leg_v():
     )
     panel = PanelBuilder(query, "cigarettes", False)
     panel._fit_all_models()
-    fitted = panel.fitted_models
-    on_z = (
-        all(fitted[name]._has_iv for name in ("PI+IV", "PI+INV+IV", "DA+PI+IV"))
-        and fitted["PI&DA+PI+IV"].baseline._has_iv
-    )
-    check("(v) the query panel's +IV models are fitted on the real Z (batch B ruling 2)", on_z)
-    rows = (
-        fitted["PI+IV"].Z_projector_R.shape[0],
-        fitted["DA+PI+IV"].Z_projector_R.shape[0],
-        fitted["DA+PI+IV"].T_projector_R.shape[0],
-    )
-    check("(v) PI+IV projects on 3 Z moments, DA+PI+IV on 3 Z and 1 T", rows == (3 + 4, 3 + 4, 1 + 4), f"{rows}")
+    fitted = fold_keys(panel.fitted_models)
+    plain_iv = listed(("PI+IV", "PI+INV+IV", "DA+PI+IV"), block_methods, fitted, "(v) the query panel's +IV models")
+    on_z = all(fitted[name]._has_iv for name in plain_iv)
+    if "PI&DA+PI+IV" in fitted:
+        on_z = on_z and fitted["PI&DA+PI+IV"].baseline._has_iv
+    check("(v) the query panel's +IV models are fitted on the real Z (batch B ruling 2)", on_z, f"{plain_iv}")
+    # 3 declared Z moments and 1 T moment, each beside the 4 mean-match rows
+    want = {"PI+IV": (3 + 4,), "PI+INV+IV": (3 + 4,), "DA+PI+IV": (3 + 4, 1 + 4)}
+    for name in plain_iv:
+        rows = (fitted[name].Z_projector_R.shape[0],)
+        if name == "DA+PI+IV":
+            rows = (*rows, fitted[name].T_projector_R.shape[0])
+        check(f"(v) {name} projects on {want[name]} moment rows", rows == want[name], f"{rows}")
     print(
-        f"      RECORDED query-path radii: PI+IV r_Z {fitted['PI+IV'].z_bound:.6f}, "
-        f"DA+PI+IV r_T {fitted['DA+PI+IV'].t_bound:.6f} r_Z {fitted['DA+PI+IV'].z_bound:.6f} "
-        f"(r_T there is the query tolerance {query.eps_tol:g})"
+        "      RECORDED query-path radii: "
+        + ", ".join(
+            f"{name} r_Z {fitted[name].z_bound:.6f}"
+            + (f" r_T {fitted[name].t_bound:.6f}" if name == "DA+PI+IV" else "")
+            for name in plain_iv
+        )
+        + f" (r_T there is the query tolerance {query.eps_tol:g})"
     )
 
     plain = orchestrator(shipped_block(n_experiments=1, sweep_samples=4))

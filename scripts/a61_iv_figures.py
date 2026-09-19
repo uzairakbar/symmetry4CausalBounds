@@ -59,11 +59,15 @@ toggle) and both recipes (`normalize: true`). Legs:
         are left alone (the rollback itself is a63-iii's), and
         `validate_plot_keys` raises at import on `normalize` under a `_coverage`
         id; the y-label carries the baseline's name. On the recipe run's own
-        gamma sweep the PI series of the width and worst_error figures after the
-        bootstrap reads 1.0 to 1e-12 at every positive step and NaN at every
-        zero step. With the toggle on or off the sweep pkls of the shipped
+        gamma sweep the baseline is the FIRST `NORMALIZE_BASELINES` entry the run
+        carries -- the rule itself, not merely a member of that tuple, which
+        `normalize_sweep` satisfies by construction -- and that series reads 1.0 to
+        1e-12 at every positive step and NaN at every zero step; a synthetic case
+        carrying BOTH `PI` and `PI+IV` pins the ORDER, which no shipped recipe run
+        exercises. With the toggle on or off the sweep pkls of the shipped
         cigarette block equal leg (D)'s: the toggle is plot-only. Catches: a
-        baseline other than the rule's (DA+PI is not 1.0), the `base > 0` guard
+        baseline other than the rule's (normalising against PI+IV while PI is
+        present), the `base > 0` guard
         dropped (inf or 0/0 where NaN is pinned), a toggle that leaks into a
         solver. Misses: figure bytes, which carry a timestamp.
 
@@ -115,9 +119,12 @@ from src.experiments.configs import (  # noqa: E402
 from src.experiments.utils import PanelBuilder, bootstrap, set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
+    NORMALIZE_BASELINES,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     TEX_MAPPER,
+    iv_mode,
+    parse_method,
     plot_keys_for,
     validate_plot_keys,
 )
@@ -173,8 +180,52 @@ def check(name, ok, detail=""):
 # ------------------------------------------------------------------ helpers
 
 
+def fold_default_mode(name):
+    """`DA+PI+IV(T,Z)` and the bare `DA+PI+IV` are the SAME estimator, spelled two
+    ways; the recipes spell it out and the headline figures key on the bare name
+    (`src/experiments/cigarettes.py` folds it the same way before the lookup). Fold
+    before keying on a method name, never respell the recipe."""
+    return parse_method(name)[0] if iv_mode(name) == "T,Z" else name
+
+
+def fold_keys(mapping):
+    """`mapping` re-keyed through `fold_default_mode`.
+
+    A block listing BOTH `DA+PI+IV` and `DA+PI+IV(T,Z)` folds them onto one key, so
+    one of the two would vanish without a word. Production has the same collision
+    (`src/experiments/cigarettes.py`), so this is a pre-existing hole the fold
+    inherits rather than a new one -- but silent is what makes it a hole, and `a63`'s
+    duplicate check is on the RAW list and cannot see it. Say so instead."""
+    folded = {}
+    for name, value in mapping.items():
+        key = fold_default_mode(name)
+        if key in folded:
+            check(f"fold_keys: {name!r} and another spelling both fold onto {key!r}", False, f"{sorted(mapping)}")
+        folded[key] = value
+    return folded
+
+
+def headline_listed(methods):
+    """The headline methods a block actually lists, in `HEADLINE_METHODS` order.
+
+    The recipe decides which methods run and the owner changes it freely, so the
+    figures draw the INTERSECTION and skip only when it is empty
+    (`src/experiments/cigarettes.py`). A gate derives its expectation the same way
+    rather than pinning the full five; `expected` asserts the derivation is
+    non-empty, which is what stops it going vacuous."""
+    have = {fold_default_mode(name) for name in methods}
+    return tuple(name for name in HEADLINE_METHODS if name in have)
+
+
+def expected(block, label):
+    """`headline_listed` of a resolved block, asserted non-empty."""
+    want = headline_listed(block["methods"])
+    check(f"{label}: the block lists at least one headline method", bool(want), f"{block['methods']}")
+    return want
+
+
 def recipe(name, fname=None):
-    fname = fname or {"cigarettes": "neighbour-price_fig12", "simulation": "iv_fig13"}[name]
+    fname = fname or {"cigarettes": "cigarettesFig7", "simulation": "validityFig9"}[name]
     with open(os.path.join(REPO, "recipes", f"{fname}.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
@@ -182,12 +233,11 @@ def recipe(name, fname=None):
 
 
 def sweep_metrics(name):
-    """The sweep metrics of whichever recipe OWNS the sweeps for this dataset: the
-    cigarette experiment is split by type, so its sweeps live in the plasmode
-    recipe while the restricted-2sls one this gate fixtures on reports the query
-    figures alone."""
-    fname = {"cigarettes": "cigarettes-plasmode_fig12b", "simulation": "iv_fig13"}[name]
-    return recipe(name, fname)["experiment"]["sweep"]["metric"]
+    """The sweep metrics of the recipe that OWNS the gamma sweep this gate drives.
+    The recipes are split by experiment type, so the cigarette sweeps live in the
+    plasmode block of `validityFig9` while the restricted-2sls recipe this gate
+    fixtures the query path on reports the query figures alone."""
+    return recipe(name, "validityFig9")["experiment"]["sweep"]["metric"]
 
 
 # the recorded tables of legs (iii) and (v) are at the 2^-8 leak radius (r_Z =
@@ -232,11 +282,15 @@ def orchestrator(block):
 
 
 def panel_models(orch):
-    """F1's own models: the query panel's, fitted on the full panel and the real Z."""
+    """F1's own models: the query panel's, fitted on the full panel and the real Z.
+
+    Keyed by the headline methods the recipe lists, exactly as `cigarettes.py` keys
+    the figure."""
     runner = orch.get_query_runner_cls()(methods=orch.methods, **{**orch._get_clean_kwargs(), "n_experiments": 1})
     panel = PanelBuilder(runner, "cigarettes", False)
     panel._fit_all_models()
-    return runner, {name: panel.fitted_models[name] for name in HEADLINE_METHODS}
+    fitted = fold_keys(panel.fitted_models)
+    return runner, {name: fitted[name] for name in headline_listed(fitted)}
 
 
 def convention_models(design, Z):
@@ -349,9 +403,11 @@ def leg_i():
     check("(i) T1 names the instrument set and the two benchmarks", "instrument set" in table and "0.1502" in table)
     with open(os.path.join(query, "beta_pn_gamma_outcomes.pkl"), "rb") as handle:
         outcomes = pickle.load(handle)  # noqa: S301 - our own artifact
+    want = expected(reduced_block("cigarettes"), "(i) F1")
     check(
-        "(i) F1 carries one band per headline method",
-        tuple(outcomes) == HEADLINE_METHODS and all(v.shape == (4, 1, 2) for v in outcomes.values()),
+        "(i) F1 carries one band per headline method the recipe lists",
+        tuple(outcomes) == want and all(v.shape == (4, 1, 2) for v in outcomes.values()),
+        f"{tuple(outcomes)} vs {want}",
     )
     # the figure's OWN grid and cells, not the module constant the gate's (ii) grid
     # is built from: a grid started under a feasibility floor writes NaN cells
@@ -437,7 +493,13 @@ def leg_ii_iii():
     print(
         "      RECORDED (iii) on F1's models (query path: tolerance 2^-8 on the INV cone and r_T, pad as configured):"
     )
-    for name in ("PI+INV+IV", "DA+PI+IV"):
+    flat_names = tuple(name for name in ("PI+INV+IV", "DA+PI+IV") if name in intervals)
+    check(
+        "(iii) F1 carries at least one of PI+INV+IV, DA+PI+IV to read the flat bound off",
+        bool(flat_names),
+        f"{tuple(intervals)}",
+    )
+    for name in flat_names:
         spread, flat, bracket = flatness(gammas, intervals[name][:, 0])
         print(
             f"        {name}: flat lower bound {flat:.6f} from gamma >= {FLAT_FROM}, spread {spread:.2e}, "
@@ -593,7 +655,7 @@ def leg_v():
     query_path = getattr(leg_ii_iii, "query_path", None)
     if query_path is not None:
         g = grid()
-        at = {name: query_path[name][np.argmin(np.abs(g - 0.25))] for name in HEADLINE_METHODS}
+        at = {name: query_path[name][np.argmin(np.abs(g - 0.25))] for name in query_path}
         print(
             "      RECORDED the same rows on F1's query-path models at gamma 0.25: "
             + ", ".join(f"{n} [{lo:+.4f}, {hi:+.4f}]" for n, (lo, hi) in at.items())
@@ -622,6 +684,15 @@ def leg_vi(reference):
     check("(vi) the input is left untouched", y["PI"][2, 0] == 2.0)
     out, baseline = normalize_sweep({"PI+IV": y["PI"], "DA+PI": y["DA+PI"]}, "gamma_worst_error")
     check("(vi) PI+IV is the baseline when PI is absent", baseline == "PI+IV" and out["PI+IV"][0, 0] == 1.0)
+    # PI and PI+IV together: the ORDER in NORMALIZE_BASELINES decides, and PI wins.
+    # No shipped recipe run carries both, so only this synthetic case pins the order
+    both = {"PI+IV": y["DA+PI"], "PI": y["PI"], "DA+PI": y["DA+PI"]}
+    out, baseline = normalize_sweep(both, "gamma_width")
+    check(
+        "(vi) with PI and PI+IV both present the rule takes PI, the earlier entry",
+        baseline == "PI" and out["PI"][0, 0] == 1.0 and not np.isclose(out["PI+IV"][0, 0], 1.0),
+        f"{baseline!r}",
+    )
     same, baseline = normalize_sweep({"DA+PI": y["DA+PI"]}, "gamma_worst_error")
     check("(vi) without PI or PI+IV nothing is divided", baseline is None and same["DA+PI"] is y["DA+PI"])
     same, baseline = normalize_sweep(y, "gamma_coverage")
@@ -660,14 +731,30 @@ def leg_vi(reference):
             ("worst_error", "gamma_worst_error"),
         ):
             series = bootstrap({name: record[metric] for name, record in results.items()})
-            base = np.nanmean(series["PI"], axis=1)
             out, baseline = normalize_sweep(series, fname)
-            ratio = np.nanmean(out["PI"], axis=1)
+            # the SS10.1 RULE, not merely the output: the baseline is the FIRST entry
+            # of NORMALIZE_BASELINES the run carries -- PI when it is there, PI+IV when
+            # it is not. Asserting only `baseline in NORMALIZE_BASELINES` is a
+            # tautology, since `normalize_sweep` derives it from that tuple, and a run
+            # normalised against PI+IV while PI was present would pass it
+            rule = next((name for name in NORMALIZE_BASELINES if name in series), None)
+            check(
+                f"(vi) {fname}: the baseline is the first NORMALIZE_BASELINES entry the run carries",
+                baseline == rule,
+                f"picked {baseline!r}, rule says {rule!r}, out of {sorted(series)}",
+            )
+            if baseline is None or baseline not in series:
+                continue
+            base = np.nanmean(series[baseline], axis=1)
+            ratio = np.nanmean(out[baseline], axis=1)
             positive, zero = base > 0, base == 0
             ok_one = np.all(np.abs(ratio[positive] - 1.0) < 1e-12)
-            ok_nan = np.all(np.isnan(out["PI"][zero])) and all(np.all(np.isnan(out[name][zero])) for name in out)
-            print(f"      RECORDED {fname}: {int(positive.sum())} positive PI steps, {int(zero.sum())} zero steps")
-            check(f"(vi) {fname}: PI reads 1.0 to 1e-12 at every positive step", baseline == "PI" and ok_one)
+            ok_nan = np.all(np.isnan(out[baseline][zero])) and all(np.all(np.isnan(out[name][zero])) for name in out)
+            print(
+                f"      RECORDED {fname}: baseline {baseline}, {int(positive.sum())} positive steps, "
+                f"{int(zero.sum())} zero steps"
+            )
+            check(f"(vi) {fname}: {baseline} reads 1.0 to 1e-12 at every positive step", bool(ok_one))
             check(f"(vi) {fname}: every method reads NaN at every zero step", ok_nan)
 
     if reference is None:

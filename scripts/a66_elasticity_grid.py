@@ -21,13 +21,20 @@ figures with y shared per row, x per column, the legend inside one panel. Legs:
         legend handle; `_mark_frame` keeps a log frame positive with a mark far
         above the grid. Catches: the edges dropped, the F2 blank frame back.
   (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): the
-        F1 and F2 outcomes of both coefficients are keyed by HEADLINE_METHODS with
-        DA+PI+IV(Z) among them; DA+PI+IV(Z) lies inside PI to 0.02 (its ball is recalibrated) on every grid point of
-        every figure, equals PI on beta_pn's F2 at the largest radius to 0.02 and sits
-        above PI's lower end by more than 0.5 at the smallest,
-        as PI+IV does. Catches: the (Z) headline missing, a band that leaves PI.
+        F1 and F2 outcomes of both coefficients are keyed by the headline methods
+        THE RECIPE LISTS (the intersection, as `cigarettes.py` keys the figure),
+        asserted non-empty; the nesting pairs are per AXIS, since `gamma` relaxes the
+        ball while `budget` sweeps r_Z and never relaxes the T constraint -- so
+        `DA+PI+IV(Z)` inside `PI` to 0.02 (its ball is recalibrated) is asserted on
+        BOTH axes of both figures, while `DA+PI+IV` inside `DA+PI+IV(Z)` is asserted
+        on `gamma` only, MEASURED false on `budget`; `DA+PI+IV(Z)` equals PI on
+        beta_pn's F2 at the largest radius to 0.02 and sits above PI's lower end by
+        more than 0.5 at the smallest; and every band the r_Z axis moves widens along
+        it monotonically and strictly end to end. Catches: the (Z) headline missing,
+        a band that leaves PI, a figure keyed by anything but the recipe's list.
   (v)   `elasticity_grid` on those artifacts: the file exists; four live panels;
-        one legend, in the first panel, five entries; x labels on the bottom row
+        one legend, in the first panel, one entry per headline method the recipe
+        lists; x labels on the bottom row
         only, y labels on the first column only, the row labels the two thetas;
         on a copy with the neighbour-price pkls removed the bottom row is off and
         the top row still draws. Catches: the grid not wired, the legend shared,
@@ -72,10 +79,13 @@ from src.experiments.utils.constants import (  # noqa: E402
     COEFFICIENT_LABELS,
     COLOR_MAP,
     INSTRUMENT_Z_STYLE,
+    IV_MODE_METHODS,
     PARTIAL_IDENTIFICATION_STYLE,
     REAL_Z_METHODS,
     SUBDIR_QUERY,
     TEX_MAPPER,
+    iv_mode,
+    parse_method,
 )
 from src.main import ORCHESTRATORS  # noqa: E402
 
@@ -90,8 +100,49 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
+# a band the r_Z axis moves carries the OBSERVED instrument's constraint: the
+# (Z)-only spellings, plus the bare `IV_MODE_METHODS` defaults, whose mode is (T,Z)
+# and so carries Z beside T. A membership test, not a substring one
+Z_CONSTRAINED: frozenset[str] = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
+
+
+def widens(width):
+    """True when `width` rises with the declared radius: monotone within 1e-6 AND
+    strictly wider end to end over at least two radii it actually reports.
+
+    The end-to-end clause is what stops a band that never moves, or one that is NaN
+    at all but one radius, passing on the monotone clause alone."""
+    seen = width[~np.isnan(width)]
+    if len(seen) < 2:
+        return False
+    return bool(np.all(np.diff(seen) > -1e-6) and seen[-1] > seen[0] + 1e-6)
+
+
+def fold_default_mode(name):
+    """`DA+PI+IV(T,Z)` and the bare `DA+PI+IV` are the SAME estimator, spelled two
+    ways; `src/experiments/cigarettes.py` folds `(T,Z)` onto the base before the
+    headline lookup, so the gate keys the same way."""
+    return parse_method(name)[0] if iv_mode(name) == "T,Z" else name
+
+
+def headline_listed(methods):
+    """The headline methods a block lists, in `HEADLINE_METHODS` order. The figures
+    draw the INTERSECTION and skip only when it is empty, so the gate derives its
+    expectation from the recipe rather than pinning the full five."""
+    have = {fold_default_mode(name) for name in methods}
+    return tuple(name for name in HEADLINE_METHODS if name in have)
+
+
+def expected(methods, label):
+    """`headline_listed`, asserted non-empty: an intersection-derived expectation
+    passes trivially when the intersection is empty."""
+    want = headline_listed(methods)
+    check(f"{label}: the block lists at least one headline method", bool(want), f"{list(methods)}")
+    return want
+
+
 def recipe_block(**overrides):
-    with open(os.path.join(REPO, "recipes", "neighbour-price_fig12.yaml")) as handle:
+    with open(os.path.join(REPO, "recipes", "cigarettesFig7.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     block = {**defaults, **config["cigarettes"]}
@@ -183,26 +234,75 @@ def leg_iv():
             parse_experiment_plan({"query": True})
         )
     check("(iv) HEADLINE_METHODS carries DA+PI+IV(Z)", "DA+PI+IV(Z)" in HEADLINE_METHODS, f"{HEADLINE_METHODS}")
+    leg_iv.want = want = expected(block["methods"], "(iv) the query figures")
+    # (wider, narrower): the narrower solves the same ball with one more constraint,
+    # so its band sits inside. The DA branch's ball is recalibrated on the translated
+    # data, so that containment is up to the rescaling, not exact -- hence DA_TOL.
+    #
+    # The pair list is per AXIS, because the two axes relax different things. `gamma`
+    # relaxes the ball itself, so both pairs nest along it. `budget` sweeps r_Z, which
+    # never relaxes the T constraint, so `DA+PI+IV` (T,Z) is NOT inside `DA+PI+IV(Z)`
+    # there -- MEASURED false on both coefficients. `("PI","DA+PI+IV(Z)")` IS still
+    # true on the budget axis (measured on both coefficients), so it stays.
+    NESTED_BY_AXIS = {
+        "gamma": (("PI", "DA+PI+IV(Z)"), ("DA+PI+IV(Z)", "DA+PI+IV")),
+        "budget": (("PI", "DA+PI+IV(Z)"),),
+    }
     for coefficient in HEADLINE_COEFFICIENTS:
         for axis in ("gamma", "budget"):
             outcomes = load(os.path.join(folder, f"beta_{coefficient}_{axis}_outcomes.pkl"))
-            check(f"(iv) beta_{coefficient}_{axis} keyed by HEADLINE_METHODS", tuple(outcomes) == HEADLINE_METHODS)
-            if "DA+PI+IV(Z)" not in outcomes:
-                continue
-            # the DA branch's ball is recalibrated on the translated data, so the
-            # (Z) band sits inside PI's up to that rescaling, not exactly
-            z, pi = outcomes["DA+PI+IV(Z)"], outcomes["PI"]
-            inside = np.all(z[:, 0, 0] >= pi[:, 0, 0] - DA_TOL) and np.all(z[:, 0, 1] <= pi[:, 0, 1] + DA_TOL)
-            check(f"(iv) beta_{coefficient}_{axis}: DA+PI+IV(Z) inside PI to {DA_TOL}", bool(inside))
+            check(
+                f"(iv) beta_{coefficient}_{axis} keyed by the headline methods the recipe lists",
+                tuple(outcomes) == want,
+                f"{tuple(outcomes)}",
+            )
+            drawn = tuple(p for p in NESTED_BY_AXIS[axis] if p[0] in outcomes and p[1] in outcomes)
+            # `gamma` must always draw one: both its pairs live inside the DA family,
+            # so any block reaching this figure has one. `budget`'s only pair needs
+            # `PI`, which the owner's current list does not carry -- so there the
+            # non-vacuity anchor is the `widens` check below, not the pair
+            if axis == "gamma":
+                check(f"(iv) beta_{coefficient}_{axis}: at least one nested pair is drawn", bool(drawn), f"{want}")
+            elif not drawn:
+                print(f"      report: beta_{coefficient}_{axis} draws no nested pair; `widens` anchors this axis")
+            for wide, narrow in drawn:
+                a, b = outcomes[narrow], outcomes[wide]
+                inside = np.all(a[:, 0, 0] >= b[:, 0, 0] - DA_TOL) and np.all(a[:, 0, 1] <= b[:, 0, 1] + DA_TOL)
+                check(f"(iv) beta_{coefficient}_{axis}: {narrow} inside {wide} to {DA_TOL}", bool(inside))
+    # F2 sweeps r_Z, so it can only pair a method against its no-IV parent, which it
+    # collapses onto once the radius stops binding. (Z) against (T,Z) is NOT such a
+    # pair: they differ by the T constraint, which this axis never relaxes
     outcomes = load(os.path.join(folder, "beta_pn_budget_outcomes.pkl"))
-    slack = np.abs(outcomes["DA+PI+IV(Z)"][-1, 0] - outcomes["PI"][-1, 0]).max()
-    check(f"(iv) beta_pn F2: DA+PI+IV(Z) equals PI at the largest radius to {DA_TOL}", slack < DA_TOL, f"{slack:.5f}")
-    tight = outcomes["DA+PI+IV(Z)"][0, 0, 0] - outcomes["PI"][0, 0, 0]
-    check(
-        "(iv) beta_pn F2: DA+PI+IV(Z)'s lower end above PI's by > 0.5 at the smallest radius",
-        tight > 0.5,
-        f"{tight:.3f}",
-    )
+    for wide, narrow in [p for p in (("PI", "DA+PI+IV(Z)"),) if p[0] in outcomes and p[1] in outcomes]:
+        slack = np.abs(outcomes[narrow][-1, 0] - outcomes[wide][-1, 0]).max()
+        check(
+            f"(iv) beta_pn F2: {narrow} equals {wide} at the largest radius to {DA_TOL}",
+            slack < DA_TOL,
+            f"{slack:.5f}",
+        )
+        tight = outcomes[narrow][0, 0, 0] - outcomes[wide][0, 0, 0]
+        check(
+            f"(iv) beta_pn F2: {narrow}'s lower end above {wide}'s by > 0.5 at the smallest radius",
+            tight > 0.5,
+            f"{tight:.3f}",
+        )
+    # the property that holds whatever the block lists, and the leg's non-vacuous
+    # anchor when it lists no (parent, +IV) pair: a wider declared radius is a weaker
+    # constraint, so every band the axis moves widens along it
+    # the property that holds whatever the block lists, and the leg's non-vacuous
+    # anchor: a wider declared radius is a weaker constraint, so every band the axis
+    # moves widens along it -- monotonically AND strictly end to end, so a band that
+    # never moves, or that is NaN at all but one radius, does not pass
+    # "the r_Z axis moves it" = it carries the OBSERVED instrument's constraint:
+    # REAL_Z_METHODS (the (Z)-only spellings) plus the bare defaults, whose mode is
+    # (T,Z) and so carries Z beside T. NOT a substring test -- `PI+INV` passes one
+    swept = tuple(name for name in outcomes if name in Z_CONSTRAINED)
+    check("(iv) beta_pn F2: the block lists at least one method the r_Z axis moves", bool(swept), f"{tuple(outcomes)}")
+    for name in swept:
+        width = outcomes[name][:, 0, 1] - outcomes[name][:, 0, 0]
+        check(
+            f"(iv) beta_pn F2: {name} widens with the declared radius", widens(width), f"{np.round(width, 4).tolist()}"
+        )
     return ARTIFACTS_DIRECTORY
 
 
@@ -219,10 +319,11 @@ def leg_v(artifacts):
         legends = [ax.get_legend() for ax in axes.ravel() if ax.get_legend() is not None]
         check("(v) one legend, in the first panel", len(legends) == 1 and axes[0, 0].get_legend() is not None)
         if legends:
+            want = getattr(leg_iv, "want", HEADLINE_METHODS)
             check(
-                "(v) the legend lists the five headline methods",
-                len(legends[0].get_texts()) == len(HEADLINE_METHODS),
-                f"{len(legends[0].get_texts())}",
+                f"(v) the legend lists the {len(want)} headline methods the recipe lists",
+                bool(want) and len(legends[0].get_texts()) == len(want),
+                f"{len(legends[0].get_texts())} vs {want}",
             )
         xlabels = [[bool(ax.get_xlabel()) for ax in row] for row in axes]
         ylabels = [[bool(ax.get_ylabel()) for ax in row] for row in axes]

@@ -400,7 +400,7 @@ def finite_widths(results, expect_empty=()):
     inflation was never the T constraint's to claim. At the honest budget the
     program is empty here -- and so is the OLD pooled one at the pooled radius, so
     this is a budget fact, not a decoupling one. RECORDED rather than asserted
-    away; the shipped `iv_fig13` n-sweep is unaffected."""
+    away; the shipped `nEfficiencyFig13` n-sweep is unaffected."""
     bad = [
         name
         for name in IV_NAMES

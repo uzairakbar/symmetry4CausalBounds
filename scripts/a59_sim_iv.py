@@ -43,7 +43,7 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         the exact p6 widths, which depend on the DA draw and are recorded, not pinned.
   (vi)  the carrier on the shipped SEM (batch B hand-off): the interventional draw
         has k + m columns, `f` sees k columns through the sweep runner's own
-        `_draw_base` and the query runner's `_load_data`, the recipe `iv_fig13.yaml`
+        `_draw_base` and the query runner's `_load_data`, the recipe `validityFig9.yaml`
         resolves and its orchestrator hands the SEM factory `iv_dim` 4 (the sweep
         SEMs and the query SEM carry `iv_width` 4, Z_train and Z are (n, 4)), and on
         this SEM the two IV terms coincide to the bit (h* is exactly T-invariant, so
@@ -86,6 +86,7 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
@@ -93,6 +94,9 @@ from src.oracle import gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
+# the simulation block with `iv: 4` that owns the gamma sweep this leg drives;
+# the recipes are split by experiment type, so the sweep lives in its own file
+RECIPE = "validityFig9.yaml"
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
 IV_BOUND = 0.05  # p6's evi
 NAMES = ["PI", "PI+IV", "PI+INV", "PI+INV+IV", "DA+PI+IV"]
@@ -114,13 +118,27 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
+# the +IV classes this leg can fixture on, best first. The recipe decides which of
+# them run, so the gate takes the first the block lists rather than pinning one; the
+# intersection (`PI&DA+PI+IV`) is deliberately absent, it is not a bare IV class
+IV_FIXTURES = ("PI+IV", "PI+INV+IV", "DA+PI+IV", "DA+PI+IV(Z)")
+
+
+def iv_fixture(methods, label):
+    """The first `IV_FIXTURES` entry the block lists, asserted present."""
+    folded = {parse_method(name)[0] if iv_mode(name) == "T,Z" else name for name in methods}
+    name = next((n for n in IV_FIXTURES if n in folded), None)
+    check(f"{label}: the block lists a +IV class to fixture on", name is not None, f"{sorted(folded)}")
+    return name
+
+
 def seeded_sem(seed, **kwargs):
     np.random.seed(seed)
     return LinearSimulationSEM(treatment_dimension=D, gamma=SIMULATION_CONFIG.gamma_true, **kwargs)
 
 
 def recipe_block():
-    with open(os.path.join(REPO, "recipes", "iv_fig13.yaml")) as handle:
+    with open(os.path.join(REPO, "recipes", RECIPE)) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     return {**defaults, **config["simulation"]}
@@ -264,7 +282,7 @@ def leg_vi(seed):
     check("(vi) the observational draw has k + m columns too", XZ_obs.shape[1] == D + M)
 
     block = resolve_dataset_block("simulation", recipe_block())
-    check("(vi) recipes/iv_fig13.yaml resolves with iv 4", block.get("iv") == 4)
+    check(f"(vi) recipes/{RECIPE} resolves with iv 4", block.get("iv") == 4)
     reduced = {**block, "n_experiments": 1, "n_samples": 512, "sweep_samples": 4, "n_jobs": 1}
     set_seed(reduced["seed"])
     orchestrator = SimulationOrchestrator(**reduced, hyperparameters=munchify(digest_leg.HYPERPARAMETERS))
@@ -327,15 +345,18 @@ def leg_vi(seed):
         "(vi) the query runner's Z is (n, 4) and X_raw has k columns",
         query.Z.shape == (len(query.X_raw), M) and query.X_raw.shape[1] == D,
     )
+    fixture = iv_fixture(block["methods"], "(vi)")
+    if fixture is None:
+        return
     check(
-        "(vi) the query runner's PI+IV read the instrument",
-        query.methods["PI+IV"]().__class__.__name__ == "InstrumentalVariablePartialR2",
+        f"(vi) the query runner's {fixture} read the instrument",
+        query.methods[fixture]().__class__.__name__ == "InstrumentalVariablePartialR2",
     )
     context = query.setup_data()
-    model = query.methods["PI+IV"]()
+    model = query.methods[fixture]()
     fit_model(
         model=model,
-        method_name="PI+IV",
+        method_name=fixture,
         X=context.X,
         y=context.y,
         GX=context.GX,
@@ -344,7 +365,7 @@ def leg_vi(seed):
         da=context.da,
     )
     check(
-        "(vi) PI+IV fitted through the query context sees a 4-column Z",
+        f"(vi) {fixture} fitted through the query context sees a 4-column Z",
         model._has_iv and model.Z_projector_R.shape[0] == M + D,
     )
 

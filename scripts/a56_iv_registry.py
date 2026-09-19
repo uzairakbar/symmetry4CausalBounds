@@ -11,12 +11,19 @@ Legs:
         a defaulted argument or a re-ordered draw. Misses: a change on a path the
         shipped config does not take (a non-empty `iv:`), and figure bytes, which
         carry a timestamp and are not hashed.
-  (i)   the two recipes resolve through `resolve_dataset_block` with `iv: 4` and
-        `iv: [tax_s, y, cpi]` (gamma_z 2^-8 written out) and neither lists the `IV`
-        baseline; the shipped config.yaml blocks and leg (D)'s own blocks resolve
-        with no `iv` key at all. Catches: a recipe carrying a retired key, a
-        validator that rejects its own recipe, an `iv` key leaked into the shipped
-        yaml. Misses: whether a run does anything with the key (refactor3 on).
+  (i)   EVERY dataset block of EVERY recipe resolves through `resolve_dataset_block`
+        and carries EXACTLY ONE of `query:`, `sweep:` and `perf:`, and the blocks of
+        one file agree on which and on its param -- derived per block off the glob,
+        so a recipe added tomorrow is covered with no row to write. On top, the
+        named recipes carry `iv: 4` / `iv: [tax_s, y, cpi]` (gamma_z written out),
+        list no `IV` baseline and are the type `RECIPES` says; the shipped
+        config.yaml blocks and leg (D)'s own blocks resolve with no `iv` key at all.
+        Catches: a recipe carrying a retired key or an illegal method spelling, a
+        validator that rejects its own recipe, ANY block that grew a second
+        experiment type or lost its only one, a file whose blocks disagree, an `iv`
+        key leaked into the shipped yaml, a `PENDING` exemption left behind once it
+        starts resolving. Misses: whether a run does anything with the key
+        (refactor3 on).
   (ii)  `iv` (and `gamma_z`) on the optical and do-MNIST blocks raise a ValueError
         naming the key: rejected, not ignored (decision 2). Catches: `iv` added to
         their DATASET_KEYS. Misses: nothing about what the key would do there.
@@ -58,7 +65,9 @@ of the other legs and is never used on the committed state.
 """
 
 import argparse
+import glob
 import os
+import subprocess
 import sys
 
 import numpy as np
@@ -94,6 +103,7 @@ from src.experiments.utils.constants import (  # noqa: E402
     PI,
     POINT_ESTIMATES,
     TEX_MAPPER,
+    parse_method,
 )
 from src.sem.cigarettes import CigaretteSEM, V, build_design  # noqa: E402
 
@@ -113,14 +123,34 @@ PLAN_METHODS = (
     "PI&DA+PI+IV",
 )
 NET_METHODS = ("ATE", "ERM", "DA+ERM", "PI+INV", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV")
-# (dataset, iv, what the experiment plan must carry). The cigarette experiment is
-# split by TYPE: the restricted-2sls target reports the query figures, the plasmode
-# carries every sweep and both perf metrics
-RECIPES = {
-    "iv_fig13": ("simulation", 4, "both"),
-    "neighbour-price_fig12": ("cigarettes", ["tax_s", "y", "cpi"], "query"),
-    "cigarettes-plasmode_fig12b": ("cigarettes", ["tax_s", "y", "cpi"], "sweep"),
-}
+CIGARETTE_IV = ["tax_s", "y", "cpi"]
+EXPERIMENT_TYPES = ("query", "sweep", "perf")
+# (recipe, dataset, iv, what the experiment plan must carry). This table pins what
+# cannot be read off the tree: the instrument set of each block, and which of the
+# three types the named recipes are. The SHAPE rule itself -- every block carries
+# exactly one type, and the blocks of one file agree on it and on its param -- is
+# derived per block in leg (i) and needs no row here, so a recipe added tomorrow is
+# checked the day it lands. The cigarette experiment is split by target too: the
+# restricted-2sls one reports the query figures, the plasmode carries every sweep
+# and both perf metrics.
+RECIPES = (
+    ("simulationFig5", "simulation", 4, "query"),
+    ("opticalDeviceFig6", "optical_device", None, "query"),
+    ("cigarettesFig7", "cigarettes", CIGARETTE_IV, "query"),
+    ("validityFig9", "simulation", 4, "sweep"),
+    ("validityFig9", "optical_device", None, "sweep"),
+    ("validityFig9", "cigarettes", CIGARETTE_IV, "sweep"),
+    ("robustnessFig11", "simulation", 4, "sweep"),
+    ("robustnessFig11", "cigarettes", CIGARETTE_IV, "sweep"),
+    ("latencyFig15", "simulation", 4, "perf"),
+    ("latencyFig15", "cigarettes", CIGARETTE_IV, "perf"),
+    ("stabilityFig16", "optical_device", None, "perf"),
+)
+# SS6 retires the `IV` point estimate; until it lands, this block spells it `IV(Z)`,
+# which the grammar rejects. The one block leg (i) does not require to resolve. The
+# exemption expires by itself: leg (i) FAILS on an entry that has started resolving,
+# so SS6 cannot land and leave the constant behind.
+PENDING = (("ivSimulationFig5", "simulation"),)
 LEGAL_SETS = ([], ["tax_s"], ["tax_sn"], ["tax_s", "tax_sn"], ["tax_s", "y", "cpi"])
 IV_METHODS = ("IV", "DA+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
 GAMMA = 0.25
@@ -152,16 +182,44 @@ def rejection(name, **extra):
     return None
 
 
-def load_recipe(fname):
-    """Resolve a recipe exactly as src/main.py resolves config.yaml."""
+def recipe_blocks(fname):
+    """The dataset blocks of a recipe, merged over its defaults, unresolved."""
     with open(os.path.join(REPO, "recipes", f"{fname}.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     config.pop("hyperparameters", None)
-    ((name, block),) = config.items()
-    block = {**defaults, **block}
+    return {name: {**defaults, **block} for name, block in config.items()}
+
+
+def load_recipe(fname, dataset):
+    """Resolve ONE dataset block of a recipe exactly as src/main.py resolves config.yaml.
+
+    The recipes carry several dataset blocks each, so the caller names the one it
+    wants; a missing block is a KeyError naming what the file does carry."""
+    blocks = recipe_blocks(fname)
+    if dataset not in blocks:
+        raise KeyError(f"recipes/{fname}.yaml carries no `{dataset}:` block, only {sorted(blocks)}")
+    block = blocks[dataset]
     plan = parse_experiment_plan(block.get("experiment"))
-    return name, resolve_dataset_block(name, block), plan
+    return resolve_dataset_block(dataset, block), plan
+
+
+def plan_shape(plan):
+    """The experiment types a plan carries, in `EXPERIMENT_TYPES` order.
+
+    A recipe block is meant to carry exactly one; the tuple is what leg (i) reports
+    when it carries none or two."""
+    carried = {"query": plan.query, "sweep": plan.sweep is not None, "perf": plan.perf is not None}
+    return tuple(name for name in EXPERIMENT_TYPES if carried[name])
+
+
+def plan_axis(plan):
+    """What the one experiment type is swept or measured over, for the agreement check."""
+    if plan.sweep is not None:
+        return tuple(plan.sweep.param)
+    if plan.perf is not None:
+        return tuple(plan.perf.metric)
+    return ()
 
 
 def leg_d(reference):
@@ -171,44 +229,110 @@ def leg_d(reference):
 
 
 def leg_i():
-    print("(i) the recipes resolve with the key, the shipped yaml and leg (D)'s blocks without it")
-    for fname, (want_name, want_iv, want_plan) in RECIPES.items():
+    print("(i) every recipe block resolves and carries one experiment type, the shipped yaml without the key")
+    # the SHAPE contract, derived per block: EVERY block of EVERY recipe, so a recipe
+    # added tomorrow is covered without a row anywhere. A block carrying two types
+    # would run twice under one name; a block carrying none would run nothing.
+    for path in sorted(glob.glob(os.path.join(REPO, "recipes", "*.yaml"))):
+        fname = os.path.splitext(os.path.basename(path))[0]
+        shapes = {}
+        for dataset in recipe_blocks(fname):
+            if (fname, dataset) in PENDING:
+                try:
+                    load_recipe(fname, dataset)
+                except Exception:  # noqa: BLE001 - the exemption is exactly this failure
+                    print(f"      report: {fname}.{dataset} not required to resolve yet (SS6 retires `IV`)")
+                    continue
+                check(f"(i) {fname}.{dataset} resolves now: drop it from PENDING", False)
+                continue
+            try:
+                _, plan = load_recipe(fname, dataset)
+            except Exception as error:  # noqa: BLE001 - one FAIL line beats a traceback
+                check(f"(i) {fname}.{dataset} resolves", False, f"{type(error).__name__}: {error}")
+                continue
+            check(f"(i) {fname}.{dataset} resolves", True)
+            shape = plan_shape(plan)
+            check(f"(i) {fname}.{dataset}: exactly one experiment type", len(shape) == 1, f"{shape}")
+            shapes[dataset] = (shape, plan_axis(plan))
+        # and the blocks of one file agree, so a `python -m src.aggregate` column can
+        # be read off the file name
+        if len(shapes) > 1:
+            check(
+                f"(i) {fname}: its blocks agree on the type and its param",
+                len(set(shapes.values())) == 1,
+                f"{shapes}",
+            )
+    # what the tree cannot tell us: the instrument set, and which type each named
+    # recipe is meant to be
+    for fname, dataset, want_iv, want_plan in RECIPES:
         try:
-            name, block, plan = load_recipe(fname)
-        except ValueError as error:
-            check(f"(i) {fname} resolves", False, str(error))
+            block, plan = load_recipe(fname, dataset)
+        except Exception as error:  # noqa: BLE001
+            check(f"(i) {fname}.{dataset} resolves", False, f"{type(error).__name__}: {error}")
             continue
-        check(f"(i) {fname}: the {want_name} block", name == want_name, name)
-        check(f"(i) {fname}: iv == {want_iv!r}", block.get("iv") == want_iv, repr(block.get("iv")))
-        check(f"(i) {fname}: PI+IV in methods", "PI+IV" in block["methods"])
-        check(f"(i) {fname}: the IV baseline is not listed", "IV" not in block["methods"])
-        planned = {
-            "both": plan.query and plan.sweep is not None,
-            "query": plan.query and plan.sweep is None and plan.perf is None,
-            "sweep": not plan.query and plan.sweep is not None and plan.perf is not None,
-        }[want_plan]
-        check(f"(i) {fname}: the plan is {want_plan}", planned, f"query {plan.query}, sweep {plan.sweep is not None}")
-    plasmode, plasmode_block, _ = load_recipe("cigarettes-plasmode_fig12b")
-    check("(i) the plasmode recipe is a cigarettes block on target plasmode", plasmode == "cigarettes")
+        check(f"(i) {fname}.{dataset}: iv == {want_iv!r}", block.get("iv") == want_iv, repr(block.get("iv")))
+        check(f"(i) {fname}.{dataset}: the IV baseline is not listed", "IV" not in block["methods"])
+        check(
+            f"(i) {fname}.{dataset}: the plan is {want_plan} alone",
+            plan_shape(plan) == (want_plan,),
+            f"{plan_shape(plan)}",
+        )
+    # a block that DECLARES an instrument set must list a method that can consume it:
+    # an `iv:` no method reads is a configuration error, and this is the registry's
+    # gate for it. Which +IV methods is the owner's call, so the check is on the
+    # family rather than on two names (round 2 pinned `PI+IV` and `PI+INV+IV`, which
+    # went red the moment a block was switched back to a pre-IV method list)
+    for fname, dataset, want_iv, _ in RECIPES:
+        if not want_iv:
+            continue
+        block, _ = load_recipe(fname, dataset)
+        consumers = sorted({m for m in block["methods"] if parse_method(m)[0] in IV_METHODS})
+        check(
+            f"(i) {fname}.{dataset}: declares iv and lists a method that reads it",
+            bool(consumers),
+            f"{block['methods']}",
+        )
+    plasmode_block, _ = load_recipe("robustnessFig11", "cigarettes")
     check(
-        "(i) and it declares target plasmode with the same leak budget",
+        "(i) the sweep recipes declare target plasmode with the same leak budget",
         plasmode_block.get("target") == "plasmode" and plasmode_block.get("gamma_z") == GAMMA_Z_DEFAULT,
         f"{plasmode_block.get('target')!r}, {plasmode_block.get('gamma_z')!r}",
     )
-    _, block, _ = load_recipe("neighbour-price_fig12")
-    written_out = block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.0177
+    block, _ = load_recipe("cigarettesFig7", "cigarettes")
+    written_out = block.get("target") == "iv" and block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.0177
     check(
-        "(i) neighbour-price: gamma_z written out as the default, Conley delta 0.05",
+        "(i) the cigarette query recipe is the restricted-2sls target, gamma_z written out (Conley delta 0.05)",
         written_out,
-        repr(block.get("gamma_z")),
+        f"{block.get('target')!r}, {block.get('gamma_z')!r}",
     )
 
+    # "the shipped default does not silently enable IV, so a bare `python -m src.main`
+    # reproduces the non-IV baseline" is an invariant about what SHIPS, and only
+    # COMMITTED state ships. Read the committed blob for it: nothing runs this gate at
+    # commit time (`.pre-commit-config.yaml` is ruff plus the hygiene hooks), so the
+    # working-tree form policed nothing while going red in the owner's ordinary state,
+    # and a permanently red gate stops being read -- which is how a65's 0.0236 sat
+    # stale for five commits. The working tree still has to RESOLVE, and an active key
+    # there is reported, not failed
+    committed = yaml.safe_load(
+        subprocess.run(["git", "show", "HEAD:config.yaml"], cwd=REPO, capture_output=True, text=True, check=True).stdout
+    )
+    committed.pop("defaults", None)
+    committed.pop("hyperparameters", None)
+    for name, raw in committed.items():
+        check(
+            f"(i) committed config.yaml {name}: no active iv or gamma_z key",
+            "iv" not in raw and "gamma_z" not in raw,
+            f"{sorted(set(raw) & {'iv', 'gamma_z'})}",
+        )
     with open(os.path.join(REPO, "config.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     config.pop("hyperparameters", None)
     for name, raw in config.items():
-        check(f"(i) config.yaml {name}: no active iv or gamma_z key", "iv" not in raw and "gamma_z" not in raw)
+        active = sorted(set(raw) & {"iv", "gamma_z"})
+        if active:
+            print(f"      report: the WORKING-tree config.yaml {name} carries {active}; uncommitted, so not a FAIL")
         check(f"(i) config.yaml {name}: resolves", rejection(name, **{**defaults, **raw}) is None)
     for name in digest_leg.DATASETS:
         block = {**digest_leg.TOGGLES, **digest_leg.BLOCKS[name]}
