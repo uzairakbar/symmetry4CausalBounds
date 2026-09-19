@@ -537,8 +537,10 @@ def leg_vii():
     allowed_tilde = (
         "Z-tilde = (T, Z) of Asm. 3 as ONE matrix",
         "NOT in general inside the single constraint on Z-tilde",
-        "2SLS on the augmented data with ONE instrument matrix",
-        "Z-tilde; `IV` under an empty set is a config error",
+        "the augmented data with ONE stacked instrument matrix",
+        # the point estimate pins the moment at its floor, so it has no radii to
+        # pool and the stacked equality is the pair of per-block equalities
+        "Z, `DA+ERM+IV` on the stacked Z-tilde. One stacked block is right",
     )
     banned = ("iv_bound", "iv_budget", "root sum square", "root-sum-square", "joint bound")
     # `z_bound` combines two pieces of ONE instrument's radius, which is not the

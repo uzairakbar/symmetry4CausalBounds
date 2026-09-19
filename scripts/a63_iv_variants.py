@@ -21,12 +21,12 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         spelling is `base`, `base(Z)`, `base(T)` or `base(T,Z)`; a duplicate
         (base, mode) pair raises naming both entries (`DA+PI+IV` beside
         `DA+PI+IV(T,Z)`, `PI` twice), `DA+PI+IV` beside `DA+PI+IV(Z)` resolves; a
-        suffix on a non-DA method raises naming it; `DA+IV(Z)` under an empty set
+        suffix on a non-DA method raises naming it; `DA+ERM+IV(Z)` under an empty set
         raises naming it and `iv`, `DA+PI+IV(Z)` resolves there and on the optical
         block, any suffix on the do_mnist block raises; an unquoted `(T,Z)` in a
         YAML flow list raises with the quoting hint and the quoted form resolves;
         `IV_MODE_METHODS` is the derived set, every stored spelling has its display
-        entries (`(T,Z)` equal to the bare, `(Z)` on the same hue), `DA+IV(Z)` is
+        entries (`(T,Z)` equal to the bare, `(Z)` on the same hue), `DA+ERM+IV(Z)` is
         a point estimate, `build_methods` returns the requested spellings in order.
         Catches: a parser accepting a suffix on a non-DA method, a duplicate check
         keyed on the spelling (it would let R2's case through), a missing display
@@ -40,10 +40,11 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         and `fit_model`: instrument width 2 on bare and `(T,Z)`, 1 on `(Z)` and
         `PI+IV`, the intersection's DA branch the same and its baseline 1 in both
         modes; `epsilon_iv` 2^-5 on bare and `(T,Z)`, 2^-6 on `(Z)`, `(Z)`'s bound
-        equal to `PI+IV`'s to 1e-12; `(T,Z)` predicts as bare to 1e-9, `DA+IV(T,Z)`
-        as `DA+IV` to 1e-12, `DA+IV(Z)` as a fresh 2SLS on (GX, y, Z); under an
+        equal to `PI+IV`'s to 1e-12; `(T,Z)` predicts as bare to 1e-9, `DA+ERM+IV(T,Z)`
+        as `DA+ERM+IV` to 1e-12, `DA+ERM+IV(Z)` zeroes the demeaned moment and is the
+        ERM optimum within it, beating a fresh 2SLS on (GX, y, Z); under an
         empty Z `DA+PI+IV(Z)` is `DA+PI` and `PI&DA+PI+IV(Z)` is `PI&DA+PI` to
-        exactly 0.0, and `fit_model` on `DA+IV(Z)` raises. Catches: G stacked in
+        exactly 0.0, and `fit_model` on `DA+ERM+IV(Z)` raises. Catches: G stacked in
         the Z mode (width 2), the Z variant built from `da_iv_common` (the T-side
         term in its bound), the intersection ignoring `instrument`. Misses: a wrong
         `gamma_z` compensated by a wrong `epsilon_iv_z`, which nothing produces.
@@ -162,9 +163,9 @@ SPELLED = (
     "PI&DA+PI+IV(Z)",
     "PI&DA+PI+IV(T,Z)",
     "PI&DA+PI+IV(T)",
-    "DA+IV(Z)",
-    "DA+IV(T,Z)",
-    "DA+IV(T)",
+    "DA+ERM+IV(Z)",
+    "DA+ERM+IV(T,Z)",
+    "DA+ERM+IV(T)",
 )
 LEGAL = {
     "DA+PI+IV(Z)": ("DA+PI+IV", "Z"),
@@ -175,8 +176,8 @@ LEGAL = {
     "DA+PI+IV( T )": ("DA+PI+IV", "T"),
     "PI&DA+PI+IV(Z)": ("PI&DA+PI+IV", "Z"),
     "PI&DA+PI+IV(T,Z)": ("PI&DA+PI+IV", "T,Z"),
-    "DA+IV(Z)": ("DA+IV", "Z"),
-    "DA+IV(T,Z)": ("DA+IV", "T,Z"),
+    "DA+ERM+IV(Z)": ("DA+ERM+IV", "Z"),
+    "DA+ERM+IV(T,Z)": ("DA+ERM+IV", "T,Z"),
 }
 REJECTED = (
     "PI+IV(Z)",
@@ -199,9 +200,9 @@ MODE_NAMES = (
     "DA+PI+IV(Z)",
     "PI&DA+PI+IV",
     "PI&DA+PI+IV(Z)",
-    "DA+IV",
-    "DA+IV(T,Z)",
-    "DA+IV(Z)",
+    "DA+ERM+IV",
+    "DA+ERM+IV(T,Z)",
+    "DA+ERM+IV(Z)",
 )
 GAMMA = 0.25
 TOGGLES = dict(recalibrate=True, clipy=False, mean_match=True, n_jobs=1)
@@ -227,6 +228,50 @@ def captured():
         yield lines
     finally:
         logger.remove(handle)
+
+
+def moment_optimum(tag, h, X, y, Z):
+    """The three assertions that characterise a moment-constrained ERM fit.
+
+    (a) is bookkeeping: 2SLS zeroes the same moment when the reduced form has full
+    rank, so it passes for both estimators. (b) and (c) are the leg: they each fail
+    against a 2SLS fit on an UNDER-identified instrument, where the moment alone
+    leaves a whole affine set and only one point of it is the ERM optimum.
+    """
+    mu, off = X.mean(axis=0), float(np.mean(y))
+    Xc, yc = X - mu, np.asarray(y, dtype=float) - off
+    Zc = np.asarray(Z, dtype=float).reshape(len(X), -1)
+    Zc = Zc - Zc.mean(axis=0)
+    residual = yc - Xc @ h
+
+    moment = float(np.linalg.norm(Zc.T @ residual)) / (np.linalg.norm(Zc, "fro") * np.linalg.norm(yc))
+    check(f"{tag} zeroes the demeaned moment to 1e-9 relative", moment < 1e-9, f"{moment:.2e}")
+
+    # ker(A) with A the moment operator on a rank-revealing basis of Zc: every step
+    # along it stays feasible, so the fit is the optimum only if none of them beats it
+    left, singular, _ = np.linalg.svd(Zc, full_matrices=False)
+    basis = left[:, singular > max(float(singular[0]), 1.0) * 1e-12]
+    A = basis.T @ Xc
+    kernel = np.linalg.svd(A)[2][np.linalg.matrix_rank(A) :].T
+    objective = float(np.linalg.norm(residual))
+    rng = np.random.default_rng(0)
+    worst = 1.0
+    for _ in range(200):
+        step = kernel @ rng.normal(size=kernel.shape[1])
+        step /= np.linalg.norm(step)
+        for t in (1e-3 * np.linalg.norm(h), -1e-3 * np.linalg.norm(h)):
+            worst = min(worst, float(np.linalg.norm(yc - Xc @ (h + t * step))) / objective)
+    check(f"{tag} and no feasible step beats it", worst >= 1.0 - 1e-9, f"{worst:.9f}")
+
+    # 2SLS's own normal equations put its point INSIDE the same feasible set here,
+    # so a strict inequality is exactly the claim that ERM picks better within it
+    by_hand = TwoStageLeastSquaresIV(fit_intercept=True).fit(X=X, y=y, Z=Z)
+    other = float(np.linalg.norm(yc - Xc @ by_hand._W))
+    check(
+        f"{tag} and beats a fresh 2SLS on the ERM objective",
+        objective <= other * (1 - 1e-6),
+        f"{objective:.4f} vs {other:.4f}",
+    )
 
 
 def base_block(name):
@@ -443,11 +488,11 @@ def leg_i():
     with_z = dict(iv=["tax_s"])
     stored = resolve_dataset_block(
         "cigarettes",
-        {**base_block("cigarettes"), **with_z, "methods": ["PI", "DA+PI+IV", "DA+PI+IV( Z )", "DA+IV(T, Z)"]},
+        {**base_block("cigarettes"), **with_z, "methods": ["PI", "DA+PI+IV", "DA+PI+IV( Z )", "DA+ERM+IV(T, Z)"]},
     )["methods"]
     check(
         "(i) the block stores bare, base(Z) and base(T,Z)",
-        stored == ["PI", "DA+PI+IV", "DA+PI+IV(Z)", "DA+IV(T,Z)"],
+        stored == ["PI", "DA+PI+IV", "DA+PI+IV(Z)", "DA+ERM+IV(T,Z)"],
         f"{stored}",
     )
     message = rejection("cigarettes", methods=["DA+PI+IV", "DA+PI+IV(T,Z)"], **with_z) or ""
@@ -467,10 +512,10 @@ def leg_i():
     )
     message = rejection("cigarettes", methods=["PI+IV(Z)"], **with_z) or ""
     check("(i) PI+IV(Z) raises naming the method", "'PI+IV(Z)'" in message, message or "no error")
-    message = rejection("cigarettes", methods=["DA+IV(Z)"], iv=[]) or ""
+    message = rejection("cigarettes", methods=["DA+ERM+IV(Z)"], iv=[]) or ""
     check(
-        "(i) DA+IV(Z) under iv: [] raises naming the method and iv",
-        "'DA+IV(Z)'" in message and "iv = " in message,
+        "(i) DA+ERM+IV(Z) under iv: [] raises naming the method and iv",
+        "'DA+ERM+IV(Z)'" in message and "iv = " in message,
         message,
     )
     check("(i) DA+PI+IV(Z) under iv: [] resolves", rejection("cigarettes", methods=["DA+PI+IV(Z)"], iv=[]) is None)
@@ -499,14 +544,14 @@ def leg_i():
             TEX_MAPPER[tz] == TEX_MAPPER[base] and COLOR_MAP[tz] == COLOR_MAP[base] and ALPHA_MAP[tz] == ALPHA_MAP[base]
         )
         check(f"(i) {tz} copies {base}'s display entries", same)
-        # a real Z on the DA family: the family's hue (DA+PI's, PI&DA+PI's, DA+IV's own)
-        family = {"DA+PI+IV": "DA+PI", "PI&DA+PI+IV": "PI&DA+PI"}.get(base, base)
+        # a real Z on the DA family: the family's hue, DA+PI's, PI&DA+PI's, DA+ERM's
+        family = {"DA+PI+IV": "DA+PI", "PI&DA+PI+IV": "PI&DA+PI", "DA+ERM+IV": "DA+ERM"}[base]
         check(
             f"(i) {z} shares {family}'s hue and differs from {base} in TeX",
             COLOR_MAP[z] == COLOR_MAP[family] and TEX_MAPPER[z] != TEX_MAPPER[base],
         )
-    check("(i) DA+IV(Z) is a point estimate", "DA+IV(Z)" in POINT_ESTIMATES)
-    order = ["PI&DA+PI+IV(Z)", "PI", "DA+PI+IV(T,Z)", "DA+PI+IV", "DA+IV(Z)", "ATE"]
+    check("(i) DA+ERM+IV(Z) is a point estimate", "DA+ERM+IV(Z)" in POINT_ESTIMATES)
+    order = ["PI&DA+PI+IV(Z)", "PI", "DA+PI+IV(T,Z)", "DA+PI+IV", "DA+ERM+IV(Z)", "ATE"]
     built = MethodRegistry.build_methods(
         order, gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=2**-8, **TOGGLES
     )
@@ -572,13 +617,15 @@ def leg_ii(seed):
         z_mode = np.asarray(models[f"{base}(Z)"].predict(queries, gamma=GAMMA), dtype=float)
         gap = float(np.nanmax(np.abs(z_mode - bare)))
         check(f"(ii) {base}(Z) predicts differently from {base}", gap > 1e-6, f"{gap:.2e}")
-    gap = float(np.abs(models["DA+IV(T,Z)"]._W - models["DA+IV"]._W).max())
-    check("(ii) DA+IV(T,Z) coefficients equal DA+IV's to 1e-12", gap < 1e-12, f"{gap:.2e}")
-    by_hand = TwoStageLeastSquaresIV(fit_intercept=True).fit(X=GX, y=y, Z=Z)
-    gap = float(np.abs(models["DA+IV(Z)"]._W - by_hand._W).max())
-    check("(ii) DA+IV(Z) coefficients equal a fresh 2SLS on (GX, y, Z) to 1e-12", gap < 1e-12, f"{gap:.2e}")
-    gap = float(np.abs(models["DA+IV(Z)"]._W - models["DA+IV"]._W).max())
-    check("(ii) DA+IV(Z) differs from DA+IV", gap > 1e-6, f"{gap:.2e}")
+    gap = float(np.abs(models["DA+ERM+IV(T,Z)"]._W - models["DA+ERM+IV"]._W).max())
+    check("(ii) DA+ERM+IV(T,Z) coefficients equal DA+ERM+IV's to 1e-12", gap < 1e-12, f"{gap:.2e}")
+    # this fixture is UNDER-identified (Z is one column against d_h = 4), so the
+    # point is not pinned by the moment alone and an equality with 2SLS is the
+    # wrong assertion: what characterises the estimator is that it is the ERM
+    # optimum WITHIN the moment set, which 2SLS is not
+    moment_optimum("(ii) DA+ERM+IV(Z)", models["DA+ERM+IV(Z)"]._W, GX, y, Z)
+    gap = float(np.abs(models["DA+ERM+IV(Z)"]._W - models["DA+ERM+IV"]._W).max())
+    check("(ii) DA+ERM+IV(Z) differs from DA+ERM+IV", gap > 1e-6, f"{gap:.2e}")
 
     empty = np.zeros((len(X), 0))
     reduced = fitted(("DA+PI", "DA+PI+IV(Z)", "PI&DA+PI", "PI&DA+PI+IV(Z)"), X, y, GX, G, da, empty, rho)
@@ -588,12 +635,14 @@ def leg_ii(seed):
         b = np.asarray(reduced[f"{base}+IV(Z)"].predict(queries, gamma=GAMMA), dtype=float)
         gap = float(np.nanmax(np.abs(a - b)))
         check(f"(ii) {base}+IV(Z) under an empty Z is {base} to exactly 0.0", gap == 0.0, f"{gap:.2e}")
-    builders = MethodRegistry.build_methods(["DA+IV(Z)"], gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, **TOGGLES)
+    builders = MethodRegistry.build_methods(
+        ["DA+ERM+IV(Z)"], gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, **TOGGLES
+    )
     try:
-        fit_model(model=builders["DA+IV(Z)"](), method_name="DA+IV(Z)", X=X, y=y, GX=GX, G=G, Z=empty)
-        check("(ii) fit_model on DA+IV(Z) with an empty Z raises", False, "fitted")
+        fit_model(model=builders["DA+ERM+IV(Z)"](), method_name="DA+ERM+IV(Z)", X=X, y=y, GX=GX, G=G, Z=empty)
+        check("(ii) fit_model on DA+ERM+IV(Z) with an empty Z raises", False, "fitted")
     except ValueError as error:
-        check("(ii) fit_model on DA+IV(Z) with an empty Z raises", "instrument" in str(error), str(error))
+        check("(ii) fit_model on DA+ERM+IV(Z) with an empty Z raises", "instrument" in str(error), str(error))
 
 
 def leg_iii():

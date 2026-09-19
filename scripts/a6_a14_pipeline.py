@@ -351,10 +351,11 @@ def a11_config_strictness():
     # the do-mnist backend must reject a method it does not define, not drop it
     from src.experiments.configs import MethodRegistry
 
-    # `DA+IV` is 2SLS -- one of the two names the backend genuinely does not define.
+    # `DA+ERM+IV` is the moment-constrained point estimate -- one of the two names
+    # the backend genuinely does not define.
     try:
         MethodRegistry.build_methods(
-            ["PI", "DA+IV"], gamma=0.1, epsilon=0.05, backend="partial_r2_net", outcome_models={"X": None}
+            ["PI", "DA+ERM+IV"], gamma=0.1, epsilon=0.05, backend="partial_r2_net", outcome_models={"X": None}
         )
         check("A11 partial_r2_net rejects an undefined method", False, "filtered silently")
     except ValueError:

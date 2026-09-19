@@ -47,12 +47,15 @@ ERM = r"\operatorname{erm}"
 IV = r"\textnormal{\i}\!\operatorname{v}"
 PI = r"\operatorname{p}\!\textnormal{\i}"
 INV = r"\textnormal{\i}\!\operatorname{nv}"
+# erm is a wide box and its accent needs the kerning; Pi does not. Shared by
+# DA+ERM and by both DA-side point estimates, so their tildes sit alike
+DA_ERM = rf"\mkern7mu\widetilde{{\mkern-7mu{{{ERM}}}\mkern-7mu}}\mkern7mu"
 
 # the DA+ methods ending in +IV take an instrument mode: bare or `(T,Z)` is one
 # constraint per instrument, the DA translation amount T and the configured Z,
 # each at its own radius (Asm. 3, SS2.6); `(Z)` the configured Z alone, `(T)` the
 # translation amount alone
-IV_MODE_METHODS: tuple[str, ...] = ("DA+IV", "DA+PI+IV", "PI&DA+PI+IV")
+IV_MODE_METHODS: tuple[str, ...] = ("DA+ERM+IV", "DA+PI+IV", "PI&DA+PI+IV")
 IV_MODES: tuple[str, ...] = ("T,Z", "Z", "T")
 # `base(mode)`: no whitespace outside the parentheses, any inside them
 _METHOD_PATTERN = re.compile(r"^(?P<base>[^()\s]+)(?:\(\s*(?P<mode>T\s*,\s*Z|Z|T)\s*\))?$")
@@ -94,10 +97,11 @@ TEX_MAPPER: dict[str, str] = {
     "ATE": r"$\operatorname{ate}$",
     # estimators
     "ERM": rf"${ERM}$",
-    "DA+ERM": rf"$\mkern7mu\widetilde{{\mkern-7mu{{{ERM}}}\mkern-7mu}}\mkern7mu$",
-    # instrumental variable
-    "IV": rf"${IV}$",
-    "DA+IV": rf"$\widetilde{{{IV}}}$",
+    "DA+ERM": rf"${DA_ERM}$",
+    # instrumental variable. The tilde on the iv is the T-as-IV distinction, as on
+    # the interval side: ERM+IV and DA+ERM+IV(Z) read the observed Z alone
+    "ERM+IV": rf"${ERM}+{IV}$",
+    "DA+ERM+IV": rf"${DA_ERM}+\widetilde{{{IV}}}$",
     "PI+IV": rf"${PI}+{IV}$",
     "PI+INV+IV": rf"${PI}+{INV}+{IV}$",
     # sensitivity models
@@ -119,8 +123,8 @@ COLOR_MAP: dict[str, int] = {
     "ATE": 3,
     "ERM": 0,
     "DA+ERM": 3,
-    "IV": 2,  # the point-estimate pair with DA+IV
-    "DA+IV": 2,
+    "ERM+IV": 0,  # the blue family, ERM plus the observed Z
+    "DA+ERM+IV": 2,
     "PI+INV": 7,
     "PI": 0,
     "PI+IV": 0,
@@ -137,8 +141,8 @@ ALPHA_MAP: dict[str, float] = {
     "ATE": 1.0,
     "ERM": 1.0,
     "DA+ERM": 1.0,
-    "IV": 1.0,
-    "DA+IV": 1.0,
+    "ERM+IV": 1.0,
+    "DA+ERM+IV": 1.0,
     # Partial identification methods (transparent)
     "PI+INV": 0.8,
     "PI": 0.2,
@@ -161,18 +165,20 @@ TEX_MAPPER.update(
     {
         "DA+PI+IV(Z)": rf"$\widetilde{{{PI}}}+{IV}$",
         "PI&DA+PI+IV(Z)": rf"${PI}\cap(\widetilde{{{PI}}}+{IV})$",
-        "DA+IV(Z)": rf"$\widetilde{{{IV}}}_{{Z}}$",
+        "DA+ERM+IV(Z)": rf"${DA_ERM}+{IV}$",
     }
 )
 # the (Z) spellings are the DA family plus an observed Z: DA+PI's hue and alpha,
 # told apart by the line style; the (T) spellings ARE the base whenever the
 # instrument set is empty, same label, same hue, same line
-for _z, _family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI")):
+for _z, _family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI"), ("DA+ERM+IV(Z)", "DA+ERM")):
     COLOR_MAP[_z], ALPHA_MAP[_z] = COLOR_MAP[_family], ALPHA_MAP[_family]
 for _base in IV_MODE_METHODS:
     TEX_MAPPER[f"{_base}(T)"] = TEX_MAPPER[_base]
-# a real Z on top of a family: the family's hue, this line style
-REAL_Z_METHODS: frozenset[str] = frozenset({"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)", "DA+IV(Z)"})
+# a real Z on top of a family: the family's hue, this line style. Point
+# estimates stay out of it: `_line_style` reads POINT_ESTIMATES first, so an
+# entry here would be inert and would break a66's conjunction
+REAL_Z_METHODS: frozenset[str] = frozenset({"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)"})
 # the coefficient labels of the cigarette price elasticities, paper notation
 # h_*(x) = theta_*' x on the four log treatments
 COEFFICIENT_LABELS: dict[str, str] = {
@@ -181,7 +187,16 @@ COEFFICIENT_LABELS: dict[str, str] = {
 }
 
 # Visual style configuration
-POINT_ESTIMATES: list[str] = ["ATE", "ERM", "DA+ERM", "DA+IV", "DA+IV(Z)", "DA+IV(T)", "DA+IV(T,Z)", "IV"]
+POINT_ESTIMATES: list[str] = [
+    "ATE",
+    "ERM",
+    "DA+ERM",
+    "ERM+IV",
+    "DA+ERM+IV",
+    "DA+ERM+IV(Z)",
+    "DA+ERM+IV(T)",
+    "DA+ERM+IV(T,Z)",
+]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 # REAL_Z_METHODS on the lines and band edges: the family's hue, this dash-dot pattern
 INSTRUMENT_Z_STYLE: tuple[int, tuple[int, int, int, int]] = (0, (3, 1, 1, 1))

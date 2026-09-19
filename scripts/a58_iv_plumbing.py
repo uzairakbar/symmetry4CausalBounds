@@ -129,7 +129,19 @@ BASE_COMMIT = "2f07683"
 N, K, M = 2048, 6, 2
 TEST_FRACTION = 0.02
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
-NAMES = ["PI", "PI+INV", "PI+IV", "PI+INV+IV", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV", "ERM", "IV", "DA+IV"]
+NAMES = [
+    "PI",
+    "PI+INV",
+    "PI+IV",
+    "PI+INV+IV",
+    "DA+PI",
+    "DA+PI+IV",
+    "PI&DA+PI",
+    "PI&DA+PI+IV",
+    "ERM",
+    "ERM+IV",
+    "DA+ERM+IV",
+]
 IV_NAMES = ("PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
 NON_DA_IV = ("PI+IV", "PI+INV+IV")
 INTERSECTION = "PI&DA+PI+IV"
@@ -360,16 +372,16 @@ def recorded(runner, data):
 
 def expected_instrument(name, Z, Z_solo, G):
     """The instrument BLOCKS each method must be handed (SS2.6): the PI classes take
-    `T` and `Z` separately, 2SLS takes the one stacked matrix. `{}` means no
-    instrument at all."""
+    `T` and `Z` separately, the point estimate takes the one stacked matrix. `{}`
+    means no instrument at all."""
     T = np.reshape(G, (len(G), -1))
-    if name in ("PI+IV", "IV"):
+    if name in ("PI+IV", "ERM+IV"):
         return {"Z": Z_solo}
     if name in ("PI+INV+IV", "PI&DA+PI+IV"):
         return {"Z": Z}
     if name == "DA+PI+IV":
         return {"Z": Z, "T": T}
-    if name == "DA+IV":
+    if name == "DA+ERM+IV":
         return {"Z": np.column_stack([T, Z])}
     return {}
 
@@ -494,7 +506,7 @@ def leg_i(seed):
             ok,
             f"statuses [OK, INFEASIBLE, FAILURE] {statuses(models[name])}",
         )
-    check("(i) IV point estimate is finite", np.all(np.isfinite(models["IV"].predict(data.X_test))))
+    check("(i) ERM+IV point estimate is finite", np.all(np.isfinite(models["ERM+IV"].predict(data.X_test))))
     check("(i) the gamma sweep runs end to end with the instrument", finite_widths(runner.run("gamma")[1]))
 
     # n-sweep: Z sliced with X

@@ -90,6 +90,91 @@ class TwoStageLeastSquaresIV(pointEstimator):
         return (X - self._mu) @ self._W + self._offset
 
 
+class MomentConstrainedLeastSquares(pointEstimator):
+    """ERM subject to the IV moment pinned at its attainable floor: (P2) at gamma_z = 0.
+
+    The feasible set is the affine set `A h == P b` with `A = Q' Xc`, `b = Q' yc`
+    and `Q` a rank-revealing basis of the (centred) instrument. It is exactly the
+    ball `|| b - A h || <= m*` at the attainable floor `m* = ||(I - P) b||`, needs
+    no tolerance constant, and always contains `pinv(A) b`.
+    """
+
+    def __init__(self, fit_intercept: bool = False, backend: tuple[str, dict] | None = None, **kwargs):
+        self.fit_intercept = fit_intercept
+        self.backend = backend  # the conic stage honours it
+        super().__init__(**kwargs)
+
+    def _fit(self, X, y, Z, **kwargs):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+        Z = np.asarray(Z, dtype=float).reshape(len(X), -1)
+
+        # both the design and the instrument centre together, so the intercept is
+        # eliminated once and restored at predict time (LeastSquaresClosedForm's
+        # convention). The constraint is then the DEMEANED moment Zc'(yc - Xc h),
+        # which is the right object once an intercept is free: the raw moment's
+        # constant component is absorbed by the intercept. (P2)'s mean-match row
+        # then holds identically under `fit_intercept`, sum_i [(x_i - mu)'h + ybar]
+        # = n ybar, for any h; without one it does not, and is not meant to
+        self._mu = X.mean(axis=0) if self.fit_intercept else np.zeros(X.shape[1])
+        offset = float(np.mean(y)) if self.fit_intercept else 0.0
+        Xc, yc = X - self._mu, y - offset
+        Zc = Z - Z.mean(axis=0) if self.fit_intercept else Z
+
+        # an orthonormal basis of the SPAN of the instrument, truncated at the same
+        # rank cut the DA-side allowance uses: a plain QR of a rank deficient block
+        # completes the basis arbitrarily, and a hard equality would then force the
+        # moment to zero along directions the instrument does not span. A constant
+        # instrument column centres to exactly zero and is dropped here, which is
+        # why the empty branch below has to come after the cut, not before it
+        left, singular, _ = np.linalg.svd(Zc, full_matrices=False)
+        keep = singular > max(float(singular[0]), 1.0) * 1e-12 if singular.size else singular.astype(bool)
+        Q = left[:, keep]
+
+        h_erm = np.linalg.pinv(Xc) @ yc
+        if Q.shape[1] == 0:
+            # no instrument: the constraint is vacuous and this IS plain ERM.
+            # Computed into self, never delegated: every caller keeps the object it
+            # built and discards the return, so handing back another estimator would
+            # leave _W / _mu / _offset unset and predict would raise
+            self._W = h_erm
+            self._offset = offset
+            return self
+
+        A, b = Q.T @ Xc, Q.T @ yc
+        rhs = A @ (np.linalg.pinv(A) @ b)  # P b, the projection onto col(A)
+        m_star = float(np.linalg.norm(b - rhs))
+
+        # the variable takes h_erm's shape, so an (n, 1) y keeps an (n, 1)
+        # prediction: a bare (n,) one would be read as an interval downstream
+        h = cp.Variable(h_erm.shape)
+        prob = cp.Problem(cp.Minimize(cp.norm(yc - Xc @ h)), [A @ h == rhs])
+        _solve_conic(prob, self.backend)
+        self._W = h.value
+        self._offset = offset
+
+        # gamma_min: the smallest ERM budget of (P2) whose ellipsoid reaches this
+        # set, || Xc (h - h_erm) ||^2 / (n sigma-hat^2) at the returned point
+        sigma_sq = float(np.mean((yc - Xc @ h_erm) ** 2))
+        gamma_min = float(np.sum((Xc @ (self._W - h_erm)) ** 2) / (len(Xc) * sigma_sq)) if sigma_sq > 0 else 0.0
+        logger.info(
+            f"ERM+IV: d_z={Zc.shape[1]}, d_h={Xc.shape[1]}, moment floor m*={m_star:.3e}, gamma_min={gamma_min:.6g}"
+        )
+        # a floor above the numerical zero means the exact-IV set is empty: the
+        # instrument over-determines the moment system and this is a RELAXATION,
+        # not (P2)'s gamma_z = 0 row. The test is relative; an under- or exactly
+        # identified fit leaves m*/||b|| at 1e-16 and an over-identified one at 1e-2
+        if m_star > 1e-9 * max(float(np.linalg.norm(b)), 1.0):
+            logger.warning(
+                f"ERM+IV: moment floor m*={m_star:.3e} with d_z={Zc.shape[1]}, d_h={Xc.shape[1]}: the "
+                "exact-IV set is empty and the fit solves the relaxation at that floor."
+            )
+        return self
+
+    def _predict(self, X, **kwargs):
+        return (X - self._mu) @ self._W + self._offset
+
+
 class GradientDescentERM(pointEstimator):
     """Torch ERM for image treatments. Returns the conditional MEAN, not a label.
 
@@ -226,6 +311,8 @@ class GradientDescentERM(pointEstimator):
 
 
 class GeneralizedMomentMethodIV(pointEstimator):
+    """Unused. NOT the live Pi_Z implementation -- `iv_constraint_terms` is."""
+
     def __init__(self, backend: tuple[str, dict] | None = None, **kwargs):
         self.backend = backend
         super().__init__(**kwargs)

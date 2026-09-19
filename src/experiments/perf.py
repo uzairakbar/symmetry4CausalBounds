@@ -29,7 +29,7 @@ from loguru import logger
 
 from src.experiments.utils.constants import parse_method
 from src.experiments.utils.model_fitting import fit_model
-from src.methods.regression import LeastSquaresIterative, TwoStageLeastSquaresIV
+from src.methods.regression import LeastSquaresIterative, MomentConstrainedLeastSquares, TwoStageLeastSquaresIV
 from src.methods.sensitivity_models import BoundedSA, PartialR2, SolveStatus
 
 # the seed_var backends, in this order, filtered by what the venv has installed;
@@ -39,8 +39,8 @@ BACKENDS: tuple[tuple[str, dict[str, float | int]], ...] = (
     ("ECOS", {"abstol": 1e-8, "reltol": 1e-8, "feastol": 1e-8}),
     ("SCS", {"eps_abs": 1e-8, "eps_rel": 1e-8, "max_iters": 100_000}),
 )
-# the point estimators whose fit is itself a conic solve (2SLS's second stage)
-CONIC_FITS: tuple[str, ...] = ("IV", "DA+IV")
+# the point estimators whose fit is itself a conic solve (the moment-constrained ERM)
+CONIC_FITS: tuple[str, ...] = ("ERM+IV", "DA+ERM+IV")
 
 
 @dataclass
@@ -94,7 +94,7 @@ def set_backend(model, backend) -> None:
     """Pin one `(name, opts)` conic backend on a model and on its branches; None
     restores the CLARABEL-then-ECOS chain."""
     for part in (model, getattr(model, "baseline", None), getattr(model, "augmented", None)):
-        if isinstance(part, BoundedSA | LeastSquaresIterative | TwoStageLeastSquaresIV):
+        if isinstance(part, BoundedSA | LeastSquaresIterative | MomentConstrainedLeastSquares | TwoStageLeastSquaresIV):
             part.backend = backend
 
 
@@ -207,8 +207,8 @@ def solver_stability(lower, upper, status, width_pi):
 
 def seed_var(runner, data, x):
     """Every method's bounds along the grid under each installed backend, then D(eps).
-    The PI family is fit once (its fit is solver-free) and re-solved per backend; IV
-    and DA+IV are re-fitted per backend (their second stage is the conic solve);
+    The PI family is fit once (its fit is solver-free) and re-solved per backend;
+    ERM+IV and DA+ERM+IV are re-fitted per backend (their fit is the conic solve);
     ERM and DA+ERM are fit once and held fixed. Returns (terms, failures, statuses,
     backends)."""
     backends = installed_backends()

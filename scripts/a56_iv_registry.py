@@ -41,20 +41,21 @@ Legs:
         builds; that is (vi) and a57.
   (v)   every ALL_METHODS name and the nine stored mode spellings (`base(Z)`, `base(T)`,
         `base(T,Z)` on the DA+ IV methods) have a TEX_MAPPER, COLOR_MAP and
-        ALPHA_MAP entry, the new TeX strings compose from the building blocks, IV
-        and DA+IV(Z) are point estimates and PI+INV+IV takes the one unused hue.
+        ALPHA_MAP entry, the new TeX strings compose from the building blocks,
+        ERM+IV and DA+ERM+IV(Z) are point estimates and PI+INV+IV takes the one
+        unused hue.
         Catches: a name that would KeyError at plot time. Misses: how the figure
         looks.
   (vi)  every `+IV` builder fits with a 1-column Z without raising, reads the
-        instrument (`_has_iv`) and predicts finite bounds; `IV` requested under an
-        empty set is a config error naming both `IV` and `iv`, and an omitted
-        `methods` falls back to ALL_METHODS without `IV` unless there is an
+        instrument (`_has_iv`) and predicts finite bounds; `ERM+IV` requested under
+        an empty set is a config error naming both `ERM+IV` and `iv`, and an omitted
+        `methods` falls back to ALL_METHODS without `ERM+IV` unless there is an
         instrument set (a default is not a request); the four IV classes built
         with `gamma_z` 2^-8 carry it, and their bounds follow SS2.6 (the joint
         0.069877 on the non-DA classes at s = 1, the joint at its own s on a DA
         class, r_Z 0.0625 on the intersection's baseline branch). Catches: `PI+IV`
         built from `common` (no `epsilon_iv`, so the class raises on the first
-        real Z), a silent 2SLS on no instrument, a fallback that trips its own
+        real Z), a silent ERM on no instrument, a fallback that trips its own
         error, `gamma_z` not forwarded by the registry. Misses: the numbers the
         fits produce (a57).
 
@@ -96,6 +97,7 @@ from src.experiments.configs import (  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
     ALPHA_MAP,
     COLOR_MAP,
+    ERM,
     INV,
     IV,
     IV_MODE_METHODS,
@@ -110,9 +112,9 @@ from src.sem.cigarettes import CigaretteSEM, V, build_design  # noqa: E402
 PLAN_METHODS = (
     "ATE",
     "ERM",
+    "ERM+IV",
     "DA+ERM",
-    "IV",
-    "DA+IV",
+    "DA+ERM+IV",
     "PI+INV",
     "PI",
     "PI+IV",
@@ -135,6 +137,7 @@ EXPERIMENT_TYPES = ("query", "sweep", "perf")
 # and both perf metrics.
 RECIPES = (
     ("simulationFig5", "simulation", 4, "query"),
+    ("ivSimulationFig5", "simulation", 4, "query"),
     ("opticalDeviceFig6", "optical_device", None, "query"),
     ("cigarettesFig7", "cigarettes", CIGARETTE_IV, "query"),
     ("validityFig9", "simulation", 4, "sweep"),
@@ -146,13 +149,17 @@ RECIPES = (
     ("latencyFig15", "cigarettes", CIGARETTE_IV, "perf"),
     ("stabilityFig16", "optical_device", None, "perf"),
 )
-# SS6 retires the `IV` point estimate; until it lands, this block spells it `IV(Z)`,
-# which the grammar rejects. The one block leg (i) does not require to resolve. The
-# exemption expires by itself: leg (i) FAILS on an entry that has started resolving,
-# so SS6 cannot land and leave the constant behind.
-PENDING = (("ivSimulationFig5", "simulation"),)
+# the one shipped block that DOES list the observed-Z baseline: the ivSimulation
+# panel exists to draw it beside the two DA spellings. Every other block must not,
+# and this block must, so the check below runs both ways
+ERM_IV_BLOCKS = frozenset({("ivSimulationFig5", "simulation")})
+# blocks leg (i) does not require to resolve yet. Empty: `ivSimulationFig5` spelled
+# the retired `IV(Z)`, which the grammar rejected; it now spells `ERM+IV` and
+# resolves. Leg (i) FAILS on an entry here that has started resolving, so an
+# exemption cannot be left behind.
+PENDING: tuple[tuple[str, str], ...] = ()
 LEGAL_SETS = ([], ["tax_s"], ["tax_sn"], ["tax_s", "tax_sn"], ["tax_s", "y", "cpi"])
-IV_METHODS = ("IV", "DA+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
+IV_METHODS = ("ERM+IV", "DA+ERM+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
 GAMMA = 0.25
 FAIL = []
 
@@ -241,7 +248,7 @@ def leg_i():
                 try:
                     load_recipe(fname, dataset)
                 except Exception:  # noqa: BLE001 - the exemption is exactly this failure
-                    print(f"      report: {fname}.{dataset} not required to resolve yet (SS6 retires `IV`)")
+                    print(f"      report: {fname}.{dataset} not required to resolve yet")
                     continue
                 check(f"(i) {fname}.{dataset} resolves now: drop it from PENDING", False)
                 continue
@@ -271,7 +278,12 @@ def leg_i():
             check(f"(i) {fname}.{dataset} resolves", False, f"{type(error).__name__}: {error}")
             continue
         check(f"(i) {fname}.{dataset}: iv == {want_iv!r}", block.get("iv") == want_iv, repr(block.get("iv")))
-        check(f"(i) {fname}.{dataset}: the IV baseline is not listed", "IV" not in block["methods"])
+        want_erm_iv = (fname, dataset) in ERM_IV_BLOCKS
+        check(
+            f"(i) {fname}.{dataset}: lists the ERM+IV baseline: {want_erm_iv}",
+            ("ERM+IV" in block["methods"]) is want_erm_iv,
+            f"{block['methods']}",
+        )
         check(
             f"(i) {fname}.{dataset}: the plan is {want_plan} alone",
             plan_shape(plan) == (want_plan,),
@@ -404,7 +416,10 @@ def leg_iv():
         unfrozen_layers=1,
     )
     check("(iv) the net backend still builds exactly its nine", tuple(net) == NET_METHODS)
-    check("(iv) IV and PI+INV+IV are not net methods", not ({"IV", "PI+INV+IV"} & set(PARTIAL_R2_NET_METHODS)))
+    check(
+        "(iv) ERM+IV and PI+INV+IV are not net methods",
+        not ({"ERM+IV", "DA+ERM+IV", "PI+INV+IV"} & set(PARTIAL_R2_NET_METHODS)),
+    )
 
 
 def leg_v():
@@ -413,20 +428,26 @@ def leg_v():
     for name in ALL_METHODS + tuple(spelled):
         present = name in TEX_MAPPER and name in COLOR_MAP and name in ALPHA_MAP
         check(f"(v) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP", present)
-    check("(v) DA+IV(Z) is a point estimate", "DA+IV(Z)" in POINT_ESTIMATES)
-    check("(v) DA+IV(T) is a point estimate", "DA+IV(T)" in POINT_ESTIMATES)
-    check("(v) IV tex", TEX_MAPPER.get("IV") == rf"${IV}$", TEX_MAPPER.get("IV"))
+    check("(v) DA+ERM+IV(Z) is a point estimate", "DA+ERM+IV(Z)" in POINT_ESTIMATES)
+    check("(v) DA+ERM+IV(T) is a point estimate", "DA+ERM+IV(T)" in POINT_ESTIMATES)
+    check("(v) ERM+IV tex composes ERM and IV", TEX_MAPPER.get("ERM+IV") == rf"${ERM}+{IV}$", TEX_MAPPER.get("ERM+IV"))
     check("(v) PI+INV+IV tex composes PI, INV, IV", TEX_MAPPER.get("PI+INV+IV") == rf"${PI}+{INV}+{IV}$")
-    check("(v) IV shares DA+IV's hue 2", COLOR_MAP.get("IV") == COLOR_MAP.get("DA+IV") == 2)
+    check(
+        "(v) ERM+IV takes ERM's blue 0, DA+ERM+IV green 2",
+        COLOR_MAP.get("ERM+IV") == 0 and COLOR_MAP.get("DA+ERM+IV") == 2,
+    )
     hue = COLOR_MAP.get("PI+INV+IV")
     check(
         "(v) PI+INV+IV shares PI+INV's hue, PI+IV shares PI's",
         hue == COLOR_MAP["PI+INV"] and COLOR_MAP["PI+IV"] == COLOR_MAP["PI"],
         repr(hue),
     )
-    check("(v) alphas: IV solid, PI+INV+IV as PI+INV", ALPHA_MAP.get("IV") == 1.0 and ALPHA_MAP.get("PI+INV+IV") == 0.8)
-    point = "IV" in POINT_ESTIMATES and "PI+INV+IV" not in POINT_ESTIMATES
-    check("(v) IV is a point estimate, PI+INV+IV is not", point)
+    check(
+        "(v) alphas: ERM+IV solid, PI+INV+IV as PI+INV",
+        ALPHA_MAP.get("ERM+IV") == 1.0 and ALPHA_MAP.get("PI+INV+IV") == 0.8,
+    )
+    point = "ERM+IV" in POINT_ESTIMATES and "PI+INV+IV" not in POINT_ESTIMATES
+    check("(v) ERM+IV is a point estimate, PI+INV+IV is not", point)
 
 
 def leg_vi(seed):
@@ -452,8 +473,8 @@ def leg_vi(seed):
         mean_match=True,
     )
     calls = {
-        "IV": dict(X=X, y=y, Z=z),
-        "DA+IV": dict(X=GX, y=y, Z=z),
+        "ERM+IV": dict(X=X, y=y, Z=z),
+        "DA+ERM+IV": dict(X=GX, y=y, Z=z),
         "PI+IV": dict(X=X, y=y, Z=z),
         "PI+INV+IV": dict(X=X, y=y, GX=GX, Z=z),
         "DA+PI+IV": dict(X=GX, y=y, Z=z),
@@ -540,16 +561,19 @@ def leg_vi(seed):
     )
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))
     for name, extra in empty:
-        message = rejection(name, methods=["PI", "IV"], **extra) or ""
-        label = f"(vi) {name} iv={extra.get('iv', 'absent')!r} with IV in methods raises, naming both"
-        check(label, "'IV'" in message and "iv = " in message, message or "no error")
-    ok = rejection("cigarettes", methods=["PI", "IV"], iv=["tax_s"]) is None
-    ok = ok and rejection("simulation", methods=["PI", "IV"], iv=4) is None
-    check("(vi) IV with a real instrument set resolves", ok)
-    # an omitted `methods` is a default, not a request: it carries IV only with an instrument set
+        message = rejection(name, methods=["PI", "ERM+IV"], **extra) or ""
+        label = f"(vi) {name} iv={extra.get('iv', 'absent')!r} with ERM+IV in methods raises, naming both"
+        check(label, "'ERM+IV'" in message and "iv = " in message, message or "no error")
+    ok = rejection("cigarettes", methods=["PI", "ERM+IV"], iv=["tax_s"]) is None
+    ok = ok and rejection("simulation", methods=["PI", "ERM+IV"], iv=4) is None
+    check("(vi) ERM+IV with a real instrument set resolves", ok)
+    # an omitted `methods` is a default, not a request: it carries ERM+IV only with an instrument set
     without = resolve_dataset_block("cigarettes", base_block("cigarettes"))["methods"]
     with_iv = resolve_dataset_block("cigarettes", {**base_block("cigarettes"), "iv": ["tax_s"]})["methods"]
-    check("(vi) omitted methods, no instrument: ALL_METHODS minus IV", without == [m for m in ALL_METHODS if m != "IV"])
+    check(
+        "(vi) omitted methods, no instrument: ALL_METHODS minus ERM+IV",
+        without == [m for m in ALL_METHODS if m != "ERM+IV"],
+    )
     check("(vi) omitted methods, an instrument set: all of ALL_METHODS", with_iv == list(ALL_METHODS))
 
 

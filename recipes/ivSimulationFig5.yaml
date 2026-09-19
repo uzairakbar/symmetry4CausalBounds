@@ -15,9 +15,9 @@ simulation:
     sweep_samples: 32
     methods:
         - ATE
-        - IV(Z)
-        - DA+IV(Z)
-        - DA+IV(T,Z)
+        - ERM+IV
+        - DA+ERM+IV(Z)
+        - DA+ERM+IV(T,Z)
         - PI+INV+IV
         - PI+IV
         - DA+PI+IV(Z)

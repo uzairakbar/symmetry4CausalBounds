@@ -27,7 +27,7 @@ from src.methods.regression import (
     LeastSquaresClosedForm as ERM,
 )
 from src.methods.regression import (
-    TwoStageLeastSquaresIV as IV,
+    MomentConstrainedLeastSquares as ERMIV,
 )
 from src.methods.sensitivity_models import (
     InstrumentalVariablePartialR2 as IVPartialR2,
@@ -666,9 +666,9 @@ validate_plot_keys("ANNOTATE_SWEEP_PLOT", ANNOTATE_SWEEP_PLOT, {"xlabel", "xscal
 ALL_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
+    "ERM+IV",
     "DA+ERM",
-    "IV",
-    "DA+IV",
+    "DA+ERM+IV",
     "PI+INV",
     "PI",
     "PI+IV",
@@ -681,7 +681,7 @@ ALL_METHODS: tuple[str, ...] = (
     "PI&DA+PI+IV",
 )
 
-# a strict subset of ALL_METHODS: no 2SLS and no baseline-IV. It DOES define the
+# a strict subset of ALL_METHODS: no point-estimate IV of either kind. It DOES define the
 # intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
 # membership fact, not a claim that the two balls share a parameterisation.
 PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
@@ -892,11 +892,14 @@ class MethodRegistry:
             # under `mean_match` the plotted point estimators carry one too
             "ERM": lambda: ERM(fit_intercept=mean_match),
             "DA+ERM": lambda: ERM(fit_intercept=mean_match),
-            # the point estimates fit with the observed Z, DA+IV with the stacked
-            # Z-tilde; `IV` under an empty set is a config error
-            # (`resolve_dataset_block`)
-            "IV": lambda: IV(fit_intercept=mean_match),
-            "DA+IV": lambda: IV(fit_intercept=mean_match),
+            # ERM with the IV moment pinned at its floor: `ERM+IV` on the observed
+            # Z, `DA+ERM+IV` on the stacked Z-tilde. One stacked block is right
+            # here and does NOT re-pool the two budgets of SS2.6: at gamma_z = 0
+            # there are no radii, and Pi_[T,Z] r = 0 iff Pi_T r = 0 and Pi_Z r = 0,
+            # so the stacked equality IS the pair of separate equalities.
+            # `ERM+IV` under an empty set is a config error (`resolve_dataset_block`)
+            "ERM+IV": lambda: ERMIV(fit_intercept=mean_match),
+            "DA+ERM+IV": lambda: ERMIV(fit_intercept=mean_match),
             "PI+INV": lambda: InvPartialR2(gamma=gamma, pad=False, **common),
             "PI": lambda: PartialR2(gamma=gamma, pad=False, **common),
             # the baseline IV balls carry the IV budget: with an empty instrument
@@ -919,7 +922,7 @@ class MethodRegistry:
         # the loop variable into the lambda, which is called with no arguments
         mode_builders = {
             mode: {
-                "DA+IV": all_builders["DA+IV"],
+                "DA+ERM+IV": all_builders["DA+ERM+IV"],
                 "DA+PI+IV": all_builders["DA+PI+IV"],
                 "PI&DA+PI+IV": (lambda mode=mode: IntIVPartialR2(gamma=gamma, pad=pad, instrument=mode, **iv_common)),
             }
@@ -1109,10 +1112,11 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         dim = block["treatment_dim"]
         if isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0:
             raise ValueError(f"config.{name}.treatment_dim must be a positive int; got {dim!r}.")
-    # the instrument set decides whether the 2SLS baseline can run at all, so the
-    # fallback method list omits `IV` without one; listing it by hand is the error below
+    # the instrument set decides whether the observed-Z point estimate can run at
+    # all, so the fallback method list omits `ERM+IV` without one; listing it by
+    # hand is the error below
     has_instruments = _check_instruments(name, block)
-    block.setdefault("methods", [method for method in ALL_METHODS if method != "IV" or has_instruments])
+    block.setdefault("methods", [method for method in ALL_METHODS if method != "ERM+IV" or has_instruments])
     # every entry parsed (`parse_method`): a stale method name (e.g. an old
     # underscore spelling) or a malformed mode suffix must be a config error
     # here, not silently filtered out of the run by the registry. Stored as
@@ -1138,11 +1142,11 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         methods.append(spelled_method(entry))
     block["methods"] = methods
 
-    # 2SLS with no instrument returns W = 0 and predicts ybar at every query, a
-    # flat line labelled as a point estimate: loud and up front, never silent.
-    # PI+IV and PI+INV+IV are fine under an empty set: they reduce to PI and
-    # PI+INV, as DA+PI+IV(Z) reduces to DA+PI.
-    for two_stage in ("IV", "DA+IV(Z)"):
+    # an observed-Z point estimate with no instrument has an inert constraint and
+    # is plain ERM under another name: loud and up front, never silent. PI+IV and
+    # PI+INV+IV are fine under an empty set: they reduce to PI and PI+INV, as
+    # DA+PI+IV(Z) reduces to DA+PI.
+    for two_stage in ("ERM+IV", "DA+ERM+IV(Z)"):
         if two_stage in block["methods"] and not has_instruments:
             raise ValueError(
                 f"config.{name}.methods lists {two_stage!r} but the instrument set is empty "

@@ -17,7 +17,7 @@ simulation:
         - ATE
         - ERM
         - DA+ERM
-        - DA+IV(T)
+        - DA+ERM+IV(T)
         - PI+INV
         - PI
         - DA+PI

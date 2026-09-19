@@ -25,10 +25,12 @@ def instrument_columns(Z, n: int) -> np.ndarray:
 
 
 def joint_instrument(G, Z) -> np.ndarray:
-    """Z-tilde = (T, Z) of Asm. 3 as ONE matrix, for the 2SLS point estimators:
-    the translation amounts G first, then the observed instrument. With Z (n, 0)
-    this is exactly G. The PI classes do NOT use this -- they take the two blocks
-    as separate constraints with separate budgets (SS2.6)."""
+    """Z-tilde = (T, Z) of Asm. 3 as ONE matrix, for the moment-constrained point
+    estimators: the translation amounts G first, then the observed instrument. With
+    Z (n, 0) this is exactly G. The PI classes do NOT use this -- they take the two
+    blocks as separate constraints with separate budgets (SS2.6). Stacking is free
+    here and only here: the moment is pinned at its floor, so there is no radius to
+    pool, and the stacked equality IS the pair of per-block equalities."""
     G = np.asarray(G).reshape(len(G), -1)
     return np.column_stack([G, instrument_columns(Z, len(G))])
 
@@ -102,8 +104,9 @@ def fit_model(
     Z_solo = Z if X_base is None else instrument_columns(Z_base, len(X_base))
     # the DA+ methods' instrument blocks by mode (SS4.3): `(T,Z)` both, `(Z)` the
     # observed instrument alone, `(T)` the translation amounts alone. The PI
-    # classes take them as SEPARATE constraints with separate budgets; 2SLS takes
-    # the one stacked matrix. Lazy: a non-DA method may be fitted without a G
+    # classes take them as SEPARATE constraints with separate budgets; the point
+    # estimate takes the one stacked matrix. Lazy: a non-DA method may be fitted
+    # without a G
     t_da = None if mode == "Z" else _translation(G, len(X), required=mode == "T")
     z_da = None if mode == "T" else Z
 
@@ -152,22 +155,25 @@ def fit_model(
         # DA+ERM uses augmented data
         model.fit(X=GX, y=y, **fit_kwargs)
 
-    elif base == "IV":
-        # 2SLS on the real instrument. With no instrument it would return W = 0 and
-        # predict ybar at every query (regression.py); the config rejects that
-        # upstream, and this stays loud in case a caller skips the config
+    elif base == "ERM+IV":
+        # the moment-constrained ERM on the real instrument. With no instrument the
+        # constraint is inert and it IS plain ERM; the config rejects that upstream,
+        # and this stays loud in case a caller skips the config
         if Z_solo.shape[1] == 0:
-            raise ValueError("IV needs an instrument; the instrument set is empty.")
+            raise ValueError("ERM+IV needs an instrument; the constraint is inert; use ERM if that is what you mean.")
         model.fit(X=X_solo, y=y_solo, Z=Z_solo, **fit_kwargs)
 
-    elif base == "DA+IV":
-        # 2SLS on the augmented data with ONE instrument matrix: Z-tilde = (T, Z),
-        # or whichever block the mode leaves. With none it would return W = 0 and
-        # predict ybar at every query, so it stays a hard error here
-        z_2sls = _stacked(t_da, z_da, len(X))
-        if z_2sls.shape[1] == 0:
-            raise ValueError("DA+IV needs an instrument; the instrument set is empty.")
-        model.fit(X=GX, y=y, Z=z_2sls, **fit_kwargs)
+    elif base == "DA+ERM+IV":
+        # the augmented data with ONE stacked instrument matrix: Z-tilde = (T, Z),
+        # or whichever block the mode leaves. Stacking does not pool two budgets
+        # here: the moment is pinned at its floor, there are no radii, and the
+        # stacked equality is exactly the pair of per-block equalities
+        z_stacked = _stacked(t_da, z_da, len(X))
+        if z_stacked.shape[1] == 0:
+            raise ValueError(
+                "DA+ERM+IV needs an instrument; the constraint is inert; use DA+ERM if that is what you mean."
+            )
+        model.fit(X=GX, y=y, Z=z_stacked, **fit_kwargs)
 
     else:
         # Fallback for any custom methods - pass everything
@@ -175,7 +181,7 @@ def fit_model(
 
 
 def _stacked(T, Z, n):
-    """One instrument matrix for 2SLS: the T block first, then Z (Asm. 3)."""
+    """One instrument matrix for the point estimate: the T block first, then Z (Asm. 3)."""
     return instrument_columns(Z, n) if T is None else joint_instrument(T, Z)
 
 
