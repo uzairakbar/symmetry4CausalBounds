@@ -54,9 +54,11 @@ non-empty, no tolerance constant. Legs:
          script's own basis copy and pass under that mutation, so they are labelled
          as such. Legs (i) and (ii) both PASS against a plain QR too, so without
          this leg the requirement ships unguarded.
-  (xi)   the legend key: six handles, five distinct (label, hue) entries, the two
-         green mode spellings pooled onto one. Catches a missing TEX_MAPPER entry,
-         which collapses the set to four or three.
+  (xi)   the legend key: six handles draw five rows -- erm, erm+iv, erm~, erm~+iv,
+         erm~+iv~ on hues 0, 0, 3, 3, 2, the two green mode spellings pooled onto one
+         and the five labels pairwise distinct. Catches the render fold not
+         happening (six rows) and a missing TEX_MAPPER entry, which collapses the set
+         to four or three.
 
 Usage:
     MPLBACKEND=Agg python scripts/a69_erm_iv.py [--only LEG]
@@ -322,11 +324,15 @@ def leg_ix():
         check(f"(ix) ALPHA_MAP[{name!r}] is solid", ALPHA_MAP.get(name) == 1.0, f"{ALPHA_MAP.get(name)!r}")
     pooled = TEX_MAPPER["DA+ERM+IV"] == TEX_MAPPER["DA+ERM+IV(T)"] == TEX_MAPPER["DA+ERM+IV(T,Z)"]
     check("(ix) the three mode spellings share one label", pooled)
+    # the first, second and last pairs share a hue, an alpha and a dash, so the
+    # label is the ONLY thing keeping them apart in the legend -- ATE against
+    # DA+ERM is red 3, solid alpha, point-estimate dash on both sides
     for a, b in (
         ("ERM+IV", "ERM"),
         ("DA+ERM+IV(Z)", "DA+ERM"),
         ("DA+ERM+IV(Z)", "DA+ERM+IV"),
         ("DA+ERM+IV", "DA+ERM"),
+        ("ATE", "DA+ERM"),
     ):
         check(f"(ix) TEX_MAPPER[{a!r}] differs from TEX_MAPPER[{b!r}]", TEX_MAPPER[a] != TEX_MAPPER[b])
 
@@ -396,13 +402,16 @@ def leg_xi():
     texts = [text.get_text() for text in legend.get_texts()]
     colours = [handle.get_color() for handle in legend.legend_handles]
     plt.close(fig)
-    # `_legend` keys on (base, mode), so the count is whatever the key gives; what
-    # SS6 owns is the LABELS, and the target is five distinct (label, hue) entries
-    # with the two green mode spellings sharing one. A missing TEX_MAPPER line
-    # collapses the set to four or three
+    # six handles, five rows: `_legend` folds entries that render as the same pixels,
+    # which is the ONE pooling SS6.4 asks for. A missing TEX_MAPPER line collapses the
+    # set further -- to four with the (Z) label aliased, to three under a blanket alias
     entries = {(text, colour) for text, colour in zip(texts, colours, strict=True)}
+    check("(xi) six handles draw five legend rows", len(texts) == 5, f"{len(texts)} of {len(handles)} handles")
     check("(xi) five distinct (label, hue) legend entries", len(entries) == 5, f"{len(entries)}")
-    check("(xi) every drawn handle is in the legend", len(texts) == len(handles), f"{len(texts)} of {len(handles)}")
+    want = [TEX_MAPPER[n] for n in ("ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV")]
+    check("(xi) the rows are erm, erm+iv, erm~, erm~+iv, erm~+iv~ in that order", texts == want, f"{texts}")
+    hues = [plotting._get_method_color(n) for n in ("ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV")]
+    check("(xi) their hues are 0, 0, 3, 3, 2", colours == hues, f"{colours}")
     green = {text for text, colour in entries if colour == plotting._get_method_color("DA+ERM+IV")}
     check("(xi) the (T) and (T,Z) spellings share the one green entry", len(green) == 1, f"{len(green)}")
     check("(xi) the five labels are pairwise distinct", len({text for text, _ in entries}) == 5, f"{len(set(texts))}")

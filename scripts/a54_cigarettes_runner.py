@@ -10,17 +10,22 @@ the replicate scheme from the `bootstrap` flag the two runners are built with. L
         Catches: the branch deleted (an unknown spec then runs silently at the
         loader's default, which is a DIFFERENT experiment). Misses: a value that is
         in the set but wrong for the run.
-  (ii)  budget plumbing. PI's half-width at three fixed queries equals the closed
+  (ii)  budget plumbing. The half-width at three fixed queries equals the closed
         form sigma sqrt(gamma) sqrt(x' Sigma^-1 x) to 1e-6, at the spec's declared
         budget and at a quarter of it. The panel is sigma-normalised, so this is the
         one leg that says the DECLARED gamma reached the solver as gamma and not as
-        something monotone in it. Catches: a squared, halved or rescaled budget, a
-        `QUERY_GAMMA` lookup on the wrong spec. Misses: which epsilon was used --
-        PI carries no invariance constraint.
-  (iii) the gamma sweep moves. Four ratio steps, one experiment: PI's coverage at
-        r = 1 is far above its coverage at r = 2^-4, the curve is monotone, and
-        PI+INV's width stays inside PI's at the plan's 0.869 +- 0.03. Catches: a
-        budget that does not reach `predict`, an inverted ratio axis.
+        something monotone in it. The ball it reads is whichever of PI_BALLS the
+        block lists, and it reports rather than raises when the block lists none.
+        Catches: a squared, halved or rescaled budget, a `QUERY_GAMMA` lookup on the
+        wrong spec, a block with no plain-PI ball. Misses: which epsilon was used --
+        the PI dispatch carries no invariance constraint.
+  (iii) the gamma sweep moves. Four ratio steps, one experiment: the baseline's
+        coverage at r = 1 is far above its coverage at r = 2^-4, the curve is
+        monotone, and the INV method's width stays inside it at the pair's pinned
+        ratio. The (INV, baseline) pair comes from WIDTH_PAIRS against the block's
+        own list, so the leg follows the config instead of indexing it blind.
+        Catches: a budget that does not reach `predict`, an inverted ratio axis, a
+        block with no INV method beside its baseline.
   (iv)  the trS axis is the recalibrated one. Four knobs, one experiment: the
         PLOTTED x is monotone decreasing in the knob, never above 1 (Prop. 2), and
         the runner's label is `TRS_XLABEL[True]` under `recalibrate: true`.
@@ -38,8 +43,9 @@ the replicate scheme from the `bootstrap` flag the two runners are built with. L
 
     MPLBACKEND=Agg python scripts/a54_cigarettes_runner.py [--seed 42]
 
-Reads the cigarettes block of config.yaml the way main.py does. Never touches
-do-MNIST.
+Reads the cigarettes block of config.yaml the way main.py does, and never assumes
+which methods it lists: every leg derives its witness from the block and reports
+when one is missing. Never touches do-MNIST.
 """
 
 import argparse
@@ -74,8 +80,20 @@ HALF_WIDTH_TOL = 1e-6
 # to PI's own curve, not to 1.000: the sweeps fit state-cluster bootstrap replicates
 # against an oracle read off the whole pool (SS6), so nothing covers 1.000 here and a
 # pin at 1.0 would fail a correct implementation (measured PI at r = 1: 0.963).
-WIDTH_RATIO = 0.869
-WIDTH_TOL = 0.03
+# leg (ii) reads the budget off whichever plain-PI ball the block lists, in this
+# order. `fit_model(method_name="PI", ...)` solves the plain ball whatever the
+# builder configured, so the INV cone and the instrument are not applied on that
+# path: measured gap to the closed form 1.2e-09 (PI+INV+IV) and 2.8e-09 (PI+IV)
+# against 7.3e-03 for a DA ball, which carries the translation and is NOT a witness
+PI_BALLS = ("PI", "PI+IV", "PI+INV", "PI+INV+IV")
+# leg (iii): (the INV method, its baseline) in preference order, and the pinned
+# (ratio, tolerance) of their widths at r = 1. The pair must differ by the INV cone
+# alone, so the +IV spellings pair with each other. `PI+INV / PI` is plan SS0.7's
+# 0.869 at t3. The +IV pair moves with the block's observed instrument -- measured
+# 0.8932 with `iv: [tax_s, y, cpi]` and 0.8609 without it -- so it is pinned at the
+# centre of that span with a tolerance that leaves about two spans of headroom
+WIDTH_PAIRS = (("PI+INV", "PI"), ("PI+INV+IV", "PI+IV"))
+WIDTH_RATIO = {("PI+INV", "PI"): (0.869, 0.03), ("PI+INV+IV", "PI+IV"): (0.877, 0.035)}
 COVERAGE_DROP = 0.3
 # leg (v)
 GAMMA_STAR_T3 = 0.19221455
@@ -171,8 +189,15 @@ def leg_i(block):
 # =============================================================================
 
 
+def _witness(available, preferred):
+    """The first of `preferred` the config-derived `available` actually holds, or
+    None. The block's method list is the owner's, so nothing may index it blind."""
+    return next((name for name in preferred if name in available), None)
+
+
 def _pi_half_width(runner, model):
-    """Half-width of a fitted PI model at the three fixed queries."""
+    """Half-width of a model fitted through the PI dispatch, at the three fixed
+    queries. The dispatch is what makes the ball the plain one; see PI_BALLS."""
     fit_model(
         model=model,
         method_name="PI",
@@ -195,12 +220,16 @@ def leg_ii(orch, runner):
     declared = QUERY_GAMMA[orch.spec]
     check("(ii) the runner's gamma is QUERY_GAMMA[spec]", abs(runner.default_gamma - declared) < 1e-15, f"{declared}")
 
+    name = _witness(runner.methods, PI_BALLS)
+    check("(ii) the block lists a plain-PI ball to read the budget off", name is not None, f"{list(runner.methods)}")
+    if name is None:
+        return
     cases = [
-        (declared, "the runner's own PI model", runner.methods["PI"]()),
+        (declared, f"the runner's own {name} model", runner.methods[name]()),
         (
             declared / 4.0,
-            "build_methods at a quarter budget",
-            orch.build_methods(gamma=declared / 4.0, epsilon=runner.default_epsilon)["PI"](),
+            f"build_methods at a quarter budget ({name})",
+            orch.build_methods(gamma=declared / 4.0, epsilon=runner.default_epsilon)[name](),
         ),
     ]
     for gamma, label, model in cases:
@@ -226,17 +255,24 @@ def leg_iii(orch):
     coverage = {name: np.nanmean(record["coverage"], axis=1) for name, record in results.items()}
     width = {name: np.nanmean(record["interval_width"], axis=1) for name, record in results.items()}
 
-    pi = coverage["PI"]
-    check("(iii) PI coverage rises with the budget", bool(np.all(np.diff(pi) > -1e-12)), f"{np.round(pi, 3)}")
+    pair = next((p for p in WIDTH_PAIRS if p[0] in width and p[1] in width), None)
+    check("(iii) the block lists an INV method beside its baseline", pair is not None, f"{list(coverage)}")
+    if pair is None:
+        return x, None
+    inv, base = pair
+
+    pi = coverage[base]
+    check(f"(iii) {base} coverage rises with the budget", bool(np.all(np.diff(pi) > -1e-12)), f"{np.round(pi, 3)}")
     check(
-        "(iii) PI coverage at r = 1 clears r = 2^-4 by 0.3",
+        f"(iii) {base} coverage at r = 1 clears r = 2^-4 by 0.3",
         float(pi[-1] - pi[0]) > COVERAGE_DROP,
         f"{pi[0]:.3f} -> {pi[-1]:.3f}",
     )
-    check("(iii) PI coverage at r = 2^-4 is well under 1", float(pi[0]) < 0.6, f"{pi[0]:.3f}")
+    check(f"(iii) {base} coverage at r = 2^-4 is well under 1", float(pi[0]) < 0.6, f"{pi[0]:.3f}")
 
-    ratio = float(width["PI+INV"][-1] / width["PI"][-1])
-    check("(iii) PI+INV / PI at r = 1", abs(ratio - WIDTH_RATIO) < WIDTH_TOL, f"{ratio:.4f} vs {WIDTH_RATIO}")
+    ratio = float(width[inv][-1] / width[base][-1])
+    want, tol = WIDTH_RATIO[pair]
+    check(f"(iii) {inv} / {base} at r = 1", abs(ratio - want) < tol, f"{ratio:.4f} vs {want} +- {tol}")
     return x, pi
 
 

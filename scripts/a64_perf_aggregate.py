@@ -59,15 +59,20 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          gamma without coverage and no trS, cigarettes perf, no optical): the CLI as
          a subprocess writes exactly the four pdfs; in-process the grid has the
          titles, the blank cells, one shared y on `CLAMP_YLIM`, the axis pkl's
-         x-label, the legend in the repo's order in one row, the (base, mode) fold
-         (bare beside `(T,Z)` is one entry, `(T)` beside bare is two), the three
+         x-label, the legend in the repo's order in one row, the render fold (bare
+         beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
          y-labels without " / "; the perf row has the blank sim panel and the
          cigarette marker line. Catches: rows reordered, a missing metric not
          blanked, the legend sorted by name or keyed on the spelling.
-  (vii)  the utility on the shipped artifacts (`--shipped DIR`): exit 0, one grid
-         per shipped param, no perf pdf, the tree's mtimes unchanged; in-process
-         under `captured()` no WARNING and the epsilon legend's 10 folded entries in
-         two rows. Catches: a crash on the real pkls. No break-it.
+  (vii)  the utility on the shipped artifacts (`--shipped DIR`): exit 0, exactly the
+         pdfs the tree calls for (a grid per sweep param, a row per perf metric some
+         dataset ran, the elasticity grid when the cigarette query pkls are there),
+         the tree's mtimes unchanged; in-process under `captured()` no WARNING and
+         the epsilon legend's 10 folded entries in two rows. The wanted list is
+         re-derived from the SAME four predicates `main` uses (`sweep_params`,
+         `PERF_METRICS`, `_has_perf`, `_has_elasticities`), so it catches `main`
+         misusing one; a defect INSIDE one of them is invisible here. Catches: a
+         crash on the real pkls, a grid silently not drawn. No break-it.
   (viii) the perf path end to end on the simulation block (5 methods, 4 steps,
          `n_experiments 2` forced to 1, serial): the six pkls and two pdfs, the grid,
          the wall-clock shapes and shape of the curves, the seed_var terms finite
@@ -78,11 +83,22 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          `meta`; `repeats` validation; do-MNIST perf inspected as source only.
          Catches: the `n_experiments` override dropped, the wrong grid, failures
          counted over runs, `ddof` 0. Misses: optical and cigarettes perf.
+  (ix)   the legend's three shapes (SS5), read back off the rendered text extents
+         rather than off `ncol`: the two live no-Z blocks pooled (6 entries, 6
+         columns, one flat row, no dash-dot), all three shipped datasets (12 keys
+         folded to 10, columns [2,2,2,2,1,1]) and cigarettes alone (6 in one row);
+         the columns equal the target table; every column is ONE PAIR_ORDER group
+         and every 2-entry column precedes every 1-entry one; `perf_row` folds the
+         same. Catches: the render fold dropped (12 entries), `ncol` left on the
+         entry count (2 columns of 5), the size-first sort term dropped (a vacancy
+         between two paired columns), the member rule keyed on REAL_Z_METHODS
+         (groups 6 and 9 collide), either precondition of the one-group-per-column
+         theorem breached without a word. Misses: the hues, which leg (i) pins.
 
     MPLBACKEND=Agg python scripts/a64_perf_aggregate.py [--seed 42] [--reference JSON] [--skip-digest]
                                                        [--only LEG] [--shipped DIR]
 
-`--skip-digest` drops leg (D); `--only i|ii|...|viii|D` runs one leg (the break-it
+`--skip-digest` drops leg (D); `--only i|ii|...|ix|D` runs one leg (the break-it
 runs). The committed state is gated with (D) on. Nothing here touches do-MNIST
 beyond `inspect.getsource`.
 """
@@ -97,6 +113,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from functools import partial
 
 import matplotlib.pyplot as plt
@@ -113,6 +130,7 @@ from munch import munchify  # noqa: E402
 import src.experiments.perf as perf  # noqa: E402
 import src.experiments.utils.plotting as plotting  # noqa: E402
 from src import aggregate  # noqa: E402
+from src.aggregate import LEGEND_MAX_COLS  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.base import METRIC_FIELDS  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
@@ -134,12 +152,15 @@ from src.experiments.utils.constants import (  # noqa: E402
     INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
     IV_MODES,
+    PAIR_ORDER,
     PARTIAL_IDENTIFICATION_STYLE,
     POINT_ESTIMATES,
+    RC_PARAMS,
     SUBDIR_PERF,
     SUBDIR_SWEEP,
     TEX_MAPPER,
     parse_method,
+    spelled_method,
 )
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
@@ -166,6 +187,17 @@ TEN = [
     "PI&DA+PI+IV",
     "PI&DA+PI+IV(T)",
 ]
+# the three legend shapes SS5 names. NO_Z is the live simulation and optical blocks
+# (config.yaml, no observed Z anywhere); CIG the shipped cigarette spellings; ALL the
+# two pooled, which is what the shipped epsilon grid draws
+SHAPE_NO_Z = ("PI+INV", "PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI", "PI&DA+PI+IV(T)")
+SHAPE_CIG = ("PI+INV+IV", "PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(Z)", "PI&DA+PI+IV(T,Z)")
+SHAPE_ALL = SHAPE_CIG + SHAPE_NO_Z
+# two paired groups and nothing else: `ncol` is 2, not the entry count. The three
+# shapes above all have g = n or g = 6, so none of them exercises that term
+SHAPE_PAIRS = ("PI", "PI+IV", "DA+PI", "DA+PI+IV(Z)")
+# more groups than LEGEND_MAX_COLS: the guarantee is lost and the warning says so
+SHAPE_WIDE = ("ATE", "PI+INV", "PI", "ERM", "DA+PI", "DA+ERM", "PI&DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")
 FAIL = []
 
 
@@ -360,6 +392,43 @@ def legend_rows(legend):
     n = len(legend.get_texts())
     ncols = getattr(legend, "_ncols", None) or getattr(legend, "_ncol", 1)
     return math.ceil(n / ncols)
+
+
+def legend_columns(fig, legend):
+    """The drawn legend as columns of label strings, top entry first. matplotlib
+    aligns a column's texts on one x, so the rendered x0 IS the column index and this
+    reads the layout back rather than re-deriving it from `ncol`."""
+    fig.canvas.draw()
+    columns = {}
+    for text in legend.get_texts():
+        box = text.get_window_extent()
+        key = next((x for x in columns if abs(x - box.x0) < 1.0), box.x0)
+        columns.setdefault(key, []).append((box.y0, text.get_text()))
+    return [[label for _, label in sorted(columns[x], key=lambda pair: -pair[0])] for x in sorted(columns)]
+
+
+def drawn_legend(names):
+    """`_legend` over one handle per name, as (columns, ncol, rows, dash patterns).
+    RC_PARAMS as the aggregate sets it: the TeX labels need usetex to lay out."""
+    plt.rcParams.update(RC_PARAMS)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    handles = {}
+    for name in names:
+        (line,) = ax.plot([0, 1], [0, 1], color=plotting._get_method_color(name), linestyle=plotting._line_style(name))
+        handles.setdefault(parse_method(name), (line, name))
+    legend = aggregate._legend(fig, handles)
+    columns = legend_columns(fig, legend)
+    ncol = getattr(legend, "_ncols", None) or getattr(legend, "_ncol", 1)
+    out = (
+        columns,
+        ncol,
+        legend_rows(legend),
+        [t.get_text() for t in legend.get_texts()],
+        [h.get_linestyle() for h in legend.legend_handles],
+    )
+    plt.close(fig)
+    return out
 
 
 def marker_lines(ax):
@@ -906,8 +975,8 @@ def leg_vi():
     fig = aggregate.sweep_grid("gamma", aggregate.columns(two), two)
     texts = [t.get_text() for t in fig.legends[0].get_texts()]
     check(
-        "(vi) PI&DA+PI+IV(T) beside PI&DA+PI+IV is two entries, the default first",
-        texts == [TEX_MAPPER[n] for n in ("PI", "DA+PI", "PI&DA+PI+IV", "PI&DA+PI+IV(T)")],
+        "(vi) PI&DA+PI+IV(T) beside PI&DA+PI+IV is one entry too: they render alike",
+        texts == [TEX_MAPPER[n] for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
         f"{len(texts)} entries",
     )
     plt.close(fig)
@@ -986,10 +1055,22 @@ def leg_vii(shipped):
         proc.stderr.strip().splitlines()[-1][:160] if proc.returncode else "",
     )
     written = sorted(os.listdir(out))
+    # what `aggregate.main` draws off THIS tree, re-derived rather than listed: one
+    # grid per sweep param, one row per perf metric some dataset ran, and the
+    # elasticity grid when the cigarette query pkls are there. The leg used to say
+    # "no perf pdf" and name no elasticity grid, which went stale when those landed
+    want = [f"{p}_grid.pdf" for p in params]
+    want += [
+        f"epsilon_{m}.{aggregate.PLOT_FORMAT}"
+        for m in aggregate.PERF_METRICS
+        if any(aggregate._has_perf(shipped, d, m) for d in datasets)
+    ]
+    if aggregate._has_elasticities(shipped):
+        want.append(f"cigarettes_elasticities.{aggregate.PLOT_FORMAT}")
     check(
-        f"(vii) one non-empty grid per shipped param {params}, no perf pdf",
-        written == sorted(f"{p}_grid.pdf" for p in params) and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
-        f"{written}",
+        f"(vii) exactly the {len(want)} non-empty pdfs this tree calls for",
+        written == sorted(want) and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
+        f"drawn {written}; wanted {sorted(want)}",
     )
     check("(vii) the shipped tree's mtimes are unchanged", mtimes(shipped) == before)
     second = tempfile.mkdtemp(prefix="shipped2_", dir=TMPROOT)
@@ -1150,6 +1231,124 @@ def leg_viii():
     print("      RECORDED D(eps) at r = 1: " + ", ".join(f"{k} {np.nanmean(v[-1]):.2e}" for k, v in seed.items()))
 
 
+def shape_check(tag, names, want_columns):
+    """One of SS5's three shapes: the columns as drawn, then the two invariants."""
+    columns, ncol, rows, ordered_texts, styles = drawn_legend(names)
+    want_rows = 2 if any(len(c) == 2 for c in want_columns) else 1
+    n = sum(len(c) for c in columns)
+    check(
+        f"(ix) {tag}: {sum(len(c) for c in want_columns)} entries in {len(want_columns)} columns, {want_rows} row(s)",
+        n == sum(len(c) for c in want_columns) and ncol == len(want_columns) and rows == want_rows,
+        f"{n} entries, ncol {ncol}, {rows} row(s)",
+    )
+    want = [[TEX_MAPPER[spelled_method(name)] for name in column] for column in want_columns]
+    check(f"(ix) {tag}: the columns are the target table", columns == want, f"{columns}")
+    # invariant 1: one PAIR_ORDER GROUP per column, not one hue -- groups 2 and 3 are
+    # both blue 0 and groups 4, 5 and ATE all red 3, so hue does not identify a group
+    group = {}
+    for name in names:
+        spelled = spelled_method(name)
+        group.setdefault(TEX_MAPPER[spelled], set()).add(PAIR_ORDER[spelled][0])
+    mixed = [column for column in columns if len({g for label in column for g in group[label]}) != 1]
+    check(f"(ix) {tag}: every column is one PAIR_ORDER group", not mixed, f"{mixed}")
+    # invariant 2, asserted on the ENTRY order rather than on the rendered column
+    # sizes: matplotlib's divmod makes the rendered sizes non-increasing whatever the
+    # sort does, so the slot counts cannot falsify anything. The entry order can --
+    # drop the size-first term and a singleton group lands ahead of a paired one here
+    sequence = [next(iter(group[label])) for label in ordered_texts]
+    counts = Counter(sequence)
+    paired = [counts[g] == 2 for g in sequence]
+    check(
+        f"(ix) {tag}: every 2-entry group precedes every 1-entry group",
+        paired == sorted(paired, reverse=True),
+        f"groups {sequence} paired {paired}",
+    )
+    return styles
+
+
+def leg_ix():
+    print("(ix) the legend's three shapes: one group per column, no duplicate entry")
+    # (i) the live simulation and optical blocks pooled: no observed Z anywhere
+    styles = shape_check(
+        "(i) no observed Z",
+        SHAPE_NO_Z,
+        [["PI+INV"], ["PI"], ["DA+PI"], ["DA+PI+IV(T)"], ["PI&DA+PI"], ["PI&DA+PI+IV(T)"]],
+    )
+    check(
+        "(ix) (i) no observed Z: nothing is drawn dash-dot",
+        all(style != INSTRUMENT_Z_STYLE for style in styles),
+        f"{styles}",
+    )
+    # (ii) all three shipped datasets: the 12 pooled keys fold to 10
+    shape_check(
+        "(ii) all three datasets",
+        SHAPE_ALL,
+        [
+            ["PI+INV", "PI+INV+IV"],
+            ["PI", "PI+IV"],
+            ["DA+PI", "DA+PI+IV(Z)"],
+            ["PI&DA+PI", "PI&DA+PI+IV(Z)"],
+            ["DA+PI+IV(T)"],
+            ["PI&DA+PI+IV(T)"],
+        ],
+    )
+    # (iii) one dataset alone -- cigarettes, the awkward one: six entries, six groups,
+    # one flat row, dash-dot on the four real-Z entries
+    shape_check(
+        "(iii) cigarettes alone",
+        SHAPE_CIG,
+        [
+            ["PI+INV+IV"],
+            ["PI+IV"],
+            ["DA+PI+IV(Z)"],
+            ["DA+PI+IV(T,Z)"],
+            ["PI&DA+PI+IV(Z)"],
+            ["PI&DA+PI+IV(T,Z)"],
+        ],
+    )
+    # (iv) NOT one of SS5's three, but the only shape that pins `ncol` to the GROUP
+    # count: on the three above min(n, 6) and min(g, 6) agree, so the term ships
+    # ungated without this. Two paired groups draw two columns, not four
+    shape_check("(iv) two paired groups", SHAPE_PAIRS, [["PI", "PI+IV"], ["DA+PI", "DA+PI+IV(Z)"]])
+    # and past the cap the theorem's precondition fails: say so, do not degrade
+    with captured() as lines:
+        _, ncol, _, _, _ = drawn_legend(SHAPE_WIDE)
+    check(
+        f"(ix) {len(SHAPE_WIDE)} groups: ncol saturates at LEGEND_MAX_COLS and one WARNING names it",
+        ncol == LEGEND_MAX_COLS and len(lines) == 1 and "LEGEND_MAX_COLS" in lines[0],
+        f"ncol {ncol}, warnings {lines}",
+    )
+    # the theorem's OTHER precondition, every group of size <= 2. Unreachable with
+    # today's PAIR_ORDER, so the only way to exercise it is to break the table:
+    # fold PI+INV into PI's group and it holds three kept entries
+    patched = dict(aggregate.PAIR_ORDER)
+    patched["PI+INV"] = (2, 0)
+    original, aggregate.PAIR_ORDER = aggregate.PAIR_ORDER, patched
+    try:
+        with captured() as lines:
+            drawn_legend(("PI+INV", "PI", "PI+IV"))
+    finally:
+        aggregate.PAIR_ORDER = original
+    check(
+        "(ix) a group of three entries warns too, rather than breaking the columns quietly",
+        len(lines) == 1 and "[2]" in lines[0],
+        f"warnings {lines}",
+    )
+
+    # the second consumer: `perf_row` pools the same way `sweep_grid` does
+    tree = synthetic_tree(tempfile.mkdtemp(prefix="shapes_", dir=TMPROOT), perf_methods=SHAPE_ALL)
+    fig = aggregate.perf_row("wall_clock", aggregate.columns(tree), tree)
+    legend = fig.legends[0]
+    columns = legend_columns(fig, legend)
+    check(
+        "(ix) perf_row folds the same 12 keys to the same 10 entries in 6 columns",
+        [len(column) for column in columns] == [2, 2, 2, 2, 1, 1],
+        f"{[len(column) for column in columns]}",
+    )
+    plt.close(fig)
+    shutil.rmtree(tree, ignore_errors=True)
+
+
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -1159,7 +1358,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--reference", default=digest_leg.DEFAULT_REFERENCE)
     parser.add_argument("--skip-digest", action="store_true")
-    parser.add_argument("--only", default=None, help="one leg: i, ii, iii, iv, v, vi, vii, viii or D")
+    parser.add_argument("--only", default=None, help="one leg: i, ii, iii, iv, v, vi, vii, viii, ix or D")
     parser.add_argument("--shipped", default=SHIPPED, help="the shipped artifacts tree for leg (vii)")
     args = parser.parse_args()
     print(f"tree: {perf.__file__}")
@@ -1172,6 +1371,7 @@ if __name__ == "__main__":
         "vi": leg_vi,
         "vii": partial(leg_vii, os.path.expanduser(args.shipped)),
         "viii": leg_viii,
+        "ix": leg_ix,
     }
     if args.only:
         selected = {args.only: legs[args.only]} if args.only in legs else {}

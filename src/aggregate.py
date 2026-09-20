@@ -21,6 +21,7 @@ of each panel, one legend inside the first panel.
 import argparse
 import glob
 import os
+from collections import Counter
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,13 +30,16 @@ from loguru import logger
 
 from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
 from src.experiments.utils.constants import (
+    ALPHA_MAP,
     CLAMP_YLIM,
     COEFFICIENT_LABELS,
+    COLOR_MAP,
     DATASET_ORDER,
     DATASET_TITLES,
     FS_LABEL,
     FS_TICK,
     IV_MODES,
+    PAIR_ORDER,
     PLOT_DPI,
     PLOT_FORMAT,
     RC_PARAMS,
@@ -53,6 +57,7 @@ from src.experiments.utils.plotting import (
     _draw_bands,
     _draw_series,
     _label_major_ticks_only,
+    _line_style,
     _mark_frame,
     _pad,
     normalize_sweep,
@@ -132,21 +137,60 @@ def _frame(ax, x, xscale: str, vlines) -> None:
 
 
 def _legend(fig, handles: dict):
-    """One legend for the figure, keyed on (base, mode) so a bare name and its
-    `(T,Z)` spelling are one entry, in the repo's method order; returns the
-    legend, or None with nothing drawn."""
-    keys = sorted(
-        handles,
-        key=lambda k: (ALL_METHODS.index(k[0]) if k[0] in ALL_METHODS else len(ALL_METHODS), IV_MODES.index(k[1])),
-    )
-    labels = [TEX_MAPPER.get(spelled_method(handles[k][1]), handles[k][1]) for k in keys]
-    if not keys:
+    """One legend for the figure, one PAIR_ORDER group per column. Two collapses:
+    `parse_method` already keys a bare name and its `(T,Z)` spelling alike, and
+    entries that would render as the same pixels (label, hue, alpha, dash) fold to
+    one, which is what blends a T-as-IV method's three mode spellings. `ncol` is the
+    number of surviving GROUPS and paired groups sort first, so each column holds one
+    group: member 0 on top, member 1 below. Returns the legend, or None with nothing
+    drawn."""
+    if not handles:
         return None
+    spelled = {k: spelled_method(handles[k][1]) for k in handles}
+    labels = {k: TEX_MAPPER.get(spelled[k], handles[k][1]) for k in handles}
+
+    def pair(k):
+        # a name no table knows lands past the end, deterministically, rather than
+        # raising here
+        return PAIR_ORDER.get(spelled[k], (len(PAIR_ORDER), 0))
+
+    def order(k):
+        return (
+            pair(k),
+            ALL_METHODS.index(k[0]) if k[0] in ALL_METHODS else len(ALL_METHODS),
+            IV_MODES.index(k[1]),
+        )
+
+    # the render signature carries NO base term: two entries merge iff a reader
+    # cannot tell them apart. `.get(s, s)` keeps a stale name distinct instead of
+    # collapsing every unknown onto one sentinel
+    keys, seen = [], set()
+    for k in sorted(handles, key=order):
+        s = spelled[k]
+        signature = (labels[k], COLOR_MAP.get(s, s), ALPHA_MAP.get(s, s), _line_style(s))
+        if signature not in seen:
+            seen.add(signature)
+            keys.append(k)
+    sizes = Counter(pair(k)[0] for k in keys)
+    # n = g + p over groups of size 1 or 2, so divmod(n, g) = (1, p) and matplotlib
+    # fills column-major: the p paired groups take the two-entry columns and the rest
+    # take the one-entry ones. Nothing has to be padded
+    keys.sort(key=lambda k: (0 if sizes[pair(k)[0]] == 2 else 1, order(k)))
+    # one group per column needs g <= LEGEND_MAX_COLS AND every group of size <= 2,
+    # so that divmod(n, g) = (1, p). A group of three sorts as a singleton and the
+    # guarantee goes quietly; unreachable with today's PAIR_ORDER, so say it, do not
+    # raise -- a wrapped legend is still readable
+    crowded = sorted(g for g, size in sizes.items() if size > 2)
+    if len(sizes) > LEGEND_MAX_COLS or crowded:
+        logger.warning(
+            f"aggregate: {len(sizes)} legend groups against LEGEND_MAX_COLS {LEGEND_MAX_COLS}, "
+            f"groups over two entries {crowded}; the legend may put two groups in one column."
+        )
     return fig.legend(
         [handles[k][0] for k in keys],
-        labels,
+        [labels[k] for k in keys],
         loc="upper center",
-        ncol=min(len(keys), LEGEND_MAX_COLS),
+        ncol=min(len(sizes), LEGEND_MAX_COLS),
         bbox_to_anchor=(0.5, 1.0),
         fontsize=FS_TICK,
         frameon=True,

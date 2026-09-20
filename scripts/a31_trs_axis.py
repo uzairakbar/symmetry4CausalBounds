@@ -28,9 +28,9 @@ the factors independently:
          one per (dataset, toggle): the rho tr(S)/k product folds back on sim
          ([3, 2, 0, 1]) where tr(S)/k does not ([3, 2, 1, 0]), so the two
          conventions cannot be confused there;
-  (v)    the xlabel on the production render is `TRS_XLABEL[recalibrate]`, contains
-         `\\rho` iff not recalibrated, equals the runner's `xlabel`, and no plotting
-         error was swallowed;
+  (v)    the xlabel on the production render is `TRS_XLABEL[recalibrate]` -- Omega on
+         both toggles, since both branches are Prop. 2's ratio -- equals the runner's
+         `xlabel`, and no plotting error was swallowed;
   (vi)   exactly n_exp * n_steps `trS step` INFO lines, each with the stored x to
          5 decimals and the marker of its convention;
   (vii)  every spec vline inside the resolved xlim is drawn and none outside it;
@@ -290,7 +290,7 @@ def run_one(experiment, recalibrate):
     check(
         tag,
         "(v)",
-        lab == want_label and (r"\rho" in lab) == (not recalibrate) and runner.xlabel == lab and not errors,
+        lab == want_label and runner.xlabel == lab and not errors,
         f"{lab!r} runner.xlabel==label {runner.xlabel == lab} errors {len(errors)}"
         + (f": {errors[0][:120]}" if errors else ""),
     )

@@ -382,11 +382,14 @@ def _EPSILON_RATIO_GRID(dataset, n):
     return grid
 
 
-# trS x-axis label by the `recalibrate` toggle: the ball in force decides which
-# Prop. 2 ratio the axis is (see ExpansionStrategy)
+# trS x-axis label by the `recalibrate` toggle. Both branches ARE Prop. 2's Omega:
+# Prop. 2 has Omega := rho [tr(K) + D_B^2] / k and Lem. 3 has S = K + delta* delta, so
+# tr(S) = tr(K) + D_B^2 and the `false` branch rho tr(S)/k is Omega as written;
+# recalibrating to gamma/rho reduces the same term to tr(S)/k, which the paper again
+# calls Omega. The dict stays: the toggle is load-bearing at ExpansionStrategy.xlabel
 TRS_XLABEL: dict[bool, str] = {
-    True: r"$\operatorname{tr}(\mathcal{S})/k$",
-    False: r"$\rho \operatorname{tr}(\mathcal{S})/k$",
+    True: r"$\Omega$",
+    False: r"$\Omega$",
 }
 
 
@@ -505,10 +508,10 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
     "coverage": MetricSpec("coverage", r"coverage rate", include_ate=False),
     # the two perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
-    # the QueryEval field the sweeps record. The label breaks in two: on one line
-    # it is taller than the figure at FS_LABEL
-    "wall_clock": MetricSpec("wall_clock", "cumulative time\n(baseline-solve equivalents)", "log", perf_only=True),
-    "seed_var": MetricSpec("seed_var", r"solver stability", "linear", perf_only=True),
+    # the QueryEval field the sweeps record, and its numbers are baseline-solve
+    # equivalents (perf.py:157)
+    "wall_clock": MetricSpec("wall_clock", "cumulative runtime", "log", perf_only=True),
+    "seed_var": MetricSpec("seed_var", r"stability", "linear", perf_only=True),
 }
 
 

@@ -179,6 +179,37 @@ for _base in IV_MODE_METHODS:
 # estimates stay out of it: `_line_style` reads POINT_ESTIMATES first, so an
 # entry here would be inert and would break a66's conjunction
 REAL_Z_METHODS: frozenset[str] = frozenset({"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)"})
+# legend layout, keyed on the STORED spelling (`spelled_method`): one group is one
+# legend column, member 0 on top and member 1 below, so a family and the same family
+# plus an observed Z stack in one hue. The three mode spellings of a T-as-IV method
+# share a (group, member) on purpose -- they render as the same pixels and `_legend`
+# folds them to a single entry, which is why those groups have one member only. NOT
+# derivable from REAL_Z_METHODS: the (T,Z) spellings are outside it, so keying the
+# member on membership would collide groups 6 and 9.
+PAIR_ORDER: dict[str, tuple[int, int]] = {
+    "ATE": (0, 0),
+    "PI+INV": (1, 0),
+    "PI+INV+IV": (1, 1),
+    "PI": (2, 0),
+    "PI+IV": (2, 1),
+    "ERM": (3, 0),
+    "ERM+IV": (3, 1),
+    "DA+PI": (4, 0),
+    "DA+PI+IV(Z)": (4, 1),
+    "DA+ERM": (5, 0),
+    "DA+ERM+IV(Z)": (5, 1),
+    "DA+PI+IV": (6, 0),
+    "DA+PI+IV(T)": (6, 0),
+    "DA+PI+IV(T,Z)": (6, 0),
+    "DA+ERM+IV": (7, 0),
+    "DA+ERM+IV(T)": (7, 0),
+    "DA+ERM+IV(T,Z)": (7, 0),
+    "PI&DA+PI": (8, 0),
+    "PI&DA+PI+IV(Z)": (8, 1),
+    "PI&DA+PI+IV": (9, 0),
+    "PI&DA+PI+IV(T)": (9, 0),
+    "PI&DA+PI+IV(T,Z)": (9, 0),
+}
 # the coefficient labels of the cigarette price elasticities, paper notation
 # h_*(x) = theta_*' x on the four log treatments
 COEFFICIENT_LABELS: dict[str, str] = {
