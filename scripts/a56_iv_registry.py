@@ -18,11 +18,16 @@ Legs:
         named recipes carry `iv: 4` / `iv: [tax_s, y, cpi]` (gamma_z written out),
         list no `IV` baseline and are the type `RECIPES` says; the shipped
         config.yaml blocks and leg (D)'s own blocks resolve with no `iv` key at all.
+        A block declaring `iv` lists a method that READS the observed Z: an `IV_METHODS`
+        base in a mode other than `(T)`, which reads the translation amounts alone.
+        The `DGP_ONLY_IV` blocks invert it: their `iv` shapes the DGP only, so no
+        method there may read Z.
         Catches: a recipe carrying a retired key or an illegal method spelling, a
         validator that rejects its own recipe, ANY block that grew a second
         experiment type or lost its only one, a file whose blocks disagree, an `iv`
         key leaked into the shipped yaml, a `PENDING` exemption left behind once it
-        starts resolving. Misses: whether a run does anything with the key
+        starts resolving, an `iv` that only `(T)` spellings "consume", a DGP-only
+        block that grew a Z reader. Misses: whether a run does anything with the key
         (refactor3 on).
   (ii)  `iv` (and `gamma_z`) on the optical and do-MNIST blocks raise a ValueError
         naming the key: rejected, not ignored (decision 2). Catches: `iv` added to
@@ -160,6 +165,11 @@ ERM_IV_BLOCKS = frozenset({("ivSimulationFig5", "simulation")})
 PENDING: tuple[tuple[str, str], ...] = ()
 LEGAL_SETS = ([], ["tax_s"], ["tax_sn"], ["tax_s", "tax_sn"], ["tax_s", "y", "cpi"])
 IV_METHODS = ("ERM+IV", "DA+ERM+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
+# blocks whose `iv` is read by NO method, by design: `iv: 4` shapes the simulation DGP
+# (the instrument enters X through a rank-m map), so the headline panel shares the
+# sweeps' draw, and its methods are the (T) spellings, which read G alone. Leg (i)
+# inverts the consumer check on these: no method may read Z
+DGP_ONLY_IV = frozenset({("simulationFig5", "simulation")})
 GAMMA = 0.25
 FAIL = []
 
@@ -293,17 +303,29 @@ def leg_i():
     # an `iv:` no method reads is a configuration error, and this is the registry's
     # gate for it. Which +IV methods is the owner's call, so the check is on the
     # family rather than on two names (round 2 pinned `PI+IV` and `PI+INV+IV`, which
-    # went red the moment a block was switched back to a pre-IV method list)
+    # went red the moment a block was switched back to a pre-IV method list). A `(T)`
+    # spelling reads the translation amounts alone, so it is no consumer of Z
     for fname, dataset, want_iv, _ in RECIPES:
         if not want_iv:
             continue
         block, _ = load_recipe(fname, dataset)
-        consumers = sorted({m for m in block["methods"] if parse_method(m)[0] in IV_METHODS})
+        consumers = sorted(
+            {m for m in block["methods"] if parse_method(m)[0] in IV_METHODS and parse_method(m)[1] != "T"}
+        )
+        if (fname, dataset) in DGP_ONLY_IV:
+            check(
+                f"(i) {fname}.{dataset}: declares iv for the DGP only and lists no method that reads it",
+                not consumers,
+                f"Z readers {consumers}",
+            )
+            continue
         check(
             f"(i) {fname}.{dataset}: declares iv and lists a method that reads it",
             bool(consumers),
             f"{block['methods']}",
         )
+    listed = {(fname, dataset) for fname, dataset, want_iv, _ in RECIPES if want_iv}
+    check("(i) every DGP_ONLY_IV block is a RECIPES row declaring iv", listed >= DGP_ONLY_IV, f"{sorted(DGP_ONLY_IV)}")
     plasmode_block, _ = load_recipe("robustnessFig11", "cigarettes")
     check(
         "(i) the sweep recipes declare target plasmode with the same leak budget",

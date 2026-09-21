@@ -23,29 +23,38 @@ the replicate scheme from the `bootstrap` flag the two runners are built with. L
         coverage at r = 1 is far above its coverage at r = 2^-4, the curve is
         monotone, and the INV method's width stays inside it at the pair's pinned
         ratio. The (INV, baseline) pair comes from WIDTH_PAIRS against the block's
-        own list, so the leg follows the config instead of indexing it blind.
+        own list, so the leg follows the config instead of indexing it blind. A
+        block that lists no pair at all SKIPS the leg, named in the summary line.
         Catches: a budget that does not reach `predict`, an inverted ratio axis, a
-        block with no INV method beside its baseline.
+        block with an INV method but not its baseline.
   (iv)  the trS axis is the recalibrated one. Four knobs, one experiment: the
         PLOTTED x is monotone decreasing in the knob, never above 1 (Prop. 2), and
         the runner's label is `TRS_XLABEL[True]` under `recalibrate: true`.
         Catches: the label and the factor disagreeing, an amplitude that does not
         reach the DA.
-  (v)   `target` routes, and the two runners get DIFFERENT replicate schemes.
-        gamma* is 0.1922 under `iv` and gamma_true under `plasmode`; `pool` and
-        `solution` are identical across the sweep SEMs under both, so the oracle
-        does not move with the draw; under `plasmode` the outcome differs between
-        experiments. Under `iv` the SWEEP fit sets are pairwise different and carry
-        duplicated state histories, while the QUERY design is the full panel, 2450
-        distinct rows, elementwise `pool[0]`. Catches: both runners built from one
-        factory (the whole point of SS6), a target that does not route, an oracle
-        that reads the resample.
+  (v)   `target` routes, and the two runners get DIFFERENT replicate schemes. Run
+        on the block as given AND on its other declaration (`iv: [tax_s, y, cpi]`
+        with `gamma_z: 0.0177` added, or both keys dropped), so both schemes are
+        exercised whichever the block declares. gamma* at t3 is
+        `GAMMA_STAR_T3[declared]` under `iv` and gamma_true under `plasmode`;
+        `pool` and `solution` are identical across the sweep SEMs under both, so
+        the oracle does not move with the draw; under `plasmode` the outcome
+        differs between experiments. The sweep SEM bootstraps state clusters only
+        under `iv` with no instrument declared (`cigarettes.py`); otherwise its draw
+        IS the panel on the treatment columns, with `iv_pool` as the trailing
+        columns when an instrument is declared. Under `iv` the SWEEP fit sets are
+        pairwise different either way: bootstrapped they carry duplicated state
+        histories, row-split no state has more than its 50 rows. The QUERY design
+        is the full panel, 2450 distinct rows, elementwise `pool[0]`. Catches: both
+        runners built from one factory (the whole point of SS6), a target that does
+        not route, an oracle that reads the resample.
 
-    MPLBACKEND=Agg python scripts/a54_cigarettes_runner.py [--seed 42]
+    MPLBACKEND=Agg python scripts/a54_cigarettes_runner.py [--seed 42] [--config PATH]
 
-Reads the cigarettes block of config.yaml the way main.py does, and never assumes
-which methods it lists: every leg derives its witness from the block and reports
-when one is missing. Never touches do-MNIST.
+Reads the cigarettes block of `--config` (default config.yaml) the way main.py
+does, and never assumes which methods it lists: every leg derives its witness from
+the block and reports when one is missing. `--config` points the gate at a block
+listing the IV pair (a recipe, or a temp copy of one). Never touches do-MNIST.
 """
 
 import argparse
@@ -89,18 +98,28 @@ PI_BALLS = ("PI", "PI+IV", "PI+INV", "PI+INV+IV")
 # leg (iii): (the INV method, its baseline) in preference order, and the pinned
 # (ratio, tolerance) of their widths at r = 1. The pair must differ by the INV cone
 # alone, so the +IV spellings pair with each other. `PI+INV / PI` is plan SS0.7's
-# 0.869 at t3. The +IV pair moves with the block's observed instrument -- measured
-# 0.8932 with `iv: [tax_s, y, cpi]` and 0.8609 without it -- so it is pinned at the
-# centre of that span with a tolerance that leaves about two spans of headroom
+# 0.869 at t3 (no-iv seed span 0.8497 to 0.8792, inside its tolerance). The +IV pair
+# moves with the seed AND with the block's observed instrument, so it is sized on
+# the union of both spans, measured over seeds 42, 7, 2024, 101, 0, 1, 2, 3:
+#   with `iv: [tax_s, y, cpi]`: 0.8932 0.8433 0.8498 0.8490 0.8828 0.8566 0.8612 0.8545
+#   without it:                0.8609 0.8709 0.8782 0.8691 0.8792 0.8683 0.8497 0.8574
+# union 0.8433 to 0.8932: pinned at its midpoint, each end cleared by 0.0097 or more,
+# and a dropped INV cone (1.0000) still fails
 WIDTH_PAIRS = (("PI+INV", "PI"), ("PI+INV+IV", "PI+IV"))
-WIDTH_RATIO = {("PI+INV", "PI"): (0.869, 0.03), ("PI+INV+IV", "PI+IV"): (0.877, 0.035)}
+WIDTH_RATIO = {("PI+INV", "PI"): (0.869, 0.03), ("PI+INV+IV", "PI+IV"): (0.868, 0.035)}
 COVERAGE_DROP = 0.3
-# leg (v)
-GAMMA_STAR_T3 = 0.19221455
+# leg (v): gamma* at t3 under `target: iv`, keyed on "the block declares an
+# instrument": the declared set moves the restricted target. The True value holds
+# under DECLARED_IV's set [tax_s, y, cpi]; another set reads another gamma*
+GAMMA_STAR_T3 = {False: 0.19221455, True: 0.37052167}
 GAMMA_STAR_TOL = 1e-6
+# the other declaration leg (v) runs beside the block's own: the query recipe's set
+DECLARED_IV = {"iv": ["tax_s", "y", "cpi"], "gamma_z": 0.0177}
 PANEL_ROWS = 2450
+STATE_YEARS = 50  # one state history
 
 FAIL = []
+SKIPPED = []
 
 
 def check(name, ok, detail=""):
@@ -109,10 +128,16 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-def shipped_block():
-    """The cigarettes block of config.yaml, merged with the defaults as main.py
-    merges it, minus the `experiment` plan."""
-    with open(os.path.join(REPO, "config.yaml")) as handle:
+def skip(name, reason):
+    """A leg that cannot run on this block: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {name} {reason}")
+    SKIPPED.append(f"{name} {reason}")
+
+
+def shipped_block(path):
+    """The cigarettes block of the yaml at `path`, merged with the defaults as
+    main.py merges it, minus the `experiment` plan."""
+    with open(path) as handle:
         config = yaml.safe_load(handle) or {}
     block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
     block.pop("experiment", None)
@@ -256,8 +281,15 @@ def leg_iii(orch):
     width = {name: np.nanmean(record["interval_width"], axis=1) for name, record in results.items()}
 
     pair = next((p for p in WIDTH_PAIRS if p[0] in width and p[1] in width), None)
-    check("(iii) the block lists an INV method beside its baseline", pair is not None, f"{list(coverage)}")
     if pair is None:
+        # an INV method without its baseline is a broken block; no pair at all is a
+        # block this leg has nothing to say about
+        orphans = [inv for inv, _ in WIDTH_PAIRS if inv in width]
+        if orphans:
+            check("(iii) the block lists an INV method beside its baseline", False, f"{orphans}: {list(coverage)}")
+        else:
+            missing = " nor ".join(f"({inv}, {base})" for inv, base in WIDTH_PAIRS)
+            skip("(iii)", f"the block lists neither {missing}: {list(coverage)}")
         return x, None
     inv, base = pair
 
@@ -309,101 +341,134 @@ def _rows_per_state(design_rows, pool_rows, states):
     return np.unique(np.asarray(drawn), return_counts=True)
 
 
+def declarations(block):
+    """The block as given, then its other declaration: `DECLARED_IV` added when it
+    declares no instrument, both keys dropped when it does."""
+    declared = bool(block.get("iv"))
+    other = {k: v for k, v in block.items() if k not in DECLARED_IV} if declared else {**block, **DECLARED_IV}
+    return ((f"as given (iv {block.get('iv')!r})", block), (f"the other declaration (iv {other.get('iv')!r})", other))
+
+
 def leg_v(block, seed):
-    print("(v) target routing and the replicate scheme")
+    print("(v) target routing and the replicate scheme, on both declarations")
     N = null_basis()
-    for target, expected in (("iv", GAMMA_STAR_T3), ("plasmode", None)):
-        orch = build(block, seed, target=target, n_experiments=2, sweep_samples=8)
-        runner = sweep_runner(orch, "gamma", GAMMA_GRID[:1], n_experiments=2)
-        gamma_star = float(runner.get_oracle(0).gamma_star)
-        want = expected if expected is not None else orch.kwargs.get("gamma_true", 0.25)
-        check(
-            f"(v) {target}: gamma*",
-            abs(gamma_star - want) < (GAMMA_STAR_TOL if expected else 1e-12),
-            f"{gamma_star:.8f} vs {want}",
-        )
+    for label, variant in declarations(block):
+        for target in ("iv", "plasmode"):
+            _leg_v_case(variant, seed, target, N, label)
 
-        sems = runner.sems
-        # BEFORE anything draws: `sample` is the replicate mechanism and the oracle
-        # reads `pool`, so a draw that moved the pool would move h_* with it
-        snapshot = tuple(np.array(part, copy=True) for part in sems[0].pool)
-        for _ in range(2):
-            sems[0].sample(PANEL_ROWS)
-        check(
-            f"(v) {target}: `sample` leaves the pool alone",
-            all(np.array_equal(before, after) for before, after in zip(snapshot, sems[0].pool, strict=True)),
-        )
 
-        pools = [sem.pool[0] for sem in sems]
-        solutions = [sem.solution for sem in sems]
-        check(
-            f"(v) {target}: pool identical across sweep SEMs",
-            all(np.array_equal(pools[0], other) for other in pools[1:]),
-        )
-        check(
-            f"(v) {target}: solution identical across sweep SEMs",
-            all(np.array_equal(solutions[0], other) for other in solutions[1:]),
-        )
-        check(
-            f"(v) {target}: h_* is homogeneous",
-            float(abs(V @ solutions[0].ravel())) < 1e-12,
-            f"|v'b| {float(abs(V @ solutions[0].ravel())):.2e}",
-        )
-        check(
-            f"(v) {target}: h_* lies in null(v)",
-            float(np.max(np.abs(solutions[0].ravel() - N @ (N.T @ solutions[0].ravel())))) < 1e-12,
-        )
+def _leg_v_case(block, seed, target, N, label):
+    orch = build(block, seed, target=target, n_experiments=2, sweep_samples=8)
+    declared = bool(orch.iv_columns)
+    # `cigarettes.py`: the sweep SEM bootstraps only under `iv` with no set declared
+    bootstrap = target == "iv" and not declared
+    tag = f"(v) {target}, {'declared' if declared else 'no'} instrument"
+    print(f"    {label}: {tag[4:]}")
+    runner = sweep_runner(orch, "gamma", GAMMA_GRID[:1], n_experiments=2)
+    gamma_star = float(runner.get_oracle(0).gamma_star)
+    want = GAMMA_STAR_T3[declared] if target == "iv" else orch.kwargs.get("gamma_true", 0.25)
+    check(
+        f"{tag}: gamma*",
+        abs(gamma_star - want) < (GAMMA_STAR_TOL if target == "iv" else 1e-12),
+        f"{gamma_star:.8f} vs {want}",
+    )
 
-        outcomes = [sem.pool[1] for sem in sems]
-        differs = not np.array_equal(outcomes[0], outcomes[1])
-        check(
-            f"(v) {target}: the outcome {'differs' if target == 'plasmode' else 'is fixed'} between experiments",
-            differs == (target == "plasmode"),
-        )
+    sems = runner.sems
+    # BEFORE anything draws: `sample` is the replicate mechanism and the oracle
+    # reads `pool`, so a draw that moved the pool would move h_* with it
+    snapshot = tuple(np.array(part, copy=True) for part in sems[0].pool)
+    for _ in range(2):
+        sems[0].sample(PANEL_ROWS)
+    check(
+        f"{tag}: `sample` leaves the pool alone",
+        all(np.array_equal(before, after) for before, after in zip(snapshot, sems[0].pool, strict=True)),
+    )
 
-        # `sample` is the sweep replicate mechanism: a cluster bootstrap under `iv`,
-        # the panel itself under `plasmode`, where the replicate is the outcome draw
-        draws = [sems[0].sample(PANEL_ROWS)[0] for _ in range(2)]
-        resamples = not np.array_equal(draws[0], draws[1])
-        check(
-            f"(v) {target}: the sweep SEM {'resamples' if target == 'iv' else 'returns the panel'}",
-            resamples == (target == "iv"),
-        )
-        if target == "plasmode":
-            check("(v) plasmode: the sweep draw IS the panel", np.array_equal(draws[0], pools[0]))
+    pools = [sem.pool[0] for sem in sems]
+    solutions = [sem.solution for sem in sems]
+    check(
+        f"{tag}: pool identical across sweep SEMs",
+        all(np.array_equal(pools[0], other) for other in pools[1:]),
+    )
+    check(
+        f"{tag}: solution identical across sweep SEMs",
+        all(np.array_equal(solutions[0], other) for other in solutions[1:]),
+    )
+    check(
+        f"{tag}: h_* is homogeneous",
+        float(abs(V @ solutions[0].ravel())) < 1e-12,
+        f"|v'b| {float(abs(V @ solutions[0].ravel())):.2e}",
+    )
+    check(
+        f"{tag}: h_* lies in null(v)",
+        float(np.max(np.abs(solutions[0].ravel() - N @ (N.T @ solutions[0].ravel())))) < 1e-12,
+    )
 
-        # the SWEEP fit sets under `iv`: bootstrap replicates, so pairwise different
-        # and carrying whole state histories more than once
-        if target == "iv":
-            fits = [runner._base_data(j)[0] for j in range(2)]
-            check("(v) iv: sweep fit sets are pairwise different", not np.array_equal(fits[0], fits[1]))
-            states, counts = _rows_per_state(fits[0], pools[0], sems[0].design.state)
+    outcomes = [sem.pool[1] for sem in sems]
+    differs = not np.array_equal(outcomes[0], outcomes[1])
+    check(
+        f"{tag}: the outcome {'differs' if target == 'plasmode' else 'is fixed'} between experiments",
+        differs == (target == "plasmode"),
+    )
+
+    # `sample` is the sweep replicate mechanism: a cluster bootstrap, or the panel
+    # itself, where the replicate is the row split (and the outcome draw under
+    # `plasmode`). A declared instrument rides as the trailing columns of the draw
+    # (`_rows`) while `pool` is the treatment alone, so the panel is compared on the
+    # treatment columns and the rest against `iv_pool`
+    draws = [sems[0].sample(PANEL_ROWS)[0] for _ in range(2)]
+    resamples = not np.array_equal(draws[0], draws[1])
+    check(f"{tag}: the sweep SEM {'resamples' if bootstrap else 'returns the panel'}", resamples == bootstrap)
+    k = pools[0].shape[1]
+    if not bootstrap:
+        check(f"{tag}: the sweep draw IS the panel on the treatment columns", np.array_equal(draws[0][:, :k], pools[0]))
+    if declared:
+        check(
+            f"{tag}: the trailing columns are the declared instrument (`iv_pool`)",
+            sems[0].iv_pool is not None and np.array_equal(draws[0][:, k:], sems[0].iv_pool),
+            f"draw {draws[0].shape}, pool {pools[0].shape}",
+        )
+    else:
+        check(f"{tag}: the draw carries the treatment alone", draws[0].shape[1] == k, f"{draws[0].shape}")
+
+    # the SWEEP fit sets under `iv`: pairwise different under both schemes (the
+    # row split is seeded per experiment), whole state histories repeated only
+    # under the bootstrap
+    if target == "iv":
+        fits = [runner._base_data(j)[0] for j in range(2)]
+        check(f"{tag}: sweep fit sets are pairwise different", not np.array_equal(fits[0], fits[1]))
+        states, counts = _rows_per_state(fits[0], pools[0], sems[0].design.state)
+        detail = f"{len(states)} distinct states, up to {int(counts.max())} rows each"
+        if bootstrap:
             check(
-                "(v) iv: the sweep fit set carries duplicated state histories",
-                int(counts.max()) > 50,
-                f"{len(states)} distinct states, up to {int(counts.max())} rows each",
+                f"{tag}: the sweep fit set carries duplicated state histories", int(counts.max()) > STATE_YEARS, detail
             )
+        else:
+            check(f"{tag}: no state has more than its {STATE_YEARS} rows", int(counts.max()) <= STATE_YEARS, detail)
 
-        # the QUERY runner: the panel itself, every row once
-        runner_q = query_runner(orch)
-        design = runner_q.X
-        check(f"(v) {target}: the query design IS the pool", np.array_equal(design, pools[0]), f"{design.shape}")
-        check(
-            f"(v) {target}: the query design has {PANEL_ROWS} distinct rows",
-            len(np.unique(design, axis=0)) == PANEL_ROWS,
-            f"{len(np.unique(design, axis=0))}",
-        )
+    # the QUERY runner: the panel itself, every row once
+    runner_q = query_runner(orch)
+    design = runner_q.X
+    check(f"{tag}: the query design IS the pool", np.array_equal(design, pools[0]), f"{design.shape}")
+    check(
+        f"{tag}: the query design has {PANEL_ROWS} distinct rows",
+        len(np.unique(design, axis=0)) == PANEL_ROWS,
+        f"{len(np.unique(design, axis=0))}",
+    )
 
 
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
-    os.chdir(REPO)
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    seed = parser.parse_args().seed
+    parser.add_argument("--config", default=os.path.join(REPO, "config.yaml"), help="yaml with a cigarettes block")
+    args = parser.parse_args()
+    seed, config = args.seed, os.path.abspath(args.config)  # before the chdir, as a32's --artifacts
+    os.chdir(REPO)
+    print(f"config {config}; seed {seed}")
 
-    block = shipped_block()
+    block = shipped_block(config)
     leg_i(block)
     orch = build(block, seed, n_experiments=1, sweep_samples=8)
     leg_ii(orch, query_runner(orch))
@@ -411,8 +476,9 @@ if __name__ == "__main__":
     leg_iv(orch)
     leg_v(block, seed)
 
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
-        print("A54 PASS")
+        print(f"A54 PASS{skipped}")
     else:
-        print(f"A54 FAIL: {FAIL}")
+        print(f"A54 FAIL: {FAIL}{skipped}")
         sys.exit(1)

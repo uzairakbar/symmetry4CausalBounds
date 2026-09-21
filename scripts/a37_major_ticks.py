@@ -30,8 +30,8 @@ experiment. Three legs:
   (v)   the gamma sweep from `<artifacts>/<dataset>/sweep/gamma_{values,results}.pkl`
         when present (`--artifacts DIR`, default the repo's `artifacts/`; read
         only): the grid ends at r = 1, xlim is the margined [min, max], and the
-        r = 1 line is drawn strictly inside it. Skipped, not failed, without the
-        pkls.
+        r = 1 line is drawn strictly inside it. Without the pkls a dataset is
+        SKIPPED, not failed, and counted in the summary line.
 
     MPLBACKEND=Agg python scripts/a37_major_ticks.py [--artifacts DIR]
 """
@@ -58,6 +58,7 @@ from src.experiments.utils import plotting  # noqa: E402
 DATASETS = ("simulation", "optical_device")
 EXPECT_N_MAJORS = {"simulation": [200.0, 500.0, 1000.0], "optical_device": [200.0, 500.0, 1000.0]}
 FAIL = []
+SKIPPED = []
 _errors = []
 logger.add(lambda m: _errors.append(m), level="ERROR")
 
@@ -66,6 +67,12 @@ def check(tag, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {tag} {detail}")
     if not ok:
         FAIL.append(tag)
+
+
+def skip(tag, reason):
+    """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {tag} {reason}")
+    SKIPPED.append(f"{tag} {reason}")
 
 
 def majors_in_view(axis):
@@ -270,7 +277,7 @@ def leg_v(artifacts):
         values = f"{artifacts}/{dataset}/sweep/gamma_values.pkl"
         results = f"{artifacts}/{dataset}/sweep/gamma_results.pkl"
         if not (os.path.exists(values) and os.path.exists(results)):
-            print(f"      {dataset}: no gamma pkls, skipped")
+            skip(f"(v) {dataset}", "no gamma pkls")
             continue
         with open(values, "rb") as fh:
             x = np.asarray(pickle.load(fh), dtype=float)  # noqa: S301 - our own artifacts
@@ -304,5 +311,6 @@ if __name__ == "__main__":
     leg_iii()
     leg_iv()
     leg_v(os.path.expanduser(args.artifacts))
-    print(f"\n{'A37 ALL PASS' if not FAIL else 'A37 FAILURES: ' + ', '.join(FAIL)}")
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
+    print(f"\n{'A37 ALL PASS' if not FAIL else 'A37 FAILURES: ' + ', '.join(FAIL)}{skipped}")
     sys.exit(bool(FAIL))

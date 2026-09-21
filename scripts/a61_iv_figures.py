@@ -168,6 +168,7 @@ P8_BENCHMARKS = {
 }
 TOGGLES = dict(recalibrate=True, clipy=False, mean_match=True, n_jobs=1)
 FAIL = []
+SKIPPED = []
 SPY = {}  # (dataset, fname) -> the `normalize` kwarg `_run_sweeps` passed
 
 
@@ -175,6 +176,12 @@ def check(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail}")
     if not ok:
         FAIL.append(name)
+
+
+def skip(tag, reason):
+    """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {tag} {reason}")
+    SKIPPED.append(f"{tag} {reason}")
 
 
 # ------------------------------------------------------------------ helpers
@@ -758,7 +765,7 @@ def leg_vi(reference):
             check(f"(vi) {fname}: every method reads NaN at every zero step", ok_nan)
 
     if reference is None:
-        print("      (vi) pkl comparisons SKIPPED by --skip-digest")
+        skip("(vi) pkl comparisons", "by --skip-digest")
         return
     with open(reference) as handle:
         want = json.load(handle)["digests"]["cigarettes"]
@@ -805,8 +812,9 @@ if __name__ == "__main__":
             check(f"{tag} ran without raising", False, f"{type(error).__name__}: {error}")
     if args.skip_digest:
         print("(D) SKIPPED by --skip-digest: a break-it run, not the committed state")
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
-        print("A61 PASS")
+        print(f"A61 PASS{skipped}")
     else:
-        print(f"A61 FAIL: {FAIL}")
+        print(f"A61 FAIL: {FAIL}{skipped}")
         sys.exit(1)

@@ -19,6 +19,16 @@ run the restricted-2sls target (`target: iv`), every sweep and both perf metrics
 the plasmode (`target: plasmode`), whose confounding is of known strength so
 coverage means something.
 
+## Output paths
+
+A run writes to `artifacts/<dataset>/<experiment type>/`, with nothing from the
+recipe's name in the path. The sweep recipes differ in `param` and the perf recipes
+in `metric`, so their files never meet, but `simulationFig5` and `ivSimulationFig5`
+are both simulation query runs and both write `artifacts/simulation/query/`: the
+second run overwrites the first. Run one, move its `query/` aside, then run the
+other. It is the only collision among the twelve, and `python -m src.aggregate`
+does not see it (it reads `sweep/` and `perf/` only).
+
 ## Old -> new
 
 The twelve files were restructured, not renamed. The old ones were single or double

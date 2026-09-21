@@ -23,6 +23,11 @@ and the two perf sweep pkls (`perf/epsilon_values.pkl` with
       sweep, and `PLOT_CONFIGS[experiment]["query"]` overriding them key by key;
   (f) the wall-clock perf figure takes `title`, `x_color` and `y_color` from
       `PLOT_CONFIGS["*"]["epsilon_wall_clock"]`;
+      (b) to (f) render the artifacts' own pkls when the tree carries the kind a
+      row reads, and otherwise a synthetic fixture written under `TMPROOT` (one
+      gamma sweep pair, one query pair, the wall-clock perf pkls; a64's
+      `synthetic_tree` pattern), so they always run; each row's first line names
+      the tree it rendered. Only a row with neither FAILs;
   (g) an unknown key is an import-time ValueError: copies of `constants.py` and
       `configs.py` with `legnd` injected fail to import in a subprocess, and
       `validate_plot_keys` raises when called directly;
@@ -31,7 +36,8 @@ and the two perf sweep pkls (`perf/epsilon_values.pkl` with
 
     MPLBACKEND=Agg python scripts/a32_figure_style.py [--artifacts DIR] [--save]
 
-`--artifacts` defaults to the repo's untracked `artifacts/`. Without `--save`
+`--artifacts` defaults to the repo's untracked `artifacts/`. A tree with no
+experiment directory at all SKIPS (a), counted in the summary line. Without `--save`
 nothing is written. With `--save` every sweep and perf pdf is re-rendered INTO
 `--artifacts` (every sweep vline is a PARAM_SPECS constant, so the pkls carry all
 a figure needs). The query sweep and panel are the orchestrator's (`query: true`)
@@ -62,6 +68,7 @@ from matplotlib.colors import to_rgba  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.experiments.base import METRIC_FIELDS  # noqa: E402
 from src.experiments.configs import ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
@@ -74,7 +81,10 @@ from src.experiments.utils.constants import (  # noqa: E402
 
 TMPROOT = os.path.expanduser("~/scratch/tmp/a32")
 SYNTHETIC = "_a32"
+# the experiment the fixture tree carries, so PLOT_CONFIGS resolves as on a real run
+FIXTURE_EXPERIMENT = "simulation"
 FAIL = []
+SKIPPED = []
 _errors = []
 logger.add(lambda m: _errors.append(m), level="ERROR")
 
@@ -85,9 +95,59 @@ def check(row, tag, ok, detail=""):
         FAIL.append(f"{row} {tag} {detail}")
 
 
+def skip(row, reason):
+    """A row that cannot run on this tree: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {row:4s} {reason}")
+    SKIPPED.append(f"{row} {reason}")
+
+
 def load(path):
     with open(path, "rb") as fh:
         return pickle.load(fh)  # noqa: S301 - our own artifacts, no untrusted input
+
+
+def dump(obj, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        pickle.dump(obj, fh)
+
+
+_FIXTURE = {}
+
+
+def fixture_tree():
+    """A synthetic pkl tree under TMPROOT for the style rows (a64's `synthetic_tree`
+    pattern), written once: a gamma sweep pair, a query pair and the wall-clock perf
+    pkls, all under `FIXTURE_EXPERIMENT`. Rows (b) to (f) fall back to it when the
+    artifacts carry no pkl of the kind they read, so they run on every tree."""
+    if "root" in _FIXTURE:
+        return _FIXTURE["root"]
+    os.makedirs(TMPROOT, exist_ok=True)
+    root = tempfile.mkdtemp(prefix="fixture_", dir=TMPROOT)
+    base = f"{root}/{FIXTURE_EXPERIMENT}"
+    rng = np.random.default_rng(2)
+    names = ("PI", "DA+PI")
+    x = PARAM_SPECS["gamma"].grid_fn(FIXTURE_EXPERIMENT, 4)
+    dump(x, f"{base}/sweep/gamma_values.pkl")
+    dump(
+        {name: {key: 0.2 + 0.6 * rng.random((len(x), 2)) for key in METRIC_FIELDS} for name in names},
+        f"{base}/sweep/gamma_results.pkl",
+    )
+    angles = np.linspace(0.1, 3.0, 24)
+    band = np.stack([np.sin(angles) - 0.3, np.sin(angles) + 0.3], -1)[:, None, :].repeat(2, 1)
+    dump(angles, f"{base}/query/treatment_values.pkl")
+    dump(
+        {"PI": band + 0.02 * rng.standard_normal(band.shape), "ERM": np.sin(angles)[:, None].repeat(2, 1)},
+        f"{base}/query/outcome_values.pkl",
+    )
+    eps = PARAM_SPECS["epsilon"].grid_fn(FIXTURE_EXPERIMENT, 4)
+    dump(eps, f"{base}/perf/epsilon_values.pkl")
+    dump(
+        {name: (i + 1) * np.cumsum(np.ones(len(eps)))[:, None] for i, name in enumerate(names)},
+        f"{base}/perf/epsilon_wall_clock_results.pkl",
+    )
+    _FIXTURE["root"] = root
+    return root
 
 
 def same_colour(a, b):
@@ -224,6 +284,9 @@ def pdf_mtimes(artifacts):
 
 def row_a(artifacts, experiments, save):
     """Every figure from the pkls: no minor labels, marks kept on log axes."""
+    if not experiments:
+        skip("(a)", "no experiment directory under the artifacts")
+        return
     n_fig = 0
     before_mtimes = pdf_mtimes(artifacts)
     for experiment in experiments:
@@ -324,6 +387,30 @@ def row_a(artifacts, experiments, save):
         )
 
 
+def tree_name(tree, artifacts):
+    return "fixture (synthetic)" if tree != artifacts else "artifacts"
+
+
+def query_pair(tree, experiments):
+    """(experiment, x, results) of the first query pkl pair under `tree`, or None."""
+    for experiment in experiments:
+        query = f"{tree}/{experiment}/query"
+        if os.path.exists(f"{query}/treatment_values.pkl") and os.path.exists(f"{query}/outcome_values.pkl"):
+            return experiment, load(f"{query}/treatment_values.pkl"), load(f"{query}/outcome_values.pkl")
+    return None
+
+
+def wall_clock_perf(tree, experiments):
+    """(perf dir, experiment) of the first wall-clock perf pkl pair under `tree`, or None."""
+    for experiment in experiments:
+        folder = f"{tree}/{experiment}/perf"
+        if os.path.exists(f"{folder}/epsilon_values.pkl") and os.path.exists(
+            f"{folder}/epsilon_wall_clock_results.pkl"
+        ):
+            return folder, experiment
+    return None
+
+
 def first_sweep(artifacts, experiments):
     """The (experiment, param, x, results) the style rows render; simulation gamma when present."""
     for experiment in ["simulation", *experiments]:
@@ -337,16 +424,19 @@ def first_sweep(artifacts, experiments):
 
 def rows_bcd(artifacts, experiments):
     """legend, colours and title through PLOT_CONFIGS on one sweep figure."""
-    found = first_sweep(artifacts, experiments)
+    tree, found = artifacts, first_sweep(artifacts, experiments)
     if found is None:
-        check("(b)", "style rows", False, "no sweep pkl pair to render")
+        tree = fixture_tree()
+        found = first_sweep(tree, [FIXTURE_EXPERIMENT])
+    check("(b)", "style rows: a sweep pkl pair to render", found is not None, f"tree {tree_name(tree, artifacts)}")
+    if found is None:
         return
     experiment, param, x, results = found
     metric = "coverage"
     plot_id = f"{param}_{metric}"
     tag = f"{experiment} {plot_id}"
 
-    sweep_dir = f"{artifacts}/{experiment}/sweep"
+    sweep_dir = f"{tree}/{experiment}/sweep"
 
     def render(cfg=None, **kwargs):
         with injected(experiment, plot_id, cfg or {}):
@@ -415,14 +505,12 @@ def rows_bcd(artifacts, experiments):
 
 def row_e(artifacts, experiments):
     """The keys through ANNOTATE_SWEEP_PLOT kwargs on the query sweep, then the query id overriding."""
-    pair = None
-    for experiment in experiments:
-        query = f"{artifacts}/{experiment}/query"
-        if os.path.exists(f"{query}/treatment_values.pkl") and os.path.exists(f"{query}/outcome_values.pkl"):
-            pair = experiment, load(f"{query}/treatment_values.pkl"), load(f"{query}/outcome_values.pkl")
-            break
+    tree, pair = artifacts, query_pair(artifacts, experiments)
     if pair is None:
-        print("  (e) skipped: no query pkl pair under the artifacts")
+        tree = fixture_tree()
+        pair = query_pair(tree, [FIXTURE_EXPERIMENT])
+    check("(e)", "a query pkl pair to render", pair is not None, f"tree {tree_name(tree, artifacts)}")
+    if pair is None:
         return
     experiment, x, results = pair
     kwargs = {"legend": False, "x_color": "red", "y_color": "tab:blue", "title": "radial", "title_color": "tab:orange"}
@@ -476,17 +564,14 @@ def row_e(artifacts, experiments):
 def row_f(artifacts, experiments):
     """The wall-clock perf figure takes title, x_color and y_color from
     PLOT_CONFIGS['*']['epsilon_wall_clock']."""
-    perf_dir = None
-    for experiment in experiments:
-        folder = f"{artifacts}/{experiment}/perf"
-        if os.path.exists(f"{folder}/epsilon_values.pkl") and os.path.exists(
-            f"{folder}/epsilon_wall_clock_results.pkl"
-        ):
-            perf_dir, exp = folder, experiment
-            break
-    if perf_dir is None:
-        print("  (f) skipped: no perf pkls under the artifacts")
+    tree, found = artifacts, wall_clock_perf(artifacts, experiments)
+    if found is None:
+        tree = fixture_tree()
+        found = wall_clock_perf(tree, [FIXTURE_EXPERIMENT])
+    check("(f)", "a wall-clock perf pkl pair to render", found is not None, f"tree {tree_name(tree, artifacts)}")
+    if found is None:
         return
+    perf_dir, exp = found
     cfg = {"title": "perf title", "title_color": "red", "x_color": "green", "y_color": "tab:blue"}
     with injected("*", "epsilon_wall_clock", cfg):
         report = style_report(render_perf(exp, perf_dir, "wall_clock", False).axes[0])
@@ -602,8 +687,11 @@ def main():
     args = parser.parse_args()
 
     artifacts = os.path.abspath(args.artifacts)
+    # `aggregate/` is `python -m src.aggregate`'s default output, not an experiment
     experiments = args.experiments or sorted(
-        d for d in os.listdir(artifacts) if os.path.isdir(f"{artifacts}/{d}") and not d.startswith("_")
+        d
+        for d in os.listdir(artifacts)
+        if os.path.isdir(f"{artifacts}/{d}") and not d.startswith("_") and d != "aggregate"
     )
     os.makedirs(TMPROOT, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix="run_", dir=TMPROOT)
@@ -631,8 +719,12 @@ def main():
 
     os.chdir(REPO)
     if not FAIL:
+        # both kept on a FAIL, for debugging
         shutil.rmtree(workdir, ignore_errors=True)
-    print(f"\nRESULT: {'ALL PASS' if not FAIL else f'{len(FAIL)} FAIL'}  ({time.perf_counter() - t0:.0f}s)")
+        if "root" in _FIXTURE:
+            shutil.rmtree(_FIXTURE["root"], ignore_errors=True)
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
+    print(f"\nRESULT: {'ALL PASS' if not FAIL else f'{len(FAIL)} FAIL'}{skipped}  ({time.perf_counter() - t0:.0f}s)")
     for f in FAIL:
         print("  ", f)
     sys.exit(1 if FAIL else 0)

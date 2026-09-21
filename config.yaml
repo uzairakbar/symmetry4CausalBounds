@@ -36,7 +36,7 @@ simulation:
         # - ATE
         # - ERM
         # - DA+ERM
-        # - DA+IV
+        # - DA+ERM+IV(T)
         - PI+INV
         - PI
         - DA+PI
@@ -116,7 +116,7 @@ optical_device:
         # - ATE
         # - ERM
         # - DA+ERM
-        # - DA+IV
+        # - DA+ERM+IV(T)
         - PI+INV
         - PI
         - DA+PI
@@ -195,7 +195,7 @@ cigarettes:
         # - ATE
         # - ERM
         # - DA+ERM
-        # - DA+IV
+        # - DA+ERM+IV(T)
         - PI+INV
         - PI
         - DA+PI

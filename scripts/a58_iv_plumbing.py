@@ -153,12 +153,19 @@ GAMMA, EPSILON = 0.5, EPS_TOL
 GAMMA_GRID = [1.0, 2.0]
 ORACLE_POOL_DRAWS, ORACLE_POOL_SEED = runner_module.ORACLE_POOL_DRAWS, runner_module.ORACLE_POOL_SEED
 FAIL = []
+SKIPPED = []
 
 
 def check(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail}")
     if not ok:
         FAIL.append(name)
+
+
+def skip(tag, reason):
+    """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {tag} {reason}")
+    SKIPPED.append(f"{tag} {reason}")
 
 
 # ------------------------------------------------------------------ SEM stubs
@@ -645,7 +652,7 @@ def leg_i(seed):
     # an archive copy (a break-it outside the worktree) it is skipped
     checkout = subprocess.run(["git", "-C", REPO, "rev-parse", "--git-dir"], capture_output=True, text=True)
     if checkout.returncode != 0:
-        print(f"      (i) do_mnist.py diff since {BASE_COMMIT} SKIPPED: not a git checkout")
+        skip(f"(i) do_mnist.py diff since {BASE_COMMIT}", "not a git checkout")
     else:
         diff = subprocess.run(
             ["git", "-C", REPO, "diff", BASE_COMMIT, "--", "src/experiments/do_mnist.py"],
@@ -1066,8 +1073,9 @@ if __name__ == "__main__":
             check(f"{tag} ran without raising", False, f"{type(error).__name__}: {error}")
     if args.skip_digest:
         print("(D) SKIPPED by --skip-digest: a break-it run, not the committed state")
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
-        print("A58 PASS")
+        print(f"A58 PASS{skipped}")
     else:
-        print(f"A58 FAIL: {FAIL}")
+        print(f"A58 FAIL: {FAIL}{skipped}")
         sys.exit(1)

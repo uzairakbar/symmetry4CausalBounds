@@ -72,7 +72,8 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          re-derived from the SAME four predicates `main` uses (`sweep_params`,
          `PERF_METRICS`, `_has_perf`, `_has_elasticities`), so it catches `main`
          misusing one; a defect INSIDE one of them is invisible here. Catches: a
-         crash on the real pkls, a grid silently not drawn. No break-it.
+         crash on the real pkls, a grid silently not drawn. No break-it. Without
+         a tree at `--shipped` the leg is SKIPPED and counted in the summary line.
   (viii) the perf path end to end on the simulation block (5 methods, 4 steps,
          `n_experiments 2` forced to 1, serial): the six pkls and two pdfs, the grid,
          the wall-clock shapes and shape of the curves, the seed_var terms finite
@@ -199,12 +200,19 @@ SHAPE_PAIRS = ("PI", "PI+IV", "DA+PI", "DA+PI+IV(Z)")
 # more groups than LEGEND_MAX_COLS: the guarantee is lost and the warning says so
 SHAPE_WIDE = ("ATE", "PI+INV", "PI", "ERM", "DA+PI", "DA+ERM", "PI&DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")
 FAIL = []
+SKIPPED = []
 
 
 def check(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail}")
     if not ok:
         FAIL.append(name)
+
+
+def skip(tag, reason):
+    """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {tag} {reason}")
+    SKIPPED.append(f"{tag} {reason}")
 
 
 # ------------------------------------------------------------------ helpers
@@ -1041,7 +1049,7 @@ def leg_vi():
 def leg_vii(shipped):
     print(f"(vii) the utility on the shipped artifacts {shipped}")
     if not os.path.isdir(shipped):
-        print("      skipped: no shipped tree at that path")
+        skip("(vii)", "no shipped tree")
         return
     os.makedirs(TMPROOT, exist_ok=True)
     before = mtimes(shipped)
@@ -1390,8 +1398,9 @@ if __name__ == "__main__":
             check(f"({tag}) ran without raising", False, f"{type(error).__name__}: {error}")
     if "D" not in selected:
         print("(D) SKIPPED: a break-it or --skip-digest run, not the committed state")
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
-        print("A64 PASS")
+        print(f"A64 PASS{skipped}")
     else:
-        print(f"A64 FAIL: {FAIL}")
+        print(f"A64 FAIL: {FAIL}{skipped}")
         sys.exit(1)

@@ -110,12 +110,19 @@ P6_WIDTHS = {
     "DA+PI+IV": (0.1351, 0.1221, 1.0198, 0.5939),
 }
 FAIL = []
+SKIPPED = []
 
 
 def check(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail}")
     if not ok:
         FAIL.append(name)
+
+
+def skip(tag, reason):
+    """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
+    print(f"  [SKIP] {tag} {reason}")
+    SKIPPED.append(f"{tag} {reason}")
 
 
 # the +IV classes this leg can fixture on, best first. The recipe decides which of
@@ -170,7 +177,7 @@ def leg_i(seed, reference=None):
     check("(i) iv_dim=4 draws W_XXi and W_XY first, U after", same_head and hasattr(wide, "U"))
     check("(i) iv_dim=0 has no U and iv_width 0", not hasattr(explicit, "U") and explicit.iv_width == 0)
     if reference is None:
-        print("      (i) iv: 0 digest half SKIPPED by --skip-digest")
+        skip("(i) iv: 0 digest half", "by --skip-digest")
         return
 
     with open(reference) as handle:
@@ -398,8 +405,9 @@ if __name__ == "__main__":
             check(f"{tag} ran without raising", False, f"{type(error).__name__}: {error}")
     if args.skip_digest:
         print("(D) SKIPPED by --skip-digest: a break-it run, not the committed state")
+    skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
-        print("A59 PASS")
+        print(f"A59 PASS{skipped}")
     else:
-        print(f"A59 FAIL: {FAIL}")
+        print(f"A59 FAIL: {FAIL}{skipped}")
         sys.exit(1)
