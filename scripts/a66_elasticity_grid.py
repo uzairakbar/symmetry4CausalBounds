@@ -7,7 +7,8 @@ line and label; the query figures draw both band edges in the method's line styl
 (`_draw_bands`) so two bands of one hue read apart; the price coefficients are
 labelled theta_{state price} and theta_{neighbour price} (`COEFFICIENT_LABELS`);
 `HEADLINE_METHODS` carries DA+PI+IV(Z); `elasticity_grid` tiles the four headline
-figures with y shared per row, x per column, the legend inside one panel. Legs:
+figures with y shared per row, x per column, the legend inside the top-right panel
+pinned upper left. Legs:
 
   (i)   the convention: PI and PI+IV one hue, DA+PI and DA+PI+IV(Z) one hue,
         PI+INV and PI+INV+IV one hue, DA+PI+IV and DA+PI+IV(T) one hue AND one
@@ -33,8 +34,8 @@ figures with y shared per row, x per column, the legend inside one panel. Legs:
         it monotonically and strictly end to end. Catches: the (Z) headline missing,
         a band that leaves PI, a figure keyed by anything but the recipe's list.
   (v)   `elasticity_grid` on those artifacts: the file exists; four live panels;
-        one legend, in the first panel, one entry per headline method the recipe
-        lists; x labels on the bottom row
+        one legend, in the top-right panel pinned upper left, one entry per
+        headline method the recipe lists; x labels on the bottom row
         only, y labels on the first column only, the row labels the two thetas;
         on a copy with the neighbour-price pkls removed the bottom row is off and
         the top row still draws. Catches: the grid not wired, the legend shared,
@@ -317,7 +318,12 @@ def leg_v(artifacts):
     if axes is not None:
         check("(v) every panel live", all(ax.axison for ax in axes.ravel()))
         legends = [ax.get_legend() for ax in axes.ravel() if ax.get_legend() is not None]
-        check("(v) one legend, in the first panel", len(legends) == 1 and axes[0, 0].get_legend() is not None)
+        legend = axes[0, 1].get_legend()
+        check(
+            "(v) one legend, in the top-right panel, upper left, one column",
+            len(legends) == 1 and legend is not None and legend._loc == 2 and getattr(legend, "_ncols", 1) == 1,
+            f"loc {getattr(legend, '_loc', None)}, ncol {getattr(legend, '_ncols', None)}",
+        )
         if legends:
             want = getattr(leg_iv, "want", HEADLINE_METHODS)
             check(
@@ -355,7 +361,7 @@ def leg_v(artifacts):
             "(v) without the neighbour-price pkls the bottom row is off, the top row draws",
             all(ax.axison for ax in axes[0]) and not any(ax.axison for ax in axes[1]),
         )
-        check("(v) the legend still sits in the first panel", axes[0, 0].get_legend() is not None)
+        check("(v) the legend still sits in the top-right panel", axes[0, 1].get_legend() is not None)
         plt.close(fig)
 
 

@@ -9,13 +9,15 @@ can be redrawn without rerunning an experiment. Per sweep parameter found under 
 last two divided by the baseline PI as the sweep figures are under `normalize`),
 columns the datasets in `DATASET_ORDER` that are present, x shared within a column,
 y shared across the grid on `CLAMP_YLIM`, one x-label, three y-labels without the
-"/ PI" suffix, one legend above the titles. A missing pkl leaves its cells blank.
+"/ PI" suffix, one legend above the titles: one row of up to `LEGEND_FLAT_MAX`
+entries, else `LEGEND_ROWS` rows with a paired family in one column and the
+singletons stacked two to a column. A missing pkl leaves its cells blank.
 Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`)
 with a shared y axis, drawn only where some dataset ran the perf sweep. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 and the leak radius, x shared within a column, y within a row, the reference marks
-of each panel, one legend inside the first panel.
+of each panel, one legend inside the top-right panel, pinned upper left.
 """
 
 import argparse
@@ -66,8 +68,12 @@ from src.experiments.utils.plotting import (
 # the grid's rows, in order: (metric id, y-label)
 ROWS: tuple[tuple[str, str], ...] = (("coverage", "coverage"), ("width", "width"), ("worst_error", "worst error"))
 PERF_METRICS: tuple[str, ...] = ("wall_clock", "seed_var")
-# one legend row holds this many entries; more wrap
-LEGEND_MAX_COLS: int = 6
+# the figure legend by entry count n: up to LEGEND_FLAT_MAX entries in one row of n,
+# more in LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns; past LEGEND_GRID_COLS
+# columns it still widens, with a warning
+LEGEND_FLAT_MAX: int = 6
+LEGEND_ROWS: int = 2
+LEGEND_GRID_COLS: int = 5
 LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column titles
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
@@ -75,7 +81,8 @@ PERF_ROW_HEIGHT: float = 4.2  # room for the two-line wall-clock label
 # the elasticity grid: (coefficient id, row label) and (axis id, column stem)
 ELASTICITY_ROWS: tuple[tuple[str, str], ...] = (("p", COEFFICIENT_LABELS["p"]), ("pn", COEFFICIENT_LABELS["pn"]))
 ELASTICITY_AXES: tuple[str, ...] = ("gamma", "budget")
-ELASTICITY_LEGEND_PANEL: tuple[int, int] = (0, 0)
+ELASTICITY_LEGEND_PANEL: tuple[int, int] = (0, 1)
+ELASTICITY_LEGEND_LOC: str = "upper left"
 ELASTICITY_Y_PAD: float = 0.05  # of the row's span
 
 
@@ -137,12 +144,14 @@ def _frame(ax, x, xscale: str, vlines) -> None:
 
 
 def _legend(fig, handles: dict):
-    """One legend for the figure, one PAIR_ORDER group per column. Two collapses:
+    """One legend for the figure, laid out by entry count. Two collapses first:
     `parse_method` already keys a bare name and its `(T,Z)` spelling alike, and
     entries that would render as the same pixels (label, hue, alpha, dash) fold to
-    one, which is what blends a T-as-IV method's three mode spellings. `ncol` is the
-    number of surviving GROUPS and paired groups sort first, so each column holds one
-    group: member 0 on top, member 1 below. Returns the legend, or None with nothing
+    one, which is what blends a T-as-IV method's three mode spellings. Then n
+    entries up to LEGEND_FLAT_MAX are one row of n in the repo's order; more are
+    LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns, paired groups first, each in
+    one column (member 0 on top, member 1 below), and the singletons after them in
+    PAIR_ORDER order, two to a column. Returns the legend, or None with nothing
     drawn."""
     if not handles:
         return None
@@ -172,25 +181,33 @@ def _legend(fig, handles: dict):
             seen.add(signature)
             keys.append(k)
     sizes = Counter(pair(k)[0] for k in keys)
-    # n = g + p over groups of size 1 or 2, so divmod(n, g) = (1, p) and matplotlib
-    # fills column-major: the p paired groups take the two-entry columns and the rest
-    # take the one-entry ones. Nothing has to be padded
-    keys.sort(key=lambda k: (0 if sizes[pair(k)[0]] == 2 else 1, order(k)))
-    # one group per column needs g <= LEGEND_MAX_COLS AND every group of size <= 2,
-    # so that divmod(n, g) = (1, p). A group of three sorts as a singleton and the
-    # guarantee goes quietly; unreachable with today's PAIR_ORDER, so say it, do not
-    # raise -- a wrapped legend is still readable
+    n = len(keys)
+    ncol = n
+    if n > LEGEND_FLAT_MAX:
+        # matplotlib fills column-major and gives the first n % ncol columns the
+        # extra entry, so with ncol = ceil(n / 2) every column holds two entries but
+        # the last one when n is odd. The paired groups go first and each lands on
+        # a column of its own; the singletons stack behind them. Nothing is padded
+        keys.sort(key=lambda k: (0 if sizes[pair(k)[0]] == 2 else 1, order(k)))
+        ncol = -(-n // LEGEND_ROWS)
+        if ncol > LEGEND_GRID_COLS:
+            logger.warning(
+                f"aggregate: {n} legend entries in LEGEND_ROWS {LEGEND_ROWS} rows take {ncol} columns, "
+                f"past LEGEND_GRID_COLS {LEGEND_GRID_COLS}; the legend widens."
+            )
+    # a pair per column needs every group of size <= 2. A group of three sorts as a
+    # singleton and the guarantee goes quietly; unreachable with today's PAIR_ORDER,
+    # so say it, do not raise -- a wrapped legend is still readable
     crowded = sorted(g for g, size in sizes.items() if size > 2)
-    if len(sizes) > LEGEND_MAX_COLS or crowded:
+    if crowded:
         logger.warning(
-            f"aggregate: {len(sizes)} legend groups against LEGEND_MAX_COLS {LEGEND_MAX_COLS}, "
-            f"groups over two entries {crowded}; the legend may put two groups in one column."
+            f"aggregate: legend groups over two entries {crowded}; the legend may split a group across columns."
         )
     return fig.legend(
         [handles[k][0] for k in keys],
         [labels[k] for k in keys],
         loc="upper center",
-        ncol=min(len(sizes), LEGEND_MAX_COLS),
+        ncol=ncol,
         bbox_to_anchor=(0.5, 1.0),
         fontsize=FS_TICK,
         frameon=True,
@@ -377,7 +394,7 @@ def elasticity_grid(artifacts: str, out: str | None = None):
         legend_ax.legend(
             list(handles.values()),
             [TEX_MAPPER.get(name, name) for name in handles],
-            loc="best",
+            loc=ELASTICITY_LEGEND_LOC,
             fontsize=FS_TICK,
             frameon=True,
             edgecolor="black",
