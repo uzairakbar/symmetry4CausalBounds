@@ -14,7 +14,6 @@ from sklearn.model_selection import train_test_split
 from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
 from src.experiments.configs import (
     EPS_TOL,
-    FLOOR_GUARD_R,
     OMEGA_XLABEL,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
@@ -146,17 +145,17 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
-        # stored, not local: the IV floor guard needs the ball these are used with.
+        # stored, not local: the IV floor report needs the ball these are used with.
         # Subclasses must FORWARD their budgets here rather than assigning before
         # super().__init__, or these defaults silently overwrite them.
         self.default_gamma = default_gamma
         self.default_epsilon = default_epsilon
 
-        # Data FIRST, methods second. The IV budget is oracle-derived AND
-        # floor-guarded, and the floor is a property of (GX, G, gamma), so it does
-        # not exist until the draw does. Building methods first would silently skip
-        # the guard. (`DoMNISTQuerySweep` passes method_factory=None and rebuilds
-        # after its nets exist; that still works.)
+        # Data FIRST, methods second. The IV budget is oracle-derived and
+        # reported against its floor, and the floor is a property of (GX, G,
+        # gamma), so it does not exist until the draw does. Building methods first
+        # would silently skip the report. (`DoMNISTQuerySweep` passes
+        # method_factory=None and rebuilds after its nets exist; that still works.)
         loaded = self._load_data()
         self.X_raw, self.GX_raw, self.y, self.G = loaded[:4]
         # a 4-tuple (do-MNIST's override) carries no instrument
@@ -218,12 +217,13 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
 
     @property
     def epsilon_iv(self) -> float:
-        """The T-as-IV budget r_T, off the knife edge (same guard as PI+INV), then
-        raised to the T CONSTRAINT'S OWN floor if it lands under it (`FLOOR_GUARD_R`),
-        the floor measured with the translation amounts alone. The oracle T piece
+        """The T-as-IV budget r_T, off the knife edge (same tolerance as PI+INV), and
+        reported against the T CONSTRAINT'S OWN floor, the floor measured with the
+        translation amounts alone. Never raised: under the floor every query reads
+        INFEASIBLE (`ParamSweepRunner._floor_report`). The oracle T piece
         `eps_iv_star` on every path; the observed instrument carries its own budget
         (`epsilon_iv_z`). Declared path (`declared_iv`, SS2.6): logged against that
-        floor and never raised."""
+        floor either way."""
         budget = getattr(self.oracle, "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
             logger.warning("oracle eps_iv_star unavailable; the T budget falls back to the tolerance.")
@@ -256,18 +256,19 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             )
             return budget
 
-        if budget**2 >= floor:  # feasible: leave it exactly as it was
-            return budget
-
-        guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
-        logger.info(f"epsilon_iv: oracle {budget:.6g} is INFEASIBLE (floor {floor:.4g}); raising to {guarded:.6g}.")
-        return guarded
+        if budget**2 < floor:
+            logger.info(
+                f"epsilon_iv: oracle {budget:.6g} is BELOW the constraint's own floor (budget^2 "
+                f"{budget**2:.4g} < floor {floor:.4g}); left as is, every query will read "
+                "INFEASIBLE, never raised."
+            )
+        return budget
 
     @property
     def epsilon_iv_z(self) -> float:
         """The observed instrument's own budget, as `ParamSweepRunner.fit_epsilon_iv_z`:
         0.0 under an empty Z or a declared radius, else the measured piece plus the
-        tolerance, never floor-guarded."""
+        tolerance, never floor-reported."""
         if self.declared_iv or np.shape(self.Z)[1] == 0:
             return 0.0
         z_piece = getattr(self.oracle, "eps_iv_z_star", None)
@@ -488,9 +489,11 @@ class EpsilonRatioStrategy(GenericParamSweep):
     since it is the same misspecification measured on the same DA draw; the
     observed instrument's budget and gamma_z do not move. Below r = 1 the assumed
     budgets can fall under what the constraints can attain on the ball, and the
-    queries then read INFEASIBLE -- which is what an under-budget ratio means and
-    what `PI+INV` has always done at the left of this grid. The grid itself is
-    centred on r = 1 (`_EPSILON_RATIO_GRID`), so both halves are on the figure.
+    queries then read INFEASIBLE -- which is what an under-budget ratio means,
+    what `PI+INV` has always done at the left of this grid, and what every sweep
+    now does wherever a budget lands under its floor (no budget is ever raised).
+    The grid itself is centred on r = 1 (`_EPSILON_RATIO_GRID`), so both halves
+    are on the figure.
     """
 
     param_key = "epsilon"
@@ -525,7 +528,7 @@ class EpsilonRatioStrategy(GenericParamSweep):
     def get_predict_kwargs(self, param, experiment_index: int):
         eps_star = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*")
         # the T-as-IV budget is misstated by the same ratio, through the same
-        # pipeline and unguarded, as the epsilon beside it: a DA+ method with a T
+        # pipeline and with no data, as the epsilon beside it: a DA+ method with a T
         # constraint re-solves at it, everything else ignores the kwarg
         return {
             "epsilon": float(param) * eps_star + EPS_TOL,
@@ -621,29 +624,25 @@ class ExpansionStrategy(GenericParamSweep):
         per_step = self._step_epsilon.get(experiment_index)
         if per_step is None:
             return super().fit_epsilon(experiment_index, step_index, data)
-        # the knob drives eps*, but it can still land under the floor -- guard it
-        # exactly as the base does, or this sweep alone bypasses the guard
-        return self._floor_guard(per_step, data, "inv", experiment_index, "epsilon")
+        # the knob drives eps*, and it can still land under the floor -- report it
+        # exactly as the base does, and leave it as is
+        self._floor_report(per_step, data, "inv", experiment_index, "epsilon")
+        return per_step
 
     def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
         """The per-step T budget, shaped exactly like `base.fit_epsilon_iv`:
         `ratio * raw + EPS_TOL` (the cache holds the raw oracle piece, so the
-        tolerance is never scaled), through the floor guard on the DECLARED
-        path too. Without this the knob would move eps* and leave r_T frozen at
-        the setup-time value."""
+        tolerance is never scaled), reported against its floor on both paths
+        and never raised. Without this the knob would move eps* and leave r_T
+        frozen at the setup-time value."""
         per_step = self._step_epsilon_iv.get(experiment_index)
         if per_step is None:
             return super().fit_epsilon_iv(experiment_index, step_index, data, ratio)
         if not np.isfinite(per_step):
             return None
-        return self._floor_guard(
-            float(ratio) * float(per_step) + EPS_TOL,
-            data,
-            "iv",
-            experiment_index,
-            "epsilon_iv",
-            declared=self.declared_iv,
-        )
+        budget = float(ratio) * float(per_step) + EPS_TOL
+        self._floor_report(budget, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv)
+        return budget
 
     @property
     def xlabel(self) -> str:

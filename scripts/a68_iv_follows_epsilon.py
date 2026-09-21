@@ -2,15 +2,16 @@
 
 refactor11 makes two changes the epsilon figure is about. `fit_epsilon_iv` gains a
 `ratio`, and `EpsilonRatioStrategy.get_predict_kwargs` passes `r eps_iv* + EPS_TOL`
-beside the epsilon it already passed, unguarded, so a DA+ method with a T
+beside the epsilon it already passed, with no data, so a DA+ method with a T
 constraint re-solves per grid point instead of only padding. And the `epsilon`
 spec gets its own grid function, log-symmetric about 1 with 1 exactly ON it, so
 both halves of the robustness axis are on the figure. Legs:
 
-  (i)   r = 1 in BOTH directions: where the fit-time guard does not fire the
-        predict kwarg equals `fit_epsilon_iv(0, 0, data)` bit for bit, and where it
-        DOES fire they differ, the predict one staying raw. Catches: the ratio
-        applied twice, `data` leaking into the predict-time call.
+  (i)   fit time and predict time agree at every ratio: at r = 1, where the budget
+        clears the T floor, and at r = 0.5, where it does not, the predict kwarg
+        equals `fit_epsilon_iv` with and without `data` bit for bit, since no
+        budget is ever raised. Catches: the ratio applied twice, a raise to the
+        floor put back (it would move the with-data call only).
   (ii)  r != 1 moves the T budget and ONLY it: the per-step values are
         `r eps_iv* + EPS_TOL` exactly and `fit_epsilon_iv_z` and `gamma_z` are
         identical at every r; on the plasmode cigarette recipe a fitted
@@ -65,7 +66,6 @@ from src.experiments.configs import (  # noqa: E402
     _EPSILON_RATIO_GRID,
     _RATIO_GRID,
     EPS_TOL,
-    FLOOR_GUARD_R,
     PARAM_SPECS,
     resolve_dataset_block,
 )
@@ -182,24 +182,23 @@ def leg_i():
         recalibrate=runner.recalibrate,
     )
     print(f"      RECORDED: r_T^2 {raw**2:.6g} against the T floor {floor:.6g}")
-    check("(i) on this fixture the fit-time guard does NOT fire", raw**2 >= floor, f"{raw**2:.4g} >= {floor:.4g}")
+    check("(i) on this fixture r_T^2 clears the T floor at r = 1", raw**2 >= floor, f"{raw**2:.4g} >= {floor:.4g}")
     check("(i) so the fitted budget equals it too", runner.fit_epsilon_iv(0, 0, data) == raw)
 
-    # the second case, with the guard FIRED. The epsilon strategy retunes the DA,
-    # so eps_iv_star is large and the r = 1 budget clears the floor; what does NOT
+    # the second case, UNDER the floor. The epsilon strategy retunes the DA, so
+    # eps_iv_star is large and the r = 1 budget clears the floor; what does NOT
     # clear it is the same pipeline at a small ratio, which is the sweep's left
-    # half. There the two calls must disagree: guarded with data, raw without
-    guarded_ratio = 0.5
-    under = guarded_ratio * raw_star() + EPS_TOL
+    # half. There the budget is left as is with data too (it reads INFEASIBLE),
+    # so fit time and predict time still agree
+    under_ratio = 0.5
+    under = under_ratio * raw_star() + EPS_TOL
     check("(i) at r = 0.5 the assumed budget is under the T floor", under**2 < floor, f"{under**2:.4g} < {floor:.4g}")
-    with_data = runner.fit_epsilon_iv(0, 0, data, ratio=guarded_ratio)
-    without = runner.fit_epsilon_iv(0, ratio=guarded_ratio)
-    guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
-    check("(i) with data the guard raises it to sqrt(9 floor)", abs(with_data - guarded) < 1e-12, f"{with_data:.6g}")
-    check("(i) without data it is the raw r * eps_iv_star + EPS_TOL", without == under, f"{without!r}")
-    check("(i) so the two disagree, which is the rule", with_data != without, f"{with_data:.6g} vs {without:.6g}")
-    step = runner.get_predict_kwargs(guarded_ratio, 0)["epsilon_iv"]
-    check("(i) and the predict kwarg is the raw one", step == under, f"{step!r}")
+    with_data = runner.fit_epsilon_iv(0, 0, data, ratio=under_ratio)
+    without = runner.fit_epsilon_iv(0, ratio=under_ratio)
+    check("(i) with data it is the raw r * eps_iv_star + EPS_TOL, never raised", with_data == under, f"{with_data!r}")
+    check("(i) without data it is the same", without == under, f"{without!r}")
+    step = runner.get_predict_kwargs(under_ratio, 0)["epsilon_iv"]
+    check("(i) and the predict kwarg is that one too", step == under, f"{step!r}")
 
 
 def leg_ii():
@@ -413,7 +412,7 @@ def leg_ix():
             data = runner.generate_data(0, knob)
             raw.append(float(runner._step_epsilon_iv[0]))
             eps.append(float(runner._step_epsilon[0]) - EPS_TOL)
-            # no data: `_floor_guard` is a no-op, so this is the budget itself
+            # no data: `_floor_report` measures nothing, so this is the budget itself
             budget.append(float(runner.fit_epsilon_iv(0, index)))
             z_budget.append(float(runner.fit_epsilon_iv_z(0, data)))
             # the budget restated from the runner's own state, independent of
@@ -489,7 +488,7 @@ def leg_ix():
     resolved = type(runner).fit_epsilon_iv
     source = inspect.getsource(resolved)
     check(
-        "(ix) the override is the one in force, and it guards on the declared path",
+        "(ix) the override is the one in force, and it reports on the declared path",
         resolved is ExpansionStrategy.fit_epsilon_iv and "declared=self.declared_iv" in source,
         f"{resolved.__qualname__}",
     )

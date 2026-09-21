@@ -1,15 +1,15 @@
 """A34: the query sweeps take their knife-edge tolerance from the dataset configs.
 
-`EPS_TOL` (2**-5) stays the tolerance of every param sweep and of the floor
-guards; the query sweeps read `eps_tol` (2**-8) from `SimulationConfig` and
-`OpticalDeviceConfig`. Three legs:
+`EPS_TOL` (2**-5) stays the tolerance of every param sweep; the query sweeps
+read `eps_tol` (2**-8) from `SimulationConfig` and `OpticalDeviceConfig`. Three
+legs:
 
   (i)   the configured values: both `eps_tol` fields are 2**-8, `EPS_TOL` is 2**-5;
   (ii)  sim, through the orchestrator's own query runner class (1 experiment,
         n = 256): `runner.eps_tol` is the config's, and `runner.epsilon_iv` is
-        eps_iv* + 2**-8 when that clears the IV floor (else the guarded value; the
-        leg says which branch ran); the PARAM sweep runner on the same orchestrator
-        keeps EPS_TOL, so when both are feasible their budgets differ by exactly
+        eps_iv* + 2**-8 whether or not that clears the IV floor (no budget is ever
+        raised; the leg prints which side it is on); the PARAM sweep runner on the
+        same orchestrator keeps EPS_TOL, so their budgets differ by exactly
         2**-5 - 2**-8;
   (iii) optical: `_epsilon_budget(None, tol=eps_tol)` sits 2**-8 over the measured
         eps*, the default call 2**-5 over it, and the query runner's
@@ -33,7 +33,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, OPTICAL_CONFIG, SIMULATION_CONFIG  # noqa: E402
+from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, SIMULATION_CONFIG  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
@@ -122,23 +122,13 @@ def leg_ii():
         recalibrate=runner.recalibrate,
     )
     query_budget = eps_iv_star + QUERY_TOL
-    query_feasible = query_budget**2 >= floor
-    print(f"      eps_iv* {eps_iv_star:.4g}, floor {floor:.4g}, query budget {query_budget:.6g}")
-    if query_feasible:
-        print("      branch: query budget feasible, exact eps_iv* + 2**-8 expected")
-        check(
-            "(ii) runner.epsilon_iv == eps_iv* + 2**-8",
-            np.isclose(runner.epsilon_iv, query_budget, rtol=1e-9),
-            f"{runner.epsilon_iv:.6g} vs {query_budget:.6g}",
-        )
-    else:
-        guarded = float(np.sqrt(FLOOR_GUARD_R * floor))
-        print("      branch: query budget under the floor, guarded value expected")
-        check(
-            "(ii) runner.epsilon_iv == sqrt(FLOOR_GUARD_R * floor)",
-            np.isclose(runner.epsilon_iv, guarded, rtol=1e-9),
-            f"{runner.epsilon_iv:.6g} vs {guarded:.6g}",
-        )
+    side = "above" if query_budget**2 >= floor else "BELOW"
+    print(f"      eps_iv* {eps_iv_star:.4g}, floor {floor:.4g}, query budget {query_budget:.6g} ({side} the floor)")
+    check(
+        "(ii) runner.epsilon_iv == eps_iv* + 2**-8",
+        np.isclose(runner.epsilon_iv, query_budget, rtol=1e-9),
+        f"{runner.epsilon_iv:.6g} vs {query_budget:.6g}",
+    )
 
     sweep = orch.get_sweep_runner_cls("gamma")(
         methods=orch.methods, method_factory=orch.build_methods, **orch._get_clean_kwargs()
@@ -147,17 +137,13 @@ def leg_ii():
     data = SweepData.coerce(sweep.generate_data(0, knob))
     sweep_budget = sweep.fit_epsilon_iv(0, 0, data)
     sweep_star = float(sweep.get_oracle(0).eps_iv_star)
-    sweep_feasible = (sweep_star + EPS_TOL) ** 2 >= floor
     print(f"      sweep eps_iv* {sweep_star:.4g}, sweep budget {sweep_budget:.6g}")
     check("(ii) sweep runner budget == eps_iv* + EPS_TOL", np.isclose(sweep_budget, sweep_star + EPS_TOL, rtol=1e-9))
-    if query_feasible and sweep_feasible:
-        check(
-            "(ii) sweep - query == 2**-5 - 2**-8",
-            np.isclose(sweep_budget - runner.epsilon_iv, EPS_TOL - QUERY_TOL, rtol=1e-9),
-            f"{sweep_budget - runner.epsilon_iv:.6g} vs {EPS_TOL - QUERY_TOL:.6g}",
-        )
-    else:
-        print("      (ii) difference check skipped: a budget was floor-guarded")
+    check(
+        "(ii) sweep - query == 2**-5 - 2**-8",
+        np.isclose(sweep_budget - runner.epsilon_iv, EPS_TOL - QUERY_TOL, rtol=1e-9),
+        f"{sweep_budget - runner.epsilon_iv:.6g} vs {EPS_TOL - QUERY_TOL:.6g}",
+    )
 
 
 def leg_iii():

@@ -11,7 +11,7 @@ constraint -- and checks the two agree, query by query.
         bit-identically;
   (ii)  the closed-form shortcut == the SOCP == Cor. 3 by hand;
   (iii) the returned optimum really sits on the slice;
-  (iv)  `constraint_floor` == the explicit floor (the budget guard must measure
+  (iv)  `constraint_floor` == the explicit floor (the floor report must measure
         the ball the solver actually uses);
   (v)   coverage of h_* at gamma* does not degrade against the uncentred run.
 
@@ -286,7 +286,7 @@ def leg_iii():
     )
 
 
-# ------------------------------------------------------- (iv) the floor guard
+# ------------------------------------------------------ (iv) the floor report
 
 
 def leg_iv():

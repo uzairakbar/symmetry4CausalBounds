@@ -26,9 +26,9 @@ quadrature across instruments any more. Legs:
         leak budget with the DA-side allowance in force. Catches: the two radii
         swapped, the allowance dropped.
   (v)   floors and budgets: the T constraint's own floor differs from the stacked
-        one, `fit_epsilon_iv` is the guarded T piece, and the declared path logs
-        "the T constraint's own floor" and never raises. Catches: the guard
-        measuring the stacked instrument again.
+        one, `fit_epsilon_iv` is the raw T piece (never raised), and the declared
+        path logs "the T constraint's own floor" and never raises. Catches: the
+        floor report measuring the stacked instrument again.
   (vi)  the oracle: `eps_iv_z_star` is the larger of the two residual moments, it
         uses the same `W#` as `eps_iv_star`, and `OracleParameters` has no
         `iv_budget`. Catches: the span(Z|G) orthogonalisation put back, the sign of
@@ -413,9 +413,9 @@ def leg_v(seed):
         f"{abs(floor_t - floor_stacked):.6f}",
     )
     raw = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
-    guarded = raw if raw**2 >= floor_t else float(np.sqrt(9.0 * max(floor_t, 0.0)))
     got = runner.fit_epsilon_iv(0, 0, data)
-    check("(v) fit_epsilon_iv is guard_T(eps_iv_star + EPS_TOL)", got == guarded, f"{got!r} vs {guarded!r}")
+    side = "above" if raw**2 >= floor_t else "BELOW"
+    check(f"(v) fit_epsilon_iv is eps_iv_star + EPS_TOL, never raised ({side} the T floor)", got == raw, f"{got!r}")
 
     records = []
     sink = logger.add(lambda message: records.append(message.record), level="DEBUG")

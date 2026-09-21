@@ -499,12 +499,12 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True
         GX: augmented design, required for `inv`
         Z: the instrument block of the ONE constraint being measured, required
             for `iv`. The T budget's floor is measured with the translation amounts
-            alone, the Z radius is never guarded (SS2.6), and a PAIR's feasibility
+            alone, the Z radius is never floor-reported (SS2.6), and a PAIR's feasibility
             is not a floor at all: it is the smallest Z moment on the ball cap the
             T constraint.
         mean_match: measure the floor over the SAME ball the model solves on --
             Lem. 2's covariance ball. A floor from the other geometry would make
-            the budget guard lie in both directions.
+            the floor report lie in both directions.
         rho, recalibrate: the DA ball's factor and toggle, so the floor is over
             the recalibrated budget the fitted model actually solves at
             (`BoundedSA.budget`). Leave both at their defaults for a baseline.

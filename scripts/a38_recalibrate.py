@@ -319,7 +319,7 @@ def leg_v(on, label):
 
 
 def leg_vi():
-    print("(vi) floor guard on the same ball")
+    print("(vi) the floor on the same ball")
     # Z = X, not GX: with the design as its own instrument the IV minimiser is
     # the ball centre and every floor is 0, which would make this leg vacuous.
     # A small gamma keeps the minimiser outside the ball, so the floor is

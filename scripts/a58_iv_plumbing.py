@@ -3,8 +3,8 @@
 refactor3 touches the carrier and its consumers only (SS8.1): `SEM.iv_width` and
 `split_instruments`, the two split sites in generic_runner.py, `SweepData.Z` and
 `ExperimentDataContext.Z` (None spelled (n, 0) on construction), `fit_model`'s
-`Z`, `eps_iv_z_star` in the oracle, and the floor guard on the joint instrument,
-skippable for a declared budget. No shipped SEM emits an instrument yet (the sim
+`Z`, `eps_iv_z_star` in the oracle, and the floor report on the joint instrument,
+declared or not. No shipped SEM emits an instrument yet (the sim
 and cigarette SEMs learn to in batch C), so the legs that need `iv_width > 0` run
 on two SEM stubs defined here: a generator (the linear SEM with a valid Z drawn
 beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
@@ -40,9 +40,9 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         Misses: the numbers, (D).
   (iii) `eps_iv_z_star` is exactly 0.0 for an empty Z (None and (n, 0), touching
         no RNG), and the runner's `epsilon_iv` (param sweeps and the query runner,
-        all three datasets) is bit-identical to the old formula recomputed here from
-        the oracle, EPS_TOL and the floor on (GX, G). Catches: a tolerance or a
-        jitter inside the Z piece, a floor that moved off G alone. Misses: a wrong Z
+        all three datasets) is bit-identical to the formula recomputed here from
+        the oracle and EPS_TOL, never raised. Catches: a tolerance or a jitter
+        inside the Z piece, a budget moved by its floor. Misses: a wrong Z
         piece under a real Z, which (i)'s independent norm covers.
   (iv)  row alignment survives a bootstrap: on a pool whose Z column is 2 X_0 + 1
         and whose `sample` resamples rows with replacement, the rows come off
@@ -50,13 +50,13 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         the bit, through `_draw_base`, `_sweep_data`, the n-slice and the m-tiling.
         Catches: columns split before rows (the plan's break-it), Z sliced or tiled
         differently from X. Misses: the cigarette SEM's own bootstrap (batch C).
-  (v)   the floor guard is skipped exactly when the budget is declared, and the
-        floor is logged: on a pool with an INVALID instrument the T constraint's own
-        floor sits above r_T^2; `declared_iv=True` returns r_T = eps_iv_star + EPS_TOL
+  (v)   no budget is ever raised, and the floor is logged: on a pool with an
+        INVALID instrument the STACKED floor sits above r_T^2 and the T constraint's
+        own below it; `declared_iv=True` returns r_T = eps_iv_star + EPS_TOL
         untouched and logs one INFO line naming that floor (the one on G alone, not
         on the stacked instrument) and "never raised"; `declared_iv=False` reads the
-        same T piece and would raise a budget under the floor to sqrt(9 floor); the
-        query runner does the same. The oracle measures `eps_iv_z_star` on both
+        same T piece, and a budget under the floor is left as is with one INFO
+        BELOW line naming the floor; the query runner does the same. The oracle measures `eps_iv_z_star` on both
         paths, and it is the radius of a separate constraint.
         Catches: the skip dropped, the declared path reading the joint budget, the
         floor computed on G alone. Misses: the declared gamma_z reaching the
@@ -109,7 +109,7 @@ from munch import munchify  # noqa: E402
 import src.experiments.generic_runner as runner_module  # noqa: E402
 from src.data_augmentors.simulation import NullSpaceTranslation  # noqa: E402
 from src.experiments.base import ExperimentDataContext, SweepData  # noqa: E402
-from src.experiments.configs import EPS_TOL, FLOOR_GUARD_R, MethodRegistry, resolve_dataset_block  # noqa: E402
+from src.experiments.configs import EPS_TOL, MethodRegistry, resolve_dataset_block  # noqa: E402
 from src.experiments.do_mnist import DoMNISTMixin, DoMNISTQuerySweep  # noqa: E402
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
@@ -412,10 +412,10 @@ def finite_widths(results, expect_empty=()):
     """Every IV method's width finite at every step, except the families named in
     `expect_empty`, which must be EMPTY at every step.
 
-    On this fixture's n-sweep they are, and the cause is the floor guard, which now
-    measures the T CONSTRAINT'S OWN floor (SS2.6): on G alone that floor is ~1e-7,
-    so the guard does not fire and `epsilon_iv` stays at the oracle 0.03125, where
-    it used to be raised to ~0.4 off the STACKED instrument's floor of ~0.019. The
+    On this fixture's n-sweep they are, and the cause is the budget: the floor
+    report measures the T CONSTRAINT'S OWN floor (SS2.6), ~1e-7 on G alone, and
+    `epsilon_iv` stays at the oracle 0.03125 (no budget is raised any more; it once
+    was, to ~0.4 off the STACKED instrument's floor of ~0.019). The
     inflation was never the T constraint's to claim. At the honest budget the
     program is empty here -- and so is the OLD pooled one at the pooled radius, so
     this is a budget fact, not a decoupling one. RECORDED rather than asserted
@@ -524,7 +524,7 @@ def leg_i(seed):
     check("(i) n-sweep: the slice is the first rows of the base Z", np.array_equal(data_n.Z, base_Z[:64]))
     check_dispatch("(i) n-sweep", recorded(runner_n, data_n), data_n.Z, data_n.Z, np.asarray(data_n.G))
     # RECORDED: on this fixture the pair is empty at both n. The block below shows
-    # why: the guard no longer inflates the T budget off the stacked floor
+    # why: the T budget is the oracle one, never inflated off the stacked floor
     check(
         "(i) n-sweep runs end to end, the decoupled pair empty throughout",
         finite_widths(
@@ -546,7 +546,7 @@ def leg_i(seed):
         solved = np.all(np.asarray(model.query_status) == SolveStatus.OK)
         check(f"(i) n-sweep: the {solo} constraint ALONE is feasible at these budgets", solved)
     # the cause, measured: the T constraint's own floor is ~1e-7 on G alone against
-    # ~1e-2 on the stacked instrument, so the guard has nothing to raise
+    # ~1e-2 on the stacked instrument, so r_T^2 clears the T floor by far
     common_floor = dict(
         mean_match=solo_runner.mean_match,
         rho=solo_runner.fit_rho(0, data_solo),
@@ -565,7 +565,7 @@ def leg_i(seed):
     budget = solo_runner.fit_epsilon_iv(0, 0, data_solo)
     print(f"      RECORDED n-sweep: r_T {budget:.6g}, floor on G {floor_t:.3g}, on [G, Z] {floor_stacked:.3g}")
     check(
-        "(i) n-sweep: the guard has nothing to raise, the T floor being far under r_T^2",
+        "(i) n-sweep: r_T^2 clears the T floor by far, the stacked floor above it",
         budget**2 >= floor_t and floor_stacked > floor_t,
         f"r_T^2 {budget**2:.3g} vs {floor_t:.3g}",
     )
@@ -777,36 +777,15 @@ def leg_ii():
         check(f"(ii) {name}: the query runner's Z is (n, 0)", query.Z.shape == (len(query.X_raw), 0))
 
 
-def old_param_budget(runner, data):
-    """Today's `fit_epsilon_iv`, written out: eps_iv_star + EPS_TOL, raised to
-    sqrt(FLOOR_GUARD_R floor) on the (GX, G) constraint only when infeasible."""
-    budget = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
-    floor = constraint_floor(
-        data.GX,
-        data.y,
-        runner.fit_gamma(0),
-        kind="iv",
-        Z=data.G,
-        mean_match=runner.mean_match,
-        rho=runner.fit_rho(0, data),
-        recalibrate=runner.recalibrate,
-    )
-    return budget if budget**2 >= floor else float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
+def old_param_budget(runner):
+    """Today's `fit_epsilon_iv`, written out: eps_iv_star + EPS_TOL, never raised
+    (the floor on (GX, G) is only reported)."""
+    return float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
 
 
 def old_query_budget(query):
-    budget = float(query.oracle.eps_iv_star) + query.eps_tol
-    floor = constraint_floor(
-        query.GX,
-        query.y,
-        query.default_gamma,
-        kind="iv",
-        Z=query.G,
-        mean_match=query.mean_match,
-        rho=query.fit_rho(),
-        recalibrate=query.recalibrate,
-    )
-    return budget if budget**2 >= floor else float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
+    """The query runner's `epsilon_iv`, written out: eps_iv_star + eps_tol, never raised."""
+    return float(query.oracle.eps_iv_star) + query.eps_tol
 
 
 def leg_iii(seed):
@@ -826,7 +805,7 @@ def leg_iii(seed):
         oracle = runner.get_oracle(0)
         check(f"(iii) {name}: oracle eps_iv_z_star == 0.0", oracle.eps_iv_z_star == 0.0, f"{oracle.eps_iv_z_star!r}")
         check(f"(iii) {name}: eps_iv_z_star is 0.0 under an empty set", oracle.eps_iv_z_star == 0.0)
-        new, old = runner.fit_epsilon_iv(0, 0, data), old_param_budget(runner, data)
+        new, old = runner.fit_epsilon_iv(0, 0, data), old_param_budget(runner)
         check(f"(iii) {name}: sweep epsilon_iv bit-identical to today's", new == old, f"{new!r} vs {old!r}")
         query = production(name, "query")
         new, old = query.epsilon_iv, old_query_budget(query)
@@ -862,7 +841,7 @@ def leg_iv(seed):
 
 
 def leg_v(seed):
-    print("(v) the floor guard is skipped exactly when the budget is declared, and the floor is logged")
+    print("(v) no budget is ever raised, and the floor is logged on both paths")
     np.random.seed(seed)
     pooled = PooledInstrumentedSEM(valid=False)
     records = []
@@ -913,11 +892,28 @@ def leg_v(seed):
     joint_ok = joint == float(o_oracle.eps_iv_star) + EPS_TOL
     check("(v) oracle path: the T budget is eps_iv_star + EPS_TOL", joint_ok, f"{joint:.6g}")
     small = 0.5 * np.sqrt(floor)
-    raised = oracle_path._floor_guard(small, data, "iv", 0, "epsilon_iv")
-    kept = declared._floor_guard(small, data, "iv", 0, "epsilon_iv", declared=True)
-    lifted = abs(raised - np.sqrt(FLOOR_GUARD_R * floor)) < 1e-12
-    check("(v) the guard raises an infeasible oracle budget to sqrt(9 floor)", lifted, f"{small:.4g} -> {raised:.4g}")
-    check("(v) and leaves the same budget alone when declared", kept == small)
+    sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
+    try:
+        records.clear()
+        reported = oracle_path._floor_report(small, data, "iv", 0, "epsilon_iv")
+        below = [r for r in records if "BELOW" in r["message"]]
+        records.clear()
+        kept = declared._floor_report(small, data, "iv", 0, "epsilon_iv", declared=True)
+        declared_below = [r for r in records if "declared path" in r["message"] and "BELOW" in r["message"]]
+    finally:
+        logger.remove(sink)
+    check("(v) the report returns nothing on either path: no budget to raise", reported is None and kept is None)
+    message = below[0]["message"] if below else ""
+    printed = float(message.split("< floor ")[1].split(")")[0]) if "< floor " in message else np.nan
+    check(
+        "(v) oracle path: an infeasible budget logs one INFO BELOW line naming its floor, never raised",
+        len(below) == 1
+        and below[0]["level"].name == "INFO"
+        and abs(printed - floor) <= 6e-4 * max(floor, 1e-12)
+        and "never raised" in message,
+        message,
+    )
+    check("(v) declared path: the same budget logs its declared line, BELOW", len(declared_below) == 1)
     # the query runner
     records.clear()
     sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
@@ -935,11 +931,11 @@ def leg_v(seed):
     check("(v) query declared: epsilon_iv is r_T, not raised", q_declared.epsilon_iv == want)
     logged_once = len(q_lines) == 1 and "never raised" in q_lines[0]["message"]
     check("(v) query declared: the floor is logged once at build", logged_once)
-    # both paths read `eps_iv_star` now, so the budgets AGREE unless the oracle
-    # path's guard fires; what still separates them is the declared log line
+    # both paths read `eps_iv_star` and neither raises it, so the budgets AGREE;
+    # what still separates them is the declared log line
     check(
-        "(v) query oracle path: no declared line, and the same T piece unless the guard fired",
-        not q_oracle_lines and q_oracle.epsilon_iv >= want,
+        "(v) query oracle path: no declared line, and the same T piece",
+        not q_oracle_lines and q_oracle.epsilon_iv == want,
         f"{q_oracle.epsilon_iv:.6g} vs {want:.6g}",
     )
 

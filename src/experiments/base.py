@@ -17,7 +17,6 @@ from loguru import logger
 from src.experiments.configs import (
     ANNOTATE_SWEEP_PLOT,
     EPS_TOL,
-    FLOOR_GUARD_R,
     METRIC_SPECS,
     PARAM_SPECS,
 )
@@ -162,7 +161,7 @@ class BaseExperimentRunner(ABC):
         self.methods = methods
         self.hyperparameters = hyperparameters
         # toggles: `recalibrate` and `mean_match` are EXPLICIT, not swallowed by
-        # **kwargs: the floor guard must measure the ball the solver actually uses
+        # **kwargs: the floor report must measure the ball the solver actually uses
         # (recalibrated budget, Lem. 2 geometry), and a silent default would be a
         # lie the gates cannot see.
         self.recalibrate = recalibrate
@@ -171,7 +170,7 @@ class BaseExperimentRunner(ABC):
         self.mean_match = mean_match
         # the IV budget rule of SS2.6, set per dataset by the orchestrator like
         # `raw_gamma` and `eps_tol` are. False: oracle, the T piece from
-        # `eps_iv_star` and the Z piece from `eps_iv_z_star`, each guarding its own
+        # `eps_iv_star` and the Z piece from `eps_iv_z_star`, each the budget of its own
         # constraint. True: declared, a non-empty `iv:` asserting near-perfect
         # instruments; the Z radius is then exactly s sqrt(gamma_z) and the T
         # budget is logged against its floor and never raised (decision 8)
@@ -319,11 +318,13 @@ class ParamSweepRunner(BaseExperimentRunner):
         Assumed invariance error: oracle eps* = ||W|| over the full augmentation,
         just large enough to admit h_* in PI+INV, off the knife edge.
 
-        Floor-guarded (see `_floor_guard`): the oracle quantity is the budget, but
-        never below what the constraint can actually attain on this ball.
+        The oracle quantity is the budget, as is: where it lands under what the
+        constraint can attain on this ball it is reported (`_floor_report`) and
+        every query reads INFEASIBLE.
         """
         budget = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*") + EPS_TOL
-        return self._floor_guard(budget, data, "inv", experiment_index, "epsilon")
+        self._floor_report(budget, data, "inv", experiment_index, "epsilon")
+        return budget
 
     def fit_rho(self, experiment_index: int, data=None) -> float:
         """Information-loss factor of this step's DA draw, rho_hat = sigma~^2/sigma^2
@@ -343,44 +344,34 @@ class ParamSweepRunner(BaseExperimentRunner):
             return float(fallback)
         return float(value)
 
-    def _floor_guard(self, budget, data, kind: str, experiment_index: int, label: str, declared: bool = False) -> float:
-        """Rescue a budget that is INFEASIBLE, and only such a budget.
+    def _floor_report(self, budget, data, kind: str, experiment_index: int, label: str, declared: bool = False) -> None:
+        """Log a budget against the constraint's own attainable floor; never change it.
 
-        A budget under the constraint's own attainable floor is not a tighter
-        bound, it is NO bound: `_prepare` returns all-INFEASIBLE and the method
-        drops out of the sweep entirely. Measured on the simulation omega grid, the
-        oracle IV budget (EPS_TOL) was below the floor at 5 of 12 steps.
-
-        The trigger is `budget^2 < floor`, i.e. actual infeasibility -- NOT
-        `budget^2 < FLOOR_GUARD_R * floor`. Those differ: a budget in
-        `[sqrt(floor), sqrt(r*floor))` is feasible and doing its job, and an
-        unconditional lower bound would loosen it for nothing. Measured: on
-        optical at n=200 the INV floor is 0.0189 against an oracle eps of 0.2477,
-        already feasible, and the unconditional form moved it to 0.4123.
-
-        Once a budget IS infeasible the oracle value carries no information about
-        where to put it, so it goes to `sqrt(FLOOR_GUARD_R * floor)` -- far enough
-        off the knife edge to cover (`configs.py` has the calibration).
+        A budget under the floor (`budget^2 < floor`) is no bound at all: `_prepare`
+        returns all-INFEASIBLE, the cell's width and coverage are NaN, and the method
+        simply does not show up at that step. That is the rule PI+INV has always
+        followed on the epsilon sweep, and it is now the rule everywhere:
+        there is no floor guard any more, and no budget is ever raised. Where the
+        oracle budget lands under the floor (small n, the m grid, a few omega
+        knobs): PLAN v16 SS2.2.
 
         The IV floor is the T CONSTRAINT'S OWN, measured with the translation
-        amounts alone, as if the observed instrument was never there; the Z radius
-        is never guarded (SS2.6). A T and a Z constraint can still be jointly
-        infeasible with both floors cleared, and that is left to read INFEASIBLE.
-        `declared` (a non-empty `iv:`): the floor is measured and logged beside the
-        budget, and the budget is NEVER raised -- a declared budget that turns out
-        infeasible is information, not something to inflate away (decision 8).
+        amounts alone, as if the observed instrument was never there (SS2.6). A T
+        and a Z constraint can still be jointly infeasible with both floors
+        cleared; that too reads INFEASIBLE, and is not logged here.
+        `declared` (a non-empty `iv:`): the floor is logged beside the budget either
+        way (decision 8). On the oracle path only a budget BELOW the floor is logged.
 
-        No `data` means no measurement and no guard: that is the epsilon sweep's
-        per-step call, where the budget is an ASSUMPTION the figure exists to test
-        (decision 16), exactly as the swept epsilon is.
+        No `data` means no measurement: that is the epsilon sweep's per-step call,
+        where the budget is an ASSUMPTION the figure exists to test (decision 16).
         """
         if data is None:
-            return budget
+            return
         design = getattr(data, "X" if kind == "inv" else "GX", None)
         # 'iv' measures the T constraint's own geometry: the translation amounts alone
         extra = {"GX": getattr(data, "GX", None)} if kind == "inv" else {"Z": getattr(data, "G", None)}
         if design is None or next(iter(extra.values())) is None:
-            return budget
+            return
         # the DA ball ('iv': DA+PI+IV fits on GX) is recalibrated; the baseline
         # ball ('inv': PI+INV fits on X) is not
         if kind == "iv":
@@ -396,7 +387,7 @@ class ParamSweepRunner(BaseExperimentRunner):
             )
         except Exception as error:  # never let a diagnostic break a run
             logger.warning(f"{label}: constraint floor unavailable ({error}); budget left at the oracle value.")
-            return budget
+            return
 
         if declared:
             side = "above" if budget**2 >= floor else "BELOW"
@@ -405,51 +396,39 @@ class ParamSweepRunner(BaseExperimentRunner):
                 f"constraint's own floor {floor:.4g}; left as declared, never raised. The observed "
                 "instrument has its own constraint at r_Z and its own budget."
             )
-            return budget
+            return
 
-        if budget**2 >= floor:  # feasible: leave it exactly as it was
-            return budget
-
-        guarded = float(np.sqrt(FLOOR_GUARD_R * max(floor, 0.0)))
-        logger.info(
-            f"{label}: oracle {budget:.6g} is INFEASIBLE (budget^2 {budget**2:.4g} "
-            f"< floor {floor:.4g}); raising to {guarded:.6g} = sqrt({FLOOR_GUARD_R} "
-            f"* floor). Every query would have come back INFEASIBLE."
-        )
-        return guarded
+        if budget**2 < floor:
+            logger.info(
+                f"{label}: oracle {budget:.6g} is BELOW the constraint's own floor (budget^2 "
+                f"{budget**2:.4g} < floor {floor:.4g}); left as is, every query will read "
+                "INFEASIBLE, never raised."
+            )
 
     def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
         """The ASSUMED T-as-IV budget r_T: `ratio` times the oracle T piece
         `eps_iv_star`, plus EPS_TOL. The observed instrument has its own constraint
         and its own budget (`fit_epsilon_iv_z`), so nothing is pooled here.
 
-        `ratio` is 1 at FIT, where `data` is present and the floor guard applies: a
-        fitted model must not be born infeasible. The epsilon sweep passes its grid
-        ratio at PREDICT, with no data, and the budget is then raw -- exactly what
-        the code does for the swept epsilon (`fit_epsilon` guards,
-        `EpsilonRatioStrategy` passes `r eps* + EPS_TOL` unguarded). Guarding per
-        step would pin the budget at sqrt(FLOOR_GUARD_R * floor) wherever the ratio
-        is small, i.e. at a constant, and the sweep would show nothing. Where the
-        fit-time guard DOES fire, the r = 1 column is the raw budget and not the
-        fitted one, as it already is for epsilon.
+        `ratio` is 1 at FIT, where `data` is present and the budget is reported
+        against its floor (`_floor_report`). The epsilon sweep passes its grid
+        ratio at PREDICT, with no data, exactly as it passes `r eps* + EPS_TOL`
+        for the swept epsilon. Neither path raises the budget, so fit time and
+        predict time agree at every ratio: a budget under the floor reads
+        INFEASIBLE wherever it is used.
         """
         budget = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
         if budget is None or not np.isfinite(budget):
             return None
-        return self._floor_guard(
-            float(ratio) * float(budget) + EPS_TOL,
-            data,
-            "iv",
-            experiment_index,
-            "epsilon_iv",
-            declared=self.declared_iv,
-        )
+        budget = float(ratio) * float(budget) + EPS_TOL
+        self._floor_report(budget, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv)
+        return budget
 
     def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
         """The observed instrument's own budget, one number for every Z constraint
         (SS2.6): 0.0 under an empty instrument (inert) and on the declared path (the
         radius is then exactly r_Z = s sqrt(gamma_z)); on the oracle path the measured
-        piece off the knife edge, `eps_iv_z_star + EPS_TOL`, never floor-guarded."""
+        piece off the knife edge, `eps_iv_z_star + EPS_TOL`, never floor-reported."""
         Z = getattr(data, "Z", None)
         if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
             return 0.0

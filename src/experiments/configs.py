@@ -63,7 +63,7 @@ class SimulationConfig:
     # query runner divides it by sigma-hat^2 of the draw (`raw_gamma`)
     gamma: float = 1.0
     epsilon: float = 2**-8
-    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5), which is
+    # query sweep only; the sweeps use EPS_TOL (2**-5), which is
     # the more favourable setting there
     eps_tol: float = 2**-8
     # SEM confounding. None = fully confounded, which drives sigma^2 to the
@@ -120,7 +120,7 @@ class OpticalDeviceConfig:
     # former understates Thm. 3.A's own requirement ~3x. See `epsilon_pad_star`.
     pad_epsilon: float | None = None
     epsilon_true: float | None = None
-    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5), which is
+    # query sweep only; the sweeps use EPS_TOL (2**-5), which is
     # the more favourable setting there
     eps_tol: float = 2**-8
     test_fraction: float = 0.1
@@ -175,7 +175,7 @@ class CigaretteConfig:
     # for it to repair.
     pad_epsilon: float | None = None
     epsilon_true: float | None = None
-    # query sweep only; the sweeps and floor guards use EPS_TOL (2**-5)
+    # query sweep only; the sweeps use EPS_TOL (2**-5)
     eps_tol: float = 2**-8
     test_fraction: float = 0.1
     # the leaky-IV misspecification guard (SS5): FIXED, never swept. The sliver is
@@ -229,6 +229,8 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 # =============================================================================
 
 # keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
+# Below the constraint's own floor a budget is left as is and reads INFEASIBLE; it is never
+# raised. Where that happens: PLAN v16 SS2.2 (`_floor_report` logs every such cell).
 EPS_TOL: float = 2**-5
 
 # the IV leakiness budget of a non-empty `iv:` (SS2.6). The observed instrument's
@@ -241,24 +243,6 @@ EPS_TOL: float = 2**-5
 # outside the four prices (r_Z = s sqrt(gamma_z) = 0.133). 2^-8 shipped before and
 # sat below the bootstrap noise floor 0.104 of the moment it bounds.
 GAMMA_Z_DEFAULT: float = 0.0177
-
-# Floor guard. An auto-set budget below the constraint's own attainable floor is not
-# a tighter bound, it is NO bound: every query comes back INFEASIBLE and the method
-# vanishes from the sweep. `budget^2 >= FLOOR_GUARD_R * floor` is enforced in
-# `ParamSweepRunner._floor_guard`, which only ever RAISES a budget, and only where the
-# oracle value was already unusable.
-#
-# Calibrated on the simulation omega grid, where the oracle IV budget (EPS_TOL, then 2**-8)
-# sits below the floor at the 5 lowest knobs and DA+PI+IV was all-NaN there. Measured
-# DA+PI+IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
-#   r=2.25  0.82-0.88            under-covers
-#   r=4     0.931-1.000  2.9-4.3 two steps under nominal
-#   r=9     0.985-1.000  4.2-6.0 <- CHOSEN: covers everywhere, still 24-47% inside
-#                                  DA+PI (7.9-8.1), i.e. the constraint is alive
-#   r=16    1.000                DA+PI parity: inert, a duplicate column
-# The floor moves with gamma, n and the DA draw, so this is a RATIO, never an epsilon.
-# It stays ~3 orders of magnitude below eps_rms, so "guard" is not "loose".
-FLOOR_GUARD_R: float = 9.0
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
 # true invariance error, so that eps/eps* is a meaningful ratio axis. Keyed by
