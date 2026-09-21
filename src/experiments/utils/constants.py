@@ -280,8 +280,8 @@ PANEL_CONFIGS = {
 
 # Per-plot overrides for the sweep, perf and query-sweep figures. Keyed
 # experiment -> plot id, where the id is the `fname` the orchestrator builds:
-# '<param>_<metric>' (`_run_sweeps`), 'epsilon_wall_clock' and 'epsilon_seed_var'
-# (`_run_perf`, the two perf sweeps) and 'query' (the radial query sweep,
+# '<param>_<metric>' (`_run_sweeps`), 'epsilon_wall_clock', 'epsilon_seed_var' and
+# 'epsilon_feasibility' (`_run_perf`, the perf sweeps) and 'query' (the radial query sweep,
 # `_plot_query_sweep`). No '_sweep' suffix on the id -- plotting.py appends that
 # when writing the file, so 'gamma_approx_error' -> gamma_approx_error_sweep.pdf.
 # '*' applies to every experiment; a named entry wins key by key, and both win
@@ -292,8 +292,8 @@ PANEL_CONFIGS = {
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
 #   normalize      width / worst_error sweeps only: divide every series by the
-#                  baseline's (SS10.1); a `_coverage`, `_approx_error`, `_wall_clock`
-#                  or `_seed_var` id rejects it
+#                  baseline's (SS10.1); a `_coverage`, `_approx_error`, `_wall_clock`,
+#                  `_seed_var` or `_feasibility` id rejects it
 # Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
 #   legend         False hides it, True shows it, a str or (x, y) tuple is a
 #                  matplotlib loc. Absent: the plot function's own default (on).
@@ -329,7 +329,9 @@ def validate_plot_keys(name: str, table: dict[str, dict[str, Any]], allowed) -> 
         bad = set(cfg) - keys
         if bad:
             raise ValueError(f"{name}[{plot_id!r}]: unknown key(s) {sorted(bad)}.")
-        if "normalize" in cfg and plot_id.endswith(("_coverage", "_approx_error", "_wall_clock", "_seed_var")):
+        if "normalize" in cfg and plot_id.endswith(
+            ("_coverage", "_approx_error", "_wall_clock", "_seed_var", "_feasibility")
+        ):
             # a rate divided by a rate means nothing, a miss divided by a
             # baseline that vanishes above gamma* reads as noise, and the perf
             # figures are already normalised; loud, at import

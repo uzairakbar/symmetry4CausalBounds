@@ -694,9 +694,10 @@ class ExperimentOrchestrator(ABC):
                 )
 
     def _run_perf(self, perf_spec):
-        """Two epsilon sweeps that time the solves and cross-check the backends, on the
-        robustness sweep's own grid, data and models (`get_sweep_runner_cls("epsilon")`):
-        one experiment, serial, never the cached sweep record."""
+        """The epsilon sweeps that time the solves, cross-check the backends and count
+        the backends that return a usable bound, on the robustness sweep's own grid,
+        data and models (`get_sweep_runner_cls("epsilon")`): one experiment, serial,
+        never the cached sweep record."""
         # Always serial: n_jobs speeds up only the SOCP methods, so a parallel
         # record would compare harnesses, not methods. The runner kwarg alone does
         # NOT reach the models: build_methods reads the orchestrator's toggles, so
@@ -728,14 +729,14 @@ class ExperimentOrchestrator(ABC):
                 xscale=PARAM_SPECS["epsilon"].xscale,
                 yscale=spec.yscale,
                 vlines=runner.vlines,
-                # the wall clock is one median line per method, the seed var a
-                # mean over queries with the bootstrap band over them; neither
-                # is clipped (the slowest method is the result) nor promoted to
-                # log (D(eps) spans decades near zero)
-                bootstrapped=(metric == "seed_var"),
+                # the wall clock is one median line per method, the seed var and
+                # the feasibility a mean over queries with the bootstrap band over
+                # them; none is clipped (the slowest method is the result) nor
+                # promoted to log (D(eps) spans decades near zero); the
+                # feasibility frame is clamped like coverage (create_sweep_plot)
+                bootstrapped=(metric in ("seed_var", "feasibility")),
                 clip_y=False,
                 promote_y=False,
-                failures=record.failures if metric == "seed_var" else None,
             )
 
     def _run_query_sweep(self):

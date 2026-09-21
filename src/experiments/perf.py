@@ -1,7 +1,7 @@
 """
-The perf sweeps: wall clock and solver stability along the epsilon grid.
+The perf sweeps: wall clock, solver stability and feasibility along the epsilon grid.
 
-Both run on the robustness sweep's own runner (`get_sweep_runner_cls("epsilon")`,
+All three run on the robustness sweep's own runner (`get_sweep_runner_cls("epsilon")`,
 one experiment, serial): one data draw, one augmentation draw, one query set, the
 same ratio grid, x-label and r = 1 line as the `epsilon` sweep figure.
 
@@ -16,6 +16,9 @@ can be an infeasibility proof, which is cheaper than a solve; the cumulative cur
 is what the figure reads, not the first increment. Seed var holds everything fixed and varies the conic backend
 over the installed subset of BACKENDS at tight, comparable tolerances; the metric
 is D(eps) of `solver_stability`, failures counted per (run, query) pair.
+Feasibility reads the same backend runs (built once when either is asked for): per
+query and grid point, the share of backends whose bound is usable (`_failed`'s
+complement), so a method the data refutes reads 0 where seed var has no line.
 """
 
 import time
@@ -184,6 +187,12 @@ def wall_clock(runner, data, x, repeats: int, seconds_per_solve: float):
     return results, increments
 
 
+def _failed(lower, upper, status) -> np.ndarray:
+    """The (run, step, query) pairs with no usable bound: a non-OK status, an end
+    that is not finite, or lower > upper."""
+    return (status != SolveStatus.OK) | ~np.isfinite(lower) | ~np.isfinite(upper) | (lower > upper)
+
+
 def solver_stability(lower, upper, status, width_pi):
     """D(eps) per query. lower, upper, status: (R, n_steps, n_queries) over the backend runs r;
     width_pi: (R, n_queries), the baseline PI width per run. Returns the per-query terms
@@ -193,7 +202,7 @@ def solver_stability(lower, upper, status, width_pi):
     excluded from both sd. A query with fewer than two surviving runs has no sd and drops out
     of the mean (ddof 1 leaves NaN there)."""
     lower, upper, status = (np.asarray(a, dtype=float) for a in (lower, upper, status))
-    failed = (status != SolveStatus.OK) | ~np.isfinite(lower) | ~np.isfinite(upper) | (lower > upper)
+    failed = _failed(lower, upper, status)
     L = np.where(failed, np.nan, lower)
     U = np.where(failed, np.nan, upper)
     with warnings.catch_warnings():
@@ -205,12 +214,13 @@ def solver_stability(lower, upper, status, width_pi):
     return terms, failed.sum(axis=(0, 2)).astype(int)
 
 
-def seed_var(runner, data, x):
-    """Every method's bounds along the grid under each installed backend, then D(eps).
-    The PI family is fit once (its fit is solver-free) and re-solved per backend;
-    ERM+IV and DA+ERM+IV are re-fitted per backend (their fit is the conic solve);
-    ERM and DA+ERM are fit once and held fixed. Returns (terms, failures, statuses,
-    backends)."""
+def backend_runs(runner, data, x):
+    """Every method's bounds along the grid under each installed backend. The PI
+    family is fit once (its fit is solver-free) and re-solved per backend; ERM+IV
+    and DA+ERM+IV are re-fitted per backend (their fit is the conic solve); ERM and
+    DA+ERM are fit once and held fixed. Returns (runs, backends), one run per
+    backend: ({method: (lower, upper, status)}, the baseline PI's (lower, upper,
+    status)), each array (n_steps, n_queries)."""
     backends = installed_backends()
     if len(backends) < 2:
         logger.warning(f"seed_var: {len(backends)} conic backend(s) installed; D(eps) needs two or more.")
@@ -236,21 +246,40 @@ def seed_var(runner, data, x):
         runs.append((bounds_along(models, runner, data, x), bounds_along({"PI": pi}, runner, data, x)["PI"]))
     for model in (*fixed.values(), pi):
         set_backend(model, None)
+    return runs, backends
+
+
+def _stacked(runs, name) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """One method's (lower, upper, status) over the runs, each (R, n_steps, n_queries)."""
+    return tuple(np.array([run[name][k] for run, _ in runs]) for k in range(3))
+
+
+def seed_var(runner, data, x, runs=None, backends=None):
+    """D(eps) per method over the backend runs (`backend_runs`, built here unless the
+    caller passes them with their backends). Returns (terms, failures, statuses,
+    backends)."""
+    if runs is None:
+        runs, backends = backend_runs(runner, data, x)
 
     # W_PI at step 0: the baseline does not read epsilon
     width_pi = np.array([run_pi[1][0] - run_pi[0][0] for _, run_pi in runs])
     terms, failures, statuses = {}, {}, {}
     for name in runs[0][0]:
-        lower = np.array([run[name][0] for run, _ in runs])
-        upper = np.array([run[name][1] for run, _ in runs])
-        status = np.array([run[name][2] for run, _ in runs])
+        lower, upper, status = _stacked(runs, name)
         terms[name], failures[name] = solver_stability(lower, upper, status, width_pi)
         statuses[name] = status
     return terms, failures, statuses, backends
 
 
+def feasibility(runs) -> dict[str, np.ndarray]:
+    """Per method, the share of backend runs whose bound is usable (not `_failed`),
+    per step and query: (n_steps, n_queries) in [0, 1]. R times its complement,
+    summed over queries, is `solver_stability`'s failure count per step."""
+    return {name: 1.0 - _failed(*_stacked(runs, name)).mean(axis=0) for name in runs[0][0]}
+
+
 def perf_sweeps(runner, metrics, repeats: int = 3) -> PerfRecord:
-    """Both perf sweeps on the runner's grid and its experiment-0 data."""
+    """The perf sweeps in `metrics` on the runner's grid and its experiment-0 data."""
     x = np.asarray(runner.get_param_range(), dtype=float)
     data = runner.generate_data(0, x[0])
     n_queries = len(data.X_test)
@@ -277,8 +306,14 @@ def perf_sweeps(runner, metrics, repeats: int = 3) -> PerfRecord:
         record.results["wall_clock"], record.meta["increments_seconds"] = wall_clock(
             runner, data, x, repeats, per_solve
         )
-    if "seed_var" in metrics:
-        terms, record.failures, record.statuses, backends = seed_var(runner, data, x)
-        record.results["seed_var"] = terms
+    if "seed_var" in metrics or "feasibility" in metrics:
+        # one set of backend runs feeds both
+        runs, backends = backend_runs(runner, data, x)
         record.meta["backends"] = backends
+        if "seed_var" in metrics:
+            record.results["seed_var"], record.failures, record.statuses, _ = seed_var(
+                runner, data, x, runs=runs, backends=backends
+            )
+        if "feasibility" in metrics:
+            record.results["feasibility"] = feasibility(runs)
     return record

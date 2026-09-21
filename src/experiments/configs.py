@@ -507,11 +507,12 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh"),
     "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
     "coverage": MetricSpec("coverage", r"coverage rate", include_ate=False),
-    # the two perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
+    # the three perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
     # the QueryEval field the sweeps record, and its numbers are baseline-solve
-    # equivalents (perf.py:157)
+    # equivalents (perf.py:157); `feasibility` is a rate over the seed_var backends
     "wall_clock": MetricSpec("wall_clock", "cumulative runtime", "log", perf_only=True),
     "seed_var": MetricSpec("seed_var", r"stability", "linear", perf_only=True),
+    "feasibility": MetricSpec("feasibility", r"feasible rate (over backends)", "linear", perf_only=True),
 }
 
 
@@ -528,7 +529,7 @@ class SweepSpec:
 
 @dataclass(frozen=True)
 class PerfSpec:
-    metric: tuple[str, ...]  # the perf sweeps to run, `wall_clock` and/or `seed_var`
+    metric: tuple[str, ...]  # the perf sweeps to run: any of `wall_clock`, `seed_var`, `feasibility`
     repeats: int = 3  # timed repeats per grid point (wall_clock), the median is kept
 
 

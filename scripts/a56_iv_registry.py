@@ -139,7 +139,7 @@ EXPERIMENT_TYPES = ("query", "sweep", "perf")
 # derived per block in leg (i) and needs no row here, so a recipe added tomorrow is
 # checked the day it lands. The cigarette experiment is split by target too: the
 # restricted-2sls one reports the query figures, the plasmode carries every sweep
-# and both perf metrics.
+# and every perf metric.
 RECIPES = (
     ("simulationFig5", "simulation", 4, "query"),
     ("ivSimulationFig5", "simulation", 4, "query"),

@@ -13,8 +13,9 @@ the column count is odd, else centred), three y-labels without the "/ PI" suffix
 one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
 `LEGEND_ROWS` rows with a paired family in one column and the singletons stacked
 two to a column. A missing pkl leaves its cells blank.
-Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`)
-with a shared y axis, drawn only where some dataset ran the perf sweep. From the
+Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`,
+`epsilon_feasibility.pdf`) with a shared y axis, drawn only where some dataset ran the
+perf sweep; the feasibility row reads on `CLAMP_YLIM`. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
@@ -69,7 +70,7 @@ from src.experiments.utils.plotting import (
 
 # the grid's rows, in order: (metric id, y-label)
 ROWS: tuple[tuple[str, str], ...] = (("coverage", "coverage"), ("width", "width"), ("worst_error", "worst error"))
-PERF_METRICS: tuple[str, ...] = ("wall_clock", "seed_var")
+PERF_METRICS: tuple[str, ...] = ("wall_clock", "seed_var", "feasibility")
 # the figure legend by entry count n: up to LEGEND_FLAT_MAX entries in one row of n,
 # more in LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns; past LEGEND_GRID_COLS
 # columns it still widens, with a warning
@@ -340,17 +341,18 @@ def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None =
         meta = f"{folder}/epsilon_perf_meta.pkl"
         found = load(meta).get("xlabel", pspec.xlabel) if os.path.exists(meta) else pspec.xlabel
         xlabel = _xlabel(xlabel, found, f"{dataset} perf")
-        failures = None
-        if metric == "seed_var":
-            # the D(eps) terms per query: the mean line and the band over queries
+        if metric in ("seed_var", "feasibility"):
+            # the D(eps) terms or the feasible rates per query: the mean line and
+            # the band over queries
             y = bootstrap(y)
-            path = f"{folder}/epsilon_seed_var_failures.pkl"
-            failures = load(path) if os.path.exists(path) else None
-        drawn, _ = _draw_series(ax, x, y, failures)
+        drawn, _ = _draw_series(ax, x, y)
         for name, handle in drawn.items():
             handles.setdefault(parse_method(name), (handle, name))
         _frame(ax, x, pspec.xscale, pspec.vlines)
         ax.set_yscale(spec.yscale)
+        if metric == "feasibility":
+            # a rate, on the coverage rows' frame
+            ax.set_ylim(*CLAMP_YLIM)
     _label_rows([axes], [spec.ylabel])
     legend = _legend(fig, handles)
     path = None if out is None else f"{out}/epsilon_{metric}.{PLOT_FORMAT}"

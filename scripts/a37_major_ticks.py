@@ -16,11 +16,12 @@ experiment. Three legs:
         texts, stripped of `$\\mathdefault{...}$`, read 200, 500, 1000;
   (iii) `create_query_sweep_plot` on synthetic positive angles with a log x scale
         (the function has no y-scale argument; y is a linear `plt.ylim`), and
-        the two perf sweep figures as `_run_perf` draws them: a `(4, 1)`
-        cumulative wall clock per method spanning 0.1, 1, 10 (log y, no clip)
-        and a `(4, 6)` seed_var block with one planted failure count (linear y,
-        no promotion): >= 2 in-view majors on every axis, zero non-empty minor
-        labels (a32's property);
+        the three perf sweep figures as `_run_perf` draws them: a `(4, 1)`
+        cumulative wall clock per method spanning 0.1, 1, 10 (log y, no clip),
+        a `(4, 6)` seed_var block (linear y, no promotion) and a `(4, 6)`
+        feasibility block of rates in [0, 1] (clamped to `CLAMP_YLIM`): >= 2
+        in-view majors on every axis, zero non-empty minor labels (a32's
+        property);
   (iv)  every param on both datasets: xlim == `_pad(x.min(), x.max(), X_MARGIN)`
         (no top-tail clip on the x grid, the 2 % margin only), both grid
         endpoints strictly inside it, and the reference lines drawn are exactly
@@ -214,11 +215,14 @@ def leg_iii():
     # a cumulative series per method at 0.1, 1, 10 baseline solves a step
     wall = {name: np.cumsum(np.full(points, 10.0 ** (i - 1)))[:, None] for i, name in enumerate(methods)}
     seed = {name: np.full((points, 6), 1e-8 * (i + 1)) for i, name in enumerate(methods)}
-    failures = np.zeros(points, dtype=int)
-    failures[1] = 2
+    # rates over three backends: PI+INV refuted at the first step, split at the second
+    feasible = {name: np.ones((points, 6)) for name in methods}
+    feasible["PI+INV"][0] = 0.0
+    feasible["PI+INV"][1] = rng.choice([0.0, 1 / 3, 2 / 3, 1.0], size=6)
     perf = (
         ("wall_clock", wall, dict(bootstrapped=False, clip_y=False)),
-        ("seed_var", seed, dict(promote_y=False, failures={"PI+INV": failures})),
+        ("seed_var", seed, dict(promote_y=False)),
+        ("feasibility", feasible, dict(clip_y=False, promote_y=False)),
     )
     for metric, y, kwargs in perf:
         before = len(_errors)

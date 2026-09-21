@@ -49,7 +49,7 @@ cigarette files fan in.
 | `nEfficiencyFig13.yaml` | sim, optical, cigarettes | sweep `n` | `n-efficiency_fig9.yaml`, whose three metrics broaden to four; the `n` step of `iv_fig13.yaml` and the two cigarette files |
 | `mEfficiencyFig14.yaml` | sim, optical, cigarettes | sweep `m` | `m-efficiency_fig10.yaml`, whose three metrics broaden to four; the `m` step of `iv_fig13.yaml` and the two cigarette files |
 | `latencyFig15.yaml` | sim, optical, cigarettes | perf `wall_clock` | the `wall_clock` half of `cigarettes-plasmode_fig12b.yaml`'s perf block; new on sim and optical |
-| `stabilityFig16.yaml` | sim, optical, cigarettes | perf `seed_var` | the `seed_var` half of the same perf block; new on sim and optical |
+| `stabilityFig16.yaml` | sim, optical, cigarettes | perf `seed_var`, `feasibility` | the `seed_var` half of the same perf block; new on sim and optical. `feasibility` (the share of backends returning a usable bound) is new everywhere and reads the same backend runs |
 
 Read the other way:
 

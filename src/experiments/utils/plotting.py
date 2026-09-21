@@ -55,8 +55,6 @@ BAND_EDGE_WIDTH: float = 1.2
 # the frame, too little to read as widening (the 5 % `_pad` did).
 CLIP_PERCENTILE: float = 98.0
 X_MARGIN: float = 0.02
-# draw the seed_var failure counts as markers on the line; False hides them
-FAILURE_MARKER: bool = True
 # asinh knee, as a fraction of the upper limit. PANEL_CONFIGS' own ylim/linear_width.
 LINEAR_WIDTH_RATIO: float = 40.0
 # promote linear -> log past this dynamic range. Fires on nothing today; a guard.
@@ -387,25 +385,12 @@ def _mark_frame(x_values: NDArray, vlines, xscale: str) -> tuple[float, float, l
     return x_lo, x_hi, marks
 
 
-def _nearest_finite(values: NDArray) -> NDArray:
-    """Every NaN replaced by the last finite value before it, else the first after."""
-    out = np.array(values, dtype=float)
-    finite = np.flatnonzero(np.isfinite(out))
-    if not len(finite):
-        return out
-    for i in np.flatnonzero(~np.isfinite(out)):
-        before = finite[finite < i]
-        out[i] = out[before[-1]] if len(before) else out[finite[finite > i][0]]
-    return out
-
-
-def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], failures: dict[str, NDArray] | None = None):
+def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray]):
     """One mean line and one 2.5 / 97.5 band per method on `ax`, in the method's
     hue and line style; a method with no finite mean is skipped. Returns the
     line handles keyed by method in drawing order and the mean series, which
     alone decide the limits (the band is contextual and clips against the
-    frame). `failures` (method -> count per step) marks every step with a
-    positive count with a cross and the count above it, under FAILURE_MARKER."""
+    frame)."""
     colors = sns.color_palette()
     handles, means = {}, []
     for method_name, errors in y_results.items():
@@ -429,27 +414,6 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], failures:
         if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
             ax.fill_between(x_values, low, high, color=color, alpha=0.2)
 
-        if FAILURE_MARKER and failures and method_name in failures:
-            counts = np.asarray(failures[method_name])
-            marked = counts > 0
-            if marked.any():
-                # a step where every run failed has no mean to sit on: the marker
-                # goes at the level of the nearest finite point of the same line
-                # (the last one before it, else the first one after), the count says
-                # what happened there
-                level = _nearest_finite(mean_error)
-                ax.plot(x_values[marked], level[marked], linestyle="none", marker="x", markersize=7, color=color)
-                for x_i, y_i, count in zip(x_values[marked], level[marked], counts[marked], strict=True):
-                    if np.isfinite(y_i):
-                        ax.annotate(
-                            str(int(count)),
-                            (x_i, y_i),
-                            textcoords="offset points",
-                            xytext=(0, 5),
-                            ha="center",
-                            fontsize=FS_TICK * 0.6,
-                            color=color,
-                        )
     return handles, means
 
 
@@ -515,7 +479,6 @@ def create_sweep_plot(
     title: str | None = None,
     title_color: str = "k",
     normalize: bool = DEFAULT_NORMALIZE_SWEEP,
-    failures: dict[str, NDArray] | None = None,
     clip_y: bool = True,
     promote_y: bool = True,
 ):
@@ -526,11 +489,11 @@ def create_sweep_plot(
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold).
 
-    `failures`, `clip_y` and `promote_y` are the perf sweeps' knobs: the failure
-    counts per method and step drawn as markers (`_draw_series`, FAILURE_MARKER),
-    the top-tail clip of the y frame and the linear-to-log promotion, both on by
-    default and off on a figure whose slowest method or near-zero D(eps) is the
-    result rather than a runaway.
+    `clip_y` and `promote_y` are the perf sweeps' knobs: the top-tail clip of the
+    y frame and the linear-to-log promotion, both on by default and off on a
+    figure whose slowest method or near-zero D(eps) is the result rather than a
+    runaway. A step where a method has no usable bound is a gap in its line; the
+    feasibility figure reads the share of backends with a usable bound there.
 
     `normalize` divides every series by the baseline's (`normalize_sweep`, SS10.1)
     on the width and worst-error figures and appends the baseline's name to the
@@ -542,8 +505,9 @@ def create_sweep_plot(
     too (the cigarette width-ratio figure), and it belongs beside the query figures.
 
     Limits/scales come from PLOT_CONFIGS[experiment][fname], else automatically from
-    the mean lines -- see _rescale; a `_coverage` id and any figure drawn normalised
-    are then clamped to a linear axis on `CLAMP_YLIM`, whatever the config says.
+    the mean lines -- see _rescale; a `_coverage` or `_feasibility` id and any figure
+    drawn normalised are then clamped to a linear axis on `CLAMP_YLIM`, whatever the
+    config says.
     The style keys `legend`, `x_color`, `y_color`, `title`, `title_color` come from
     the same config entry, else from the arguments of the same name (_style);
     `legend`, when given, overrides `hide_legend` and `legend_loc`.
@@ -585,7 +549,7 @@ def create_sweep_plot(
         fig = plt.figure()
 
         # one line and band per method; the mean lines alone decide the limits
-        handles, all_means = _draw_series(plt.gca(), x_values, y_results, failures)
+        handles, all_means = _draw_series(plt.gca(), x_values, y_results)
         plot_handles = list(handles.values())
         all_labels = [TEX_MAPPER.get(name, name) for name in handles]
         legend_items = [TEX_MAPPER.get(item, item) if item in handles else item for item in legend_items]
@@ -611,10 +575,11 @@ def create_sweep_plot(
             clip_y=clip_y,
             promote_y=promote_y,
         )
-        # coverage, and anything drawn as a fraction of the baseline, reads on one
-        # fixed linear frame; the pad and the promotion of _rescale are undone here
-        # on purpose, and a series above the frame clips (the user's call)
-        if fname.endswith("_coverage") or baseline is not None:
+        # coverage and feasibility (rates), and anything drawn as a fraction of the
+        # baseline, read on one fixed linear frame; the pad and the promotion of
+        # _rescale are undone here on purpose, and a series above the frame clips
+        # (the user's call)
+        if fname.endswith(("_coverage", "_feasibility")) or baseline is not None:
             for key in ("yscale", "ylim"):
                 if key in cfg:
                     logger.warning(f"{fname}: {key} ignored, the axis is clamped to {CLAMP_YLIM}.")

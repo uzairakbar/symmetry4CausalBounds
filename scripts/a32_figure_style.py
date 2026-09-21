@@ -5,11 +5,12 @@ Every figure labels only its major ticks, and the five style keys of
 reach the figures through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`. Pkl-driven: it
 pairs `{param}_values.pkl` with `{param}_results.pkl` under `<artifacts>/<experiment>/
 sweep/` (so `omega_axis.pkl` and the statuses are ignored), and takes the query pair
-and the two perf sweep pkls (`perf/epsilon_values.pkl` with
-`perf/epsilon_{wall_clock,seed_var}_results.pkl`) when present. No experiment is run.
+and the three perf sweep pkls (`perf/epsilon_values.pkl` with
+`perf/epsilon_{wall_clock,seed_var,feasibility}_results.pkl`) when present. No
+experiment is run.
 
   (a) every re-rendered figure (each sweep param x metric, the query sweep, the
-      two perf sweep figures): zero non-empty minor tick labels on every axes,
+      three perf sweep figures): zero non-empty minor tick labels on every axes,
       both axes, at least one minor tick mark on every log axis (the wall-clock
       figure has one), and at least two major ticks inside the view on every
       axis; no plotting error was swallowed;
@@ -249,10 +250,9 @@ def render_query(experiment, x, results, save, **kwargs):
 
 def render_perf(experiment, perf_dir, metric, save):
     """One perf sweep figure from `perf/epsilon_values.pkl` and its `_results.pkl`,
-    as `_run_perf` draws it (the seed_var failures marked, no clip, no promotion)."""
+    as `_run_perf` draws it (no clip, no promotion, no failure marker)."""
     x = load(f"{perf_dir}/epsilon_values.pkl")
     results = load(f"{perf_dir}/epsilon_{metric}_results.pkl")
-    failures = f"{perf_dir}/epsilon_seed_var_failures.pkl"
     meta = f"{perf_dir}/epsilon_perf_meta.pkl"
     spec = METRIC_SPECS[metric]
     plotting.create_sweep_plot(
@@ -268,10 +268,9 @@ def render_perf(experiment, perf_dir, metric, save):
         xscale=PARAM_SPECS["epsilon"].xscale,
         yscale=spec.yscale,
         vlines=PARAM_SPECS["epsilon"].vlines,
-        bootstrapped=(metric == "seed_var"),
+        bootstrapped=(metric in ("seed_var", "feasibility")),
         clip_y=False,
         promote_y=False,
-        failures=load(failures) if metric == "seed_var" and os.path.exists(failures) else None,
         savefig=save,
     )
     return plt.gcf()
@@ -347,7 +346,7 @@ def row_a(artifacts, experiments, save):
 
         perf_dir = f"{artifacts}/{experiment}/perf"
         if os.path.exists(f"{perf_dir}/epsilon_values.pkl"):
-            for metric in ("wall_clock", "seed_var"):
+            for metric in (m for m, spec in METRIC_SPECS.items() if spec.perf_only):
                 if not os.path.exists(f"{perf_dir}/epsilon_{metric}_results.pkl"):
                     print(f"  {experiment}: no perf {metric} pkl")
                     continue

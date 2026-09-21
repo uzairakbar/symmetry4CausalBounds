@@ -55,7 +55,7 @@ simulation:
             param:  [epsilon, gamma, omega, n, m]
             metric: [coverage, approx_error, worst_error, width]
         # perf:
-        #     metric: [wall_clock, seed_var]
+        #     metric: [wall_clock, seed_var, feasibility]
 
 # do_mnist:
 #     seed: 42
@@ -101,7 +101,7 @@ simulation:
 #     experiment:
 #         # query: true                 # digit-exemplar sweep; the PC panel is off here
 #         perf:
-#             metric: [wall_clock, seed_var]    # seed_var needs n_experiments >= 2
+#             metric: [wall_clock, seed_var, feasibility]    # seed_var needs n_experiments >= 2
 
 optical_device:
     seed: 42
@@ -136,7 +136,7 @@ optical_device:
             param:  [epsilon, gamma, omega, n, m]
             metric: [coverage, approx_error, worst_error, width]
         # # perf:
-        # #     metric: [wall_clock, seed_var]
+        # #     metric: [wall_clock, seed_var, feasibility]
 
 cigarettes:
     seed: 42

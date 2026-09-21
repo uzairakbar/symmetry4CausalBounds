@@ -151,8 +151,8 @@ def render():
             )
         print(f"  {name:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
 
-    # the two perf sweep figures: a cumulative wall clock per method (log y, no
-    # clip) and the seed_var terms per query with one planted failure count
+    # two perf sweep figures: a cumulative wall clock per method (log y, no clip)
+    # and the seed_var terms per query, PI+INV with no usable bound at two steps
     grid = np.geomspace(2**-6, 1.0, 4)
     perf = {
         "wall_clock": {
@@ -179,7 +179,6 @@ def render():
             bootstrapped=(metric == "seed_var"),
             clip_y=False,
             promote_y=False,
-            failures={"PI+INV": np.array([6, 6, 0, 0])} if metric == "seed_var" else None,
         )
         print(f"  {'perf ' + metric:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
     print()

@@ -24,7 +24,7 @@ simulation:
     augmentation: translate
     experiment:
         perf:
-            metric: [seed_var]
+            metric: [seed_var, feasibility]
 optical_device:
     seed: 42
     n_samples: 1_000
@@ -40,7 +40,7 @@ optical_device:
     augmentation: rotation > hflip > vflip > random-permutation
     experiment:
         perf:
-            metric: [seed_var]
+            metric: [seed_var, feasibility]
 cigarettes:
     seed: 42
     target: plasmode
@@ -63,4 +63,4 @@ cigarettes:
     augmentation: translate
     experiment:
         perf:
-            metric: [seed_var]
+            metric: [seed_var, feasibility]

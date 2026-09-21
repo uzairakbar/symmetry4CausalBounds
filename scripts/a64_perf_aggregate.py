@@ -5,8 +5,9 @@ constrain the translation amounts alone at the T-side term (`parse_method`,
 `build_methods`, `fit_model`, the intersection's `instrument`); `perf` is two
 epsilon sweeps on the robustness grid (`src/experiments/perf.py`: a cumulative
 wall clock that re-solves only the programs reading epsilon and `repad`s the rest,
-and the backend cross-check D(eps) with failure markers); `python -m src.aggregate`
-draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
+and the backend cross-check D(eps); round 16 adds the feasible rate over the same
+backends and drops the failure markers); `python -m src.aggregate` draws the
+3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
 
   (D)    the digest leg (scripts/digest_leg.py), as a56 to a63: no shipped block
          spells a mode or plans perf, bare names dispatch as before, `_draw_series`
@@ -48,21 +49,19 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          runs, D(1) by hand; a third failure on one query leaves one run and a NaN
          term that `nanmean` skips; a status of 1 counts like a 2. Catches: the
          `lower > upper` clause dropped, `ddof` 0. Misses: nothing on the formula.
-  (v)    `FAILURE_MARKER` on rendered artists: with the constant on, a marker-only
-         line (`x`, 2 points, the method's colour) and two count texts; off, neither,
-         the mean lines and bands untouched. And `clip_y`: the record {PI 1, PI+INV
-         1..100} rendered twice on log y, the frame equal to `_pad(_limits(clip=False))`
-         under `clip_y=False` and to `_pad(_limits(clip=True))` by default, the former
-         higher. Catches: the flag ignored, the `clip_y` forwarding dropped. Misses:
-         how the markers look.
+  (v)    `clip_y` on rendered artists: the record {PI 1, PI+INV 1..100} rendered
+         twice on log y, the frame equal to `_pad(_limits(clip=False))` under
+         `clip_y=False` and to `_pad(_limits(clip=True))` by default, the former
+         higher. Catches: the `clip_y` forwarding dropped. (The failure markers
+         this leg used to pin are gone; a70 leg 4 pins their absence.)
   (vi)   the aggregate on a synthetic tree (simulation gamma and omega, cigarettes
          gamma without coverage and no omega, cigarettes perf, no optical): the CLI as
          a subprocess writes exactly the four pdfs; in-process the grid has the
          titles, the blank cells, one shared y on `CLAMP_YLIM`, the axis pkl's
          x-label, the legend in the repo's order in one row, the render fold (bare
          beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
-         y-labels without " / "; the perf row has the blank sim panel and the
-         cigarette marker line; ten perf methods draw five columns of two, with no
+         y-labels without " / "; the perf row has the blank sim panel and no
+         marker line, and its feasibility row sits on `CLAMP_YLIM`; ten perf methods draw five columns of two, with no
          WARNING, clear of the titles; the x-label at 0.5 on two columns and, with
          optical added, under the middle column of three (grid and perf row).
          Catches: rows reordered, a missing metric not blanked, the legend sorted by
@@ -79,12 +78,14 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          crash on the real pkls, a grid silently not drawn. No break-it. Without
          a tree at `--shipped` the leg is SKIPPED and counted in the summary line.
   (viii) the perf path end to end on the simulation block (5 methods, 4 steps,
-         `n_experiments 2` forced to 1, serial): the six pkls and two pdfs, the grid,
+         `n_experiments 2` forced to 1, serial, all three metrics): the seven pkls
+         and three pdfs, the grid,
          the wall-clock shapes and shape of the curves, the seed_var terms finite
          exactly where two runs survive and NaN elsewhere, `PI+INV` NaN at its
          INFEASIBLE steps and every method finite at r = 1, `failures` equal to the
          (run, query) pairs re-derived from `perf.bounds_along` per backend (612 for
          `PI+INV` there, RECORDED), the statuses pkl equal to the re-derived codes,
+         the feasibility pkl equal to the re-derived share of usable runs,
          `meta`; `repeats` validation; do-MNIST perf inspected as source only.
          Catches: the `n_experiments` override dropped, the wrong grid, failures
          counted over runs, `ddof` 0. Misses: optical and cigarettes perf.
@@ -747,87 +748,11 @@ def leg_iv():
 
 
 def leg_v():
-    print("(v) FAILURE_MARKER and clip_y on rendered artists")
+    print("(v) clip_y on rendered artists")
     x = PARAM_SPECS["epsilon"].grid_fn("simulation", 4)
     # the epsilon grid's own length: `_EPSILON_RATIO_GRID` forces it odd
     points = len(x)
-    rng = np.random.default_rng(0)
-    seed = {"PI": 1e-8 + 1e-10 * rng.random((points, 6)), "PI+INV": 3e-8 + 1e-10 * rng.random((points, 6))}
-    marks = np.zeros(points, dtype=int)
-    marks[1], marks[3 % points] = 2, 1
-    failures = {"PI+INV": marks}
     plt.rcParams.update(plotting.RC_PARAMS)
-    import seaborn as sns
-
-    sns.set_palette("deep")
-    colour = sns.color_palette()[COLOR_MAP["PI+INV"]]
-
-    def render(flag):
-        plt.close("all")
-        saved = plotting.FAILURE_MARKER
-        plotting.FAILURE_MARKER = flag
-        try:
-            plotting.create_sweep_plot(
-                x,
-                seed,
-                xlabel="x",
-                ylabel="y",
-                xscale="log",
-                fname="epsilon_seed_var",
-                failures=failures,
-                promote_y=False,
-                savefig=False,
-            )
-        finally:
-            plotting.FAILURE_MARKER = saved
-        ax = plt.gca()
-        means = [line for line in ax.get_lines() if line.get_linestyle() != "None" and len(line.get_xdata()) == points]
-        return ax, marker_lines(ax), means, len(ax.collections)
-
-    ax, markers, means, bands = render(True)
-    check("(v) on: one marker-only line", len(markers) == 1, f"{len(markers)}")
-    if markers:
-        line = markers[0]
-        check(
-            "(v) on: 2 marked points at the failed steps",
-            np.allclose(line.get_xdata(), x[[1, 3]]),
-            f"{line.get_xdata()}",
-        )
-        check(
-            "(v) on: in PI+INV's colour",
-            np.allclose(line.get_color()[:3], colour[:3]) if not isinstance(line.get_color(), str) else True,
-        )
-    texts = sorted(t.get_text() for t in ax.texts)
-    check("(v) on: the texts read 1 and 2", texts == ["1", "2"], f"{texts}")
-    check("(v) on: two mean lines and two bands", len(means) == 2 and bands == 2, f"{len(means)} {bands}")
-    ax, markers, means_off, bands_off = render(False)
-    check("(v) off: no marker line", not markers, f"{len(markers)}")
-    check("(v) off: no text", not ax.texts, f"{[t.get_text() for t in ax.texts]}")
-    check("(v) off: the mean lines and bands untouched", len(means_off) == 2 and bands_off == 2)
-    check("(v) FAILURE_MARKER defaults to True", plotting.FAILURE_MARKER is True)
-
-    # a step where every run failed has no mean: the marker sits at the level of the
-    # nearest finite point of the same line (the first one after, here) with its count
-    all_failed = np.full((points, 6), 2e-8)
-    all_failed[:2] = np.nan
-    all_failed[2] = 1e-8
-    seed["PI+INV"] = all_failed
-    counts = np.zeros(points, dtype=int)
-    counts[:2] = 6
-    failures["PI+INV"] = counts
-    ax, markers, means, _ = render(True)
-    check(
-        "(v) all-failed steps: one marker line at the nearest finite level",
-        len(markers) == 1
-        and np.allclose(markers[0].get_xdata(), x[[0, 1]])
-        and np.allclose(markers[0].get_ydata(), 1e-8),
-        f"{[m.get_ydata() for m in markers]}",
-    )
-    texts = sorted(t.get_text() for t in ax.texts)
-    check("(v) all-failed steps: the counts are drawn", texts == ["6", "6"], f"{texts}")
-    seed["PI+INV"] = 3e-8 + 1e-10 * rng.random((points, 6))
-    failures["PI+INV"] = marks
-
     wall = {
         "PI": np.ones((points, 1)),
         "PI+INV": np.linspace(1.0, 100.0, points)[:, None],
@@ -918,6 +843,11 @@ def synthetic_tree(
     marks = np.zeros(points, dtype=int)
     marks[1], marks[3 % points] = 2, 1
     dump({"PI": np.zeros(points, dtype=int), "PI+INV": marks}, f"{perf_dir}/epsilon_seed_var_failures.pkl")
+    # the matching rates over three backends: PI+INV loses a third of its runs at
+    # the marked steps
+    feasible = {"PI": np.ones((points, 6)), "PI+INV": np.ones((points, 6))}
+    feasible["PI+INV"][marks > 0, :2] = 2 / 3
+    dump(feasible, f"{perf_dir}/epsilon_feasibility_results.pkl")
     dump({"xlabel": PARAM_SPECS["epsilon"].xlabel, "repeats": 3}, f"{perf_dir}/epsilon_perf_meta.pkl")
     return root
 
@@ -934,9 +864,9 @@ def leg_vi():
         proc.stderr.strip().splitlines()[-1][:160] if proc.returncode else "",
     )
     written = sorted(os.listdir(out)) if os.path.isdir(out) else []
-    want = ["epsilon_seed_var.pdf", "epsilon_wall_clock.pdf", "gamma_grid.pdf", "omega_grid.pdf"]
+    want = sorted([f"epsilon_{m}.pdf" for m in aggregate.PERF_METRICS] + ["gamma_grid.pdf", "omega_grid.pdf"])
     check(
-        "(vi) exactly the four pdfs, non-empty",
+        f"(vi) exactly the {len(want)} pdfs (a grid per param, a row per PERF_METRICS entry), non-empty",
         written == want and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
         f"{written}",
     )
@@ -1019,13 +949,28 @@ def leg_vi():
         "(vi) the perf row has two panels, the sim panel off",
         len(panels) == 2 and not panels[0].axison and panels[1].axison,
     )
-    check("(vi) the cigarette seed_var panel carries a marker line", bool(marker_lines(panels[1])))
+    check("(vi) the cigarette seed_var panel carries no marker line", not marker_lines(panels[1]))
+    check("(vi) and no count text", not panels[1].texts, f"{[t.get_text() for t in panels[1].texts]}")
     check(
         "(vi) the perf y-label and its tick numbers sit on the first panel that is on",
         panels[1].get_ylabel() == METRIC_SPECS["seed_var"].ylabel
         and not panels[0].get_ylabel()
         and ticks_render(panels[1]),
         f"{[p.get_ylabel() for p in panels]!r}",
+    )
+    plt.close(fig)
+
+    fig = aggregate.perf_row("feasibility", datasets, root)
+    panels = fig.axes[: len(datasets)]
+    check(
+        f"(vi) the feasibility row: the sim panel off, the cigarette panel on CLAMP_YLIM {CLAMP_YLIM}",
+        not panels[0].axison and tuple(float(v) for v in panels[1].get_ylim()) == CLAMP_YLIM,
+        f"{panels[1].get_ylim()}",
+    )
+    check(
+        "(vi) the feasibility y-label is the spec's",
+        panels[1].get_ylabel() == METRIC_SPECS["feasibility"].ylabel,
+        f"{panels[1].get_ylabel()!r}",
     )
     plt.close(fig)
 
@@ -1182,13 +1127,15 @@ def leg_viii():
     )
 
     block = sim_block(PERF_METHODS, n_experiments=2)
-    plan = parse_experiment_plan({"perf": {"metric": ["wall_clock", "seed_var"], "repeats": 3}})
+    plan = parse_experiment_plan({"perf": {"metric": ["wall_clock", "seed_var", "feasibility"], "repeats": 3}})
     folder = os.path.join(ARTIFACTS_DIRECTORY, "simulation", SUBDIR_PERF)
     shutil.rmtree(folder, ignore_errors=True)
     set_seed(block["seed"])
     ORCHESTRATORS["simulation"](**block, hyperparameters=munchify(digest_leg.HYPERPARAMETERS)).run(plan)
     files = sorted(os.listdir(folder))
     want = [
+        "epsilon_feasibility_results.pkl",
+        "epsilon_feasibility_sweep.pdf",
         "epsilon_perf_meta.pkl",
         "epsilon_seed_var_failures.pkl",
         "epsilon_seed_var_results.pkl",
@@ -1199,7 +1146,7 @@ def leg_viii():
         "epsilon_wall_clock_sweep.pdf",
     ]
     check(
-        "(viii) the six pkls and two pdfs, non-empty",
+        "(viii) the seven pkls and three pdfs, non-empty",
         files == want and all(os.path.getsize(f"{folder}/{f}") > 0 for f in files),
         f"{files}",
     )
@@ -1226,6 +1173,7 @@ def leg_viii():
     seed = load(f"{folder}/epsilon_seed_var_results.pkl")
     statuses = load(f"{folder}/epsilon_seed_var_statuses.pkl")
     failures = load(f"{folder}/epsilon_seed_var_failures.pkl")
+    feasible = load(f"{folder}/epsilon_feasibility_results.pkl")
     meta = load(f"{folder}/epsilon_perf_meta.pkl")
     n_queries = meta["n_queries"]
     check(
@@ -1268,6 +1216,11 @@ def leg_viii():
         finite = np.isfinite(seed[name])
         check(f"(viii) {name}: terms finite exactly where two runs survive", np.array_equal(finite, survivors >= 2))
         check(f"(viii) {name}: statuses pkl equals the re-derived codes", np.array_equal(statuses[name], status))
+        check(
+            f"(viii) {name}: feasibility equals the re-derived share of usable runs",
+            np.array_equal(feasible[name], 1.0 - failed.mean(axis=0)),
+            f"per step {np.round(feasible[name].mean(axis=1), 3)}",
+        )
         pairs = failed.sum(axis=(0, 2))
         check(
             f"(viii) {name}: failures equal the re-derived (run, query) pairs",
