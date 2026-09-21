@@ -47,10 +47,13 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         resolves and its orchestrator hands the SEM factory `iv_dim` 4 (the sweep
         SEMs and the query SEM carry `iv_width` 4, Z_train and Z are (n, 4)), and on
         this SEM the two IV terms coincide to the bit (h* is exactly T-invariant, so
-        `eps_iv_star` is 0 and the joint budget IS the Z piece). Catches: an
+        `eps_iv_star` is 0 and the joint budget IS the Z piece). The Z budget is
+        `eps_iv_z_star` recomputed here on the runner's base sample (the query
+        runner: on its own draw) + the tolerance, RECORDED. Catches: an
         interventional draw without its Z (the runner mis-slices), the key not
-        forwarded, a Z that never reaches the runner. Misses: the solves at the
-        recipe's full scale, which the recipe run is for.
+        forwarded, a Z that never reaches the runner, the Z budget read off the
+        setup oracle's draw. Misses: the solves at the recipe's full scale, which
+        the recipe run is for.
 
     MPLBACKEND=Agg python scripts/a59_sim_iv.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -88,7 +91,7 @@ from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
-from src.oracle import gamma_star  # noqa: E402
+from src.oracle import eps_iv_z_star, gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
@@ -107,6 +110,9 @@ P6_WIDTHS = {
     "PI+INV+IV": (0.1125, 0.0824, 0.6156, 0.3264),
     "DA+PI+IV": (0.1351, 0.1221, 1.0198, 0.5939),
 }
+# (vi): the raw observed-Z budget eps_iv_z_star on the gamma runner's base sample
+# and on the query runner's own draw (MEASURED on refactor25 at n 512, experiment 0)
+Z_BUDGET_RECORDED = {"base sample": 0.054257865, "query draw": 0.048559556}
 FAIL = []
 SKIPPED = []
 
@@ -324,10 +330,18 @@ def leg_vi(seed):
     # never raised: a T budget under its floor is left as is and reads INFEASIBLE
     raw_t = float(oracle.eps_iv_star) + EPS_TOL
     check("(vi) epsilon_iv is the T piece + EPS_TOL", eps_da == raw_t, f"{eps_da:.6f} vs raw {raw_t:.6f}")
+    # the baseline observed-Z budget is read once on the base sample, not on the
+    # setup oracle's calibration draw
+    base_z = float(
+        eps_iv_z_star(
+            runner.sems[0], runner.das[0], X=X_raw, y=y, Z=Z, features=runner._features, mean_match=runner.mean_match
+        )
+    )
+    print(f"      RECORDED raw Z budget: base sample {base_z:.9f}, setup draw {float(oracle.eps_iv_z_star):.9f}")
     check(
-        "(vi) epsilon_iv_z is the Z piece + EPS_TOL",
-        abs(eps_z - (float(oracle.eps_iv_z_star) + EPS_TOL)) < 1e-12,
-        f"{eps_z:.6f}",
+        "(vi) epsilon_iv_z is eps_iv_z_star on the base sample + EPS_TOL",
+        eps_z == base_z + EPS_TOL,
+        f"{eps_z:.6f} vs {base_z + EPS_TOL:.6f}",
     )
 
     query = orchestrator.get_query_runner_cls()(
@@ -337,6 +351,30 @@ def leg_vi(seed):
         "(vi) the query runner's Z is (n, 4) and X_raw has k columns",
         query.Z.shape == (len(query.X_raw), M) and query.X_raw.shape[1] == D,
     )
+    query_z = float(
+        eps_iv_z_star(
+            query.sem,
+            query.da,
+            X=query.X_raw,
+            y=query.y,
+            Z=query.Z,
+            features=query._features,
+            mean_match=query.mean_match,
+        )
+    )
+    print(f"      RECORDED raw Z budget: query draw {query_z:.9f}")
+    check(
+        "(vi) the query runner's epsilon_iv_z is eps_iv_z_star on its own draw + eps_tol",
+        query.epsilon_iv_z == query_z + query.eps_tol,
+        f"{query.epsilon_iv_z:.6f} vs {query_z + query.eps_tol:.6f}",
+    )
+    for tag, value in (("base sample", base_z), ("query draw", query_z)):
+        recorded = Z_BUDGET_RECORDED[tag]
+        check(
+            f"(vi) the {tag} Z budget matches the RECORDED one",
+            recorded is not None and abs(value - recorded) < 1e-6,
+            f"{value:.6f} vs {recorded}",
+        )
     fixture = iv_fixture(block["methods"], "(vi)")
     if fixture is None:
         return

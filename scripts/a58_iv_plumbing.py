@@ -69,9 +69,11 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         solves a different problem. Misses: timing.
   (vii) the two budgets per SS2.6 row on the oracle path (the batch B rulings): the
         runner hands the factory `epsilon_iv_z = eps_iv_z_star + EPS_TOL` beside the
-        T-side `epsilon_iv`; PI+IV, PI+INV+IV and the intersection's baseline branch
-        carry it, DA+PI+IV carries the T-side term, and the intersection is feasible
-        on every query under a real Z, both branches OK. Under an empty Z the term
+        T-side `epsilon_iv`, `eps_iv_z_star` read on the experiment's base sample
+        (the query runner: on its own draw), not on the setup oracle's draw;
+        PI+IV, PI+INV+IV and the intersection's baseline branch carry it, DA+PI+IV
+        carries the T-side term, and the intersection is feasible on every query
+        under a real Z, both branches OK. Under an empty Z the term
         is exactly 0.0 (inert). Catches: `epsilon_iv_z` not forwarded or ignored
         (the baseline bound is then 0 and every query INFEASIBLE), the T-side term
         leaking into the non-DA methods. Misses: a floor on this term, by ruling.
@@ -962,6 +964,22 @@ def leg_vi(seed):
     check("(vi) a gamma sweep through the runner at n_jobs 4 equals the serial one", same)
 
 
+def base_sample_z(runner, experiment_index=0):
+    """`eps_iv_z_star` restated on the sample the runner's steps are cut from."""
+    X_raw, _, y, _, _, Z = runner._base_data(experiment_index, getattr(runner, "n_samples_override", None))
+    return float(
+        eps_iv_z_star(
+            runner.sems[experiment_index],
+            runner.das[experiment_index],
+            X=X_raw,
+            y=y,
+            Z=Z,
+            features=runner._features,
+            mean_match=runner.mean_match,
+        )
+    )
+
+
 def leg_vii(seed):
     print("(vii) the oracle path: non-DA +IV methods carry eps_iv_z_star + EPS_TOL, the intersection is feasible")
     # the routing on a MISSPECIFIED symmetry (DA strength > 0), where the T-side
@@ -970,10 +988,14 @@ def leg_vii(seed):
     runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed, strength=MISSPECIFIED_STRENGTH)
     data = runner.generate_data(0, GAMMA_GRID[0])
     oracle = runner.get_oracle(0)
-    want_z, want_t = float(oracle.eps_iv_z_star) + EPS_TOL, runner.fit_epsilon_iv(0, 0, data)
+    want_z, want_t = base_sample_z(runner) + EPS_TOL, runner.fit_epsilon_iv(0, 0, data)
     apart = oracle.eps_iv_star > 10 * EPS_TOL and want_z != want_t
     check("(vii) the Z term and the T-side budget differ on this draw", apart, f"{want_z:.6g} vs {want_t:.6g}")
-    check("(vii) fit_epsilon_iv_z is eps_iv_z_star + EPS_TOL, unguarded", runner.fit_epsilon_iv_z(0, data) == want_z)
+    check(
+        "(vii) fit_epsilon_iv_z is eps_iv_z_star on the base sample + EPS_TOL, unguarded",
+        runner.fit_epsilon_iv_z(0, data) == want_z,
+        f"{want_z:.6g} (setup draw {float(oracle.eps_iv_z_star) + EPS_TOL:.6g})",
+    )
     models = runner.build_models(0, 0, data)
     for name in NON_DA_IV:
         model = models[name]
@@ -1009,8 +1031,17 @@ def leg_vii(seed):
         "(vii) an empty Z gives epsilon_iv_z exactly 0.0", empty.fit_epsilon_iv_z(0, empty.generate_data(0, 1.0)) == 0.0
     )
     query = query_runner(make_generator(), seed=seed, strength=MISSPECIFIED_STRENGTH)
-    same_term = query.epsilon_iv_z == float(query.oracle.eps_iv_z_star) + EPS_TOL
-    check("(vii) the query runner's epsilon_iv_z is the same term", same_term)
+    on_draw = eps_iv_z_star(
+        query.sem,
+        query.da,
+        X=query.X_raw,
+        y=query.y,
+        Z=query.Z,
+        features=query._features,
+        mean_match=query.mean_match,
+    )
+    same_term = query.epsilon_iv_z == float(on_draw) + query.eps_tol
+    check("(vii) the query runner's epsilon_iv_z is the same term, on its own draw", same_term)
     check("(vii) and it differs from the query runner's T-side budget", query.epsilon_iv_z != query.epsilon_iv)
     check("(vii) and its PI+IV carries it", query.methods["PI+IV"]().epsilon_iv_z == query.epsilon_iv_z)
 

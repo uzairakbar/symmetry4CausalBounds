@@ -26,6 +26,7 @@ from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
     eps_iv_star,
+    eps_iv_z_star,
     epsilon_star,
     pool_oracles,
     preserve_rng,
@@ -169,6 +170,9 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             self.X = self.X_raw
             self.GX = self.GX_raw
 
+        # the baseline observed-Z budget, once, on this runner's own draw
+        self._epsilon_iv_z = self._baseline_epsilon_iv_z()
+
         # a raw declared gamma into the paper's units: the solver's radius
         # sigma-hat sqrt(gamma / sigma-hat^2) is back at sqrt(gamma)
         if self.raw_gamma:
@@ -264,17 +268,33 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             )
         return budget
 
+    def _baseline_epsilon_iv_z(self) -> float:
+        """Baseline observed-Z budget: a pre-DA quantity, read once on this runner's
+        own draw (`X_raw`, `y`, `Z`); never per query. `eps_iv_z_star` on the draw
+        plus `eps_tol`, as `GenericParamSweep.fit_epsilon_iv_z` reads it on each
+        experiment's base sample. Exits first, calling nothing, on a declared radius
+        or an empty Z (optical, do-MNIST's 4-tuple draw)."""
+        if self.declared_iv or np.shape(self.Z)[1] == 0:
+            return 0.0
+        z_piece = eps_iv_z_star(
+            self.sem,
+            self.da,
+            X=self.X_raw,
+            y=self.y,
+            Z=self.Z,
+            features=self._features,
+            mean_match=self.mean_match,
+        )
+        if not np.isfinite(z_piece):
+            return 0.0
+        return float(z_piece) + self.eps_tol
+
     @property
     def epsilon_iv_z(self) -> float:
         """The observed instrument's own budget, as `ParamSweepRunner.fit_epsilon_iv_z`:
-        0.0 under an empty Z or a declared radius, else the measured piece plus the
-        tolerance, never floor-reported."""
-        if self.declared_iv or np.shape(self.Z)[1] == 0:
-            return 0.0
-        z_piece = getattr(self.oracle, "eps_iv_z_star", None)
-        if z_piece is None or not np.isfinite(z_piece):
-            return 0.0
-        return float(z_piece) + self.eps_tol
+        0.0 under an empty Z or a declared radius, else the baseline observed-Z budget
+        read once on the draw (`_baseline_epsilon_iv_z`), never floor-reported."""
+        return self._epsilon_iv_z
 
     @property
     def _features(self) -> Callable | None:
@@ -336,6 +356,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         self.default_gamma = default_gamma
         self.default_epsilon = default_epsilon
         self._base = {}
+        self._baseline_z = {}  # experiment -> raw eps_iv_z_star on its base sample
         super().__init__(**kwargs)
 
     @property
@@ -384,6 +405,36 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             X_raw, X, y, X_test, estimand, Z = drawn
             self._base[key] = (X_raw, X, y, X_test, estimand, instrument_columns(Z, len(X_raw)))
         return self._base[key]
+
+    def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
+        """Baseline observed-Z budget: a pre-DA quantity, read once per experiment on
+        its base sample; never per step (the DA knob does not touch it).
+
+        0.0 on the declared path, without data, or under an empty Z, checked before
+        anything else, so a runner without Z (optical, do-MNIST) never reaches
+        `_base_data` from here. Else `eps_iv_z_star` on the sample every step of this
+        experiment is cut from (`_base_data`, the m sweep's override included),
+        cached raw, plus EPS_TOL: the same number at every step and for every method,
+        never floor-reported. The setup oracle's draw is not the fit sample, so its
+        `eps_iv_z_star` is not read here."""
+        Z = getattr(data, "Z", None)
+        if self.declared_iv or data is None or Z is None or np.shape(Z)[1] == 0:
+            return 0.0
+        if experiment_index not in self._baseline_z:
+            X_raw, _, y, _, _, Z_base = self._base_data(experiment_index, getattr(self, "n_samples_override", None))
+            self._baseline_z[experiment_index] = eps_iv_z_star(
+                self.sems[experiment_index],
+                self.das[experiment_index],
+                X=X_raw,
+                y=y,
+                Z=Z_base,
+                features=self._features,
+                mean_match=self.mean_match,
+            )
+        z_piece = self._baseline_z[experiment_index]
+        if not np.isfinite(z_piece):
+            return 0.0
+        return float(z_piece) + EPS_TOL
 
     def _draw_base(self, experiment_index: int, n_samples: int | None = None):
         """Split site: a SEM with instruments emits them as the trailing columns of

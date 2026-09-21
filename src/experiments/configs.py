@@ -820,8 +820,10 @@ class MethodRegistry:
                 Thm. 3.A requires.
             epsilon_iv_z: the observed instrument's measured piece: 0.0 under a
                 declared radius (the Z radius is then exactly s sqrt(gamma_z)) and
-                under an empty set (inert), oracle `eps_iv_z_star` + EPS_TOL on the
-                simulation. One number for every Z constraint, non-DA and DA alike.
+                under an empty set (inert), else `eps_iv_z_star` read once per
+                experiment on the experiment's base sample (the query runner: on
+                its own draw) + EPS_TOL. One number for every Z constraint, non-DA
+                and DA alike.
             gamma_z: leakiness budget of the observed instruments, `GAMMA_Z_DEFAULT`
                 under a non-empty `iv:`; it enters the Z radius only
                 (`z_bound`), never the T one

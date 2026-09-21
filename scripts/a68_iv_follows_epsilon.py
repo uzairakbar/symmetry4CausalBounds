@@ -36,7 +36,14 @@ both halves of the robustness axis are on the figure. Legs:
         the recorded fact that bounds the fix -- eps_iv* is 0 to machine
         precision at every knob there, so that panel cannot move. Catches:
         `ExpansionStrategy.fit_epsilon_iv` missing, so the budget falls back to
-        the setup-time oracle.
+        the setup-time oracle. The baseline observed-Z budget (refactor25): on
+        simulation it is `eps_iv_z_star` on the experiment's base sample +
+        EPS_TOL at every knob, not the setup oracle's draw (both RECORDED); a
+        recording DA shows `eps_iv_z_star` forwards its augment kwargs; optical
+        (no Z) reads 0.0; declared cigarettes reads 0.0 on the sweep and the query
+        runner and a spy shows the runner never calls `eps_iv_z_star` there.
+        Catches: the budget read off the setup oracle again, a per-step refit,
+        an early exit placed after the computation.
 
     MPLBACKEND=Agg python scripts/a68_iv_follows_epsilon.py [--only LEG]
 """
@@ -75,7 +82,7 @@ from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import IV_MODE_METHODS, REAL_Z_METHODS  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
-from src.oracle import eps_iv_star  # noqa: E402
+from src.oracle import eps_iv_star, eps_iv_z_star  # noqa: E402
 
 # the recorded infeasible-query counts per (method, grid point). Measured on this
 # tree at the fixtures leg (vii) names; a family that empties at a NEW point fails
@@ -100,6 +107,10 @@ ORDERING = {
         "DA+PI+IV(Z)": [0] * 9,
     },
 }
+# leg (ix): the sim omega fixture's observed-Z budget, RAW (no EPS_TOL), on the base
+# sample it is now read on and on the setup oracle's own draw it used to be read on
+# (MEASURED on refactor25 at the fixture's n 512, experiment 0)
+Z_BUDGET_RECORDED = {"base sample": 0.054257865, "setup draw": 0.031089240}
 FAIL = []
 
 
@@ -498,7 +509,9 @@ def leg_ix():
     # precision at EVERY knob and the T budget is pure EPS_TOL before and after
     # the refit. The sim and cigarettes omega panels therefore do NOT move; only
     # optical does. Whatever bends those two panels, it is not a frozen budget.
-    _, sim_raw, sim_budget, sim_z, _ = budgets("simulation")
+    optical_z = z_budget
+    check("(ix) optical (no Z): the observed-Z budget is 0.0 at every knob", optical_z == [0.0] * len(optical_z))
+    sim_runner_, sim_raw, sim_budget, sim_z, _ = budgets("simulation")
     print(f"      RECORDED simulation per-step eps_iv* {sim_raw}")
     check(
         "(ix) on simulation h_* is exactly invariant, so the T budget is EPS_TOL at every knob",
@@ -512,6 +525,78 @@ def leg_ix():
         min(sim_z) > 0.0 and max(sim_z) - min(sim_z) == 0.0,
         f"{np.round(sim_z, 8).tolist()}",
     )
+    X_raw, _, y, _, _, Z = sim_runner_._base_data(0)
+    base = float(
+        eps_iv_z_star(
+            sim_runner_.sems[0],
+            sim_runner_.das[0],
+            X=X_raw,
+            y=y,
+            Z=Z,
+            features=sim_runner_._features,
+            mean_match=sim_runner_.mean_match,
+        )
+    )
+    setup = float(sim_runner_.get_oracle(0).eps_iv_z_star)
+    print(f"      RECORDED simulation raw Z budget: base sample {base:.9f}, setup draw {setup:.9f}")
+    check(
+        "(ix) simulation: the Z budget is eps_iv_z_star on the base sample + EPS_TOL",
+        all(z == base + EPS_TOL for z in sim_z),
+        f"{sim_z[0]!r} vs {base + EPS_TOL!r}",
+    )
+    check(
+        "(ix) simulation: and not the setup oracle's draw",
+        abs(sim_z[0] - (setup + EPS_TOL)) > 1e-3,
+        f"gap {abs(sim_z[0] - (setup + EPS_TOL)):.4g}",
+    )
+    for tag, value in (("base sample", base), ("setup draw", setup)):
+        recorded = Z_BUDGET_RECORDED[tag]
+        check(
+            f"(ix) simulation: the {tag} value matches the RECORDED one",
+            recorded is not None and abs(value - recorded) < 1e-6,
+            f"{value:.6f} vs {recorded}",
+        )
+
+    # `eps_iv_z_star` must forward its augment kwargs, pinned at the call itself
+    # with a DA that records what it was handed, as for `eps_iv_star` above
+    seen.clear()
+    X_stub = np.eye(8)
+    y_stub = X_stub.sum(axis=1, keepdims=True) + 0.1
+    Z_stub = np.arange(8.0).reshape(8, 1)
+    eps_iv_z_star(_StubSEM(), recording_da, X=X_stub, y=y_stub, Z=Z_stub, mean_match=False, scale=0.25)
+    check("(ix) eps_iv_z_star forwards its augment kwargs to the DA", seen == {"scale": 0.25}, f"{seen}")
+
+    # declared cigarettes: the radius is declared, so the runner exits before any
+    # measurement, on the sweep and on the query runner alike
+    import src.experiments.generic_runner as generic_runner
+
+    calls = []
+    original = generic_runner.eps_iv_z_star
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    generic_runner.eps_iv_z_star = spy
+    try:
+        orch = a60.orchestrator(a60.recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1))
+        cig = a60.sweep_runner(orch, "gamma")
+        cig_data = cig.generate_data(0, 1.0)
+        cig_z = cig.fit_epsilon_iv_z(0, cig_data)
+        cig_query = a60.query_runner(orch)
+    finally:
+        generic_runner.eps_iv_z_star = original
+    check(
+        "(ix) cigarettes is declared and carries a real Z",
+        cig.declared_iv and cig_query.declared_iv and np.shape(cig_data.Z)[1] > 0 and np.shape(cig_query.Z)[1] > 0,
+        f"{np.shape(cig_data.Z)} {np.shape(cig_query.Z)}",
+    )
+    check(
+        "(ix) declared cigarettes: the observed-Z budget is 0.0 on the sweep and the query runner",
+        cig_z == 0.0 and cig_query.epsilon_iv_z == 0.0,
+        f"{cig_z!r} {cig_query.epsilon_iv_z!r}",
+    )
+    check("(ix) declared cigarettes: eps_iv_z_star is never called by the runners", calls == [], f"{len(calls)} calls")
 
 
 if __name__ == "__main__":

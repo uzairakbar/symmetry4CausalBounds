@@ -414,6 +414,49 @@ def eps_iv_star(
     return budget, eps_rms, eta
 
 
+def _instrument_basis(X: NDArray, Z: NDArray | None) -> NDArray | None:
+    """Orthonormal basis Q of span(Z), or None for an empty Z. The emptiness test
+    comes first and reads Z alone, so an empty Z touches neither X nor any RNG."""
+    if Z is None or np.size(Z) == 0:
+        return None
+    Q, _ = np.linalg.qr(np.asarray(Z, dtype=float).reshape(len(X), -1))
+    return Q
+
+
+def _z_moment(Q: NDArray, r: NDArray, mean_match: bool) -> float:
+    """|| Q' r || / sqrt(N), with r centred under `mean_match` as the solver centres y."""
+    r = r - np.mean(r) if mean_match else r
+    return float(np.linalg.norm(Q.T @ r) / np.sqrt(len(r)))
+
+
+def _outcome_residual(sem, X: NDArray, y: NDArray | None, features: Callable) -> NDArray:
+    """r_* = y - h_*(Phi(X)) on the original design."""
+    if y is None:
+        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(X)).")
+    return np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel()
+
+
+def z_moment_star(
+    sem,
+    X: NDArray,
+    y: NDArray | None,
+    Z: NDArray | None,
+    features: Callable | None = None,
+    mean_match: bool = False,
+) -> float:
+    """
+    The baseline observed-Z moment, || Q_Z' r_* || / sqrt(N) with r_* = y - h_*(Phi(X)):
+    the Z moment of the residual at h_* on the ORIGINAL design, the element the
+    PI+IV and PI+INV+IV programs have to admit. A pre-DA quantity (no DA enters),
+    and the `on_x` half of `eps_iv_z_star`, which calls this, so the two share one
+    definition. Exactly 0.0 for an empty Z, returned before `sem` or `X` is touched.
+    """
+    Q = _instrument_basis(X, Z)
+    if Q is None:
+        return 0.0
+    return _z_moment(Q, _outcome_residual(sem, X, y, features or _identity), mean_match)
+
+
 def eps_iv_z_star(
     sem,
     da,
@@ -423,6 +466,7 @@ def eps_iv_z_star(
     features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
     mean_match: bool = False,
+    **augment_kwargs,
 ) -> float:
     """
     The observed instrument's budget (SS2.6), the radius of the Z constraint:
@@ -452,27 +496,21 @@ def eps_iv_z_star(
 
     Under `mean_match` the residuals are centred, as the solver centres y and the
     design. Exactly 0.0 for an empty Z: nothing is computed, so today's budget is
-    untouched to the bit.
+    untouched to the bit. `augment_kwargs` go straight to the DA call, exactly as
+    `epsilon_star` and `eps_iv_star` forward them.
     """
-    Z = np.zeros((len(X), 0)) if Z is None else np.asarray(Z, dtype=float).reshape(len(X), -1)
-    if Z.shape[1] == 0:
+    Q = _instrument_basis(X, Z)
+    if Q is None:
         return 0.0
-    if y is None:
-        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(X)).")
     features = features or _identity
-    w, Phi, _ = _invariance_signal(sem, da, X, features, n_samples)
+    on_x = z_moment_star(sem, X, y, Z, features=features, mean_match=mean_match)
+    w, Phi, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
     if mean_match:
         Phi = Phi - Phi.mean(axis=0)
         w = w - np.mean(w)
     W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
-    residual = np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel()
-    Q, _ = np.linalg.qr(Z)
-
-    def moment(r):
-        r = r - np.mean(r) if mean_match else r
-        return float(np.linalg.norm(Q.T @ r) / np.sqrt(len(r)))
-
-    on_x, on_gx = moment(residual), moment(residual + W_sharp)
+    residual = _outcome_residual(sem, X, y, features)
+    on_gx = _z_moment(Q, residual + W_sharp, mean_match)
     if on_gx > 3.0 * on_x:
         # the DA-side term is what the budget becomes, and at this ratio the Z
         # constraint has stopped binding on the un-augmented design: the only
