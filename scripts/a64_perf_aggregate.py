@@ -7,7 +7,8 @@ epsilon sweeps on the robustness grid (`src/experiments/perf.py`: a cumulative
 wall clock that re-solves only the programs reading epsilon and `repad`s the rest,
 and the backend cross-check D(eps); round 16 adds the feasible rate over the same
 backends and drops the failure markers); `python -m src.aggregate` draws the
-3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
+3 x [datasets] sweep grids and the perf grids from the pkls (both through
+`_metric_grid` since round 16). Legs:
 
   (D)    the digest leg (scripts/digest_leg.py), as a56 to a63: no shipped block
          spells a mode or plans perf, bare names dispatch as before, `_draw_series`
@@ -56,24 +57,29 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          this leg used to pin are gone; a70 leg 4 pins their absence.)
   (vi)   the aggregate on a synthetic tree (simulation gamma and omega, cigarettes
          gamma without coverage and no omega, cigarettes perf, no optical): the CLI as
-         a subprocess writes exactly the four pdfs; in-process the grid has the
-         titles, the blank cells, one shared y on `CLAMP_YLIM`, the axis pkl's
-         x-label, the legend in the repo's order in one row, the render fold (bare
-         beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
-         y-labels without " / "; the perf row has the blank sim panel and no
-         marker line, and its feasibility row sits on `CLAMP_YLIM`; ten perf methods draw five columns of two, with no
-         WARNING, clear of the titles; the x-label at 0.5 on two columns and, with
-         optical added, under the middle column of three (grid and perf row).
+         a subprocess writes exactly the four pdfs (a grid per param, one per
+         `PERF_FIGURES` entry); in-process the grid has the titles, the blank cells,
+         one shared y on `CLAMP_YLIM`, the axis pkl's x-label, the legend in the
+         repo's order in one row, the render fold (bare beside `(T,Z)` is one entry,
+         and so is `(T)` beside bare), the three y-labels without " / "; the stacked
+         perf grid has stability over feasible rate, the sim column blank, no marker
+         line, the feasibility row alone on `CLAMP_YLIM`; ten perf methods draw five
+         columns of two, with no WARNING, clear of the titles; the x-label at 0.5 on
+         two columns and, with optical added, under the middle column of three (the
+         sweep grid and both perf grids); and `sweep_grid` after the `_metric_grid`
+         refactor matches round 16's branch 21 on four of these trees (axes count,
+         cells on, titles, y-labels, legend entries, x-label and its x; RECORDED).
          Catches: rows reordered, a missing metric not blanked, the legend sorted by
-         name or keyed on the spelling, the x-label left at 0.5 over three columns.
+         name or keyed on the spelling, the x-label left at 0.5 over three columns,
+         the refactor moving the sweep grid.
   (vii)  the utility on the shipped artifacts (`--shipped DIR`): exit 0, exactly the
-         pdfs the tree calls for (a grid per sweep param, a row per perf metric some
-         dataset ran, the elasticity grid when the cigarette query pkls are there),
+         pdfs the tree calls for (a grid per sweep param, one per `PERF_FIGURES`
+         entry with a metric some dataset ran, the elasticity grid when the cigarette query pkls are there),
          the tree's mtimes unchanged; in-process under `captured()` no WARNING and
          the epsilon legend's 10 folded entries in two rows, five columns of two
          with green DA+PI+IV over pink PI&DA+PI+IV last. The wanted list is
          re-derived from the SAME four predicates `main` uses (`sweep_params`,
-         `PERF_METRICS`, `_has_perf`, `_has_elasticities`), so it catches `main`
+         `PERF_FIGURES`, `_has_perf`, `_has_elasticities`), so it catches `main`
          misusing one; a defect INSIDE one of them is invisible here. Catches: a
          crash on the real pkls, a grid silently not drawn. No break-it. Without
          a tree at `--shipped` the leg is SKIPPED and counted in the summary line.
@@ -99,7 +105,7 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          [2,2,2,2,1]), 11 entries (6 columns and one WARNING). On the two-row
          shapes the entry order has every paired group ahead of every singleton,
          each part in PAIR_ORDER order, and every pair in one column with member 0
-         on top; `perf_row` draws the same five columns. Catches: the render fold
+         on top; `perf_grid` draws the same five columns. Catches: the render fold
          dropped (12 entries), `ncol` left on the group count (a 4-entry legend in
          2 columns), the size-first sort dropped (a pair split across columns),
          the member rule keyed on REAL_Z_METHODS (groups 6 and 9 collide), a group
@@ -219,6 +225,43 @@ SHAPE_PAIRS = ("PI", "PI+IV", "DA+PI", "DA+PI+IV(Z)")
 SHAPE_WIDE = ("ATE", "PI+INV", "PI", "ERM", "DA+PI", "DA+ERM", "PI&DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")
 # eleven entries: past LEGEND_GRID_COLS columns, the grid widens and a warning says so
 SHAPE_OVER = SHAPE_ALL + ("ATE",)
+# `sweep_grid` on leg (vi)'s trees as round 16's branch 21 drew it, before the body
+# moved into `_metric_grid` (RECORDED): axes count, cells on, column titles, y-labels
+# (row-major), legend entries by method, x-label and its figure x
+SWEEP_GRID_R21 = {
+    ("root", "gamma"): (
+        6,
+        (True, False, True, True, True, True),
+        ("simulation", "cigarettes"),
+        ("coverage", "", "width", "", "worst error", ""),
+        ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"),
+        ("gamma", 0.5),
+    ),
+    ("root", "omega"): (
+        6,
+        (True, False, True, False, True, False),
+        ("simulation", "cigarettes"),
+        ("coverage", "", "width", "", "worst error", ""),
+        ("PI", "DA+PI", "PI&DA+PI+IV(T)"),
+        ("omega", 0.5),
+    ),
+    ("blank", "gamma"): (
+        6,
+        (False, True, False, True, False, True),
+        ("simulation", "cigarettes"),
+        ("", "coverage", "", "width", "", "worst error"),
+        ("PI", "DA+PI+IV(T)"),
+        ("gamma", 0.5),
+    ),
+    ("three", "gamma"): (
+        9,
+        (True, True, False, True, True, True, True, True, True),
+        ("simulation", "optical device", "cigarettes"),
+        ("coverage", "", "", "width", "", "", "worst error", "", ""),
+        ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"),
+        ("gamma", 0.525930626),
+    ),
+}
 FAIL = []
 SKIPPED = []
 
@@ -864,9 +907,9 @@ def leg_vi():
         proc.stderr.strip().splitlines()[-1][:160] if proc.returncode else "",
     )
     written = sorted(os.listdir(out)) if os.path.isdir(out) else []
-    want = sorted([f"epsilon_{m}.pdf" for m in aggregate.PERF_METRICS] + ["gamma_grid.pdf", "omega_grid.pdf"])
+    want = sorted([f"epsilon_{stem}.pdf" for stem, _ in aggregate.PERF_FIGURES] + ["gamma_grid.pdf", "omega_grid.pdf"])
     check(
-        f"(vi) exactly the {len(want)} pdfs (a grid per param, a row per PERF_METRICS entry), non-empty",
+        f"(vi) exactly the {len(want)} pdfs (a grid per param, one per PERF_FIGURES entry), non-empty",
         written == want and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
         f"{written}",
     )
@@ -943,34 +986,34 @@ def leg_vi():
     )
     plt.close(fig)
 
-    fig = aggregate.perf_row("seed_var", datasets, root)
-    panels = fig.axes[: len(datasets)]
+    stacked = dict(aggregate.PERF_FIGURES)["seed_var"]
+    fig = aggregate.perf_grid("seed_var", stacked, datasets, root)
+    grid = np.array(fig.axes[: 2 * len(datasets)]).reshape(2, len(datasets))
     check(
-        "(vi) the perf row has two panels, the sim panel off",
-        len(panels) == 2 and not panels[0].axison and panels[1].axison,
+        "(vi) the stacked perf grid is 2 x 2, the sim column off",
+        len(fig.axes) == 4 and not any(ax.axison for ax in grid[:, 0]) and all(ax.axison for ax in grid[:, 1]),
+        f"{len(fig.axes)} axes",
     )
-    check("(vi) the cigarette seed_var panel carries no marker line", not marker_lines(panels[1]))
-    check("(vi) and no count text", not panels[1].texts, f"{[t.get_text() for t in panels[1].texts]}")
+    check("(vi) the cigarette seed_var panel carries no marker line", not marker_lines(grid[0, 1]))
+    check("(vi) and no count text", not grid[0, 1].texts, f"{[t.get_text() for t in grid[0, 1].texts]}")
     check(
-        "(vi) the perf y-label and its tick numbers sit on the first panel that is on",
-        panels[1].get_ylabel() == METRIC_SPECS["seed_var"].ylabel
-        and not panels[0].get_ylabel()
-        and ticks_render(panels[1]),
-        f"{[p.get_ylabel() for p in panels]!r}",
-    )
-    plt.close(fig)
-
-    fig = aggregate.perf_row("feasibility", datasets, root)
-    panels = fig.axes[: len(datasets)]
-    check(
-        f"(vi) the feasibility row: the sim panel off, the cigarette panel on CLAMP_YLIM {CLAMP_YLIM}",
-        not panels[0].axison and tuple(float(v) for v in panels[1].get_ylim()) == CLAMP_YLIM,
-        f"{panels[1].get_ylim()}",
+        "(vi) the stability label and its tick numbers sit on the first panel that is on",
+        grid[0, 1].get_ylabel() == METRIC_SPECS["seed_var"].ylabel
+        and not grid[0, 0].get_ylabel()
+        and ticks_render(grid[0, 1]),
+        f"{[p.get_ylabel() for p in grid[0]]!r}",
     )
     check(
-        "(vi) the feasibility y-label is the spec's",
-        panels[1].get_ylabel() == METRIC_SPECS["feasibility"].ylabel,
-        f"{panels[1].get_ylabel()!r}",
+        f"(vi) the feasibility row below: the cigarette panel on CLAMP_YLIM {CLAMP_YLIM}, the stability row not",
+        tuple(float(v) for v in grid[1, 1].get_ylim()) == CLAMP_YLIM
+        and tuple(float(v) for v in grid[0, 1].get_ylim()) != CLAMP_YLIM,
+        f"{grid[1, 1].get_ylim()} / {grid[0, 1].get_ylim()}",
+    )
+    check(
+        "(vi) the feasibility label is the grid's row label for the spec",
+        grid[1, 1].get_ylabel() == aggregate.PERF_ROW_LABELS.get("feasibility", METRIC_SPECS["feasibility"].ylabel)
+        and grid[1, 1].get_ylabel().replace("\n", " ") == METRIC_SPECS["feasibility"].ylabel,
+        f"{grid[1, 1].get_ylabel()!r}",
     )
     plt.close(fig)
 
@@ -993,14 +1036,15 @@ def leg_vi():
     plt.close(fig)
 
     # three columns: the one x-label sits under the middle column, on the grid and
-    # on the perf row
+    # on both perf grids (one row, and the stacked two)
     three = synthetic_tree(tempfile.mkdtemp(prefix="three_", dir=TMPROOT))
     shutil.copytree(f"{three}/simulation/{SUBDIR_SWEEP}", f"{three}/optical_device/{SUBDIR_SWEEP}")
     datasets = aggregate.columns(three)
     check("(vi) three columns: simulation, optical_device, cigarettes", len(datasets) == 3, f"{datasets}")
     for label, fig, middle in (
         ("gamma grid", aggregate.sweep_grid("gamma", datasets, three), 2 * 3 + 1),
-        ("perf row", aggregate.perf_row("wall_clock", datasets, three), 1),
+        ("wall-clock grid", aggregate.perf_grid("wall_clock", ("wall_clock",), datasets, three), 1),
+        ("stacked perf grid", aggregate.perf_grid("seed_var", stacked, datasets, three), 3 + 1),
     ):
         fig.canvas.draw()
         box, text = fig.axes[middle].get_position(), fig.texts[0]
@@ -1022,7 +1066,7 @@ def leg_vi():
     ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF))
     with captured() as lines:
         drawn = (
-            ("perf row", aggregate.perf_row("wall_clock", aggregate.columns(ten), ten)),
+            ("perf grid", aggregate.perf_grid("wall_clock", ("wall_clock",), aggregate.columns(ten), ten)),
             ("gamma grid", aggregate.sweep_grid("gamma", aggregate.columns(ten), ten)),
         )
     check("(vi) ten methods: no WARNING", not lines, f"{lines[:3]}")
@@ -1031,7 +1075,7 @@ def leg_vi():
         legend = fig.legends[0]
         box = legend.get_window_extent()
         titles = [ax.title.get_window_extent() for ax in fig.axes if ax.get_title()]
-        if label == "perf row":
+        if label == "perf grid":
             sizes = [len(column) for column in legend_columns(fig, legend)]
             check(
                 f"(vi) ten methods: the perf legend is {LEGEND_ROWS} rows, five columns of two",
@@ -1042,6 +1086,27 @@ def leg_vi():
             f"(vi) ten methods: the {label} legend clears the column titles",
             bool(titles) and box.y0 > max(t.y1 for t in titles),
             f"legend y0 {box.y0:.0f}, titles y1 {max(t.y1 for t in titles):.0f}",
+        )
+        plt.close(fig)
+
+    # the refactor moved no part of the sweep grid: branch 21's drawing, RECORDED
+    xlabels = {"gamma": PARAM_SPECS["gamma"].xlabel, "omega": OMEGA_XLABEL[True]}
+    trees = {"root": root, "blank": blank, "three": three}
+    for (tree, param), (n, on, titles, ylabels, names, (xname, x)) in SWEEP_GRID_R21.items():
+        fig = aggregate.sweep_grid(param, aggregate.columns(trees[tree]), trees[tree])
+        got = (
+            len(fig.axes),
+            tuple(ax.axison for ax in fig.axes),
+            tuple(ax.get_title() for ax in fig.axes if ax.get_title()),
+            tuple(ax.get_ylabel() for ax in fig.axes),
+            tuple(t.get_text() for t in fig.legends[0].get_texts()),
+            [t.get_text() for t in fig.texts],
+        )
+        want = (n, on, titles, ylabels, tuple(TEX_MAPPER[name] for name in names), [xlabels[xname]])
+        check(
+            f"(vi) sweep_grid on {tree} {param} is branch 21's: axes, cells, titles, labels, legend, x-label",
+            got == want and abs(fig.texts[0].get_position()[0] - x) < 1e-6,
+            f"{got if got != want else ''} x {fig.texts[0].get_position()[0]:.9f} vs {x}",
         )
         plt.close(fig)
     for folder in (root, fold, two, blank, three, ten):
@@ -1066,14 +1131,15 @@ def leg_vii(shipped):
     )
     written = sorted(os.listdir(out))
     # what `aggregate.main` draws off THIS tree, re-derived rather than listed: one
-    # grid per sweep param, one row per perf metric some dataset ran, and the
-    # elasticity grid when the cigarette query pkls are there. The leg used to say
-    # "no perf pdf" and name no elasticity grid, which went stale when those landed
+    # grid per sweep param, one perf grid per PERF_FIGURES entry with a metric some
+    # dataset ran, and the elasticity grid when the cigarette query pkls are there.
+    # The leg used to say "no perf pdf" and name no elasticity grid, which went stale
+    # when those landed
     want = [f"{p}_grid.pdf" for p in params]
     want += [
-        f"epsilon_{m}.{aggregate.PLOT_FORMAT}"
-        for m in aggregate.PERF_METRICS
-        if any(aggregate._has_perf(shipped, d, m) for d in datasets)
+        f"epsilon_{stem}.{aggregate.PLOT_FORMAT}"
+        for stem, metrics in aggregate.PERF_FIGURES
+        if any(aggregate._has_perf(shipped, d, m) for d in datasets for m in metrics)
     ]
     if aggregate._has_elasticities(shipped):
         want.append(f"cigarettes_elasticities.{aggregate.PLOT_FORMAT}")
@@ -1370,13 +1436,13 @@ def leg_ix():
         f"warnings {lines}",
     )
 
-    # the second consumer: `perf_row` pools the same way `sweep_grid` does
+    # the second consumer: `perf_grid` pools the same way `sweep_grid` does
     tree = synthetic_tree(tempfile.mkdtemp(prefix="shapes_", dir=TMPROOT), perf_methods=SHAPE_ALL)
-    fig = aggregate.perf_row("wall_clock", aggregate.columns(tree), tree)
+    fig = aggregate.perf_grid("wall_clock", ("wall_clock",), aggregate.columns(tree), tree)
     columns = legend_columns(fig, fig.legends[0])
     want = [[TEX_MAPPER[spelled_method(name)] for name in column] for column in TABLE_ALL]
     check(
-        "(ix) perf_row folds the same 12 keys to the same five columns of two",
+        "(ix) perf_grid folds the same 12 keys to the same five columns of two",
         columns == want,
         f"{[len(column) for column in columns]}",
     )

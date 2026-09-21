@@ -13,9 +13,11 @@ the column count is odd, else centred), three y-labels without the "/ PI" suffix
 one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
 `LEGEND_ROWS` rows with a paired family in one column and the singletons stacked
 two to a column. A missing pkl leaves its cells blank.
-Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`,
-`epsilon_feasibility.pdf`) with a shared y axis, drawn only where some dataset ran the
-perf sweep; the feasibility row reads on `CLAMP_YLIM`. From the
+The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
+columns the datasets, x shared within a column, y within a row, the same x-label and
+legend rules. `epsilon_wall_clock.pdf` is the wall-clock row alone;
+`epsilon_seed_var.pdf` stacks the feasible rate (on `CLAMP_YLIM`) under the
+stability. A row is drawn only where some dataset ran its metric. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
@@ -70,7 +72,16 @@ from src.experiments.utils.plotting import (
 
 # the grid's rows, in order: (metric id, y-label)
 ROWS: tuple[tuple[str, str], ...] = (("coverage", "coverage"), ("width", "width"), ("worst_error", "worst error"))
-PERF_METRICS: tuple[str, ...] = ("wall_clock", "seed_var", "feasibility")
+# the perf figures, `epsilon_{stem}`, each a grid of its metric rows: the wall clock
+# alone, the stability with the feasible rate stacked below it
+PERF_FIGURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("wall_clock", ("wall_clock",)),
+    ("seed_var", ("seed_var", "feasibility")),
+)
+PERF_OVER_QUERIES: tuple[str, ...] = ("seed_var", "feasibility")  # bootstrapped over queries
+PERF_RATES: tuple[str, ...] = ("feasibility",)  # framed on CLAMP_YLIM
+# a row label the panel height cannot take on one line, broken for the grid
+PERF_ROW_LABELS: dict[str, str] = {"feasibility": "feasible rate\n(over backends)"}
 # the figure legend by entry count n: up to LEGEND_FLAT_MAX entries in one row of n,
 # more in LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns; past LEGEND_GRID_COLS
 # columns it still widens, with a warning
@@ -80,7 +91,7 @@ LEGEND_GRID_COLS: int = 5
 LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column titles
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
-PERF_ROW_HEIGHT: float = 4.2  # room for the two-line wall-clock label
+PERF_ROW_HEIGHT: float = 4.2  # per perf row, the legend and the x-label included
 # the elasticity grid: (coefficient id, row label) and (axis id, column stem)
 ELASTICITY_ROWS: tuple[tuple[str, str], ...] = (("p", COEFFICIENT_LABELS["p"]), ("pn", COEFFICIENT_LABELS["pn"]))
 ELASTICITY_AXES: tuple[str, ...] = ("gamma", "budget")
@@ -262,101 +273,156 @@ def _xlabel(current: str | None, found: str, where: str) -> str:
     return found
 
 
-def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None):
-    """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given."""
+def _metric_grid(
+    rows,
+    datasets: list[str],
+    load_cell,
+    xlabel_default: str,
+    xscale: str,
+    vlines,
+    sharey,
+    row_ylim,
+    *,
+    row_yscale,
+    height: float,
+    where: str,
+    path: str | None,
+):
+    """The [rows] x [datasets] grid: `rows` is [(metric, row label)], `load_cell(dataset,
+    metric)` gives (x, {method: y}, x-label) or None for a blank cell (an empty dict
+    blanks the cell but still offers its x-label), x shared within a column, y as
+    `sharey` says, each row on `row_yscale(metric)` and, when `row_ylim(metric)` is not
+    None, framed there. Titles on the first row, one x-label, one legend; saved at
+    `path` when given."""
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
-    spec = PARAM_SPECS[param]
     fig, axes = plt.subplots(
-        len(ROWS),
+        len(rows),
         len(datasets),
-        figsize=(PANEL_WIDTH * len(datasets), GRID_HEIGHT),
+        figsize=(PANEL_WIDTH * len(datasets), height),
         sharex="col",
-        sharey=True,
+        sharey=sharey,
         squeeze=False,
     )
     handles, xlabel = {}, None
     for c, dataset in enumerate(datasets):
         axes[0, c].set_title(DATASET_TITLES[dataset], fontsize=FS_LABEL)
-        folder = f"{artifacts}/{dataset}/{SUBDIR_SWEEP}"
-        values, results = f"{folder}/{param}_values.pkl", f"{folder}/{param}_results.pkl"
-        if not (os.path.exists(values) and os.path.exists(results)):
-            for r in range(len(ROWS)):
-                axes[r, c].axis("off")
-            continue
-        # the one sort of the sweep path (a measured omega axis is not ascending)
-        x = np.asarray(load(values), dtype=float)
-        order = np.argsort(x, kind="stable")
-        x = x[order]
-        record = load(results)
-        axis_pkl = f"{folder}/{param}_axis.pkl"
-        found = load(axis_pkl).get("xlabel", spec.xlabel) if os.path.exists(axis_pkl) else spec.xlabel
-        xlabel = _xlabel(xlabel, found, f"{dataset} {param}")
-        for r, (metric, _) in enumerate(ROWS):
-            ax, mspec = axes[r, c], METRIC_SPECS[metric]
-            include_ate = spec.include_ate and mspec.include_ate
-            y = {
-                name: np.asarray(rec[mspec.key])[order]
-                for name, rec in record.items()
-                if mspec.key in rec and (include_ate or name != "ATE")
-            }
+        labelled = False
+        for r, (metric, _) in enumerate(rows):
+            ax, cell = axes[r, c], load_cell(dataset, metric)
+            if cell is None:
+                ax.axis("off")
+                continue
+            x, y, found = cell
+            if not labelled:
+                # one x-label per column, the first cell's
+                xlabel, labelled = _xlabel(xlabel, found, f"{dataset} {where}"), True
             if not y:
                 ax.axis("off")
                 continue
+            drawn, _ = _draw_series(ax, x, y)
+            for name, handle in drawn.items():
+                handles.setdefault(parse_method(name), (handle, name))
+            _frame(ax, x, xscale, vlines)
+            ax.set_yscale(row_yscale(metric))
+            ylim = row_ylim(metric)
+            if ylim is not None:
+                ax.set_ylim(*ylim)
+    _label_rows(axes, [label for _, label in rows])
+    legend = _legend(fig, handles)
+    return _finish(fig, axes, xlabel or xlabel_default, legend, path)
+
+
+def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None):
+    """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given."""
+    spec = PARAM_SPECS[param]
+    loaded = {}
+
+    def column(dataset):
+        # the pkls of one column, read once for its three rows
+        if dataset not in loaded:
+            folder = f"{artifacts}/{dataset}/{SUBDIR_SWEEP}"
+            values, results = f"{folder}/{param}_values.pkl", f"{folder}/{param}_results.pkl"
+            if not (os.path.exists(values) and os.path.exists(results)):
+                loaded[dataset] = None
+            else:
+                # the one sort of the sweep path (a measured omega axis is not ascending)
+                x = np.asarray(load(values), dtype=float)
+                order = np.argsort(x, kind="stable")
+                axis_pkl = f"{folder}/{param}_axis.pkl"
+                found = load(axis_pkl).get("xlabel", spec.xlabel) if os.path.exists(axis_pkl) else spec.xlabel
+                loaded[dataset] = (x[order], order, load(results), found)
+        return loaded[dataset]
+
+    def load_cell(dataset, metric):
+        if column(dataset) is None:
+            return None
+        x, order, record, found = column(dataset)
+        mspec = METRIC_SPECS[metric]
+        include_ate = spec.include_ate and mspec.include_ate
+        y = {
+            name: np.asarray(rec[mspec.key])[order]
+            for name, rec in record.items()
+            if mspec.key in rec and (include_ate or name != "ATE")
+        }
+        if y:
             y = bootstrap(y)
             if metric != "coverage":
                 # the same PI, else PI+IV, division the sweep figure applies under
                 # `normalize`; a rate is drawn as it is
                 y, _ = normalize_sweep(y, f"{param}_{metric}")
-            drawn, _ = _draw_series(ax, x, y)
-            for name, handle in drawn.items():
-                handles.setdefault(parse_method(name), (handle, name))
-            _frame(ax, x, spec.xscale, spec.vlines)
-            ax.set_yscale("linear")
-            ax.set_ylim(*CLAMP_YLIM)
-    _label_rows(axes, [label for _, label in ROWS])
-    legend = _legend(fig, handles)
-    path = None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}"
-    return _finish(fig, axes, xlabel or spec.xlabel, legend, path)
+        return x, y, found
 
-
-def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None = None):
-    """One row of [datasets] panels of a perf metric on a shared y; saved under `out`."""
-    plt.rcParams.update(RC_PARAMS)
-    sns.set_palette("deep")
-    spec, pspec = METRIC_SPECS[metric], PARAM_SPECS["epsilon"]
-    fig, axes = plt.subplots(
-        1, len(datasets), figsize=(PANEL_WIDTH * len(datasets), PERF_ROW_HEIGHT), sharey=True, squeeze=False
+    return _metric_grid(
+        ROWS,
+        datasets,
+        load_cell,
+        spec.xlabel,
+        spec.xscale,
+        spec.vlines,
+        True,
+        lambda metric: CLAMP_YLIM,
+        row_yscale=lambda metric: "linear",
+        height=GRID_HEIGHT,
+        where=param,
+        path=None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}",
     )
-    axes = axes[0]
-    handles, xlabel = {}, None
-    for ax, dataset in zip(axes, datasets, strict=True):
-        ax.set_title(DATASET_TITLES[dataset], fontsize=FS_LABEL)
+
+
+def perf_grid(stem: str, metrics, datasets: list[str], artifacts: str, out: str | None = None):
+    """The [metrics] x [datasets] grid of the perf sweeps against epsilon, a y shared
+    within each row, the rates on `CLAMP_YLIM`; saved as `epsilon_{stem}` under `out`."""
+    pspec = PARAM_SPECS["epsilon"]
+
+    def load_cell(dataset, metric):
         if not _has_perf(artifacts, dataset, metric):
-            ax.axis("off")
-            continue
+            return None
         folder = f"{artifacts}/{dataset}/{SUBDIR_PERF}"
         x = np.asarray(load(f"{folder}/epsilon_values.pkl"), dtype=float)
         y = load(f"{folder}/epsilon_{metric}_results.pkl")
         meta = f"{folder}/epsilon_perf_meta.pkl"
         found = load(meta).get("xlabel", pspec.xlabel) if os.path.exists(meta) else pspec.xlabel
-        xlabel = _xlabel(xlabel, found, f"{dataset} perf")
-        if metric in ("seed_var", "feasibility"):
+        if metric in PERF_OVER_QUERIES:
             # the D(eps) terms or the feasible rates per query: the mean line and
             # the band over queries
             y = bootstrap(y)
-        drawn, _ = _draw_series(ax, x, y)
-        for name, handle in drawn.items():
-            handles.setdefault(parse_method(name), (handle, name))
-        _frame(ax, x, pspec.xscale, pspec.vlines)
-        ax.set_yscale(spec.yscale)
-        if metric == "feasibility":
-            # a rate, on the coverage rows' frame
-            ax.set_ylim(*CLAMP_YLIM)
-    _label_rows([axes], [spec.ylabel])
-    legend = _legend(fig, handles)
-    path = None if out is None else f"{out}/epsilon_{metric}.{PLOT_FORMAT}"
-    return _finish(fig, axes[None, :], xlabel or pspec.xlabel, legend, path)
+        return x, y, found
+
+    return _metric_grid(
+        [(metric, PERF_ROW_LABELS.get(metric, METRIC_SPECS[metric].ylabel)) for metric in metrics],
+        datasets,
+        load_cell,
+        pspec.xlabel,
+        pspec.xscale,
+        pspec.vlines,
+        "row",
+        # a rate, on the coverage rows' frame
+        lambda metric: CLAMP_YLIM if metric in PERF_RATES else None,
+        row_yscale=lambda metric: METRIC_SPECS[metric].yscale,
+        height=PERF_ROW_HEIGHT * len(metrics),
+        where="perf",
+        path=None if out is None else f"{out}/epsilon_{stem}.{PLOT_FORMAT}",
+    )
 
 
 def elasticity_grid(artifacts: str, out: str | None = None):
@@ -439,9 +505,11 @@ def main(argv=None) -> None:
         return
     for param in sweep_params(artifacts, datasets):
         plt.close(sweep_grid(param, datasets, artifacts, out))
-    for metric in PERF_METRICS:
-        if any(_has_perf(artifacts, d, metric) for d in datasets):
-            plt.close(perf_row(metric, datasets, artifacts, out))
+    for stem, metrics in PERF_FIGURES:
+        # the rows some dataset ran; a figure none of whose metrics ran is not drawn
+        ran = [m for m in metrics if any(_has_perf(artifacts, d, m) for d in datasets)]
+        if ran:
+            plt.close(perf_grid(stem, ran, datasets, artifacts, out))
     if _has_elasticities(artifacts):
         plt.close(elasticity_grid(artifacts, out))
 

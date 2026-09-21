@@ -33,15 +33,20 @@ Legs:
   4. the stability figure of the same run has no marker-only line and no count
      text; `create_sweep_plot` and `_draw_series` take no `failures`, and
      `plotting` has no `FAILURE_MARKER` or `_nearest_finite`.
-  5. the aggregate at this round, on a synthetic tree (simulation perf with a
+  5. the stacked perf aggregate, on a synthetic tree (simulation perf with a
      failures pkl, seed_var and feasibility; cigarettes perf with seed_var only):
-     the CLI writes `epsilon_feasibility.pdf` beside the other two perf pdfs; the
-     feasibility figure is one row, its simulation panel on `CLAMP_YLIM`, its
-     cigarette panel blank; `epsilon_seed_var.pdf` draws no marker-only line and
-     no count text although the failures pkl is there.
+     the CLI writes `epsilon_seed_var.pdf` and no `epsilon_feasibility.pdf`;
+     `PERF_FIGURES` stacks feasibility under seed_var; `perf_grid` draws two rows,
+     stability on top and feasible rate below, the simulation feasibility cell on
+     `CLAMP_YLIM` and the stability row not, the cigarette feasibility cell blank,
+     x shared per column and y per row, no marker-only line or count text on the
+     stability row although the failures pkl is there, the legend one row of its
+     n entries, the x-label at 0.5 on two columns and under the middle column of
+     three (optical added).
   6. completeness: `git grep -e 'failures=' -e FAILURE_MARKER -e _nearest_finite
-     -- src scripts` matches nothing outside this file, apart from `perf.py`'s
-     `PerfRecord.failures` field and the `record.failures` save.
+     -- src scripts` matches nothing outside this file. The allow-list keeps
+     `perf.py`'s `PerfRecord.failures` field and `record.failures` save out of the
+     verdict should a spelling of them ever match; neither does today.
   7. do-MNIST perf still logs and skips whatever it is asked, read off the source
      text with `ast` (nothing is imported from `do_mnist`).
 
@@ -374,8 +379,12 @@ def synthetic_tree(root):
     return root
 
 
+def legend_ncol(legend):
+    return getattr(legend, "_ncols", None) or getattr(legend, "_ncol", 1)
+
+
 def leg_5():
-    print("(5) the aggregate at this round, on a synthetic tree")
+    print("(5) the stacked perf aggregate, on a synthetic tree")
     os.makedirs(TMPROOT, exist_ok=True)
     root = synthetic_tree(tempfile.mkdtemp(prefix="tree_", dir=TMPROOT))
     out = f"{root}/aggregate"
@@ -388,41 +397,95 @@ def leg_5():
         timeout=600,
     )
     written = sorted(os.listdir(out)) if os.path.isdir(out) else []
-    want = ["epsilon_feasibility.pdf", "epsilon_seed_var.pdf"]
     check(
-        "(5) the CLI exits 0 and writes epsilon_feasibility.pdf beside epsilon_seed_var.pdf",
-        proc.returncode == 0 and written == want and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
+        "(5) the CLI exits 0 and writes epsilon_seed_var.pdf alone (no epsilon_feasibility.pdf)",
+        proc.returncode == 0 and written == ["epsilon_seed_var.pdf"] and os.path.getsize(f"{out}/{written[0]}") > 0,
         f"{written} {proc.stderr.strip().splitlines()[-1][:160] if proc.returncode else ''}",
     )
+    stems = dict(aggregate.PERF_FIGURES)
+    check(
+        "(5) PERF_FIGURES stacks feasibility under seed_var; no feasibility figure of its own",
+        stems.get("seed_var") == ("seed_var", "feasibility") and "feasibility" not in stems,
+        f"{aggregate.PERF_FIGURES}",
+    )
     datasets = aggregate.columns(root)
-    fig = aggregate.perf_row("feasibility", datasets, root)
-    panels = [ax for ax in fig.axes if ax.get_title()]
+    fig = aggregate.perf_grid("seed_var", stems["seed_var"], datasets, root)
+    axes = np.array(fig.axes[: 2 * len(datasets)]).reshape(2, len(datasets))
     check(
-        "(5) the feasibility figure is one row: simulation, cigarettes",
-        len(panels) == 2 and [ax.get_title() for ax in panels] == ["simulation", "cigarettes"],
-        f"{[ax.get_title() for ax in panels]}",
+        "(5) two rows by two columns, titled simulation, cigarettes",
+        len(fig.axes) == 4 and [ax.get_title() for ax in axes[0]] == ["simulation", "cigarettes"],
+        f"{len(fig.axes)} axes, {[ax.get_title() for ax in axes[0]]}",
+    )
+    labels = [ax.get_ylabel() for ax in axes[:, 0]]
+    check(
+        "(5) the rows are labelled stability (top) and feasible rate (below)",
+        labels[0] == METRIC_SPECS["seed_var"].ylabel and labels[1].startswith("feasible rate"),
+        f"{labels}",
     )
     check(
-        f"(5) the simulation panel is on CLAMP_YLIM {CLAMP_YLIM}, linear",
-        panels[0].axison
-        and tuple(float(v) for v in panels[0].get_ylim()) == CLAMP_YLIM
-        and panels[0].get_yscale() == "linear",
-        f"{panels[0].get_ylim()}",
+        f"(5) the simulation feasibility cell is on CLAMP_YLIM {CLAMP_YLIM}, linear",
+        axes[1, 0].axison
+        and tuple(float(v) for v in axes[1, 0].get_ylim()) == CLAMP_YLIM
+        and axes[1, 0].get_yscale() == "linear",
+        f"{axes[1, 0].get_ylim()}",
     )
-    check("(5) the cigarette panel is blank (no feasibility pkl)", not panels[1].axison)
+    check(
+        "(5) the stability row is not on CLAMP_YLIM",
+        tuple(float(v) for v in axes[0, 0].get_ylim()) != CLAMP_YLIM,
+        f"{axes[0, 0].get_ylim()}",
+    )
+    check(
+        "(5) the cigarette feasibility cell is blank (no pkl), its stability cell on",
+        not axes[1, 1].axison and axes[0, 1].axison,
+    )
+
+    def shared(ax, kind):
+        group = ax.get_shared_x_axes() if kind == "x" else ax.get_shared_y_axes()
+        return {id(s) for s in group.get_siblings(ax)}
+
+    check(
+        "(5) x is shared within each column and not across",
+        all(shared(axes[0, c], "x") == {id(axes[0, c]), id(axes[1, c])} for c in range(2)),
+    )
+    check(
+        "(5) y is shared within each row and not across",
+        all(shared(axes[r, 0], "y") == {id(axes[r, 0]), id(axes[r, 1])} for r in range(2)),
+    )
+    check(
+        "(5) the stability row draws no marker-only line and no count text",
+        all(not marker_lines(ax) and not ax.texts for ax in axes[0]),
+        f"{[(len(marker_lines(ax)), len(ax.texts)) for ax in axes[0]]}",
+    )
+    legend = fig.legends[0]
+    n = len(legend.get_texts())
+    check(
+        "(5) the legend follows the entry-count rule: two entries, one row of n",
+        len(fig.legends) == 1 and n == 2 and legend_ncol(legend) == n,
+        f"{n} entries, ncol {legend_ncol(legend)}",
+    )
+    check(
+        "(5) two columns: the one x-label sits at 0.5",
+        [t.get_text() for t in fig.texts] == [PARAM_SPECS["epsilon"].xlabel] and fig.texts[0].get_position()[0] == 0.5,
+        f"{[(t.get_text(), t.get_position()) for t in fig.texts]}",
+    )
     plt.close(fig)
-    fig = aggregate.perf_row("seed_var", datasets, root)
-    panels = [ax for ax in fig.axes if ax.get_title()]
+    # three columns: the x-label under the middle one
+    shutil.copytree(f"{root}/simulation/{SUBDIR_PERF}", f"{root}/optical_device/{SUBDIR_PERF}")
+    datasets = aggregate.columns(root)
+    fig = aggregate.perf_grid("seed_var", stems["seed_var"], datasets, root)
+    fig.canvas.draw()
+    box = fig.axes[len(datasets) + 1].get_position()
     check(
-        "(5) epsilon_seed_var: no marker-only line and no count text on any panel",
-        all(not marker_lines(ax) and not ax.texts for ax in panels) and all(ax.axison for ax in panels),
-        f"{[(len(marker_lines(ax)), len(ax.texts)) for ax in panels]}",
+        "(5) three columns: the x-label is at the middle column's centre",
+        len(datasets) == 3 and abs(fig.texts[0].get_position()[0] - (box.x0 + box.x1) / 2) < 1e-9,
+        f"{datasets} {fig.texts[0].get_position()[0]:.6f} vs {(box.x0 + box.x1) / 2:.6f}",
     )
     plt.close(fig)
     shutil.rmtree(root, ignore_errors=True)
 
 
-# the only lines the completeness grep may match: the PerfRecord field and its save
+# the perf.py lines the completeness grep would forgive, the PerfRecord field and its
+# save; neither spells `failures=`, so today the grep matches nothing at all
 ALLOWED = ("failures: dict[str, np.ndarray] = field(", "save(record.failures,")
 
 
