@@ -63,8 +63,10 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
          y-labels without " / "; the perf row has the blank sim panel and the
          cigarette marker line; ten perf methods draw five columns of two, with no
-         WARNING, clear of the titles. Catches: rows reordered, a missing metric not
-         blanked, the legend sorted by name or keyed on the spelling.
+         WARNING, clear of the titles; the x-label at 0.5 on two columns and, with
+         optical added, under the middle column of three (grid and perf row).
+         Catches: rows reordered, a missing metric not blanked, the legend sorted by
+         name or keyed on the spelling, the x-label left at 0.5 over three columns.
   (vii)  the utility on the shipped artifacts (`--shipped DIR`): exit 0, exactly the
          pdfs the tree calls for (a grid per sweep param, a row per perf metric some
          dataset ran, the elasticity grid when the cigarette query pkls are there),
@@ -962,6 +964,11 @@ def leg_vi():
     check("(vi) no y-label carries ' / '", not any(" / " in ax.get_ylabel() for ax in axes.ravel()))
     sup = [t.get_text() for t in fig.texts]
     check("(vi) one x-label, the gamma spec's", sup == [PARAM_SPECS["gamma"].xlabel], f"{sup}")
+    check(
+        "(vi) two columns: the x-label sits at 0.5",
+        fig.texts[0].get_position()[0] == 0.5,
+        f"{fig.texts[0].get_position()}",
+    )
     legend = fig.legends[0]
     texts = [t.get_text() for t in legend.get_texts()]
     check(
@@ -1040,6 +1047,32 @@ def leg_vi():
     check("(vi) blank first column: its y tick numbers render", all(ticks_render(ax) for ax in axes[:, 1]))
     plt.close(fig)
 
+    # three columns: the one x-label sits under the middle column, on the grid and
+    # on the perf row
+    three = synthetic_tree(tempfile.mkdtemp(prefix="three_", dir=TMPROOT))
+    shutil.copytree(f"{three}/simulation/{SUBDIR_SWEEP}", f"{three}/optical_device/{SUBDIR_SWEEP}")
+    datasets = aggregate.columns(three)
+    check("(vi) three columns: simulation, optical_device, cigarettes", len(datasets) == 3, f"{datasets}")
+    for label, fig, middle in (
+        ("gamma grid", aggregate.sweep_grid("gamma", datasets, three), 2 * 3 + 1),
+        ("perf row", aggregate.perf_row("wall_clock", datasets, three), 1),
+    ):
+        fig.canvas.draw()
+        box, text = fig.axes[middle].get_position(), fig.texts[0]
+        extent = text.get_window_extent()
+        panel = fig.axes[middle].get_window_extent()
+        check(
+            f"(vi) three columns: the {label} x-label is at the middle axes' centre",
+            abs(text.get_position()[0] - (box.x0 + box.x1) / 2) < 1e-9,
+            f"{text.get_position()[0]:.6f} vs {(box.x0 + box.x1) / 2:.6f}",
+        )
+        check(
+            f"(vi) three columns: the {label} x-label's centre lies within the middle axes",
+            panel.x0 < (extent.x0 + extent.x1) / 2 < panel.x1,
+            f"{(extent.x0 + extent.x1) / 2:.0f} in ({panel.x0:.0f}, {panel.x1:.0f})",
+        )
+        plt.close(fig)
+
     # a legend that wraps must not sit on the column titles: ten methods, two rows
     ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF))
     with captured() as lines:
@@ -1066,7 +1099,7 @@ def leg_vi():
             f"legend y0 {box.y0:.0f}, titles y1 {max(t.y1 for t in titles):.0f}",
         )
         plt.close(fig)
-    for folder in (root, fold, two, blank, ten):
+    for folder in (root, fold, two, blank, three, ten):
         shutil.rmtree(folder, ignore_errors=True)
 
 

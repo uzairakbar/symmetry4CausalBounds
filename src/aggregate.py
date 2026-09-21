@@ -8,10 +8,11 @@ can be redrawn without rerunning an experiment. Per sweep parameter found under 
 `<dataset>/sweep/`, one `<param>_grid.pdf`: rows coverage, width, worst error (the
 last two divided by the baseline PI as the sweep figures are under `normalize`),
 columns the datasets in `DATASET_ORDER` that are present, x shared within a column,
-y shared across the grid on `CLAMP_YLIM`, one x-label, three y-labels without the
-"/ PI" suffix, one legend above the titles: one row of up to `LEGEND_FLAT_MAX`
-entries, else `LEGEND_ROWS` rows with a paired family in one column and the
-singletons stacked two to a column. A missing pkl leaves its cells blank.
+y shared across the grid on `CLAMP_YLIM`, one x-label (under the middle column when
+the column count is odd, else centred), three y-labels without the "/ PI" suffix,
+one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
+`LEGEND_ROWS` rows with a paired family in one column and the singletons stacked
+two to a column. A missing pkl leaves its cells blank.
 Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.pdf`)
 with a shared y axis, drawn only where some dataset ran the perf sweep. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
@@ -228,9 +229,11 @@ def _label_rows(axes_rows, labels) -> None:
 
 
 def _finish(fig, axes, xlabel: str, legend, path: str | None):
-    fig.supxlabel(xlabel, fontsize=FS_LABEL)
-    _label_major_ticks_only(*axes)
-    _at_least_two_major_ticks(*axes)
+    """`axes` is the 2-D grid; the one x-label sits under the middle column when
+    the column count is odd (one included), else at the figure's centre."""
+    label = fig.supxlabel(xlabel, fontsize=FS_LABEL)
+    _label_major_ticks_only(*axes.ravel())
+    _at_least_two_major_ticks(*axes.ravel())
     # the room the legend takes, as rendered, so a second or third row never sits
     # on the column titles
     top = 0.97
@@ -239,6 +242,10 @@ def _finish(fig, axes, xlabel: str, legend, path: str | None):
         box = legend.get_window_extent().transformed(fig.transFigure.inverted())
         top = max(0.5, box.y0 - LEGEND_GAP)
     fig.tight_layout(rect=(0, 0, 1, top))
+    ncols = axes.shape[1]
+    if ncols % 2:
+        box = axes[-1, ncols // 2].get_position()
+        label.set_x((box.x0 + box.x1) / 2)
     if path is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         fig.savefig(path, format=PLOT_FORMAT, dpi=PLOT_DPI)
@@ -308,7 +315,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
     _label_rows(axes, [label for _, label in ROWS])
     legend = _legend(fig, handles)
     path = None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}"
-    return _finish(fig, axes.ravel(), xlabel or spec.xlabel, legend, path)
+    return _finish(fig, axes, xlabel or spec.xlabel, legend, path)
 
 
 def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None = None):
@@ -346,7 +353,7 @@ def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None =
     _label_rows([axes], [spec.ylabel])
     legend = _legend(fig, handles)
     path = None if out is None else f"{out}/epsilon_{metric}.{PLOT_FORMAT}"
-    return _finish(fig, axes, xlabel or pspec.xlabel, legend, path)
+    return _finish(fig, axes[None, :], xlabel or pspec.xlabel, legend, path)
 
 
 def elasticity_grid(artifacts: str, out: str | None = None):
