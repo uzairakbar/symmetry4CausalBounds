@@ -234,7 +234,7 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> flo
         intercept: fit with a free intercept, i.e. take the MMSE over Lem. 2's
             hypothesis class rather than over the intercept-free one. Its sibling
             `trace_S_over_k` already centres, so `mean_match` runs make the two
-            factors of the trS axis consistent.
+            factors of the omega axis consistent.
 
     Returns:
         rho_hat, or NaN if the baseline MSE vanishes

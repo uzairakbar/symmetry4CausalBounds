@@ -1,9 +1,9 @@
-"""A31: the trS sweep's x-axis under both settings of the recalibrate toggle.
+"""A31: the omega sweep's x-axis under both settings of the recalibrate toggle.
 
 `ExpansionStrategy` plots a MEASURED x for the ball in force: tr(S)/k under
 `recalibrate: true` (the recalibrated DA+ radius is sigma sqrt(gamma), so Prop. 2's
 ratio is tr(S)/k) and rho tr(S)/k under `recalibrate: false` (the radius carries
-sqrt(rho)). The label follows the factor (`TRS_XLABEL`), the runner and the pkls
+sqrt(rho)). The label follows the factor (`OMEGA_XLABEL`), the runner and the pkls
 keep knob order, and `create_sweep_plot` holds the one sort, on the x it is given.
 Two experiments, a 4-step knob grid, both datasets, both toggles, through the
 production path (`sweep_record`, `_run_sweeps`), with a second runner recomputing
@@ -11,9 +11,9 @@ the factors independently:
 
   (0)    `generate_data(j, knob)` is deterministic (common random numbers), so the
          recomputation in (i) measures the same draw;
-  (i)    every stored x is exactly trS (recalibrated) or rho * trS (not), with rho
-         and trS recomputed by the gate on the runner's own data;
-  (ii)   the returned x is the experiment mean in KNOB order, `trS_values.pkl` is
+  (i)    every stored x is exactly tr(S)/k (recalibrated) or rho tr(S)/k (not), with
+         rho and tr(S)/k recomputed by the gate on the runner's own data;
+  (ii)   the returned x is the experiment mean in KNOB order, `omega_values.pkl` is
          bit-identical to it, and the width array is (n_steps, n_exp);
   (iii)  under BOTH toggles, the PRODUCTION render from `_run_sweeps` (bootstrapped,
          so only x is pinnable there) draws the DA+PI line and its CI band on
@@ -28,24 +28,31 @@ the factors independently:
          one per (dataset, toggle): the rho tr(S)/k product folds back on sim
          ([3, 2, 0, 1]) where tr(S)/k does not ([3, 2, 1, 0]), so the two
          conventions cannot be confused there;
-  (v)    the xlabel on the production render is `TRS_XLABEL[recalibrate]` -- Omega on
+  (v)    the xlabel on the production render is `OMEGA_XLABEL[recalibrate]` -- Omega on
          both toggles, since both branches are Prop. 2's ratio -- equals the runner's
          `xlabel`, and no plotting error was swallowed;
-  (vi)   exactly n_exp * n_steps `trS step` INFO lines, each with the stored x to
+  (vi)   exactly n_exp * n_steps `omega step` INFO lines, each with the stored x to
          5 decimals and the marker of its convention;
   (vii)  every spec vline inside the resolved xlim is drawn and none outside it;
-  (viii) `trS_axis.pkl` holds knob, rho, trS, x, the toggle and the label in knob
-         order, with x equal to `trS_values.pkl` and to the mean of the right
-         factor, and the label equal to the one drawn;
+  (viii) `omega_axis.pkl` holds knob, rho, tr(S)/k (under its own key `trS`), x, the
+         toggle and the label in knob order, with x equal to `omega_values.pkl` and
+         to the mean of the right factor, and the label equal to the one drawn;
   (ix)   the other sweeps write no axis record: the gamma runner returns None and
-         `_run_sweeps` on the gamma grid writes no `gamma_axis.pkl`.
+         `_run_sweeps` on the gamma grid writes no `gamma_axis.pkl`;
+  (x)    the rename is complete: `git grep -i` on the retired key over src,
+         recipes, config.yaml and scripts hits only the allowlist below (tr(S)/k's
+         own names: the axis pkl's factor key and the lines documenting it, a51's
+         tr(S)/k constants, and this gate's one spelling of each), every allowlist
+         entry still hits, and a config saying the retired key fails in
+         `parse_experiment_plan` naming it (no alias). Runs once, before the
+         datasets, whatever the arguments.
 
 Writes only into a fresh directory under `~/scratch/tmp/a31/`, never into the
 repo's `artifacts/`; the directory is removed when its sweep passes and kept
-(path printed) when it fails. Nothing here touches do-MNIST (the trS sweep is
+(path printed) when it fails. Nothing here touches do-MNIST (the omega sweep is
 not wired for it).
 
-    MPLBACKEND=Agg python scripts/a31_trs_axis.py [simulation] [optical_device]
+    MPLBACKEND=Agg python scripts/a31_omega_axis.py [simulation] [optical_device]
 """
 
 import glob
@@ -53,6 +60,7 @@ import os
 import pickle
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -69,7 +77,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from src.experiments.base import SweepData  # noqa: E402
-from src.experiments.configs import PARAM_SPECS, TRS_XLABEL, SweepSpec  # noqa: E402
+from src.experiments.configs import OMEGA_XLABEL, PARAM_SPECS, SweepSpec, parse_experiment_plan  # noqa: E402
 from src.experiments.generic_runner import SPECTRUM_KEEP  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
@@ -80,7 +88,7 @@ from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
 N_EXP, N_STEPS = 2, 4
-LINE = re.compile(r"trS step (\S+): rho (\S+) tr\(S\)/k (\S+) \(untruncated (\S+)\) x (\S+)(.*)$")
+LINE = re.compile(r"omega step (\S+): rho (\S+) tr\(S\)/k (\S+) \(untruncated (\S+)\) x (\S+)(.*)$")
 MARK = {True: "recalibrated: x = tr(S)/k", False: "inherited gamma: x = rho tr(S)/k"}
 # argsort of the 4-step experiment mean per (dataset, toggle), measured 2026-09-11
 # at treatment_dim 32 on the shipped optical chain. tr(S)/k (recalibrated) is
@@ -91,8 +99,28 @@ EXPECT_ARGSORT = {
     "simulation": {True: [3, 2, 1, 0], False: [3, 2, 0, 1]},
     "optical_device": {True: [0, 1, 2, 3], False: [0, 1, 2, 3]},
 }
-EXPECT_TRS_SIGN = {"simulation": -1, "optical_device": 1}
-AXIS_KEYS = {"knob", "rho", "trS", "x", "recalibrate", "xlabel"}
+EXPECT_TRACE_SIGN = {"simulation": -1, "optical_device": 1}
+# tr(S)/k's own key in the axis pkl: it names the factor, not the sweep, so the
+# omega rename keeps it
+FACTOR_KEY = "trS"
+AXIS_KEYS = {"knob", "rho", FACTOR_KEY, "x", "recalibrate", "xlabel"}
+# (x): the sweep's retired name, spelled once here. There is no alias for it
+RETIRED = "trS"
+# (x): the only lines `git grep -i RETIRED` may hit, per file, each by a substring the
+# line must carry; tr(S)/k's own names, not the sweep's
+GREP_SCOPE = ("src", "recipes", "config.yaml", "scripts")
+ALLOWED = {
+    # the axis pkl's factor key and the docstring lines that name it
+    "src/experiments/generic_runner.py": (
+        f'"{FACTOR_KEY}": factors[',
+        f"nanmean({FACTOR_KEY}, 1)",
+        f"key `{FACTOR_KEY}`",
+    ),
+    # this gate's two constants and the docstring line on the factor key
+    "scripts/a31_omega_axis.py": ('FACTOR_KEY = "', 'RETIRED = "', f"own key `{FACTOR_KEY}`"),
+    # a51's tr(S)/k end constants
+    "scripts/a51_cigarettes_da.py": (f"{RETIRED.upper()}_",),
+}
 TMPROOT = os.path.expanduser("~/scratch/tmp/a31")
 FAIL = []
 
@@ -158,21 +186,21 @@ def run_one(experiment, recalibrate):
     err_sink = logger.add(lambda m: errors.append(m.record["message"]), level="ERROR")
     orch = build(experiment, recalibrate)
     t0 = time.perf_counter()
-    x, results, _ = orch.sweep_record("trS")
+    x, results, _ = orch.sweep_record("omega")
     t_sweep = time.perf_counter() - t0
     tmp = tempfile.mkdtemp(prefix=f"{experiment}_{'recal' if recalibrate else 'inh'}_", dir=TMPROOT)
     os.chdir(tmp)
     plt.close("all")
-    orch._run_sweeps(SweepSpec(param=("trS",), metric=("width",)))
+    orch._run_sweeps(SweepSpec(param=("omega",), metric=("width",)))
     logger.remove(sink)
     logger.remove(err_sink)
     ax = plt.gcf().axes[0]  # the production render
     os.chdir(REPO)
     x = np.asarray(x)
     sweep_dir = f"{tmp}/artifacts/{experiment}/sweep"
-    want_label = TRS_XLABEL[recalibrate]
+    want_label = OMEGA_XLABEL[recalibrate]
 
-    runner = second_runner(orch, "trS")
+    runner = second_runner(orch, "omega")
     knobs = np.asarray(runner.get_param_range(), dtype=float)
 
     # (0) determinism of the draw the factors are measured on
@@ -188,14 +216,14 @@ def run_one(experiment, recalibrate):
 
     # (i) stored x against an independent recomputation of the factors
     rho = np.full((N_STEPS, N_EXP), np.nan)
-    trs = np.full((N_STEPS, N_EXP), np.nan)
+    trace_s = np.full((N_STEPS, N_EXP), np.nan)
     ok_i, det_i = True, []
     for i, knob in enumerate(knobs):
         for j in range(N_EXP):
             data = SweepData.coerce(runner.generate_data(j, knob))
             rho[i, j] = rho_hat(data.X, data.GX, data.y, intercept=runner.mean_match)
-            trs[i, j] = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
-            want = trs[i, j] if recalibrate else rho[i, j] * trs[i, j]
+            trace_s[i, j] = trace_S_over_k(data.X, data.GX, keep=SPECTRUM_KEEP)
+            want = trace_s[i, j] if recalibrate else rho[i, j] * trace_s[i, j]
             got = runner._measured[(j, float(knob))]
             if got != want:
                 ok_i = False
@@ -205,7 +233,7 @@ def run_one(experiment, recalibrate):
     # (ii) knob order, pkl bit-identity, width shape
     meas = np.array([[runner._measured[(j, float(k))] for j in range(N_EXP)] for k in knobs])
     x_knob = np.nanmean(meas, axis=1)
-    with open(f"{sweep_dir}/trS_values.pkl", "rb") as fh:
+    with open(f"{sweep_dir}/omega_values.pkl", "rb") as fh:
         pkl = np.asarray(pickle.load(fh))  # noqa: S301 - the gate wrote this file itself
     w = results["DA+PI"]["interval_width"]
     ok_ii = np.array_equal(x, x_knob) and np.array_equal(pkl, x) and w.shape == (N_STEPS, N_EXP)
@@ -225,10 +253,10 @@ def run_one(experiment, recalibrate):
         xlabel=want_label,
         ylabel="w",
         experiment=experiment,
-        fname="trS_width",
+        fname="omega_width",
         savefig=False,
         bootstrapped=False,
-        vlines=PARAM_SPECS["trS"].vlines,
+        vlines=PARAM_SPECS["omega"].vlines,
     )
     ax2 = plt.gcf().axes[0]
     lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
@@ -259,9 +287,9 @@ def run_one(experiment, recalibrate):
         and np.array_equal(band[1], np.nanpercentile(w, 2.5, axis=1)[order])
         and np.array_equal(band[2], np.nanpercentile(w, 97.5, axis=1)[order])
     )
-    mono = bool((np.sign(np.diff(x)) == EXPECT_TRS_SIGN[experiment]).all()) if recalibrate else True
+    mono = bool((np.sign(np.diff(x)) == EXPECT_TRACE_SIGN[experiment]).all()) if recalibrate else True
     mono_txt = (
-        f"monotone ({'falling' if EXPECT_TRS_SIGN[experiment] < 0 else 'rising'}) {mono} "
+        f"monotone ({'falling' if EXPECT_TRACE_SIGN[experiment] < 0 else 'rising'}) {mono} "
         if recalibrate
         else "monotone n/a (rho tr(S)/k may fold) "
     )
@@ -274,7 +302,7 @@ def run_one(experiment, recalibrate):
     )
 
     # (iv) the right product, and the pinned argsort of this (dataset, toggle)
-    product = trs if recalibrate else rho * trs
+    product = trace_s if recalibrate else rho * trace_s
     ok_iv = np.array_equal(x, np.nanmean(product, axis=1))
     srt = order.tolist()
     expect = EXPECT_ARGSORT[experiment][recalibrate]
@@ -282,7 +310,7 @@ def run_one(experiment, recalibrate):
         tag,
         "(iv)",
         ok_iv and srt == expect,
-        f"x==mean({'trS' if recalibrate else 'rho*trS'}) {ok_iv} argsort {srt} expected {expect}",
+        f"x==mean({'tr(S)/k' if recalibrate else 'rho tr(S)/k'}) {ok_iv} argsort {srt} expected {expect}",
     )
 
     # (v) the label on the production render, and no swallowed plotting error
@@ -316,7 +344,7 @@ def run_one(experiment, recalibrate):
     # (vii) vlines on the production render, gated on the resolved xlim
     drawn = vline_positions(ax)
     x_lo, x_hi = ax.get_xlim()
-    spec_in = [v for v in PARAM_SPECS["trS"].vlines if x_lo <= v <= x_hi]
+    spec_in = [v for v in PARAM_SPECS["omega"].vlines if x_lo <= v <= x_hi]
     drawn_in = [v for v in drawn if x_lo <= v <= x_hi]
     drawn_out = [v for v in drawn if not (x_lo <= v <= x_hi)]
     check(
@@ -327,11 +355,11 @@ def run_one(experiment, recalibrate):
     )
 
     # (viii) the axis record next to the values pkl
-    axis_path = f"{sweep_dir}/trS_axis.pkl"
+    axis_path = f"{sweep_dir}/omega_axis.pkl"
     if not hasattr(runner, "axis_record"):
-        check(tag, "(viii)", False, "no axis_record on the trS runner")
+        check(tag, "(viii)", False, "no axis_record on the omega runner")
     elif not os.path.exists(axis_path):
-        check(tag, "(viii)", False, "trS_axis.pkl missing")
+        check(tag, "(viii)", False, "omega_axis.pkl missing")
     else:
         with open(axis_path, "rb") as fh:
             rec = pickle.load(fh)  # noqa: S301 - the gate wrote this file itself
@@ -339,14 +367,14 @@ def run_one(experiment, recalibrate):
         shapes_ok = (
             keys_ok
             and np.shape(rec["rho"]) == (N_STEPS, N_EXP)
-            and np.shape(rec["trS"]) == (N_STEPS, N_EXP)
+            and np.shape(rec[FACTOR_KEY]) == (N_STEPS, N_EXP)
             and np.shape(rec["x"]) == (N_STEPS,)
         )
         knob_ok = keys_ok and np.array_equal(rec["knob"], knobs)
         x_ok = keys_ok and np.array_equal(rec["x"], pkl)
         fac = None
         if shapes_ok:
-            fac = np.nanmean(rec["trS"], 1) if recalibrate else np.nanmean(rec["rho"] * rec["trS"], 1)
+            fac = np.nanmean(rec[FACTOR_KEY], 1) if recalibrate else np.nanmean(rec["rho"] * rec[FACTOR_KEY], 1)
         fac_ok = fac is not None and np.array_equal(fac, pkl)
         cal_ok = keys_ok and rec["recalibrate"] == recalibrate
         lab_ok = keys_ok and rec["xlabel"] == lab
@@ -382,9 +410,39 @@ def run_one(experiment, recalibrate):
     print(f"  DA+PI width knob order {np.round(np.nanmean(w, 1), 4).tolist()}  sweep {t_sweep:.1f}s  out {kept}")
 
 
+def leg_x():
+    """(x) the rename is complete and the retired key has no alias."""
+    print("\n===== (x) the omega rename")
+    grep = subprocess.run(
+        ["git", "-C", REPO, "grep", "-n", "-I", "-i", "-e", RETIRED.lower(), "--", *GREP_SCOPE],
+        capture_output=True,
+        text=True,
+    )
+    check("[rename]", "(x)", grep.returncode in (0, 1), f"git grep exit {grep.returncode} {grep.stderr.strip()[:120]}")
+    hits = [line.split(":", 2) for line in grep.stdout.splitlines()]
+    stray = [f"{path}:{no}" for path, no, text in hits if not any(k in text for k in ALLOWED.get(path, ()))]
+    check("[rename]", "(x)", not stray, f"{len(hits)} hits, outside the allowlist: {stray[:6]}")
+    stale = [
+        f"{path} {k!r}"
+        for path, keys in ALLOWED.items()
+        for k in keys
+        if not any(p == path and k in text for p, _, text in hits)
+    ]
+    check("[rename]", "(x)", not stale, f"allowlist entries that no longer hit: {stale}")
+    try:
+        parse_experiment_plan({"sweep": {"param": [RETIRED], "metric": ["width"]}})
+        raised = ""
+    except ValueError as error:
+        raised = str(error)
+    check("[rename]", "(x)", f"'{RETIRED}'" in raised, f"the retired key is refused: {raised[:100]!r}")
+    plan = parse_experiment_plan({"sweep": {"param": ["omega"], "metric": ["width"]}})
+    check("[rename]", "(x)", plan.sweep.param == ("omega",) and "omega" in PARAM_SPECS, "omega parses")
+
+
 def main():
     experiments = sys.argv[1:] or ["simulation", "optical_device"]
     os.makedirs(TMPROOT, exist_ok=True)
+    leg_x()
     for experiment in experiments:
         for recalibrate in (True, False):
             run_one(experiment, recalibrate)

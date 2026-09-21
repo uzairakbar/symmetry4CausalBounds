@@ -554,7 +554,7 @@ def create_sweep_plot(
         fname = fname or "".join(c for c in xlabel if c.isalnum())
         cfg = _plot_config(experiment, fname)
 
-        # x can be MEASURED rather than a designed grid (trS plots tr(S)/k when
+        # x can be MEASURED rather than a designed grid (omega plots tr(S)/k when
         # recalibrated, rho tr(S)/k otherwise), so it is not
         # guaranteed ascending. matplotlib draws segments in array order, so an
         # out-of-order x makes the line double back on itself and read as
@@ -598,7 +598,7 @@ def create_sweep_plot(
         # the grid's last point and the r = 1 reference line stay in view and
         # off the frame; the 5 % pad would visibly widen every sweep.
         # x is also never auto-promoted: PARAM_SPECS.xscale is an author's choice
-        # (trS opts out to linear on purpose), not a default to be second-guessed.
+        # (omega opts out to linear on purpose), not a default to be second-guessed.
         _rescale(
             plt.gca(),
             cfg,

@@ -29,7 +29,7 @@
   (v)   isolation of the appended component: the optical epsilon runner's DA (read
         off the runner, `das[0]`) is config.yaml's chain plus the component of
         `ROBUSTNESS_AUGMENTATION`, so it carries gaussian-noise; every other
-        strategy's runner (gamma, trS, n, m, recalibrate), the query runner and
+        strategy's runner (gamma, omega, n, m, recalibrate), the query runner and
         the orchestrator's own budget DA are config.yaml's chain and carry no
         gaussian-noise. Catches: a component set to None (no knob, so no dip
         either), a leak into any other sweep or the panel. Misses: a chain in

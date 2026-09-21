@@ -27,8 +27,8 @@ both halves of the robustness axis are on the figure. Legs:
         same grid point, against RECORDED integers so a family that empties at a
         NEW point fails even when the ordering still holds.
   (viii) ruff and ASCII on the touched files.
-  (ix)  the trS sweep refits the T budget per step, not only the epsilon sweep.
-        On OPTICAL, the one trS dataset whose h_* is not exactly invariant: the
+  (ix)  the omega sweep refits the T budget per step, not only the epsilon sweep.
+        On OPTICAL, the one omega dataset whose h_* is not exactly invariant: the
         returned budget moves across knobs, is not the frozen setup one, and is
         `ratio * raw + EPS_TOL` with the tolerance unscaled. Then on simulation,
         which carries an observed instrument: r_Z does not follow the knob, and
@@ -404,10 +404,10 @@ def leg_viii():
 
 
 def leg_ix():
-    print("(ix) the trS sweep refits the T budget per step")
+    print("(ix) the omega sweep refits the T budget per step")
 
     def budgets(dataset):
-        runner = a25.trs_recipe_runner(dataset, steps=4)
+        runner = a25.omega_recipe_runner(dataset, steps=4)
         raw, budget, z_budget, eps, expect = [], [], [], [], []
         for index, knob in enumerate(runner.get_param_range()):
             data = runner.generate_data(0, knob)
@@ -448,7 +448,7 @@ def leg_ix():
     runner, raw, budget, z_budget, eps = budgets("optical_device")
     frozen = float(runner.get_oracle(0).eps_iv_star)
     print(f"      RECORDED optical frozen eps_iv* {frozen:.6g}, per-step {np.round(raw, 6).tolist()}")
-    check("(ix) the trS runner IS an ExpansionStrategy", isinstance(runner, ExpansionStrategy))
+    check("(ix) the omega runner IS an ExpansionStrategy", isinstance(runner, ExpansionStrategy))
 
     # MOVES: EPS_TOL (2^-5) is far bigger than the optical budget itself, so the
     # threshold is absolute and well clear of solver noise, which is ~1e-12 here
@@ -497,7 +497,7 @@ def leg_ix():
     # RECORDED, because it bounds what this fix can do: on the simulation SEM
     # h_* is exactly invariant under `translate`, so eps_iv* is 0 to machine
     # precision at EVERY knob and the T budget is pure EPS_TOL before and after
-    # the refit. The sim and cigarettes trS panels therefore do NOT move; only
+    # the refit. The sim and cigarettes omega panels therefore do NOT move; only
     # optical does. Whatever bends those two panels, it is not a frozen budget.
     _, sim_raw, sim_budget, sim_z, _ = budgets("simulation")
     print(f"      RECORDED simulation per-step eps_iv* {sim_raw}")

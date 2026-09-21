@@ -248,7 +248,7 @@ GAMMA_Z_DEFAULT: float = 0.0177
 # `ParamSweepRunner._floor_guard`, which only ever RAISES a budget, and only where the
 # oracle value was already unusable.
 #
-# Calibrated on the simulation trS grid, where the oracle IV budget (EPS_TOL, then 2**-8)
+# Calibrated on the simulation omega grid, where the oracle IV budget (EPS_TOL, then 2**-8)
 # sits below the floor at the 5 lowest knobs and DA+PI+IV was all-NaN there. Measured
 # DA+PI+IV coverage / width at those 5 steps, at budget = sqrt(r * floor):
 #   r=2.25  0.82-0.88            under-covers
@@ -348,7 +348,7 @@ QUERY_GAMMA: dict[str, float] = {"s": 2**-1, "t1": 2**-1, "t2": 2**-2, "t3": 2**
 # Fraction of Sigma_GX's variance kept before inverting it for tr(S)/k.
 # The near-null eigendirections of Sigma_GX are noise and 1/w blows them up, so the
 # untruncated estimate is inflated exactly where the DA is strongest. Measured on the
-# simulation trS sweep: at the top of the knob grid tr(S)/k reads 0.22889 untruncated
+# simulation omega sweep: at the top of the knob grid tr(S)/k reads 0.22889 untruncated
 # vs 0.17706 here -- a 23% error, at the end of the axis the sweep is about.
 SPECTRUM_KEEP: float = 0.999
 
@@ -382,12 +382,12 @@ def _EPSILON_RATIO_GRID(dataset, n):
     return grid
 
 
-# trS x-axis label by the `recalibrate` toggle. Both branches ARE Prop. 2's Omega:
+# omega x-axis label by the `recalibrate` toggle. Both branches ARE Prop. 2's Omega:
 # Prop. 2 has Omega := rho [tr(K) + D_B^2] / k and Lem. 3 has S = K + delta* delta, so
 # tr(S) = tr(K) + D_B^2 and the `false` branch rho tr(S)/k is Omega as written;
 # recalibrating to gamma/rho reduces the same term to tr(S)/k, which the paper again
 # calls Omega. The dict stays: the toggle is load-bearing at ExpansionStrategy.xlabel
-TRS_XLABEL: dict[bool, str] = {
+OMEGA_XLABEL: dict[bool, str] = {
     True: r"$\Omega$",
     False: r"$\Omega$",
 }
@@ -420,13 +420,13 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         include_ate=False,
         data_constant=True,
     ),
-    "trS": ParamSpec(
+    "omega": ParamSpec(
         # knob grid; the x-axis actually plotted is the MEASURED expansion of
         # Prop. 2 for the ball in force: tr(S)/k under `recalibrate: true`
         # (the DA+ radius is sigma sqrt(gamma)), rho tr(S)/k under `false` (the
         # radius carries sqrt(rho)). The runner picks the factor and the label
-        # (TRS_XLABEL); this static xlabel is the `false` one.
-        xlabel=TRS_XLABEL[False],
+        # (OMEGA_XLABEL); this static xlabel is the `false` one.
+        xlabel=OMEGA_XLABEL[False],
         # sim: tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
         # optical: s is the permutation probability of every component
@@ -1076,7 +1076,7 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     if isinstance(n_jobs, bool) or not isinstance(n_jobs, int) or n_jobs == 0:
         raise ValueError(f"config.{name}.n_jobs must be a non-zero int (1 = serial, -1 = all cores); got {n_jobs!r}.")
 
-    # the toggle is bool-only: the trS factor and label key on it, and a float
+    # the toggle is bool-only: the omega factor and label key on it, and a float
     # here would solve the ball in between under the recalibrated label. The
     # solver's predict-time knob (`recalibrate=t`, the sweep) is a different thing.
     recalibrate = block.get("recalibrate", True)

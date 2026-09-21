@@ -25,7 +25,7 @@ experiment. Three legs:
         (no top-tail clip on the x grid, the 2 % margin only), both grid
         endpoints strictly inside it, and the reference lines drawn are exactly
         the spec's values inside xlim (the code's own gate), each strictly
-        inside it: r = 1 on gamma and epsilon, 1.0 on both trS grids (the
+        inside it: r = 1 on gamma and epsilon, 1.0 on both omega grids (the
         optical knob grid ends at 0.99 and 1.0 sits in its margin);
   (v)   the gamma sweep from `<artifacts>/<dataset>/sweep/gamma_{values,results}.pkl`
         when present (`--artifacts DIR`, default the repo's `artifacts/`; read

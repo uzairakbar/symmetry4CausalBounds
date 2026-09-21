@@ -55,8 +55,8 @@ draws the 3 x [datasets] sweep grids and the perf rows from the pkls. Legs:
          under `clip_y=False` and to `_pad(_limits(clip=True))` by default, the former
          higher. Catches: the flag ignored, the `clip_y` forwarding dropped. Misses:
          how the markers look.
-  (vi)   the aggregate on a synthetic tree (simulation gamma and trS, cigarettes
-         gamma without coverage and no trS, cigarettes perf, no optical): the CLI as
+  (vi)   the aggregate on a synthetic tree (simulation gamma and omega, cigarettes
+         gamma without coverage and no omega, cigarettes perf, no optical): the CLI as
          a subprocess writes exactly the four pdfs; in-process the grid has the
          titles, the blank cells, one shared y on `CLAMP_YLIM`, the axis pkl's
          x-label, the legend in the repo's order in one row, the render fold (bare
@@ -137,8 +137,8 @@ from src.experiments.base import METRIC_FIELDS  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
     METRIC_SPECS,
+    OMEGA_XLABEL,
     PARAM_SPECS,
-    TRS_XLABEL,
     MethodRegistry,
     parse_experiment_plan,
     resolve_dataset_block,
@@ -861,8 +861,8 @@ def synthetic_tree(
     sim_gamma=True,
     perf_methods=("PI", "PI+INV"),
 ):
-    """simulation gamma (unless `sim_gamma` is off) and trS, cigarettes gamma without
-    the `cig_drop` metrics and no trS, cigarettes perf on `perf_methods`; no optical."""
+    """simulation gamma (unless `sim_gamma` is off) and omega, cigarettes gamma without
+    the `cig_drop` metrics and no omega, cigarettes perf on `perf_methods`; no optical."""
     rng = np.random.default_rng(1)
     x = PARAM_SPECS["gamma"].grid_fn("simulation", 4)
 
@@ -876,10 +876,10 @@ def synthetic_tree(
         dump(x, f"{sim}/gamma_values.pkl")
         dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/gamma_results.pkl")
         dump({name: np.zeros((4, 2, 4), dtype=int) for name in ("PI", "DA+PI", sim_inter)}, f"{sim}/gamma_statuses.pkl")
-    trs_x = np.array([0.3, 0.1, 0.5, 0.2])  # not ascending, as a measured axis is
-    dump(trs_x, f"{sim}/trS_values.pkl")
-    dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/trS_results.pkl")
-    dump({"knob": trs_x, "x": trs_x, "recalibrate": True, "xlabel": TRS_XLABEL[True]}, f"{sim}/trS_axis.pkl")
+    omega_x = np.array([0.3, 0.1, 0.5, 0.2])  # not ascending, as a measured axis is
+    dump(omega_x, f"{sim}/omega_values.pkl")
+    dump(record(["PI", "DA+PI", sim_inter]), f"{sim}/omega_results.pkl")
+    dump({"knob": omega_x, "x": omega_x, "recalibrate": True, "xlabel": OMEGA_XLABEL[True]}, f"{sim}/omega_axis.pkl")
     cig = f"{root}/cigarettes/{SUBDIR_SWEEP}"
     dump(x, f"{cig}/gamma_values.pkl")
     dump(record(["PI", cig_inter], drop=cig_drop), f"{cig}/gamma_results.pkl")
@@ -915,7 +915,7 @@ def leg_vi():
         proc.stderr.strip().splitlines()[-1][:160] if proc.returncode else "",
     )
     written = sorted(os.listdir(out)) if os.path.isdir(out) else []
-    want = ["epsilon_seed_var.pdf", "epsilon_wall_clock.pdf", "gamma_grid.pdf", "trS_grid.pdf"]
+    want = ["epsilon_seed_var.pdf", "epsilon_wall_clock.pdf", "gamma_grid.pdf", "omega_grid.pdf"]
     check(
         "(vi) exactly the four pdfs, non-empty",
         written == want and all(os.path.getsize(f"{out}/{f}") > 0 for f in written),
@@ -954,16 +954,16 @@ def leg_vi():
     )
     plt.close(fig)
 
-    fig = aggregate.sweep_grid("trS", datasets, root)
+    fig = aggregate.sweep_grid("omega", datasets, root)
     axes = np.array(fig.axes[: 3 * len(datasets)]).reshape(3, len(datasets))
-    check("(vi) every trS cigarette cell is off", not any(ax.axison for ax in axes[:, 1]))
+    check("(vi) every omega cigarette cell is off", not any(ax.axison for ax in axes[:, 1]))
     check(
-        "(vi) the trS x-label is the axis pkl's",
-        [t.get_text() for t in fig.texts] == [TRS_XLABEL[True]],
+        "(vi) the omega x-label is the axis pkl's",
+        [t.get_text() for t in fig.texts] == [OMEGA_XLABEL[True]],
         f"{[t.get_text() for t in fig.texts]}",
     )
     line = axes[0, 0].get_lines()[0]
-    check("(vi) the measured trS axis is drawn sorted", np.all(np.diff(line.get_xdata()) > 0), f"{line.get_xdata()}")
+    check("(vi) the measured omega axis is drawn sorted", np.all(np.diff(line.get_xdata()) > 0), f"{line.get_xdata()}")
     plt.close(fig)
 
     fold = synthetic_tree(

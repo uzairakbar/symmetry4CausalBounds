@@ -1,4 +1,4 @@
-"""A36: the optical trS knob after random-permutation honours p.
+"""A36: the optical omega knob after random-permutation honours p.
 
 The optical knob s is the permutation probability of every component
 (`_knob_to_augment_kwargs`: p = s), the grid is `linspace(0.2, 0.99)`, and
@@ -19,7 +19,7 @@ keeps every other optical experiment bit-identical). Four legs:
         span >= 0.2, rho at s = 0.2 <= 1.6. Fails on the pre-change code
         (span 0.06, no order).
 
-    python scripts/a36_trs_knob.py
+    python scripts/a36_omega_knob.py
 """
 
 import os
@@ -40,7 +40,7 @@ CHAIN = "rotation > hflip > vflip > random-permutation"
 FIXTURE_GRID = [0.2, 0.4, 0.6, 0.8, 0.99]
 # measured 2026-09-11 on this fixture (seed 42, experiment 0); the reviewer's
 # probe read 0.7944, 0.8493, 0.9134, 1.0099, 1.0924 at four decimals
-EXPECT_TRS = [0.794393, 0.849343, 0.913383, 1.009853, 1.092403]
+EXPECT_TRACE = [0.794393, 0.849343, 0.913383, 1.009853, 1.092403]
 PIN_RTOL = 1e-5
 FAIL = []
 
@@ -112,7 +112,7 @@ def leg_ii():
 
 def leg_iii():
     print("(iii) knob map and grids")
-    grid = PARAM_SPECS["trS"].grid_fn("optical_device", 7)
+    grid = PARAM_SPECS["omega"].grid_fn("optical_device", 7)
     want = np.linspace(0.2, 0.99, 7)
     check("(iii) optical grid == linspace(0.2, 0.99, 7)", np.array_equal(grid, want), f"{np.round(grid, 4).tolist()}")
     check("(iii) optical grid endpoints exact", grid[0] == 0.2 and grid[-1] == 0.99)
@@ -120,7 +120,7 @@ def leg_iii():
         "(iii) _knob_to_augment_kwargs(s)['p'] == s on the grid",
         all(_knob_to_augment_kwargs(s)["p"] == s for s in grid),
     )
-    sim = PARAM_SPECS["trS"].grid_fn("simulation", 7)
+    sim = PARAM_SPECS["omega"].grid_fn("simulation", 7)
     check("(iii) sim grid unchanged (logspace(-1.5, 1.0, 7))", np.array_equal(sim, np.logspace(-1.5, 1.0, num=7)))
 
 
@@ -141,7 +141,7 @@ def leg_iv():
         mean_match=True,
         augmentation=CHAIN,
     )
-    runner = orch.get_sweep_runner_cls("trS")(
+    runner = orch.get_sweep_runner_cls("omega")(
         methods=orch.methods,
         method_factory=orch.build_methods,
         param_grid_override=FIXTURE_GRID,
@@ -154,16 +154,16 @@ def leg_iv():
     for s in FIXTURE_GRID:
         runner.generate_data(0, s)
     factors = np.array([runner._factors[(0, float(s))] for s in FIXTURE_GRID])
-    rho, trs = factors[:, 0], factors[:, 1]
-    print(f"      trS {np.round(trs, 6).tolist()}")
-    print(f"      rho {np.round(rho, 4).tolist()}; rho trS {np.round(rho * trs, 4).tolist()}")
-    check("(iv) tr(S)/k strictly increasing along the grid", bool(np.all(np.diff(trs) > 0)))
+    rho, trace_s = factors[:, 0], factors[:, 1]
+    print(f"      tr(S)/k {np.round(trace_s, 6).tolist()}")
+    print(f"      rho {np.round(rho, 4).tolist()}; rho tr(S)/k {np.round(rho * trace_s, 4).tolist()}")
+    check("(iv) tr(S)/k strictly increasing along the grid", bool(np.all(np.diff(trace_s) > 0)))
     check(
         "(iv) tr(S)/k pinned to the measured values",
-        np.allclose(trs, EXPECT_TRS, rtol=PIN_RTOL, atol=0),
-        f"vs {EXPECT_TRS}",
+        np.allclose(trace_s, EXPECT_TRACE, rtol=PIN_RTOL, atol=0),
+        f"vs {EXPECT_TRACE}",
     )
-    check("(iv) span max - min >= 0.2", trs.max() - trs.min() >= 0.2, f"{trs.max() - trs.min():.4f}")
+    check("(iv) span max - min >= 0.2", trace_s.max() - trace_s.min() >= 0.2, f"{trace_s.max() - trace_s.min():.4f}")
     check("(iv) rho at s = 0.2 <= 1.6", rho[0] <= 1.6, f"{rho[0]:.4f}")
 
 

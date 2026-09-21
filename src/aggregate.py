@@ -258,7 +258,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
             for r in range(len(ROWS)):
                 axes[r, c].axis("off")
             continue
-        # the one sort of the sweep path (a measured trS axis is not ascending)
+        # the one sort of the sweep path (a measured omega axis is not ascending)
         x = np.asarray(load(values), dtype=float)
         order = np.argsort(x, kind="stable")
         x = x[order]

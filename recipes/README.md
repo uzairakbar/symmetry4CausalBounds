@@ -43,7 +43,7 @@ cigarette files fan in.
 | `opticalDeviceFig6.yaml` | optical | query | `optical-device_fig6.yaml`; `DA+IV` / `DA+PI+IV` respelled `(T)` |
 | `cigarettesFig7.yaml` | cigarettes | query | `neighbour-price_fig12.yaml`; the query half of `cigarettes_fig11.yaml` |
 | `validityFig9.yaml` | sim, optical, cigarettes | sweep `gamma` | `validity_fig7.yaml`, whose one metric `coverage` broadens to four; the `gamma` step of `iv_fig13.yaml`, `cigarettes_fig11.yaml` and `cigarettes-plasmode_fig12b.yaml` |
-| `sharpnessInformativenessFig10.yaml` | sim, optical, cigarettes | sweep `trS` | `sharpness_fig7.yaml` and `informativeness_fig7.yaml`, merged and inverted (trS is now the x-axis, not the metric); the `trS` step of the two cigarette files |
+| `sharpnessInformativenessFig10.yaml` | sim, optical, cigarettes | sweep `omega` | `sharpness_fig7.yaml` and `informativeness_fig7.yaml`, merged and inverted (omega is now the x-axis, not the metric); the `omega` step of the two cigarette files |
 | `robustnessFig11.yaml` | sim, optical, cigarettes | sweep `epsilon` | `robustness_fig8.yaml`, whose three metrics broaden to four; the `epsilon` step of `iv_fig13.yaml` and the two cigarette files |
 | `recalibrationFig12.yaml` | sim, optical, cigarettes | sweep `recalibrate` | the `recalibrate` step of `cigarettes_fig11.yaml` and `cigarettes-plasmode_fig12b.yaml`; new on sim and optical |
 | `nEfficiencyFig13.yaml` | sim, optical, cigarettes | sweep `n` | `n-efficiency_fig9.yaml`, whose three metrics broaden to four; the `n` step of `iv_fig13.yaml` and the two cigarette files |
@@ -85,7 +85,7 @@ Three things changed across the board, not per file:
   estimator, the mode written out; see the grammar below.
 
 Two sweep params did not survive: the old `worst_error` and `width` x-axes of
-`informativeness_fig7` / `sharpness_fig7` are now metrics on the `trS` x-axis. The
+`informativeness_fig7` / `sharpness_fig7` are now metrics on the `omega` x-axis. The
 two perf recipes drop the old `repeats: 3`, which `configs.py` defaults to 3 anyway.
 
 ## Method spellings

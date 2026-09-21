@@ -4,7 +4,7 @@ Every figure labels only its major ticks, and the five style keys of
 `constants._STYLE_KEYS` (`legend`, `x_color`, `y_color`, `title`, `title_color`)
 reach the figures through `PLOT_CONFIGS` and `ANNOTATE_SWEEP_PLOT`. Pkl-driven: it
 pairs `{param}_values.pkl` with `{param}_results.pkl` under `<artifacts>/<experiment>/
-sweep/` (so `trS_axis.pkl` and the statuses are ignored), and takes the query pair
+sweep/` (so `omega_axis.pkl` and the statuses are ignored), and takes the query pair
 and the two perf sweep pkls (`perf/epsilon_values.pkl` with
 `perf/epsilon_{wall_clock,seed_var}_results.pkl`) when present. No experiment is run.
 

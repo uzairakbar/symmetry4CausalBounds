@@ -31,8 +31,8 @@ from src.methods.sensitivity_models import (
 )
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# the trS figure's recipe, named ONCE: a68 leg (ix) fits the same fixture
-TRS_RECIPE = "sharpnessInformativenessFig10.yaml"
+# the omega figure's recipe, named ONCE: a68 leg (ix) fits the same fixture
+OMEGA_RECIPE = "sharpnessInformativenessFig10.yaml"
 METHODS = ["PI", "DA+PI", "PI+INV", "DA+PI+IV"]
 FAIL = []
 
@@ -117,18 +117,18 @@ def sim_runner(steps=12):
         pad=False,
         clipy=True,
     )
-    return orch.get_sweep_runner_cls("trS")(
+    return orch.get_sweep_runner_cls("omega")(
         methods=orch.methods,
         method_factory=orch.build_methods,
         **{k: v for k, v in orch.kwargs.items() if k != "methods"},
     )
 
 
-def trs_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides):
-    """A trS runner on the trS figure's own block, cut to gate scale.
+def omega_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides):
+    """An omega runner on the omega figure's own block, cut to gate scale.
 
     The one definition of that fixture: a68 leg (ix) imports this rather than
-    keeping a second copy, so `TRS_RECIPE` is the only place the file name
+    keeping a second copy, so `OMEGA_RECIPE` is the only place the file name
     appears. A rename must land as a named FAIL, never as a traceback out of a
     gate that then looks merely broken.
 
@@ -138,18 +138,18 @@ def trs_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides):
     The recipe block does go infeasible over the low third of the grid, which is
     the case the guard exists for.
     """
-    path = os.path.join(REPO, "recipes", TRS_RECIPE)
+    path = os.path.join(REPO, "recipes", OMEGA_RECIPE)
     if not os.path.exists(path):
         available = sorted(f for f in os.listdir(os.path.join(REPO, "recipes")) if f.endswith(".yaml"))
         raise FileNotFoundError(
-            f"recipes/{TRS_RECIPE} is gone; a25 leg 3 and a68 leg (ix) both fit their "
-            f"trS fixture on it. recipes/ carries {available}. Re-point TRS_RECIPE."
+            f"recipes/{OMEGA_RECIPE} is gone; a25 leg 3 and a68 leg (ix) both fit their "
+            f"omega fixture on it. recipes/ carries {available}. Re-point OMEGA_RECIPE."
         )
     with open(path) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     if dataset not in config:
-        raise KeyError(f"recipes/{TRS_RECIPE} carries no `{dataset}:` block, only {sorted(config)}")
+        raise KeyError(f"recipes/{OMEGA_RECIPE} carries no `{dataset}:` block, only {sorted(config)}")
     block = {**defaults, **config[dataset]}
     block.pop("experiment", None)
     block.update(n_experiments=1, n_samples=512, sweep_samples=steps, n_jobs=1, **overrides)
@@ -159,7 +159,7 @@ def trs_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides):
     set_seed(block["seed"])
     Orchestrator = SimulationOrchestrator if dataset == "simulation" else OpticalOrchestrator
     orch = Orchestrator(**block, hyperparameters={})
-    return orch.get_sweep_runner_cls("trS")(
+    return orch.get_sweep_runner_cls("omega")(
         methods={k: v for k, v in orch.methods.items() if k != "ATE"},
         method_factory=orch.build_methods,
         **orch._get_clean_kwargs(),
@@ -253,9 +253,9 @@ def a25_noop_when_feasible():
 
 def a25_rescues_infeasible():
     try:
-        runner = trs_recipe_runner("simulation", methods=METHODS)
+        runner = omega_recipe_runner("simulation", methods=METHODS)
     except (FileNotFoundError, KeyError) as error:  # a renamed recipe is a FAIL, not a traceback
-        check("A25 the trS fixture recipe is present", False, str(error))
+        check("A25 the omega fixture recipe is present", False, str(error))
         return
     rescued = nan_steps = 0
     for index, knob in enumerate(runner.get_param_range()):
@@ -273,7 +273,7 @@ def a25_rescues_infeasible():
         )
         # the UNGUARDED budget for THIS step. `_floor_guard` is a no-op without
         # data, so this is the same pipeline minus the guard -- the setup-time
-        # oracle is the wrong reference now that the trS sweep refits the T
+        # oracle is the wrong reference now that the omega sweep refits the T
         # budget per step, and branching on it would count a step as infeasible
         # that the refit already solved
         oracle_iv = float(runner.fit_epsilon_iv(0, index))

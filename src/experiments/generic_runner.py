@@ -15,10 +15,10 @@ from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QueryS
 from src.experiments.configs import (
     EPS_TOL,
     FLOOR_GUARD_R,
+    OMEGA_XLABEL,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
     SPECTRUM_KEEP,
-    TRS_XLABEL,
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
@@ -496,7 +496,7 @@ class EpsilonRatioStrategy(GenericParamSweep):
     param_key = "epsilon"
 
     def __init__(self, **kwargs):
-        # scoped to this sweep only; never leaks into trS/n/m/perf or the query panel
+        # scoped to this sweep only; never leaks into omega/n/m/perf or the query panel
         name = kwargs.get("experiment_name", "simulation")
         kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[name]
         component = ROBUSTNESS_AUGMENTATION[name]
@@ -541,14 +541,14 @@ class ExpansionStrategy(GenericParamSweep):
     sigma~ sqrt(gamma/rho) = sigma sqrt(gamma), so the ratio is tr(S)/k and the
     axis plots x = tr(S)/k under that label; at the inherited gamma the radius
     carries sqrt(rho), so x = rho tr(S)/k under `rho tr(S)/k`. The label follows
-    the factor (`xlabel`, TRS_XLABEL) and both go into the axis pkl. Base data
+    the factor (`xlabel`, OMEGA_XLABEL) and both go into the axis pkl. Base data
     is fixed per experiment and the DA draws use common random numbers. On sim
     tr(S)/k falls with the knob while rho rises, so the product can fold back
     (it does on the 4-step sim fixture of a31), which is why `create_sweep_plot`
     sorts the (x, y) pairs it is given, i.e. the plotted quantity, before drawing.
     """
 
-    param_key = "trS"
+    param_key = "omega"
 
     def __init__(self, augment_kwargs_fn: Callable | None = None, **kwargs):
         # knob -> DA call kwargs; dataset-specific
@@ -575,7 +575,7 @@ class ExpansionStrategy(GenericParamSweep):
         self._factors[(experiment_index, float(param))] = (rho, trace_S)
         convention = "recalibrated: x = tr(S)/k" if self.recalibrate else "inherited gamma: x = rho tr(S)/k"
         logger.info(
-            f"trS step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
+            f"omega step {float(param):.4g}: rho {rho:.4f} tr(S)/k {trace_S:.5f} "
             f"(untruncated {trace_S_over_k(data.X, data.GX):.5f}) "
             f"x {x:.5f} ({convention})"
         )
@@ -647,15 +647,16 @@ class ExpansionStrategy(GenericParamSweep):
 
     @property
     def xlabel(self) -> str:
-        """The label of the factor in force (TRS_XLABEL), not the spec's static one."""
-        return TRS_XLABEL[bool(self.recalibrate)]
+        """The label of the factor in force (OMEGA_XLABEL), not the spec's static one."""
+        return OMEGA_XLABEL[bool(self.recalibrate)]
 
     def axis_record(self) -> dict[str, Any]:
         """
         Both factors of the measured x, per (knob, experiment), in KNOB order like
         the values pkl: `x == nanmean(trS, 1)` when recalibrated, `nanmean(rho * trS, 1)`
         otherwise, so the other convention is `nanmean` of the other product. The
-        toggle and the label the figure was drawn with ride along.
+        key `trS` names tr(S)/k itself, not the sweep, so it keeps its name under
+        the omega sweep. The toggle and the label the figure was drawn with ride along.
         """
         knob = np.asarray(self.get_param_range(), dtype=float)
         nan_pair = (np.nan, np.nan)
@@ -812,7 +813,7 @@ class FoldStrategy(GenericParamSweep):
 STRATEGIES: dict[str, type] = {
     "gamma": GammaRatioStrategy,
     "epsilon": EpsilonRatioStrategy,
-    "trS": ExpansionStrategy,
+    "omega": ExpansionStrategy,
     "n": SampleSizeStrategy,
     "m": FoldStrategy,
     "recalibrate": RecalibrationStrategy,

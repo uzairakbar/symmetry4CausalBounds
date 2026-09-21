@@ -24,7 +24,7 @@ simulation:
     augmentation: translate
     experiment:
         sweep:
-            param:  [trS]
+            param:  [omega]
             metric: [coverage, approx_error, worst_error, width]
 optical_device:
     seed: 42
@@ -41,7 +41,7 @@ optical_device:
     augmentation: rotation > hflip > vflip > random-permutation
     experiment:
         sweep:
-            param:  [trS]
+            param:  [omega]
             metric: [coverage, approx_error, worst_error, width]
 cigarettes:
     seed: 42
@@ -65,5 +65,5 @@ cigarettes:
     augmentation: translate
     experiment:
         sweep:
-            param:  [trS]
+            param:  [omega]
             metric: [coverage, approx_error, worst_error, width]

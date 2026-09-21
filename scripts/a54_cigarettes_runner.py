@@ -27,9 +27,9 @@ the replicate scheme from the `bootstrap` flag the two runners are built with. L
         block that lists no pair at all SKIPS the leg, named in the summary line.
         Catches: a budget that does not reach `predict`, an inverted ratio axis, a
         block with an INV method but not its baseline.
-  (iv)  the trS axis is the recalibrated one. Four knobs, one experiment: the
+  (iv)  the omega axis is the recalibrated one. Four knobs, one experiment: the
         PLOTTED x is monotone decreasing in the knob, never above 1 (Prop. 2), and
-        the runner's label is `TRS_XLABEL[True]` under `recalibrate: true`.
+        the runner's label is `OMEGA_XLABEL[True]` under `recalibrate: true`.
         Catches: the label and the factor disagreeing, an amplitude that does not
         reach the DA.
   (v)   `target` routes, and the two runners get DIFFERENT replicate schemes. Run
@@ -70,8 +70,8 @@ sys.path.insert(0, REPO)
 
 from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
+    OMEGA_XLABEL,
     QUERY_GAMMA,
-    TRS_XLABEL,
     resolve_dataset_block,
 )
 from src.experiments.utils import fit_model, set_seed  # noqa: E402
@@ -81,7 +81,7 @@ from src.sem.cigarettes import V, null_basis  # noqa: E402
 SWEEP_STEPS = 4
 N_JOBS = 4
 GAMMA_GRID = (2.0**-4, 2.0**-2, 2.0**-1, 1.0)
-TRS_GRID = (0.125, 0.5, 2.0, 8.0)
+OMEGA_GRID = (0.125, 0.5, 2.0, 8.0)
 # leg (ii): three queries, none of them degenerate
 QUERIES = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.4, -0.2, 0.3, 0.1]])
 HALF_WIDTH_TOL = 1e-6
@@ -309,14 +309,14 @@ def leg_iii(orch):
 
 
 # =============================================================================
-# LEG (iv): THE trS AXIS
+# LEG (iv): THE OMEGA AXIS
 # =============================================================================
 
 
 def leg_iv(orch):
-    print("(iv) the trS axis is the recalibrated one")
-    runner = sweep_runner(orch, "trS", TRS_GRID, n_experiments=1)
-    x, _, _ = runner.run("trS")
+    print("(iv) the omega axis is the recalibrated one")
+    runner = sweep_runner(orch, "omega", OMEGA_GRID, n_experiments=1)
+    x, _, _ = runner.run("omega")
     x = np.asarray(x, dtype=float)
     check("(iv) the plotted x falls with the knob", bool(np.all(np.diff(x) < 0.0)), f"{np.round(x, 4)}")
     check("(iv) every x is at or under 1 (Prop. 2)", bool(np.all(x <= 1.0 + 1e-9)), f"max {x.max():.5f}")
@@ -324,7 +324,7 @@ def leg_iv(orch):
     # itself would pass whatever ball it went on to solve
     configured = bool(orch.toggles["recalibrate"])
     check("(iv) the runner solves the configured ball", runner.recalibrate == configured, f"{configured}")
-    check("(iv) the label follows the factor", runner.xlabel == TRS_XLABEL[configured], f"recalibrate={configured}")
+    check("(iv) the label follows the factor", runner.xlabel == OMEGA_XLABEL[configured], f"recalibrate={configured}")
 
 
 # =============================================================================

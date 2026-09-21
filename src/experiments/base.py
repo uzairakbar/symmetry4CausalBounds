@@ -348,7 +348,7 @@ class ParamSweepRunner(BaseExperimentRunner):
 
         A budget under the constraint's own attainable floor is not a tighter
         bound, it is NO bound: `_prepare` returns all-INFEASIBLE and the method
-        drops out of the sweep entirely. Measured on the simulation trS grid, the
+        drops out of the sweep entirely. Measured on the simulation omega grid, the
         oracle IV budget (EPS_TOL) was below the floor at 5 of 12 steps.
 
         The trigger is `budget^2 < floor`, i.e. actual infeasibility -- NOT

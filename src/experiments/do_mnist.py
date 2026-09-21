@@ -411,7 +411,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             raise NotImplementedError(
                 f"do_mnist {param} sweep is Phase 2. Blockers: "
                 "(a) epsilon -- needs a trusted eps*, which the estimated target does "
-                "not give (see fit_epsilon); (b) trS -- needs augment_kwargs_fn "
+                "not give (see fit_epsilon); (b) omega -- needs augment_kwargs_fn "
                 "wired to DA.strength, and _augment_once must pass its seed through "
                 "to the DA so common random numbers reach the torch draws; "
                 "(c) n -- needs the nets retrained per step. gamma is no longer "

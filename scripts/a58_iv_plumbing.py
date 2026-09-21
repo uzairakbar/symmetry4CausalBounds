@@ -20,7 +20,7 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         on the stripped test set, the oracle on the stripped draw and on `iv_pool`
         (`eps_iv_z_star` against an independent computation of the same norm),
         `pool` staying treatment only, the n-sweep slicing Z, the m-sweep tiling it
-        with the untiled copy beside `X_base`, the recalibrate and trS sweeps
+        with the untiled copy beside `X_base`, the recalibrate and omega sweeps
         carrying it, `fit_model` handing the real Z to the non-DA +IV methods and
         the intersection, the joint (G, Z) to the DA+ ones and nothing to the rest,
         the m-sweep's baselines fitting the untiled Z, a 5-tuple `_draw_base` and a
@@ -596,7 +596,7 @@ def leg_i(seed):
     check_dispatch("(i) m-sweep", recorded(runner_m, data_m), data_m.Z, data_m.Z_base, np.asarray(data_m.G))
     check("(i) m-sweep runs end to end", finite_widths(sweep_runner("m", lambda: sem, [1, 2], seed=seed).run("m")[1]))
 
-    for param, grid in (("recalibrate", [0.0, 1.0]), ("trS", [0.5, 1.0])):
+    for param, grid in (("recalibrate", [0.0, 1.0]), ("omega", [0.5, 1.0])):
         runner_p = sweep_runner(param, lambda: sem, grid, seed=seed)
         data_p = runner_p.generate_data(0, grid[0])
         check(f"(i) {param}-sweep carries Z", data_p.Z.shape == (N, M) and data_p.X.shape == (N, K))
@@ -667,10 +667,13 @@ def leg_i(seed):
             if in_stub:
                 in_stub = line.strip() != "+"  # the stub ends at its blank line
                 continue
+            # the omega rename's text-only edit of the Phase 2 blocker list: its
+            # added line is set aside; the removed line it replaces still counts
             if (
                 "Phase 1 is the query sweep" in line
                 or "Phase 2 -- see" in line
                 or "for what each one still needs" in line
+                or "(b) omega --" in line
             ):
                 continue
             kept.append(line)

@@ -17,7 +17,7 @@ equivalent one. So the gate is half regression and half interface. Legs:
   (ii)  the rewritten `finite_pool` predicate agrees with the old class-name test
         on both shipped SEMs. Catches: a pool attribute appearing on a generator
         SEM. Misses: a third SEM neither predicate was written for.
-  (iii) the trS and n grids: sim and optical elementwise unchanged, cigarettes at
+  (iii) the omega and n grids: sim and optical elementwise unchanged, cigarettes at
         [0.125, 8] and [245, 2450]. Catches: a branch that swallows another
         dataset's grid.
   (iv)  the two ROBUSTNESS tables carry exactly three keys, with the shipped two
@@ -119,7 +119,7 @@ PARENT_DIGESTS: dict[str, str] = {
 }
 
 # leg (iii)
-CIGARETTE_TRS = (0.125, 8.0)
+CIGARETTE_OMEGA = (0.125, 8.0)
 CIGARETTE_N = (245, 2450)
 # leg (iv)
 DATASET_KEYS = {"simulation", "optical_device", "cigarettes"}
@@ -278,10 +278,10 @@ def leg_ii(orchs):
 
 
 def leg_iii():
-    print("(iii) the trS and n grids: two unchanged, one added")
-    trS, n = PARAM_SPECS["trS"].grid_fn, PARAM_SPECS["n"].grid_fn
+    print("(iii) the omega and n grids: two unchanged, one added")
+    omega, n = PARAM_SPECS["omega"].grid_fn, PARAM_SPECS["n"].grid_fn
     steps = 7
-    expected_trS = {
+    expected_omega = {
         "simulation": np.logspace(-1.5, 1.0, num=steps),
         "optical_device": np.linspace(0.2, 0.99, num=steps),
     }
@@ -290,17 +290,17 @@ def leg_iii():
         "optical_device": np.linspace(128, 1000, 16, dtype=int),
     }
     for name in ("simulation", "optical_device"):
-        check(f"(iii) {name}: trS grid unchanged", np.array_equal(trS(name, steps), expected_trS[name]))
+        check(f"(iii) {name}: omega grid unchanged", np.array_equal(omega(name, steps), expected_omega[name]))
         check(f"(iii) {name}: n grid unchanged", np.array_equal(n(name, steps), expected_n[name]))
 
-    cig_trS = np.asarray(trS("cigarettes", steps), dtype=float)
+    cig_omega = np.asarray(omega("cigarettes", steps), dtype=float)
     cig_n = np.asarray(n("cigarettes", steps), dtype=int)
     check(
-        "(iii) cigarettes: trS grid ends",
-        np.allclose([cig_trS[0], cig_trS[-1]], CIGARETTE_TRS) and len(cig_trS) == steps,
-        f"[{cig_trS[0]:.4g}, {cig_trS[-1]:.4g}] over {len(cig_trS)} steps",
+        "(iii) cigarettes: omega grid ends",
+        np.allclose([cig_omega[0], cig_omega[-1]], CIGARETTE_OMEGA) and len(cig_omega) == steps,
+        f"[{cig_omega[0]:.4g}, {cig_omega[-1]:.4g}] over {len(cig_omega)} steps",
     )
-    check("(iii) cigarettes: trS grid is increasing", np.all(np.diff(cig_trS) > 0))
+    check("(iii) cigarettes: omega grid is increasing", np.all(np.diff(cig_omega) > 0))
     check(
         "(iii) cigarettes: n grid ends",
         (cig_n[0], cig_n[-1]) == CIGARETTE_N and len(cig_n) == 16,
@@ -309,8 +309,8 @@ def leg_iii():
     # the branches must not collide: the added grid is nobody else's
     for name in ("simulation", "optical_device"):
         check(
-            f"(iii) cigarettes trS differs from {name}",
-            not np.allclose(cig_trS, np.asarray(trS(name, steps), dtype=float)),
+            f"(iii) cigarettes omega differs from {name}",
+            not np.allclose(cig_omega, np.asarray(omega(name, steps), dtype=float)),
         )
         check(f"(iii) cigarettes n differs from {name}", not np.array_equal(cig_n, np.asarray(n(name, 16), dtype=int)))
 

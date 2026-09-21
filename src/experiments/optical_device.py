@@ -206,7 +206,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 extra = {}
                 if param == "m":
                     extra["n_samples_override"] = FOLD_SWEEP_SAMPLES
-                if param == "trS":
+                if param == "omega":
                     extra["augment_kwargs_fn"] = _knob_to_augment_kwargs
                 super().__init__(
                     sem_factory=outer._sem_factory,

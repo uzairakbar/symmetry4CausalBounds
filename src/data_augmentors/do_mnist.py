@@ -92,7 +92,7 @@ class DoMNISTDA(DataAugmenter):
 
     @property
     def strength(self) -> float:
-        """One multiplier over every op's amount; the knob the trS/epsilon sweeps turn."""
+        """One multiplier over every op's amount; the knob the omega/epsilon sweeps turn."""
         return self._strength
 
     @strength.setter
