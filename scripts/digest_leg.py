@@ -45,7 +45,7 @@ import numpy as np
 from threadpoolctl import threadpool_limits
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_REFERENCE = os.path.expanduser("~/scratch/tmp/impl_v10/digests/reference_14509db_pinned.json")
+DEFAULT_REFERENCE = os.path.expanduser("~/scratch/tmp/impl_v16/digests/reference_3b3a4b0_d1c.json")
 
 DATASETS = ("simulation", "optical_device", "cigarettes")
 QUERY_SAMPLES = 8  # even, so the cigarette query grids never touch the origin

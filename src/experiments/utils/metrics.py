@@ -275,6 +275,12 @@ def evaluate_queries(
     """
     Build the full record for one (method, step, experiment).
 
+    A cell whose queries are ALL empty (every interval has a NaN bound: infeasible,
+    failed or an empty intersection; exactly when `interval_width` is NaN) has NaN
+    coverage, so it drops out of every coverage row as it already drops out of the
+    width row. A partly empty cell keeps `coverage`'s reading: its NaN queries count
+    as not covered.
+
     Args:
         estimand: Ground truth f(x) per query
         estimate: Interval estimates [lower, upper] or point estimates
@@ -289,6 +295,7 @@ def evaluate_queries(
     """
     interval = _as_interval(estimate)
     n_queries = len(interval)
+    empty = bool(np.isnan(interval).any(axis=1).all())
 
     if statuses is None:
         statuses = np.full(n_queries, SolveStatus.OK, dtype=int)
@@ -321,7 +328,7 @@ def evaluate_queries(
         # reads `f` whatever the extent is; say so wherever it is printed
         worst_error=worst_error(estimand, estimate),
         interval_width=interval_width(estimand, estimate),
-        coverage=coverage(estimand, estimate, extent=extent),
+        coverage=np.nan if empty else coverage(estimand, estimate, extent=extent),
         wall_clock=elapsed / max(n_queries, 1),
         status_counts=counts,
     )
