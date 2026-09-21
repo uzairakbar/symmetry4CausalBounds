@@ -25,18 +25,19 @@ pinned upper left. Legs:
         F1 and F2 outcomes of both coefficients are keyed by the headline methods
         THE RECIPE LISTS (the intersection, as `cigarettes.py` keys the figure),
         asserted non-empty; the nesting pairs are per AXIS, since `gamma` relaxes the
-        ball while `budget` sweeps r_Z and never relaxes the T constraint -- so
+        ball while `budget` sweeps gamma_z and never relaxes the T constraint -- so
         `DA+PI+IV(Z)` inside `PI` to 0.02 (its ball is recalibrated) is asserted on
         BOTH axes of both figures, while `DA+PI+IV` inside `DA+PI+IV(Z)` is asserted
         on `gamma` only, MEASURED false on `budget`; `DA+PI+IV(Z)` equals PI on
-        beta_pn's F2 at the largest radius to 0.02 and sits above PI's lower end by
-        more than 0.5 at the smallest; and every band the r_Z axis moves widens along
-        it monotonically and strictly end to end. Catches: the (Z) headline missing,
+        beta_pn's F2 at the largest gamma_z to 0.02 and sits above PI's lower end by
+        more than 0.5 at the smallest; and every band the gamma_z axis moves widens
+        along it monotonically and strictly end to end. Catches: the (Z) headline missing,
         a band that leaves PI, a figure keyed by anything but the recipe's list.
   (v)   `elasticity_grid` on those artifacts: the file exists; four live panels;
         one legend, in the top-right panel pinned upper left, one entry per
         headline method the recipe lists; x labels on the bottom row
-        only, y labels on the first column only, the row labels the two thetas;
+        only, y labels on the first column only, the row labels the two thetas,
+        the gamma column linear and the gamma_z (leak) column log;
         on a copy with the neighbour-price pkls removed the bottom row is off and
         the top row still draws. Catches: the grid not wired, the legend shared,
         a missing pair taking the grid down.
@@ -101,15 +102,15 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-# a band the r_Z axis moves carries the OBSERVED instrument's constraint: the
+# a band the gamma_z axis moves carries the OBSERVED instrument's constraint: the
 # (Z)-only spellings, plus the bare `IV_MODE_METHODS` defaults, whose mode is (T,Z)
 # and so carries Z beside T. A membership test, not a substring one
 Z_CONSTRAINED: frozenset[str] = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
 
 
 def widens(width):
-    """True when `width` rises with the declared radius: monotone within 1e-6 AND
-    strictly wider end to end over at least two radii it actually reports.
+    """True when `width` rises with the declared gamma_z: monotone within 1e-6 AND
+    strictly wider end to end over at least two grid points it actually reports.
 
     The end-to-end clause is what stops a band that never moves, or one that is NaN
     at all but one radius, passing on the monotone clause alone."""
@@ -241,7 +242,7 @@ def leg_iv():
     # data, so that containment is up to the rescaling, not exact -- hence DA_TOL.
     #
     # The pair list is per AXIS, because the two axes relax different things. `gamma`
-    # relaxes the ball itself, so both pairs nest along it. `budget` sweeps r_Z, which
+    # relaxes the ball itself, so both pairs nest along it. `budget` sweeps gamma_z, which
     # never relaxes the T constraint, so `DA+PI+IV` (T,Z) is NOT inside `DA+PI+IV(Z)`
     # there -- MEASURED false on both coefficients. `("PI","DA+PI+IV(Z)")` IS still
     # true on the budget axis (measured on both coefficients), so it stays.
@@ -270,20 +271,20 @@ def leg_iv():
                 a, b = outcomes[narrow], outcomes[wide]
                 inside = np.all(a[:, 0, 0] >= b[:, 0, 0] - DA_TOL) and np.all(a[:, 0, 1] <= b[:, 0, 1] + DA_TOL)
                 check(f"(iv) beta_{coefficient}_{axis}: {narrow} inside {wide} to {DA_TOL}", bool(inside))
-    # F2 sweeps r_Z, so it can only pair a method against its no-IV parent, which it
+    # F2 sweeps gamma_z, so it can only pair a method against its no-IV parent, which it
     # collapses onto once the radius stops binding. (Z) against (T,Z) is NOT such a
     # pair: they differ by the T constraint, which this axis never relaxes
     outcomes = load(os.path.join(folder, "beta_pn_budget_outcomes.pkl"))
     for wide, narrow in [p for p in (("PI", "DA+PI+IV(Z)"),) if p[0] in outcomes and p[1] in outcomes]:
         slack = np.abs(outcomes[narrow][-1, 0] - outcomes[wide][-1, 0]).max()
         check(
-            f"(iv) beta_pn F2: {narrow} equals {wide} at the largest radius to {DA_TOL}",
+            f"(iv) beta_pn F2: {narrow} equals {wide} at the largest gamma_z to {DA_TOL}",
             slack < DA_TOL,
             f"{slack:.5f}",
         )
         tight = outcomes[narrow][0, 0, 0] - outcomes[wide][0, 0, 0]
         check(
-            f"(iv) beta_pn F2: {narrow}'s lower end above {wide}'s by > 0.5 at the smallest radius",
+            f"(iv) beta_pn F2: {narrow}'s lower end above {wide}'s by > 0.5 at the smallest gamma_z",
             tight > 0.5,
             f"{tight:.3f}",
         )
@@ -294,15 +295,17 @@ def leg_iv():
     # anchor: a wider declared radius is a weaker constraint, so every band the axis
     # moves widens along it -- monotonically AND strictly end to end, so a band that
     # never moves, or that is NaN at all but one radius, does not pass
-    # "the r_Z axis moves it" = it carries the OBSERVED instrument's constraint:
+    # "the gamma_z axis moves it" = it carries the OBSERVED instrument's constraint:
     # REAL_Z_METHODS (the (Z)-only spellings) plus the bare defaults, whose mode is
     # (T,Z) and so carries Z beside T. NOT a substring test -- `PI+INV` passes one
     swept = tuple(name for name in outcomes if name in Z_CONSTRAINED)
-    check("(iv) beta_pn F2: the block lists at least one method the r_Z axis moves", bool(swept), f"{tuple(outcomes)}")
+    check(
+        "(iv) beta_pn F2: the block lists at least one method the gamma_z axis moves", bool(swept), f"{tuple(outcomes)}"
+    )
     for name in swept:
         width = outcomes[name][:, 0, 1] - outcomes[name][:, 0, 0]
         check(
-            f"(iv) beta_pn F2: {name} widens with the declared radius", widens(width), f"{np.round(width, 4).tolist()}"
+            f"(iv) beta_pn F2: {name} widens with the declared gamma_z", widens(width), f"{np.round(width, 4).tolist()}"
         )
     return ARTIFACTS_DIRECTORY
 
@@ -344,7 +347,7 @@ def leg_v(artifacts):
             axes[0, 0].get_ylim() == axes[0, 1].get_ylim() and axes[0, 0].get_ylim() != axes[1, 0].get_ylim(),
         )
         check(
-            "(v) the leak column is log, the budget column linear",
+            "(v) the leak (gamma_z) column is log, the confounding (gamma) column linear",
             axes[0, 1].get_xscale() == "log" and axes[0, 0].get_xscale() == "linear",
         )
     plt.close(fig)

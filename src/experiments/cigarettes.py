@@ -22,6 +22,7 @@ from src.experiments.configs import (
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import PanelBuilder, create_query_sweep_plot, create_sweep_plot, save
 from src.experiments.utils.constants import COEFFICIENT_LABELS, SUBDIR_QUERY, TEX_MAPPER, iv_mode, parse_method
+from src.experiments.utils.metrics import sigma_sq_hat
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import epsilon_star, preserve_rng
 from src.sem.cigarettes import (
@@ -72,15 +73,17 @@ NORMAL_95: float = 1.959963984540054
 # the headline figures under a configured instrument set (SS10), one pair per
 # coefficient in HEADLINE_COEFFICIENTS. F1: the coefficient against the
 # confounding budget on the benchmarked range, 1x to 3x the tax-differential
-# benchmark. F2: the coefficient against the real-Z radius r_Z = s sqrt(gamma_z)
-# at the query budget, the declared radius, the cluster-bootstrap moment and the
-# gamma_z benchmarks marked, so the leak assumption is seen against what the
-# panel itself says. Both are read off the query panel's fitted models, one band
-# per method. The budget range reaches the addiction-stock leak (r_Z 0.558).
+# benchmark. F2: the coefficient against the real-Z leakiness budget gamma_z
+# (Asm. 3; the radius r_Z = s sqrt(gamma_z)) at the query budget, the declared
+# gamma_z, the cluster-bootstrap moment and the gamma_z benchmarks marked, so the
+# leak assumption is seen against what the panel itself says. Both are read off
+# the query panel's fitted models, one band per method. The gamma_z range reaches
+# the addiction-stock leak (gamma_z 0.311); it is the square of the r_Z range
+# (2^-8, 2^-0.5) the figure swept before, the same curves at s = 1.
 HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "DA+PI+IV")
 HEADLINE_COEFFICIENTS: tuple[str, ...] = ("pn", "p")
 GAMMA_RANGE: tuple[float, float] = (0.150, 0.450)
-BUDGET_RANGE: tuple[float, float] = (2**-8, 2**-0.5)
+GAMMA_Z_RANGE: tuple[float, float] = (2**-16, 2**-1)
 PN: int = TREATMENTS.index("pn")
 # the gamma_z benchmarks marked on F2 and read in the IV benchmark table, by
 # BENCHMARK_NAMES key: the primary and the channel-specific one, as on F1
@@ -594,13 +597,13 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         beta_pn: the lower bound flattens by 0.19 and only the upper end grows
         with the budget (that PI never separates from PI+INV is T1's row, not a
         band here).
-        F2: the same methods against the radius r_Z = s sqrt(gamma_z) at the query
-        budget. Marks, in order: the cluster-bootstrap median and p95 of the
-        moment at the target, the declared radius, then the radius of each
-        IV_BENCHMARKS leak, so the declared budget is seen against what a
-        resampled panel reads and against what the same omitted variables that
-        benchmark gamma would do to the instruments. Every model's `gamma_z` is
-        put back after.
+        F2: the same methods against the leakiness budget gamma_z at the query
+        budget. Marks, in order and in gamma_z units: the cluster-bootstrap
+        median and p95 of the moment at the target (squared over s^2), the
+        declared gamma_z, then the gamma_z of each IV_BENCHMARKS leak, so the
+        declared budget is seen against what a resampled panel reads and against
+        what the same omitted variables that benchmark gamma would do to the
+        instruments. Every model's `gamma_z` is put back after.
         """
         # a spelled default (`DA+PI+IV(T,Z)`) is the headline `DA+PI+IV`; the
         # `(Z)` variant is its own headline, PI+IV on the DA'd data with no T term
@@ -628,17 +631,21 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             f"F1 marks: PI+IV floor {f1_marks[0]:.4f}, 1x tax-diff {f1_marks[1]:.4f}, 1x lag-q {f1_marks[2]:.4f}, "
             f"gamma*(b) {f1_marks[3]:.4f}, 3x tax-diff {f1_marks[4]:.4f}"
         )
+        # the moment is a radius in outcome units: over the runner's s^2 it reads
+        # as the gamma_z whose bound s sqrt(gamma_z) it would fill (s is 1 here)
         median, p95 = moment_quantiles(design, Z, b)
-        leaks = tuple(float(np.sqrt(self.benchmarks_iv()[key][3])) for key in IV_BENCHMARKS)
-        f2_marks = (median, p95, float(np.sqrt(self.gamma_z)), *leaks)
+        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+        leaks = tuple(float(self.benchmarks_iv()[key][3]) for key in IV_BENCHMARKS)
+        f2_marks = (median**2 / s_sq, p95**2 / s_sq, self.gamma_z, *leaks)
         logger.info(
-            f"F2 marks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f}; declared r_Z "
-            f"{f2_marks[2]:.4f}; leak radii {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
+            f"F2 marks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f} (gamma_z "
+            f"{f2_marks[0]:.6f}, {f2_marks[1]:.6f} at s^2 {s_sq:.6f}); declared gamma_z {f2_marks[2]:.4f}; "
+            f"leak gamma_z {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
         )
         gammas = np.linspace(*GAMMA_RANGE, points)
-        # F2: r_Z enters the bound as s sqrt(gamma_z), so each radius is one
-        # gamma_z per model at that model's own s; PI carries no such term
-        radii = np.geomspace(*BUDGET_RANGE, points)
+        # F2: each model is handed gamma_z itself; its bound s sqrt(gamma_z) is at
+        # its own s. PI carries no such term
+        gamma_zs = np.geomspace(*GAMMA_Z_RANGE, points)
 
         for coefficient in HEADLINE_COEFFICIENTS:
             query = np.eye(design.k)[TREATMENTS.index(coefficient)][None, :]
@@ -666,11 +673,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 vlines=f1_marks,
             )
 
-            # F2. The x-axis is the DECLARED leak radius s sqrt(gamma_z). A DA+
+            # F2. The x-axis is the DECLARED leakiness budget gamma_z. A DA+
             # method solves on the augmented design, so the radius it actually
-            # carries is that plus its DA-side allowance (`_z_allowance`, SS2.6),
-            # a fit-time constant: those rows sit a little to the right of their
-            # x-coordinate, and `_z_allowance` is logged at the first solve
+            # carries is s sqrt(gamma_z) plus its DA-side allowance
+            # (`_z_allowance`, SS2.6), a fit-time constant: those rows sit a little
+            # to the right of their x-coordinate, and `_z_allowance` is logged at
+            # the first solve
             results = {name: np.full((points, 1, 2), np.nan) for name in models}
             for name, model in models.items():
                 if not hasattr(model, "gamma_z"):
@@ -678,17 +686,17 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     continue
                 declared = model.gamma_z
                 try:
-                    for i, radius in enumerate(radii):
-                        model.gamma_z = float(radius**2 / (model.sigma_sq / model.rho))
+                    for i, gamma_z in enumerate(gamma_zs):
+                        model.gamma_z = float(gamma_z)
                         results[name][i, 0] = interval(model, self.gamma)
                 finally:
                     model.gamma_z = declared
             stem = f"beta_{coefficient}_budget"
-            save(radii, f"{stem}_values", self.name, "pkl", subdir=SUBDIR_QUERY)
+            save(gamma_zs, f"{stem}_values", self.name, "pkl", subdir=SUBDIR_QUERY)
             save(results, f"{stem}_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
             save(np.array(f2_marks), f"{stem}_vlines", self.name, "pkl", subdir=SUBDIR_QUERY)
             create_query_sweep_plot(
-                radii,
+                gamma_zs,
                 results,
                 **ANNOTATE_SWEEP_PLOT[stem],
                 ylabel=label,

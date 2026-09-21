@@ -17,8 +17,9 @@ Per perf metric, one row of panels (`epsilon_wall_clock.pdf`, `epsilon_seed_var.
 with a shared y axis, drawn only where some dataset ran the perf sweep. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
-and the leak radius, x shared within a column, y within a row, the reference marks
-of each panel, one legend inside the top-right panel, pinned upper left.
+gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
+the reference marks of each panel, one legend inside the top-right panel, pinned
+upper left.
 """
 
 import argparse
@@ -357,7 +358,7 @@ def perf_row(metric: str, datasets: list[str], artifacts: str, out: str | None =
 
 
 def elasticity_grid(artifacts: str, out: str | None = None):
-    """The 2 x 2 grid of the cigarette price elasticities against gamma and r_Z;
+    """The 2 x 2 grid of the cigarette price elasticities against gamma and gamma_z;
     saved under `out` when given. A missing pkl pair leaves its panel blank."""
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")

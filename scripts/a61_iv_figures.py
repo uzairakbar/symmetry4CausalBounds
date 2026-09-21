@@ -440,13 +440,14 @@ def leg_i():
     )
     with open(os.path.join(query, "beta_pn_budget_vlines.pkl"), "rb") as handle:
         marks = pickle.load(handle)  # noqa: S301
+    # F2 is in gamma_z units: p5's moment radii 0.1039 and 0.2256, squared over s^2 = 1
     print(
-        f"      RECORDED F2 marks: cluster-bootstrap moment median {marks[0]:.4f}, p95 {marks[1]:.4f} "
-        "(p5: 0.1039, 0.2256)"
+        f"      RECORDED F2 marks: cluster-bootstrap moment median {marks[0]:.6f}, p95 {marks[1]:.6f} "
+        "(p5: 0.1039^2 = 0.0108, 0.2256^2 = 0.0509)"
     )
     check(
-        "(i) F2's marks are p5's 0.104 and 0.226 to 1e-3",
-        abs(marks[0] - 0.1039) < 1e-3 and abs(marks[1] - 0.2256) < 1e-3,
+        "(i) F2's marks are p5's radii in gamma_z units, 0.010798 and 0.050914 to relative 1e-3",
+        abs(marks[0] / 0.010798 - 1) < 1e-3 and abs(marks[1] / 0.050914 - 1) < 1e-3,
     )
     for metric in ("width", "worst_error", "approx_error", "coverage"):
         check(

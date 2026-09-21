@@ -640,13 +640,14 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
     },
     # the two headline figures of the neighbour-price run (SS10): beta_pn against
     # the confounding budget on the benchmarked range, and against the declared
-    # real-Z radius r_Z = s sqrt(gamma_z) at the query budget
+    # real-Z leakiness budget gamma_z (the radius r_Z = s sqrt(gamma_z)) at the
+    # query budget
     "beta_pn_gamma": {
         "xlabel": r"$\gamma$",
         "xscale": "linear",
     },
     "beta_pn_budget": {
-        "xlabel": r"$r_Z = s\sqrt{\gamma_z}$",
+        "xlabel": r"$\gamma_z$",
         "xscale": "log",
     },
     # the own-price pair, same axes
@@ -655,7 +656,7 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xscale": "linear",
     },
     "beta_p_budget": {
-        "xlabel": r"$r_Z = s\sqrt{\gamma_z}$",
+        "xlabel": r"$\gamma_z$",
         "xscale": "log",
     },
 }

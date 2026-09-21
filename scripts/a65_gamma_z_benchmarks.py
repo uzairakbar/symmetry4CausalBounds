@@ -6,7 +6,8 @@ and Hazlett's IV framework, paper [12]); `direct_effect_gamma_z` converts a dire
 tax elasticity to gamma_z (Conley, Hansen and Rossi); T3 (`benchmarks_iv.tex`)
 prints both; F1 and F2 now come in a pair per coefficient (`beta_pn_*`, `beta_p_*`)
 and F2 marks the declared radius and the two benchmark leaks after the bootstrap
-quantiles. Legs:
+quantiles. refactor20 draws F2 in gamma_z units: the grid is `GAMMA_Z_RANGE`, each
+model is handed gamma_z itself, and the marks are gamma_z values. Legs:
 
   (i)   T2 does not move: the `benchmark_gamma` refactor keeps lag-q 0.3121 and
         tax-diff 0.1502 to 1e-3 and the OVB / CH identity to 1e-9 on every row.
@@ -22,19 +23,27 @@ quantiles. Legs:
         the live default, so the leg cannot again test one budget while naming
         another. Catches: a var(z_tax) or sigma slipped in the formula, a moved
         default whose delta was not re-derived.
-  (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points):
-        every `beta_p_*` and `beta_pn_*` file and T3 exist; F2's marks are
-        (0.1039, 0.2256, 0.0625, 0.5579, 0.3009) to 1e-3, so a61's first two
-        stay where they were; F2's grid spans BUDGET_RANGE; on beta_p's F1 the
-        F1 and F2 outcomes of both coefficients are keyed by the headline methods
-        THE RECIPE LISTS (the intersection, as `cigarettes.py` keys the figure),
-        asserted non-empty; whichever of the nesting pairs the block draws holds on
-        F1; on beta_pn's F2, when the block lists both, the PI+IV band equals PI's at
-        the largest radius to 1e-3, the addiction-stock leak having slackened the
-        instrument, and whatever the block lists, every band the r_Z axis moves
-        widens along it monotonically and strictly end to end. Catches: the loop writing one
-        coefficient twice, the marks reordered, the leak grid not reaching the
-        benchmark, a band that stops respecting nesting.
+  (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): every
+        `beta_p_*` and `beta_pn_*` file and T3 exist; F2's marks are (0.010798,
+        0.050914, GAMMA_Z_DEFAULT, 0.311252, 0.090531) to relative 1e-3, the old radii
+        squared, so a61's first two stay where they were; F2's grid spans
+        GAMMA_Z_RANGE, the square of the old r_Z grid (`OLD_BUDGET_RANGE`); the
+        precondition that makes the relabelling exact holds, s^2 = sigma_sq / rho is 1
+        to 1e-12 on every swept model and on the runner the marks are read at; F2's
+        bands equal, per model and to 1e-9, the old r_Z loop run literally (the old
+        radii, gamma_z = r^2 / (sigma_sq / rho)) on the figure's own fitted models,
+        whose gamma_z is back at the declared value after the figure; the F1 and F2
+        outcomes of both coefficients are keyed by the headline methods THE RECIPE
+        LISTS (the intersection, as `cigarettes.py` keys the figure), asserted
+        non-empty; whichever of the nesting pairs the block draws holds on F1; on
+        beta_pn's F2, when the block lists both, the PI+IV band equals PI's at the
+        largest gamma_z to 1e-3, the addiction-stock leak having slackened the
+        instrument, and whatever the block lists, every band the gamma_z axis moves
+        widens along it monotonically and strictly end to end. Catches: the loop
+        writing one coefficient twice, the marks reordered or left in radius units,
+        the leak grid not reaching the benchmark, the relabelling moving a curve (or a
+        model whose s^2 left 1, where it would), a model left at a swept gamma_z, a
+        band that stops respecting nesting.
   (D)   the digest leg (scripts/digest_leg.py): with `iv: []` nothing here runs
         and the shipped artifacts hash as before.
 
@@ -61,7 +70,8 @@ from munch import munchify  # noqa: E402
 from threadpoolctl import threadpool_limits  # noqa: E402
 
 from src.experiments.cigarettes import (  # noqa: E402
-    BUDGET_RANGE,
+    GAMMA_Z_RANGE,
+    HEADLINE_COEFFICIENTS,
     HEADLINE_METHODS,
     IV_BENCHMARKS,
     benchmark_covariates,
@@ -79,10 +89,15 @@ from src.experiments.utils.constants import (  # noqa: E402
     iv_mode,
     parse_method,
 )
+from src.experiments.utils.metrics import sigma_sq_hat  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
-from src.sem.cigarettes import CigaretteSEM, build_design  # noqa: E402
+from src.sem.cigarettes import TREATMENTS, CigaretteSEM, build_design  # noqa: E402
 
 SPEC, IV = "t3", ("tax_s", "y", "cpi")
+# the r_Z range F2 swept before refactor20, written out literally so (iv) can
+# redraw the old figure: GAMMA_Z_RANGE is its square, the same curves when every
+# swept model's s^2 = sigma_sq / rho is 1
+OLD_BUDGET_RANGE = (2**-8, 2**-0.5)
 # the declared budget read back as a direct tax elasticity,
 # delta = sqrt(gamma_z / E[z^2]) * sigma  (`cigarettes.py::_write_benchmarks_iv`).
 # At the panel's E[z^2] = 0.149006 and sigma = 0.145507 the Conley-scale default
@@ -98,15 +113,15 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-# a band the r_Z axis moves carries the OBSERVED instrument's constraint: the
+# a band the gamma_z axis moves carries the OBSERVED instrument's constraint: the
 # (Z)-only spellings, plus the bare `IV_MODE_METHODS` defaults, whose mode is (T,Z)
 # and so carries Z beside T. A membership test, not a substring one
 Z_CONSTRAINED: frozenset[str] = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
 
 
 def widens(width):
-    """True when `width` rises with the declared radius: monotone within 1e-6 AND
-    strictly wider end to end over at least two radii it actually reports.
+    """True when `width` rises with the declared gamma_z: monotone within 1e-6 AND
+    strictly wider end to end over at least two grid points it actually reports.
 
     The end-to-end clause is what stops a band that never moves, or one that is NaN
     at all but one radius, passing on the monotone clause alone."""
@@ -144,6 +159,31 @@ def both_listed(pairs, available, label):
     kept = tuple(pair for pair in pairs if pair[0] in available and pair[1] in available)
     check(f"{label}: the block lists at least one comparable pair", bool(kept), f"lists {sorted(available)}")
     return kept
+
+
+def old_loop_bands(orch, runner, models, points):
+    """F2's bands exactly as the r_Z loop drew them before refactor20: the old grid
+    `geomspace(*OLD_BUDGET_RANGE, points)` of radii, each handed to the model as
+    gamma_z = r^2 / (sigma_sq / rho) at its own s. Every `gamma_z` is put back."""
+    design = runner.sem.design
+    radii = np.geomspace(*OLD_BUDGET_RANGE, points)
+    bands = {}
+    for coefficient in HEADLINE_COEFFICIENTS:
+        query = np.eye(design.k)[TREATMENTS.index(coefficient)][None, :]
+        results = {name: np.full((points, 1, 2), np.nan) for name in models}
+        for name, model in models.items():
+            if not hasattr(model, "gamma_z"):
+                results[name][:, 0] = design.sigma * model.predict(query, gamma=orch.gamma)[0]
+                continue
+            declared = model.gamma_z
+            try:
+                for i, radius in enumerate(radii):
+                    model.gamma_z = float(radius**2 / (model.sigma_sq / model.rho))
+                    results[name][i, 0] = design.sigma * model.predict(query, gamma=orch.gamma)[0]
+            finally:
+                model.gamma_z = declared
+        bands[coefficient] = results
+    return bands
 
 
 def recipe_block(**overrides):
@@ -212,11 +252,23 @@ def leg_iv():
     block = recipe_block(n_experiments=1, sweep_samples=4)
     folder = os.path.join(ARTIFACTS_DIRECTORY, "cigarettes", SUBDIR_QUERY)
     shutil.rmtree(folder, ignore_errors=True)
+    # the figure's own runner and fitted models, for the old-loop equivalence below
+    seen, cls = {}, ORCHESTRATORS["cigarettes"]
+    original = cls._plot_headline
+
+    def spy(self, runner, panel):
+        seen.update(orch=self, runner=runner, fitted=panel.fitted_models)
+        return original(self, runner, panel)
+
     set_seed(block["seed"])
-    with threadpool_limits(limits=1):
-        ORCHESTRATORS["cigarettes"](**block, hyperparameters=munchify(digest_leg.HYPERPARAMETERS)).run(
-            parse_experiment_plan({"query": True})
-        )
+    cls._plot_headline = spy
+    try:
+        with threadpool_limits(limits=1):
+            cls(**block, hyperparameters=munchify(digest_leg.HYPERPARAMETERS)).run(
+                parse_experiment_plan({"query": True})
+            )
+    finally:
+        cls._plot_headline = original
     for coefficient in ("p", "pn"):
         for stem in (f"beta_{coefficient}_gamma", f"beta_{coefficient}_budget"):
             for suffix in ("sweep.pdf", "values.pkl", "outcomes.pkl", "vlines.pkl"):
@@ -230,15 +282,62 @@ def leg_iv():
         all(s in table for s in ("0.3113", "0.0905", f"{DECLARED_DELTA:.4f}")),
     )
     marks = load(folder, "beta_pn_budget_vlines.pkl")
-    want = (0.1039, 0.2256, np.sqrt(GAMMA_Z_DEFAULT), 0.5579, 0.3009)
+    # gamma_z units: the bootstrap radii 0.1039 and 0.2256 squared over s^2 = 1, the
+    # declared gamma_z, and T3's two leaks (the old radii 0.5579 and 0.3009, squared)
+    want = np.array((0.010798, 0.050914, GAMMA_Z_DEFAULT, 0.311252, 0.090531))
     check(
-        "(iv) F2 marks (median, p95, declared, lag-q, tax-diff) to 1e-3",
-        len(marks) == 3 + len(IV_BENCHMARKS) and np.abs(np.asarray(marks) - want).max() < 1e-3,
+        "(iv) F2 marks (median, p95, declared, lag-q, tax-diff) to relative 1e-3",
+        len(marks) == 3 + len(IV_BENCHMARKS) and np.max(np.abs(np.asarray(marks) - want) / want) < 1e-3,
         f"{np.round(marks, 4)}",
     )
     check("(iv) beta_p and beta_pn F2 marks agree", np.allclose(marks, load(folder, "beta_p_budget_vlines.pkl")))
-    radii = load(folder, "beta_pn_budget_values.pkl")
-    check("(iv) F2 grid spans BUDGET_RANGE", radii[0] == BUDGET_RANGE[0] and radii[-1] == BUDGET_RANGE[1])
+    gamma_zs = load(folder, "beta_pn_budget_values.pkl")
+    check(
+        "(iv) F2 grid spans GAMMA_Z_RANGE",
+        gamma_zs[0] == GAMMA_Z_RANGE[0] and gamma_zs[-1] == GAMMA_Z_RANGE[1],
+        f"{gamma_zs}",
+    )
+    check(
+        "(iv) F2 grid is the same on both coefficients",
+        np.array_equal(gamma_zs, load(folder, "beta_p_budget_values.pkl")),
+    )
+    old_sq = np.geomspace(*OLD_BUDGET_RANGE, len(gamma_zs)) ** 2
+    check(
+        "(iv) F2 grid is the old r_Z grid squared to relative 1e-12",
+        bool(np.max(np.abs(gamma_zs - old_sq) / old_sq) < 1e-12),
+        f"{np.max(np.abs(gamma_zs - old_sq) / old_sq):.1e}",
+    )
+    # the relabelling moves no curve: the old r_Z loop, run literally on the
+    # figure's own models. Exact only where s^2 = sigma_sq / rho is 1, so that
+    # precondition is checked first, per model and on the runner the marks read
+    check("(iv) the spy saw the figure's runner and models", {"orch", "runner", "fitted"} <= set(seen))
+    if {"orch", "runner", "fitted"} <= set(seen):
+        orch, runner = seen["orch"], seen["runner"]
+        models = {fold_default_mode(n): m for n, m in seen["fitted"].items()}
+        models = {name: models[name] for name in HEADLINE_METHODS if name in models}
+        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+        check("(iv) the runner's s^2, the marks' scale, is 1 to 1e-12", abs(s_sq - 1.0) < 1e-12, f"{s_sq!r}")
+        for name, model in models.items():
+            if hasattr(model, "gamma_z"):
+                ratio = model.sigma_sq / model.rho
+                check(f"(iv) {name}: s^2 = sigma_sq / rho is 1 to 1e-12", abs(ratio - 1.0) < 1e-12, f"{ratio!r}")
+        restored = [name for name, m in models.items() if hasattr(m, "gamma_z") and m.gamma_z == orch.gamma_z]
+        check(
+            "(iv) every swept model's gamma_z is back at the declared value",
+            len(restored) == sum(hasattr(m, "gamma_z") for m in models.values()) > 0,
+            f"{restored} at {orch.gamma_z:g}",
+        )
+        bands = old_loop_bands(orch, runner, models, len(gamma_zs))
+        for coefficient in HEADLINE_COEFFICIENTS:
+            drawn = load(folder, f"beta_{coefficient}_budget_outcomes.pkl")
+            for name in models:
+                gap = np.nanmax(np.abs(drawn[name] - bands[coefficient][name]))
+                same_nan = np.array_equal(np.isnan(drawn[name]), np.isnan(bands[coefficient][name]))
+                check(
+                    f"(iv) beta_{coefficient} F2: {name} equals the old r_Z loop to 1e-9",
+                    bool(same_nan and gap < 1e-9),
+                    f"{gap:.2e}",
+                )
     want = expected(block["methods"], "(iv) F1")
     p_gamma = load(folder, "beta_p_gamma_outcomes.pkl")
     check("(iv) beta_p F1 keyed by the headline methods the recipe lists", tuple(p_gamma) == want, f"{tuple(p_gamma)}")
@@ -259,7 +358,7 @@ def leg_iv():
     if {"PI", "PI+IV"} <= set(p_gamma):
         gap = p_gamma["PI"][:, 0, 1] - p_gamma["PI+IV"][:, 0, 1]
         check("(iv) beta_p F1: PI+IV's upper end under PI's by > 0.5 at every gamma", bool(np.all(gap > 0.5)), f"{gap}")
-    # F2 sweeps r_Z, so the only pairs it can say anything about are the ones that
+    # F2 sweeps gamma_z, so the only pairs it can say anything about are the ones that
     # differ by the Z CONSTRAINT: an IV method against its no-IV parent, which it
     # collapses onto once the radius stops binding. NOT (PI+IV, PI+INV+IV) -- those
     # differ by the INV cone, which this axis never relaxes
@@ -284,16 +383,20 @@ def leg_iv():
     # anchor: a wider declared radius is a weaker constraint, so every band the axis
     # moves widens along it -- monotonically AND strictly end to end, so a band that
     # never moves, or that is NaN at all but one radius, does not pass
-    # "the r_Z axis moves it" = it carries the OBSERVED instrument's constraint:
+    # "the gamma_z axis moves it" = it carries the OBSERVED instrument's constraint:
     # REAL_Z_METHODS (the (Z)-only spellings) plus the bare defaults, whose mode is
     # (T,Z) and so carries Z beside T. NOT a substring test -- `PI+INV` passes one
     swept = tuple(name for name in pn_budget if name in Z_CONSTRAINED)
-    check("(iv) beta_pn F2: the block lists at least one method the r_Z axis moves", bool(swept), f"{tuple(pn_budget)}")
+    check(
+        "(iv) beta_pn F2: the block lists at least one method the gamma_z axis moves",
+        bool(swept),
+        f"{tuple(pn_budget)}",
+    )
     for name in swept:
         band = pn_budget[name][:, 0]
         width = band[:, 1] - band[:, 0]
         check(
-            f"(iv) beta_pn F2: {name} widens with the declared radius", widens(width), f"{np.round(width, 4).tolist()}"
+            f"(iv) beta_pn F2: {name} widens with the declared gamma_z", widens(width), f"{np.round(width, 4).tolist()}"
         )
 
 
