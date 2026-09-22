@@ -88,7 +88,8 @@ Four things changed across the board, not per file:
   instead of the raw bound, and the raw record sits beside it in
   `{param}_results_raw.pkl`; `im-ci: 0` gives the raw numbers back. Under the CI the
   DA+ pad is eps* alone (the `EPS_TOL` it carried is the CI's job now; a73), so the
-  raw record's DA+ widths are 2 `EPS_TOL` narrower than an `im-ci: 0` run's. The query
+  raw record's DA+ widths are up to 2 `EPS_TOL` narrower than an `im-ci: 0` run's
+  (exactly that on a standalone DA+ method, at most that on an intersection). The query
   and perf recipes carry no key: neither path reads it.
 
 Two sweep params did not survive: the old `worst_error` and `width` x-axes of
