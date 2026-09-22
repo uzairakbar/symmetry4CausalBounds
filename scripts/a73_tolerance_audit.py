@@ -34,7 +34,11 @@ replicates (built in the workers) are padded the same way as the point fit.
      checked prints as undecided.
 
     uv run python scripts/a73_tolerance_audit.py --config YAML --out DIR
-        [--v1 ARTIFACTS] [--variants V2,V3] [--reuse]
+        [--v1 ARTIFACTS] [--v2 ARTIFACTS] [--variants V2,V3] [--reuse]
+
+Each criterion is read only when its variant is there, so `--v1 PRE --v2 POST
+--variants ""` decides 1b across two finished runs (a pre- and a post-retirement one)
+without running anything, and leaves 1a alone.
 
 `--config` is the multi-block yaml the V1 tree was run from, each dataset block with
 `experiment.sweep.param` naming the swept params (n and m are audited); each
@@ -168,9 +172,11 @@ def step_means(results, name, metric):
         return np.nanmean(results[name][metric], axis=1)
 
 
-def audit(v1_root, out, datasets):
+def audit(roots, datasets, out):
     """The two criteria per (dataset, param, step, method), the cells that fail them,
-    and one figure per (dataset, param)."""
+    and one figure per (dataset, param). `roots` maps each variant present -- always
+    V1, then whichever of V2 and V3 this run has -- to its artifacts tree, and each
+    criterion is evaluated only when its variant is there."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -178,18 +184,15 @@ def audit(v1_root, out, datasets):
 
     table, failures, checked = {}, {"1b": [], "1a": []}, {"1b": 0, "1a": 0}
     missing = []
+    v1_root = roots["V1"]
     for dataset in datasets:
         for param in PARAMS:
             x = load(v1_root, dataset, param, "values")
-            runs = {
-                "V0": load(v1_root, dataset, param, "results_raw"),
-                "V1": load(v1_root, dataset, param, "results"),
-                **{v: load(os.path.join(out, v, "artifacts"), dataset, param, "results") for v in VARIANTS},
-            }
-            statuses = {
-                "V1": load(v1_root, dataset, param, "statuses"),
-                "V3": load(os.path.join(out, "V3", "artifacts"), dataset, param, "statuses"),
-            }
+            runs = {"V0": load(v1_root, dataset, param, "results_raw")}
+            runs |= {variant: load(root, dataset, param, "results") for variant, root in roots.items()}
+            statuses = {"V1": load(v1_root, dataset, param, "statuses")}
+            if "V3" in roots:
+                statuses["V3"] = load(roots["V3"], dataset, param, "statuses")
             if x is None or any(r is None for r in runs.values()) or any(s is None for s in statuses.values()):
                 missing.append(f"{dataset}/{param}")
                 continue
@@ -201,12 +204,16 @@ def audit(v1_root, out, datasets):
                     for v in runs
                     for metric, key in (("coverage", "coverage"), ("width", "interval_width"))
                 }
-                row["infeasible_V1"] = np.round(infeasible_share(statuses["V1"][name]), 5).tolist()
-                row["infeasible_V3"] = np.round(infeasible_share(statuses["V3"][name]), 5).tolist()
+                for variant, counts in statuses.items():
+                    row[f"infeasible_{variant}"] = np.round(infeasible_share(counts[name]), 5).tolist()
+                # every metric the retirement can move, for the record
+                for metric in ("worst_error", "approximation_error"):
+                    for variant, run in runs.items():
+                        row[f"{metric}_{variant}"] = np.round(step_means(run, name, metric), 6).tolist()
                 cell["methods"][name] = row
                 for i, step in enumerate(x):
                     where = f"{dataset} {param}={step:g} {name}"
-                    if padded_family(name):
+                    if padded_family(name) and "V2" in roots:
                         c1, c2 = row["coverage_V1"][i], row["coverage_V2"][i]
                         w1, w2 = row["width_V1"][i], row["width_V2"][i]
                         if np.isfinite(c1) or np.isfinite(c2):
@@ -216,7 +223,7 @@ def audit(v1_root, out, datasets):
                                 failures["1b"].append(
                                     f"{where}: coverage {c1:.4f} -> {c2:.4f}, width {w1:.4g} -> {w2:.4g}"
                                 )
-                    if knife_family(name):
+                    if knife_family(name) and "V3" in roots:
                         checked["1a"] += 1
                         s1, s3 = row["infeasible_V1"][i], row["infeasible_V3"][i]
                         if s3 - s1 > INFEASIBLE_SLACK:
@@ -233,7 +240,8 @@ def figure(plt, cell, dataset, param, out):
         for line, metric in enumerate(("coverage", "width")):
             ax = axes[line][column]
             for variant, style in (("V0", ":"), ("V1", "-"), ("V2", "--"), ("V3", "-.")):
-                ax.plot(cell["x"], row[f"{metric}_{variant}"], style, label=variant)
+                if f"{metric}_{variant}" in row:
+                    ax.plot(cell["x"], row[f"{metric}_{variant}"], style, label=variant)
             ax.set_title(name if line == 0 else "", fontsize=9)
             ax.set_ylabel(metric if column == 0 else "")
             if param == "n":
@@ -250,6 +258,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="the multi-block yaml the V1 tree was run from")
     parser.add_argument("--v1", help="an existing V1 artifacts/ tree; omitted = run V1 here")
+    parser.add_argument("--v2", help="an existing V2 artifacts/ tree (a post-retirement run); omitted = run V2 here")
     parser.add_argument("--out", required=True, help="where the V2 / V3 trees, the table and the figures go")
     parser.add_argument("--variants", default="V2,V3")
     parser.add_argument("--reuse", action="store_true", help="keep a (variant, dataset, param) already written")
@@ -273,10 +282,18 @@ def main():
         and set(PARAMS) & set(((block.get("experiment") or {}).get("sweep") or {}).get("param") or [])
     ]
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    # `--v2` names a finished V2 tree (a post-retirement run of the same config), so the
+    # criterion can be read across two existing runs with nothing rerun here
+    if args.v2:
+        variants = [v for v in variants if v != "V2"]
     if args.v1 is None and "V1" not in variants:
         variants.insert(0, "V1")
-    v1_root = os.path.abspath(args.v1) if args.v1 else os.path.join(out, "V1", "artifacts")
+    roots = {"V1": os.path.abspath(args.v1) if args.v1 else os.path.join(out, "V1", "artifacts")}
+    if args.v2:
+        roots["V2"] = os.path.abspath(args.v2)
     for variant in variants:
+        if variant != "V1":
+            roots[variant] = os.path.join(out, variant, "artifacts")
         root = os.path.join(out, variant)
         os.makedirs(root, exist_ok=True)
         if not os.path.exists(os.path.join(root, "data")) and os.path.isdir(os.path.join(REPO, "data")):
@@ -297,12 +314,16 @@ def main():
                     print(tail)
                     return 1
 
-    table, failures, checked, missing = audit(v1_root, out, datasets)
+    table, failures, checked, missing = audit(roots, datasets, out)
     with open(os.path.join(out, "audit.json"), "w") as handle:
         json.dump({"table": table, "failures": failures, "checked": checked, "missing": missing}, handle, indent=1)
     if missing:
         print(f"missing runs: {missing}")
     for knob, label in (("1b", "the pad's EPS_TOL (V2)"), ("1a", "the constraint's EPS_TOL (V3)")):
+        if knob == "1b" and "V2" not in roots:
+            continue
+        if knob == "1a" and "V3" not in roots:
+            continue
         cells = failures[knob]
         if not checked[knob]:
             verdict = "undecided (no cell checked)"

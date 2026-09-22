@@ -13,7 +13,7 @@ defaults:
                         # gamma_n, put back as sampling error): coverage, approx_error,
                         # worst_error and width read the CI. 0 or false = the raw bounds
                         # (today's numbers). perf, query and do-MNIST never read it.
-    n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
+    n_jobs: 16          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budgets are not toggles: the T-as-IV radius is the oracle
 # ||E[W#|T]|| (`eps_iv_star`), and an observed instrument gets its own
@@ -155,7 +155,7 @@ cigarettes:
     #            gamma*(target).
     # plasmode = real design, synthetic exactly-homogeneous h* and synthetic
     #            confounding of known strength; gamma* == gamma_true. VALIDITY.
-    target: iv
+    target: plasmode #iv
     # state FE plus a trend of this order. t3 is chosen by the restriction's own
     # diagnostics: the OLS ladder converges there (rho_max 1.0020, unchanged at
     # t4), the restricted-GMM J does not reject under state or year clustering
@@ -176,7 +176,7 @@ cigarettes:
                             # the exact zero stays off them
     # DA amplitude along v = (1,1,1,1), in units of sd(X . v-hat) after FWL
     # (0.1055 at t3). The omega sweep multiplies this by its own `scale` knob.
-    da_amplitude: 1.0
+    da_amplitude: 2.0
     # the leaky-IV misspecification guard. false = the target is the restricted
     # point alone. gamma_z is FIXED at CigaretteConfig.gamma_z, never swept; the
     # sliver is empty at every spec except t3 with the own-tax anchor.

@@ -235,8 +235,9 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 EPS_TOL: float = 2**-5
 # Under the IM-CI (`im-ci` > 0) the sweeps pad by eps* alone and keep EPS_TOL on the
 # constraints only: the CI is the sampling allowance on the interval that the
-# tolerance used to add to the pad (a73: coverage unchanged in every cell without it),
-# while an empty set has no CI to widen, so the constraint's knife edge still needs it
+# tolerance used to add to the pad (a73, on config.yaml's six methods: coverage
+# unchanged in every cell without it), while an empty set has no CI to widen, so the
+# constraint's knife edge still needs it.
 
 # the Imbens-Manski CI of the `im-ci` toggle (SS3): B nonparametric bootstrap refits
 # of each method's own fitted rows per sweep cell; the replicate spread gives s_L, s_U

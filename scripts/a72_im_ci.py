@@ -640,28 +640,34 @@ def leg_3(quick):
     leg_3_pad()
 
 
+PAD_METHODS = ["DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
+
+
 def leg_3_pad():
-    """Under im_ci 95 the sweep pads by eps* alone, on the point models (a DA+ method and
-    an intersection's DA branch) and in the replicates; under 0 by eps* + EPS_TOL."""
+    """Under im_ci 95 the sweep pads by eps* alone, on the point models (the DA+ methods
+    and both intersections' DA branches, IV included) and in the replicates; under 0 by
+    eps* + EPS_TOL."""
+    runner, data, budgets = None, None, None
     for level, tol in ((0.0, 0.0), (95.0, EPS_TOL)):
-        runner = runner_for(sim_orchestrator(FIXTURE_METHODS, im_ci_level=level), "n")
+        runner = runner_for(sim_orchestrator(PAD_METHODS, im_ci_level=level), "n")
         data = SweepData.coerce(runner.generate_data(0, 128))
         models = runner.build_models(0, 0, data)
         star = runner.get_oracle(0).epsilon_star
         epsilon = runner.fit_epsilon(0, 0, data)
-        da_pad = models["DA+PI"].pad_amount
-        branch_pad = models["PI&DA+PI"].augmented.pad_amount
+        budgets = runner.fit_budgets(0, 0, data)
         want = epsilon - tol
+        pads = {name: models[name].pad_amount for name in ("DA+PI", "DA+PI+IV")}
+        pads |= {f"{name} branch": models[name].augmented.pad_amount for name in ("PI&DA+PI", "PI&DA+PI+IV")}
         check(
-            f"(3) im_ci {level:g}: DA+PI and the intersection's DA branch pad by {'eps*' if tol else 'eps* + EPS_TOL'}",
-            da_pad == want and branch_pad == want and np.isclose(want, star + EPS_TOL - tol, rtol=0, atol=1e-12),
-            f"pads {da_pad!r} / {branch_pad!r}, eps* {star!r}",
+            f"(3) im_ci {level:g}: every DA+ method and both intersections' DA branches "
+            f"pad by {'eps*' if tol else 'eps* + EPS_TOL'}",
+            all(pad == want for pad in pads.values()) and np.isclose(want, star + EPS_TOL - tol, rtol=0, atol=1e-12),
+            f"pads {pads}, eps* {star!r}",
         )
         check(
-            f"(3) im_ci {level:g}: the intersection's baseline branch still does not pad",
-            models["PI&DA+PI"].baseline.pad is False,
+            f"(3) im_ci {level:g}: the intersections' baseline branches still do not pad",
+            all(models[name].baseline.pad is False for name in ("PI&DA+PI", "PI&DA+PI+IV")),
         )
-    budgets = runner.fit_budgets(0, 0, data)
     builders = runner.method_factory(n_jobs=1, **budgets)
     rows = np.arange(len(data.X))
     shifted = {}
@@ -670,7 +676,7 @@ def leg_3_pad():
             name: im_ci._replicate(
                 builders, name, data.fit_arrays, rows, None, data.X_test, [{}], {}, runner.get_da(0), tol
             )
-            for name in ("DA+PI", "PI&DA+PI")
+            for name in PAD_METHODS
         }
     diff = shifted[0.0]["DA+PI"] - shifted[EPS_TOL]["DA+PI"]
     check(
@@ -679,12 +685,13 @@ def leg_3_pad():
         and np.allclose(diff[..., 1], EPS_TOL, rtol=0, atol=1e-12),
     )
     width = lambda b: b[..., 1] - b[..., 0]  # noqa: E731
-    narrowing = width(shifted[0.0]["PI&DA+PI"]) - width(shifted[EPS_TOL]["PI&DA+PI"])
-    check(
-        "(3) ... and the intersection replicate's DA branch too (narrower, by at most 2 EPS_TOL)",
-        np.all(narrowing >= -1e-12) and np.all(narrowing <= 2 * EPS_TOL + 1e-12) and narrowing.max() > 0,
-        f"{narrowing.min():.4g}..{narrowing.max():.4g}",
-    )
+    for name in ("PI&DA+PI", "PI&DA+PI+IV"):
+        narrowing = width(shifted[0.0][name]) - width(shifted[EPS_TOL][name])
+        check(
+            f"(3) ... and {name}'s replicate DA branch too (narrower, by at most 2 EPS_TOL)",
+            np.all(narrowing >= -1e-12) and np.all(narrowing <= 2 * EPS_TOL + 1e-12) and narrowing.max() > 0,
+            f"{narrowing.min():.4g}..{narrowing.max():.4g}",
+        )
 
 
 def structural(tag, ci, raw):
@@ -860,6 +867,10 @@ def leg_5a():
     ):
         text = read(os.path.join(REPO, rel))
         check(f"(5a) {rel} names none of {tokens}", not any(t in text for t in tokens))
+    # the net backend's intersections do not forward `pad_tolerance` to their branches;
+    # do-MNIST is their only caller and its `im-ci` is forced to 0, so it stays 0.0 there
+    nets = read(os.path.join(REPO, "src/methods/partial_r2_net.py"))
+    check("(5a) partial_r2_net.py never forwards pad_tolerance", "pad_tolerance" not in nets)
     for obj in (QuerySweepRunner, PanelBuilder):
         text = inspect.getsource(obj)
         check(f"(5a) {obj.__name__} names none of {tokens}", not any(t in text for t in tokens))
@@ -1021,6 +1032,15 @@ def leg_6(quick):
             f"(6) {param}: ... and the padded ones' raw widths within 2 EPS_TOL below the raw run's",
             all(np.all(np.isnan(g) | ((g >= -1e-9) & (g <= 2 * EPS_TOL + 1e-9))) for g in gaps),
         )
+        # a narrower raw interval can only lose coverage, can only be closer to the
+        # worst query's target and can only be further from the whole target set
+        for metric, sign in (("coverage", 1), ("worst_error", 1), ("approximation_error", -1)):
+            moves = [sign * (raw[n][metric] - plain[n][metric]) for n in padded]
+            check(
+                f"(6) {param}: the padded methods' raw {metric} moves the way a narrower pad must",
+                all(np.all(np.isnan(m) | (m <= 1e-9)) for m in moves),
+                f"max move {max(np.nanmax(m) for m in moves):.3g}",
+            )
         files = set(os.listdir(sweep))
         want = {f"{param}_{stem}.pkl" for stem in ("values", "results", "results_raw", "statuses", "im_ci")}
         want |= {f"{param}_{metric}_sweep.pdf" for metric in metrics}

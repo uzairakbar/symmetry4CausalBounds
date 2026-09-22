@@ -66,7 +66,9 @@ class BoundedSA(SA):
     # taken off the pad, never off the constraint: the sweeps set it to EPS_TOL under
     # the IM-CI (ParamSweepRunner), whose interval carries the sampling allowance the
     # tolerance used to add to the pad. 0.0 everywhere else, so every other number is
-    # today's
+    # today's. The net backend's own intersections (`partial_r2_net._branch_kwargs`)
+    # do not forward it; do-MNIST is the only caller and the config forces its
+    # `im-ci` to 0, so it never leaves 0.0 there
     pad_tolerance: float = 0.0
 
     def __init__(
@@ -215,7 +217,7 @@ class BoundedSA(SA):
         """Thm. 3.A's epsilon: `pad_epsilon` when supplied, else the constraint's
         own (L2) epsilon -- see `__init__` for why those are not the same thing --
         less `pad_tolerance` (0.0 unless a sweep runs under the IM-CI)."""
-        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon) - self.pad_tolerance
+        return max(float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon) - self.pad_tolerance, 0.0)
 
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
