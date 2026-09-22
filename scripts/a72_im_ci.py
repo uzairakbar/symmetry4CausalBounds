@@ -724,11 +724,12 @@ def leg_4():
 
 
 # gates that merge a yaml's `defaults:` into a block but never pin im-ci off: the
-# do-MNIST helpers (never run here; the config forces that block off) and this gate.
+# do-MNIST helpers (never run here; the config forces that block off), this gate and
+# the tolerance audit (both read the configured level on purpose).
 # The scan reads dict displays only: a merge written as `dict.update` or `|` would
 # slip past it, and a pin in a gate that never runs a sweep is a harmless no-op
 # (the key is simply 0 there, as it was before the toggle existed)
-PIN_EXEMPT = ("a72_im_ci.py", "smoke_do_mnist.py", "select_domnist_budgets.py")
+PIN_EXEMPT = ("a72_im_ci.py", "a73_tolerance_audit.py", "smoke_do_mnist.py", "select_domnist_budgets.py")
 
 
 def unpinned_merges(path):
