@@ -639,7 +639,7 @@ def leg_2():
             out[n_jobs] = runner.bootstrap_bounds(0, 0, cell, [4])
     check(
         "(2) ... and on the m = 4 cell under the unit indices, pools of 1 and -1",
-        all(np.array_equal(out[1][k], out[-1][k], equal_nan=True) for k in out[1]),
+        np.isfinite(out[1]["PI"]).any() and all(np.array_equal(out[1][k], out[-1][k], equal_nan=True) for k in out[1]),
     )
 
     # speed: the first cell of a process pays the workers' spawn and imports once
