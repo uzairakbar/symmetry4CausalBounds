@@ -17,11 +17,15 @@ from loguru import logger
 from src.experiments.configs import (
     ANNOTATE_SWEEP_PLOT,
     EPS_TOL,
+    IM_CI_REPLICATES,
+    IM_CI_SEED_OFFSET,
+    IM_CI_VALID_WARN,
     METRIC_SPECS,
     PARAM_SPECS,
 )
 from src.experiments.perf import perf_sweeps
 from src.experiments.utils import fit_model, save, set_seed
+from src.experiments.utils import im_ci as im_ci_helper
 from src.experiments.utils.constants import (
     SUBDIR_PERF,
     SUBDIR_QUERY,
@@ -283,6 +287,16 @@ class ParamSweepRunner(BaseExperimentRunner):
         self.experiment_name = experiment_name
         # perf collapses the grid to a single default operating point
         self.param_grid_override = param_grid_override
+        # one cell's budgets, ((j, i), data, budgets): `build_models` and
+        # `bootstrap_bounds` read the same dict, and the floor reports inside
+        # `fit_epsilon` / `fit_epsilon_iv` fire once per cell as they always have
+        self._budgets = None
+        # the IM-CI side of the last `run` (SS8): the raw record and the CI
+        # diagnostics; None when `im_ci` is 0
+        self.im_ci_record = None
+        # the last point predict's seconds per method: the replicate tasks of the
+        # next cell go slowest method first, so the pool's tail is a short task
+        self._predict_seconds = {}
         self.setup_sems_and_das()
 
     @property
@@ -452,12 +466,16 @@ class ParamSweepRunner(BaseExperimentRunner):
         the budgets do not carry (e.g. prefit outcome models)."""
         return {}
 
-    def build_models(self, experiment_index: int, step_index: int, data) -> dict[str, Any]:
-        """Fresh, fitted models at this experiment's budgets."""
-        gamma = self.fit_gamma(experiment_index)
-        epsilon = self.fit_epsilon(experiment_index, step_index, data)
-        builders = (
-            self.method_factory(
+    def fit_budgets(self, experiment_index: int, step_index: int, data) -> dict[str, Any]:
+        """The builder kwargs of one cell, memoised on the cell and its data (the
+        same object), so the replicates are built at exactly the point fit's budgets.
+        A runner attribute changed between two calls on the same cell and data is not
+        seen: the second call returns the first's budgets."""
+        key = (experiment_index, step_index)
+        if self._budgets is None or self._budgets[0] != key or self._budgets[1] is not data:
+            gamma = self.fit_gamma(experiment_index)
+            epsilon = self.fit_epsilon(experiment_index, step_index, data)
+            budgets = dict(
                 gamma=gamma,
                 epsilon=epsilon,
                 epsilon_iv=self.fit_epsilon_iv(experiment_index, step_index, data),
@@ -465,9 +483,13 @@ class ParamSweepRunner(BaseExperimentRunner):
                 rho=self.fit_rho(experiment_index, data),
                 **self.method_kwargs(experiment_index),
             )
-            if self.method_factory
-            else self.methods
-        )
+            self._budgets = (key, data, budgets)
+        return self._budgets[2]
+
+    def build_models(self, experiment_index: int, step_index: int, data) -> dict[str, Any]:
+        """Fresh, fitted models at this experiment's budgets."""
+        budgets = self.fit_budgets(experiment_index, step_index, data)
+        builders = self.method_factory(**budgets) if self.method_factory else self.methods
 
         models = {}
         for name in self.methods:
@@ -484,6 +506,35 @@ class ParamSweepRunner(BaseExperimentRunner):
             models[name] = model
         return models
 
+    def bootstrap_bounds(self, experiment_index: int, step_index: int, data, params) -> dict[str, np.ndarray] | None:
+        """The cell's replicate bounds, {name: (len(params), B, n_queries, 2)}, NaN
+        where a replicate's query was not OK; None when `im_ci` is 0 (SS2.1).
+
+        The replicates are refit at the cell's budgets (held fixed, F6) with serial
+        models, and predicted at every entry of `params` in order: one on a
+        data-varying sweep, every step on a data-constant one."""
+        if not self.im_ci:
+            return None
+        budgets = self.fit_budgets(experiment_index, step_index, data)
+        builders = self.method_factory(n_jobs=1, **budgets) if self.method_factory else self.methods
+        # point estimators are never bootstrapped: the CI wraps interval methods only
+        names = [name for name in self.methods if name != "ATE" and not isinstance(builders[name](), Regressor)]
+        # stable: the first cell keeps the configured order
+        names.sort(key=lambda name: -self._predict_seconds.get(name, 0.0))
+        return im_ci_helper.bootstrap_bounds(
+            builders,
+            names,
+            data,
+            [self.get_predict_kwargs(param, experiment_index) for param in params],
+            IM_CI_REPLICATES,
+            # a SeedSequence takes non-negative entropy only; an unseeded run
+            # (seed < 0) is read by its magnitude, so seeds -1 and 1 share a stream
+            [IM_CI_SEED_OFFSET, abs(self.seed), experiment_index, step_index],
+            n_jobs=self.n_jobs,
+            hyperparameters=self.hyperparameters,
+            da=self.get_da(experiment_index),
+        )
+
     # ------------------------------------------------------------------ loop
 
     def run(self, desc: str = "Param Sweep") -> tuple[np.ndarray, dict, dict]:
@@ -494,21 +545,39 @@ class ParamSweepRunner(BaseExperimentRunner):
 
         results = {name: {metric: np.full(shape, np.nan) for metric in METRIC_FIELDS} for name in self.methods}
         statuses = {name: np.zeros(shape + (len(STATUS_CATEGORIES),), dtype=int) for name in self.methods}
+        # the raw bounds' record beside the CI's, and the CI diagnostics (SS8)
+        results_raw, valid, seconds = None, None, None
+        if self.im_ci:
+            results_raw = {name: {metric: np.full(shape, np.nan) for metric in METRIC_FIELDS} for name in self.methods}
+            valid = {name: np.full(shape, np.nan) for name in self.methods if name != "ATE"}
+            seconds = np.full(shape, np.nan)
 
         with MANAGER.counter(total=self.n_experiments * n_steps, desc=desc, unit="runs") as pbar:
             for j in range(self.n_experiments):
                 # data-constant sweeps (gamma, epsilon) fit ONCE per experiment
-                cached_data, cached_models = None, None
+                cached_data, cached_models, cached_boot = None, None, None
                 if not self.data_depends_on_param:
                     cached_data = SweepData.coerce(self.generate_data(j, param_values[0]))
                     cached_models = self.build_models(j, 0, cached_data)
+                    # the B replicates are fit once too, and predicted at every step
+                    start = time.perf_counter()
+                    cached_boot = self.bootstrap_bounds(j, 0, cached_data, param_values)
+                    if cached_boot is not None:
+                        seconds[:, j] = (time.perf_counter() - start) / n_steps
 
                 for i, param in enumerate(param_values):
                     if self.data_depends_on_param:
                         data = SweepData.coerce(self.generate_data(j, param))
                         models = self.build_models(j, i, data)
+                        # joined before the point predict below, so the replicate
+                        # pool and the predict's own per-query pool never overlap
+                        start = time.perf_counter()
+                        boot, step = self.bootstrap_bounds(j, i, data, param_values[i : i + 1]), 0
+                        if boot is not None:
+                            seconds[i, j] = time.perf_counter() - start
                     else:
                         data, models = cached_data, cached_models
+                        boot, step = cached_boot, i
 
                     for name in self.methods:
                         if name == "ATE":
@@ -522,17 +591,55 @@ class ParamSweepRunner(BaseExperimentRunner):
                             estimate = model.predict(data.X_test, **self.get_predict_kwargs(param, j))
                             elapsed = time.perf_counter() - start
                             query_status = getattr(model, "query_status", None)
+                            self._predict_seconds[name] = elapsed
 
-                        record = evaluate_queries(
+                        raw = evaluate_queries(
                             data.estimand, estimate, query_status, elapsed, extent=data.metric_extent
                         )
+                        record = raw
+                        # the metrics read the IM-CI around the finalised bounds; the
+                        # solver's statuses stay (SS5.5). Point estimates are not wrapped
+                        if boot is not None and name in boot and np.ndim(estimate) == 2 and np.shape(estimate)[-1] == 2:
+                            replicates = boot[name][step]
+                            ci = im_ci_helper.imbens_manski_bounds(estimate, replicates, self.im_ci)
+                            record = evaluate_queries(
+                                data.estimand, ci, query_status, elapsed, extent=data.metric_extent
+                            )
+                            valid[name][i, j] = self._valid_fraction(estimate, replicates, name, i, j)
                         for metric in METRIC_FIELDS:
                             results[name][metric][i, j] = getattr(record, metric)
+                            if results_raw is not None:
+                                results_raw[name][metric][i, j] = getattr(raw, metric)
                         statuses[name][i, j] = record.status_counts
 
                     pbar.update()
 
+        self.im_ci_record = None
+        if self.im_ci:
+            self.im_ci_record = dict(
+                results_raw=results_raw,
+                level=self.im_ci,
+                replicates=IM_CI_REPLICATES,
+                seed_offset=IM_CI_SEED_OFFSET,
+                valid=valid,
+                seconds=seconds,
+            )
         return self.observed_x(param_values), results, statuses
+
+    def _valid_fraction(self, estimate, replicates, name: str, step_index: int, experiment_index: int) -> float:
+        """Mean over the cell's raw-finite queries of the valid-replicate fraction
+        (NaN when none is finite: an empty cell has no CI); under IM_CI_VALID_WARN
+        it is logged, since those queries' CIs rest on few replicates (SS5.3)."""
+        finite = np.all(np.isfinite(estimate), axis=1)
+        if not finite.any():
+            return np.nan
+        fraction = float(np.mean(np.all(np.isfinite(replicates[:, finite]), axis=-1)))
+        if fraction < IM_CI_VALID_WARN:
+            logger.warning(
+                f"{name} at step {step_index} (experiment {experiment_index}): {fraction:.2f} of the bootstrap "
+                "replicates solved OK; the IM-CI there leans on few replicates (raw bounds where < 2)."
+            )
+        return fraction
 
     @abstractmethod
     def setup_sems_and_das(self):
@@ -583,6 +690,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_vlines = {}  # (param) -> measured reference x positions
         self._sweep_axis = {}  # (param) -> factors behind a measured x, or None
         self._sweep_xlabel = {}  # (param) -> the runner's label for the plotted x
+        self._sweep_ci = {}  # (param) -> the runner's `im_ci_record`, or None
 
     @abstractmethod
     def get_query_runner_cls(self) -> type[QuerySweepRunner]:
@@ -647,6 +755,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_vlines[param] = runner.vlines
         self._sweep_axis[param] = runner.axis_record()
         self._sweep_xlabel[param] = runner.xlabel
+        self._sweep_ci[param] = runner.im_ci_record
         return record
 
     def _run_sweeps(self, sweep_spec):
@@ -661,6 +770,13 @@ class ExperimentOrchestrator(ABC):
             # re-rendered under the other budget convention without a rerun
             if self._sweep_axis.get(param) is not None:
                 save(self._sweep_axis[param], f"{param}_axis", self.name, "pkl", subdir=SUBDIR_SWEEP)
+            # under `im-ci` the results above read the CI; the raw bounds' record and
+            # the CI diagnostics sit beside them (SS8)
+            ci_record = self._sweep_ci.get(param)
+            if ci_record is not None:
+                save(ci_record["results_raw"], f"{param}_results_raw", self.name, "pkl", subdir=SUBDIR_SWEEP)
+                diagnostics = {key: value for key, value in ci_record.items() if key != "results_raw"}
+                save(diagnostics, f"{param}_im_ci", self.name, "pkl", subdir=SUBDIR_SWEEP)
 
             for metric in sweep_spec.metric:
                 metric_spec = METRIC_SPECS[metric]
