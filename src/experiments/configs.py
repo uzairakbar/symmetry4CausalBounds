@@ -441,12 +441,12 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         # ),
         # cigarettes: n is the pre-split panel size, a tenth of it up to all 2450
         grid_fn=lambda dataset, n: (
-            np.linspace(245, 2450, 16, dtype=int)
+            np.linspace(245, 2450, n, dtype=int)
             if dataset == "cigarettes"
             else np.linspace(
                 128,
                 1024 if dataset == "simulation" else 1000,
-                16,
+                n,
                 dtype=int,
             )
         ),
@@ -454,7 +454,7 @@ PARAM_SPECS: dict[str, ParamSpec] = {
     "m": ParamSpec(
         xlabel=r"Augmentation Folds ($m$)",
         # grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16]),
-        grid_fn=lambda dataset, n: np.arange(1, 16 + 1),
+        grid_fn=lambda dataset, n: np.arange(1, n + 1),
     ),
     "recalibrate": ParamSpec(
         # the continuous `recalibrate` knob t in [0, 1] (SS4.2): the DA+ methods
