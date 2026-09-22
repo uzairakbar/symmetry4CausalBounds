@@ -31,7 +31,7 @@ simulation:
     # and every number is the one shipped today. The IV run is recipes/iv_fig13.yaml.
     # iv: 4
     n_experiments: 8
-    sweep_samples: 128
+    sweep_samples: 16
     methods:
         # - ATE
         # - ERM
@@ -111,7 +111,7 @@ optical_device:
                         # so the error bars are over the DRAW -- resampling and the
                         # DA realisation -- not over devices. The oracle itself is
                         # read off the whole pool and does not move between them.
-    sweep_samples: 128
+    sweep_samples: 16
     methods:
         # - ATE
         # - ERM
@@ -168,7 +168,7 @@ cigarettes:
                             # sample with h* held fixed from the full pool, so
                             # the bars are a resampling RATE. plasmode: fresh
                             # (U, xi) per experiment on the fixed design.
-    sweep_samples: 128      # also the per-dimension query grids, forced EVEN so
+    sweep_samples: 16      # also the per-dimension query grids, forced EVEN so
                             # the exact zero stays off them
     # DA amplitude along v = (1,1,1,1), in units of sd(X . v-hat) after FWL
     # (0.1055 at t3). The omega sweep multiplies this by its own `scale` knob.

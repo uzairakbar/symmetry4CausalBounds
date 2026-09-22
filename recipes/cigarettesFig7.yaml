@@ -14,7 +14,7 @@ cigarettes:
     gamma_z: 0.0177
     n_samples: 2_450
     n_experiments: 8
-    sweep_samples: 128
+    sweep_samples: 16
     da_amplitude: 1.0
     sliver: false
     methods:
