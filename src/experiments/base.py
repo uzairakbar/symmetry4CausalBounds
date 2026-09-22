@@ -149,6 +149,8 @@ class BaseExperimentRunner(ABC):
         clipy: bool = True,
         mean_match: bool = True,
         declared_iv: bool = False,
+        im_ci: float = 0.0,
+        n_jobs: int = 1,
         **kwargs,
     ):
         if seed >= 0:
@@ -175,6 +177,14 @@ class BaseExperimentRunner(ABC):
         # instruments; the Z radius is then exactly s sqrt(gamma_z) and the T
         # budget is logged against its floor and never raised (decision 8)
         self.declared_iv = bool(declared_iv)
+        # the Imbens-Manski CI level (%) of the sweep bounds, 0 = the raw bounds (SS7).
+        # Explicit for the same reason: a silently swallowed level would run raw.
+        # `n_jobs` sizes the replicate POOL; the models' own `n_jobs` (the
+        # orchestrator's toggles) is the per-query worker count of the point predict
+        if isinstance(im_ci, bool) or not isinstance(im_ci, int | float) or not (im_ci == 0 or 0 < im_ci < 100):
+            raise ValueError(f"im_ci must be 0 or a percentage in (0, 100); got {im_ci!r}.")
+        self.im_ci = float(im_ci)
+        self.n_jobs = n_jobs
 
     @abstractmethod
     def run(self, desc: str):

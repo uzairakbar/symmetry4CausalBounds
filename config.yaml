@@ -9,6 +9,10 @@ defaults:
                         # by centring); a 2-SE band on the do-MNIST nets, where the
                         # constraint is nonlinear (see MEAN_BAND_SE).
                         # false = the pre-2026-09 uncentred, intercept-free ball.
+    im-ci: 95           # Imbens-Manski CI level (%) around every SWEEP bound (App. E's
+                        # gamma_n, put back as sampling error): coverage, approx_error,
+                        # worst_error and width read the CI. 0 or false = the raw bounds
+                        # (today's numbers). perf, query and do-MNIST never read it.
     n_jobs: -1          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budgets are not toggles: the T-as-IV radius is the oracle
