@@ -1,7 +1,8 @@
 """A72: Imbens-Manski confidence intervals on the sweep bounds (`im-ci` in `defaults:`).
 
 Every sweep cell's finalised bounds [L, U] are wrapped in [L - C s_L, U + C s_U],
-s_L and s_U the SDs of B bootstrap refits of each method's own fitted rows, C the
+s_L and s_U the SDs of B bootstrap refits of the fitted units (a row; on the fold
+sweep a base row with its m augmented copies, carried together), C the
 root of Phi(C + Delta / sigma) - Phi(-C) = level; the four sweep metrics read that
 interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
 
@@ -20,9 +21,12 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      swapped, an extra sqrt(n), the clamp missing, ddof 0, a NaN leaking into a
      raw-OK query.
   2. resampling: an n-sweep cell has one index vector shared by X/y/GX/G/Z; an m = 4
-     sim cell draws 4n tiled rows and n base rows independently, and through
-     `fit_model` with recording stubs the baselines are fitted on n rows and the DA+
-     methods and intersections on 4n; the same seed gives the same indices, another
+     sim cell draws n units once per replicate, the base rows are that draw and the
+     tiled rows its block-major expansion (block k = the draw + k n), the cell's
+     tiling is what that expansion assumes (block k of X / y / Z is the base group,
+     the GX blocks differ), a non-whole fold count raises, and through `fit_model`
+     with recording stubs the baselines are fitted on n rows and the DA+ methods and
+     intersections on 4n; the same seed gives the same indices, another
      cell others; replicate bounds bit-identical under pools of 1, 2 and -1 (the hard
      assertion); speed on a warmed pool, printed and RECORDED, only > 1 asserted.
   3. `im-ci: 0` reproduces `finite`: the fixture sweep (sim, n on [128, 512], 1
@@ -44,8 +48,11 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      width never under raw, the statuses' failure / infeasible columns the raw run's,
      the raw run's metrics equal to `results_raw`, the pkls and figures written,
      `aggregate.sweep_params` finds n and m with no warning; the per-method readings
-     (coverage, CI/raw width ratio, the log-log slope of the CI excess width in n,
-     the valid fractions) printed and compared with RECORDED.
+     (coverage, CI/raw width ratio, the log-log slope of the CI excess width in x,
+     the valid fractions; on m the CI excess width per step too) printed and compared
+     with RECORDED; the n readings must equal RECORDED exactly (the unit bootstrap is
+     the iid one off the fold sweep), and PI, a base-group method, must read on m
+     what it read under the iid rule, within the tolerances.
   7. render: the width figure of leg 6's record drawn without a swallowed error; its
      line is the CI record's nanmean in sorted-x order.
   8. the Slurm launcher (`sbatch_sweeps.py --dry-run`), no submission: one yaml per
@@ -157,7 +164,8 @@ SPEEDUP_RECORDED = 24.2  # 32 workers, 2026-09-22
 # RECORDED 2026-09-22 on a 32-core allocation, re-pinned after the pad tolerance was
 # retired under the im-ci (the widths lost 2 EPS_TOL): leg 6's readings at B = IM_CI_REPLICATES
 # (per step: CI and raw coverage, CI/raw width ratio, valid fraction; the slope of the
-# CI excess width in log x)
+# CI excess width in log x). m re-pinned the same day under the unit bootstrap, with the
+# CI excess width per step (the plateau the DA+ family reaches once a unit is its m copies)
 RECORDED_6 = {
     "n": {
         "PI+INV": {
@@ -205,54 +213,73 @@ RECORDED_6 = {
     },
     "m": {
         "PI+INV": {
-            "coverage": [1.0, 1.0, 1.0, 1.0, 0.9167, 0.9167, 0.9167, 0.9167],
+            "excess": [1.0181, 1.0234, 0.9824, 1.2537, 1.2541, 1.1002, 0.9767, 1.0556],
+            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9167, 1.0],
             "coverage_raw": [0.6667, 0.6667, 0.6667, 0.6667, 0.6667, 0.6667, 0.6667, 0.6667],
-            "ratio": [1.8268, 1.7981, 1.7756, 1.8177, 1.709, 1.6591, 1.6902, 1.626],
-            "valid": [0.11, 0.36, 0.43, 0.48, 0.5, 0.59, 0.67, 0.66],
-            "slope": -0.1331,
+            "ratio": [1.9144, 1.9127, 1.8763, 2.1416, 2.145, 1.9988, 1.8916, 1.9476],
+            "valid": [0.15, 0.11, 0.06, 0.05, 0.13, 0.13, 0.05, 0.11],
+            "slope": 0.033,
         },
         "PI": {
+            "excess": [2.0631, 2.0413, 2.1126, 2.0611, 2.0402, 2.0461, 2.0213, 2.0005],
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2672, 1.2611, 1.2558, 1.2623, 1.2665, 1.2615, 1.2546, 1.261],
+            "ratio": [1.2642, 1.2614, 1.2706, 1.264, 1.2613, 1.262, 1.2589, 1.2562],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.0101,
+            "slope": -0.012,
         },
         "DA+PI": {
+            "excess": [1.6173, 1.168, 1.1672, 1.0427, 1.0513, 1.0193, 1.0508, 1.045],
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3017, 1.182, 1.1476, 1.1259, 1.1113, 1.1023, 1.094, 1.0901],
+            "ratio": [1.3053, 1.2364, 1.2424, 1.2193, 1.2209, 1.2167, 1.2234, 1.2215],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6297,
+            "slope": -0.1966,
         },
         "DA+PI+IV": {
+            "excess": [1.6637, 1.1647, 1.1735, 1.0364, 1.0377, 0.9897, 1.0331, 1.0447],
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3965, 1.2443, 1.2018, 1.168, 1.1523, 1.1372, 1.1304, 1.125],
+            "ratio": [1.4023, 1.3018, 1.3194, 1.2806, 1.2858, 1.2716, 1.2879, 1.2925],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6207,
+            "slope": -0.2155,
         },
         "PI&DA+PI": {
+            "excess": [1.5641, 1.176, 1.206, 1.0792, 1.093, 1.0369, 1.0647, 1.0688],
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2877, 1.1794, 1.149, 1.1267, 1.1107, 1.102, 1.0941, 1.0876],
+            "ratio": [1.2964, 1.238, 1.2504, 1.227, 1.2296, 1.2205, 1.2263, 1.2265],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6145,
+            "slope": -0.1739,
         },
         "PI&DA+PI+IV": {
+            "excess": [1.738, 1.2478, 1.3062, 1.1242, 1.1801, 1.09, 1.1777, 1.1543],
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.4124, 1.2535, 1.2158, 1.1754, 1.1612, 1.1445, 1.1386, 1.1301],
+            "ratio": [1.4213, 1.3233, 1.3555, 1.3044, 1.325, 1.2991, 1.3282, 1.3232],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6139,
+            "slope": -0.1817,
         },
     },
+}
+# leg 6's m readings of PI under the iid row bootstrap (RECORDED_6["m"] before the unit
+# bootstrap): a base-group method, whose resampling law the unit bootstrap leaves alone,
+# so its readings must hold; never bit for bit (another draw), so the width is read as the
+# CI excess (ratio - 1) within IID_EXCESS_RTOL: one SD from B = 100 replicates is ~7%
+# noisy, and two independent draws of it differ by ~10% at one sigma
+IID_M_PI = {
+    "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "ratio": [1.2672, 1.2611, 1.2558, 1.2623, 1.2665, 1.2615, 1.2546, 1.261],
+    "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "slope": -0.0101,
 }
 # one query of 204 flipping in one of 2 experiments moves an n-step mean by 0.0025; on
 # m (12 queries) one flip is 0.042, so there the tolerance is exact: the run is
 # deterministic on one node (seeded draws, seeded bootstrap, serial models)
 COVERAGE_ATOL = 0.01
 RATIO_RTOL = 0.01
+IID_EXCESS_RTOL = 0.10
 SLOPE_ATOL = 0.05
 
 
@@ -479,7 +506,7 @@ def leg_1():
 
 
 def leg_2():
-    print("(2) resampling: each method's own fitted rows, iid")
+    print("(2) resampling: the fitted units, a base row with its m copies on the fold sweep")
     orch = sim_orchestrator(["PI"])
     n_runner = runner_for(orch, "n")
     data = SweepData.coerce(n_runner.generate_data(0, 128))
@@ -502,7 +529,48 @@ def leg_2():
     n = len(arrays["X_base"])
     rows, base_rows = im_ci.replicate_rows(len(arrays["X"]), n, 2, [IM_CI_SEED_OFFSET, 42, 0, 3])
     check("(2) m = 4 cell: 4n tiled rows, n base rows", rows.shape == (2, 4 * n) and base_rows.shape == (2, n))
-    check("(2) ... drawn independently", not np.array_equal(rows[0][:n], base_rows[0]))
+    check(
+        "(2) ... one draw: the first block is the base rows",
+        all(np.array_equal(r[:n], b) for r, b in zip(rows, base_rows, strict=True)),
+    )
+    check(
+        "(2) ... block k is the draw + k n, each drawn unit carries exactly its 4 copies",
+        all(
+            all(np.array_equal(r[k * n : (k + 1) * n], b + k * n) for k in range(4))
+            and np.array_equal(np.sort(r % n), np.sort(np.tile(b, 4)))
+            for r, b in zip(rows, base_rows, strict=True)
+        ),
+    )
+    blocks = range(4)
+    check(
+        "(2) ... the tiling it rests on: block k of X / y / Z is the base group, the GX blocks differ",
+        all(
+            np.array_equal(arrays[key][k * n : (k + 1) * n], arrays[f"{key}_base"])
+            for key in ("X", "y", "Z")
+            for k in blocks
+        )
+        and all(
+            not np.array_equal(arrays["GX"][a * n : (a + 1) * n], arrays["GX"][b * n : (b + 1) * n])
+            for a in blocks
+            for b in blocks
+            if a < b
+        ),
+    )
+    sample = im_ci.resample_fit_arrays(arrays, rows[0], base_rows[0])
+    check(
+        "(2) ... under the index, block k of X / y / GX / G / Z is block k of the cell at the draw",
+        all(
+            np.array_equal(sample[key][k * n : (k + 1) * n], arrays[key][k * n : (k + 1) * n][base_rows[0]])
+            for key in ("X", "y", "GX", "G", "Z")
+            for k in blocks
+        ),
+    )
+    try:
+        im_ci.replicate_rows(10, 4, 1, 0)
+        raised = False
+    except ValueError:
+        raised = True
+    check("(2) a tiled length that is not a whole number of folds raises", raised)
 
     class Recorder:
         def fit(self, X, y, **kwargs):
@@ -510,7 +578,6 @@ def leg_2():
             self.lengths = {k: len(v) for k, v in kwargs.items() if hasattr(v, "__len__") and not isinstance(v, str)}
             return self
 
-    sample = im_ci.resample_fit_arrays(arrays, rows[0], base_rows[0])
     baselines = ("PI", "PI+IV", "ERM")
     tiled = ("DA+PI", "PI+INV", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV", "DA+ERM")
     rows_seen = {}
@@ -960,6 +1027,7 @@ def readings(x, ci, raw, valid):
             ratio = np.nanmean(width, axis=1) / np.nanmean(width_raw, axis=1)
             excess = np.nanmean(width - width_raw, axis=1)
             out[name] = dict(
+                excess=np.round(excess, 4).tolist(),
                 coverage=np.round(cov, 4).tolist(),
                 coverage_raw=np.round(cov_raw, 4).tolist(),
                 ratio=np.round(ratio, 4).tolist(),
@@ -1084,21 +1152,32 @@ def leg_6(quick):
     print(f"      RECORDED_6 = {got!r}")
     if quick:
         skip("(6) RECORDED readings", f"--quick (B = {count})")
-    elif RECORDED_6 is None:
-        skip("(6) RECORDED readings", "first run: printed above, to be pinned")
     else:
-        for param, rows in RECORDED_6.items():
-            for name, want in rows.items():
-                have = got[param][name]
-                check(
-                    f"(6) {param} {name}: coverage, ratio, valid, slope == RECORDED",
-                    close(have["coverage"], want["coverage"], atol=COVERAGE_ATOL, rtol=0)
-                    and close(have["coverage_raw"], want["coverage_raw"], atol=COVERAGE_ATOL, rtol=0)
-                    and close(have["ratio"], want["ratio"], rtol=RATIO_RTOL)
-                    and close(have["valid"], want["valid"], atol=COVERAGE_ATOL, rtol=0)
-                    and close(have["slope"], want["slope"], atol=SLOPE_ATOL, rtol=0),
-                    f"{have}",
-                )
+        # off the fold sweep the unit bootstrap draws the iid rows: n must not move at all
+        for name, want in RECORDED_6["n"].items():
+            have = {key: got["n"][name][key] for key in want}
+            check(f"(6) n {name}: readings == RECORDED exactly", have == want, f"{have}")
+        have = got["m"]["PI"]
+        check(
+            "(6) m PI (base group): coverage, ratio, valid, slope == the iid rule's",
+            close(have["coverage"], IID_M_PI["coverage"], atol=COVERAGE_ATOL, rtol=0)
+            and close(np.subtract(have["ratio"], 1), np.subtract(IID_M_PI["ratio"], 1), rtol=IID_EXCESS_RTOL)
+            and close(have["valid"], IID_M_PI["valid"], atol=COVERAGE_ATOL, rtol=0)
+            and close(have["slope"], IID_M_PI["slope"], atol=SLOPE_ATOL, rtol=0),
+            f"{have}",
+        )
+        for name, want in RECORDED_6["m"].items():
+            have = got["m"][name]
+            check(
+                f"(6) m {name}: coverage, ratio, excess, valid, slope == RECORDED",
+                close(have["coverage"], want["coverage"], atol=COVERAGE_ATOL, rtol=0)
+                and close(have["coverage_raw"], want["coverage_raw"], atol=COVERAGE_ATOL, rtol=0)
+                and close(have["ratio"], want["ratio"], rtol=RATIO_RTOL)
+                and close(have["excess"], want["excess"], rtol=RATIO_RTOL)
+                and close(have["valid"], want["valid"], atol=COVERAGE_ATOL, rtol=0)
+                and close(have["slope"], want["slope"], atol=SLOPE_ATOL, rtol=0),
+                f"{have}",
+            )
     return orch, record, root
 
 
