@@ -496,6 +496,8 @@ class ParamSweepRunner(BaseExperimentRunner):
             if name == "ATE":
                 continue
             model = builders[name]()
+            if self.pad_tolerance and hasattr(model, "pad_tolerance"):
+                model.pad_tolerance = self.pad_tolerance
             fit_model(
                 model=model,
                 method_name=name,
@@ -533,7 +535,16 @@ class ParamSweepRunner(BaseExperimentRunner):
             n_jobs=self.n_jobs,
             hyperparameters=self.hyperparameters,
             da=self.get_da(experiment_index),
+            pad_tolerance=self.pad_tolerance,
         )
+
+    @property
+    def pad_tolerance(self) -> float:
+        """What the pad drops (`BoundedSA.pad_tolerance`): EPS_TOL under the IM-CI, whose
+        interval is the sampling allowance on the bound, so the pad is eps* alone (on
+        the epsilon sweep the swept r eps*); 0.0 without it, today's pad. The
+        constraint budgets keep their EPS_TOL either way: an empty set has no CI."""
+        return EPS_TOL if self.im_ci else 0.0
 
     # ------------------------------------------------------------------ loop
 

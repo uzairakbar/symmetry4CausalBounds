@@ -96,8 +96,10 @@ import digest_leg  # noqa: E402
 import src.aggregate as aggregate  # noqa: E402
 import src.experiments.base as base  # noqa: E402
 import src.experiments.utils.im_ci as im_ci  # noqa: E402
+import src.methods.sensitivity_models as sensitivity_models  # noqa: E402
 from src.experiments.base import BaseExperimentRunner, QuerySweepRunner, SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
+    EPS_TOL,
     IM_CI_REPLICATES,
     IM_CI_SEED_OFFSET,
     PARAM_SPECS,
@@ -152,7 +154,8 @@ PRE_DIGESTS = {
 # RECORDED: leg 2's speedup of the six methods at B = 32 on a warmed pool of -1
 # (printed, never asserted as a number: the core count is the machine's)
 SPEEDUP_RECORDED = 24.2  # 32 workers, 2026-09-22
-# RECORDED 2026-09-22 on a 32-core allocation: leg 6's readings at B = IM_CI_REPLICATES
+# RECORDED 2026-09-22 on a 32-core allocation, re-pinned after the pad tolerance was
+# retired under the im-ci (the widths lost 2 EPS_TOL): leg 6's readings at B = IM_CI_REPLICATES
 # (per step: CI and raw coverage, CI/raw width ratio, valid fraction; the slope of the
 # CI excess width in log x)
 RECORDED_6 = {
@@ -174,30 +177,30 @@ RECORDED_6 = {
         "DA+PI": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2898, 1.1833, 1.1446, 1.1247, 1.1093, 1.0965, 1.092, 1.0858],
+            "ratio": [1.2932, 1.1854, 1.1463, 1.1261, 1.1106, 1.0977, 1.0931, 1.0868],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "slope": -0.5736,
         },
         "DA+PI+IV": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3786, 1.2422, 1.1929, 1.1674, 1.1455, 1.1301, 1.126, 1.1143],
+            "ratio": [1.3843, 1.2459, 1.1958, 1.1699, 1.1477, 1.1321, 1.1279, 1.116],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "slope": -0.5637,
         },
         "PI&DA+PI": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2826, 1.1833, 1.1444, 1.1249, 1.1098, 1.0982, 1.0934, 1.086],
+            "ratio": [1.2861, 1.1854, 1.1462, 1.1264, 1.1111, 1.0993, 1.0945, 1.087],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.5578,
+            "slope": -0.5581,
         },
         "PI&DA+PI+IV": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3846, 1.2567, 1.202, 1.1733, 1.1517, 1.1362, 1.1325, 1.1185],
+            "ratio": [1.3906, 1.2606, 1.2051, 1.1759, 1.154, 1.1383, 1.1346, 1.1202],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.556,
+            "slope": -0.5563,
         },
     },
     "m": {
@@ -218,30 +221,30 @@ RECORDED_6 = {
         "DA+PI": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2982, 1.1797, 1.1457, 1.1242, 1.1098, 1.101, 1.0928, 1.0889],
+            "ratio": [1.3017, 1.182, 1.1476, 1.1259, 1.1113, 1.1023, 1.094, 1.0901],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "slope": -0.6297,
         },
         "DA+PI+IV": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3906, 1.2404, 1.1984, 1.1652, 1.1498, 1.1349, 1.1282, 1.1229],
+            "ratio": [1.3965, 1.2443, 1.2018, 1.168, 1.1523, 1.1372, 1.1304, 1.125],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "slope": -0.6207,
         },
         "PI&DA+PI": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2842, 1.1772, 1.1471, 1.125, 1.1093, 1.1006, 1.0929, 1.0865],
+            "ratio": [1.2877, 1.1794, 1.149, 1.1267, 1.1107, 1.102, 1.0941, 1.0876],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6143,
+            "slope": -0.6145,
         },
         "PI&DA+PI+IV": {
             "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.4061, 1.2495, 1.2121, 1.1725, 1.1585, 1.1421, 1.1362, 1.1279],
+            "ratio": [1.4124, 1.2535, 1.2158, 1.1754, 1.1612, 1.1445, 1.1386, 1.1301],
             "valid": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6137,
+            "slope": -0.6139,
         },
     },
 }
@@ -600,7 +603,7 @@ def fixture_digests(x, results, statuses):
 
 
 def leg_3(quick):
-    print("(3) im-ci 0 reproduces finite; im-ci 95 keeps it as results_raw")
+    print("(3) im-ci 0 reproduces finite; im-ci 95 keeps it as results_raw, the pad at eps* alone")
     _, x, results, statuses = fixture_run(0.0)
     got = fixture_digests(x, results, statuses)
     bad = sorted(k for k in PRE_DIGESTS if got.get(k) != PRE_DIGESTS[k])
@@ -608,13 +611,25 @@ def leg_3(quick):
     count = QUICK_REPLICATES if quick else IM_CI_REPLICATES
     with replicates(count):
         runner, x95, results95, statuses95 = fixture_run(95.0, pool=-1)
+    # under the IM-CI the pad drops EPS_TOL (BoundedSA.pad_tolerance), so the raw record
+    # is finite's for the unpadded PI and the padded methods are narrower by at most
+    # 2 EPS_TOL, exactly that on a standalone DA+ method; the statuses never move
     raw = runner.im_ci_record["results_raw"]
     got = fixture_digests(x95, raw, statuses)
-    bad = sorted(k for k in PRE_DIGESTS if k.startswith(("results/", "x")) and got.get(k) != PRE_DIGESTS[k])
-    check(f"(3) im_ci 95 (B = {count}): results_raw == RECORDED on finite", not bad, f"{bad}")
+    unpadded = [k for k in PRE_DIGESTS if k.startswith(("results/PI/", "x"))]
+    bad = sorted(k for k in unpadded if got.get(k) != PRE_DIGESTS[k])
+    check(f"(3) im_ci 95 (B = {count}): results_raw of the unpadded PI == RECORDED on finite", not bad, f"{bad}")
+    narrower = raw["DA+PI"]["interval_width"] - results["DA+PI"]["interval_width"]
     check(
-        "(3) ... and == the im_ci 0 results bit for bit",
-        all(np.array_equal(raw[n][m], results[n][m], equal_nan=True) for n in raw for m in raw[n] if m != "wall_clock"),
+        "(3) ... DA+PI's raw width is finite's minus 2 EPS_TOL (the pad at eps* alone)",
+        np.allclose(narrower, -2 * EPS_TOL, rtol=0, atol=1e-12),
+        f"{np.round(narrower, 6).tolist()}",
+    )
+    narrower = raw["PI&DA+PI"]["interval_width"] - results["PI&DA+PI"]["interval_width"]
+    check(
+        "(3) ... the intersection's by at most 2 EPS_TOL",
+        bool(np.all((narrower <= 1e-12) & (narrower >= -2 * EPS_TOL - 1e-12))),
+        f"{np.round(narrower, 6).tolist()}",
     )
     for status in ("solver_failure", "infeasible"):
         check(
@@ -622,6 +637,54 @@ def leg_3(quick):
             all(np.array_equal(column(statuses95[n], status), column(statuses[n], status)) for n in statuses),
         )
     structural("(3)", results95, raw)
+    leg_3_pad()
+
+
+def leg_3_pad():
+    """Under im_ci 95 the sweep pads by eps* alone, on the point models (a DA+ method and
+    an intersection's DA branch) and in the replicates; under 0 by eps* + EPS_TOL."""
+    for level, tol in ((0.0, 0.0), (95.0, EPS_TOL)):
+        runner = runner_for(sim_orchestrator(FIXTURE_METHODS, im_ci_level=level), "n")
+        data = SweepData.coerce(runner.generate_data(0, 128))
+        models = runner.build_models(0, 0, data)
+        star = runner.get_oracle(0).epsilon_star
+        epsilon = runner.fit_epsilon(0, 0, data)
+        da_pad = models["DA+PI"].pad_amount
+        branch_pad = models["PI&DA+PI"].augmented.pad_amount
+        want = epsilon - tol
+        check(
+            f"(3) im_ci {level:g}: DA+PI and the intersection's DA branch pad by {'eps*' if tol else 'eps* + EPS_TOL'}",
+            da_pad == want and branch_pad == want and np.isclose(want, star + EPS_TOL - tol, rtol=0, atol=1e-12),
+            f"pads {da_pad!r} / {branch_pad!r}, eps* {star!r}",
+        )
+        check(
+            f"(3) im_ci {level:g}: the intersection's baseline branch still does not pad",
+            models["PI&DA+PI"].baseline.pad is False,
+        )
+    budgets = runner.fit_budgets(0, 0, data)
+    builders = runner.method_factory(n_jobs=1, **budgets)
+    rows = np.arange(len(data.X))
+    shifted = {}
+    for tol in (0.0, EPS_TOL):
+        shifted[tol] = {
+            name: im_ci._replicate(
+                builders, name, data.fit_arrays, rows, None, data.X_test, [{}], {}, runner.get_da(0), tol
+            )
+            for name in ("DA+PI", "PI&DA+PI")
+        }
+    diff = shifted[0.0]["DA+PI"] - shifted[EPS_TOL]["DA+PI"]
+    check(
+        "(3) a replicate drops EPS_TOL from each end of its pad (DA+PI)",
+        np.allclose(diff[..., 0], -EPS_TOL, rtol=0, atol=1e-12)
+        and np.allclose(diff[..., 1], EPS_TOL, rtol=0, atol=1e-12),
+    )
+    width = lambda b: b[..., 1] - b[..., 0]  # noqa: E731
+    narrowing = width(shifted[0.0]["PI&DA+PI"]) - width(shifted[EPS_TOL]["PI&DA+PI"])
+    check(
+        "(3) ... and the intersection replicate's DA branch too (narrower, by at most 2 EPS_TOL)",
+        np.all(narrowing >= -1e-12) and np.all(narrowing <= 2 * EPS_TOL + 1e-12) and narrowing.max() > 0,
+        f"{narrowing.min():.4g}..{narrowing.max():.4g}",
+    )
 
 
 def structural(tag, ci, raw):
@@ -822,10 +885,20 @@ def leg_5b():
     def refuse(*args, **kwargs):
         raise RuntimeError("the IM-CI helper was reached")
 
+    # every pad the two paths apply, recorded: they must keep EPS_TOL on it (the pad
+    # drops it on the im-ci sweeps alone)
+    finalize, pads = sensitivity_models.BoundedSA._finalize, []
+
+    def recording(model, bounds):
+        if model.pad:
+            pads.append(model.pad_tolerance)
+        return finalize(model, bounds)
+
     im_ci.bootstrap_bounds = refuse
+    sensitivity_models.BoundedSA._finalize = recording
     try:
         with workdir("perf_"):
-            orch = sim_orchestrator(["PI", "DA+PI"], im_ci_level=95.0, sweep_samples=2)
+            orch = sim_orchestrator(["PI", "DA+PI", "PI&DA+PI"], im_ci_level=95.0, sweep_samples=2)
             plan = parse_experiment_plan({"perf": {"metric": ["wall_clock"]}})
             try:
                 orch._run_perf(plan.perf)
@@ -836,7 +909,7 @@ def leg_5b():
                 ok, detail = False, f"{type(error).__name__}: {error}"
             check("(5b) _run_perf (wall_clock) completes under im_ci 95", ok, detail)
         with workdir("query_"):
-            orch = sim_orchestrator(["PI", "DA+PI"], im_ci_level=95.0)
+            orch = sim_orchestrator(["PI", "DA+PI", "PI&DA+PI"], im_ci_level=95.0)
             try:
                 orch._run_query_sweep()
                 ok, detail = True, ""
@@ -845,6 +918,12 @@ def leg_5b():
             check("(5b) _run_query_sweep (sweep_samples 8) completes under im_ci 95", ok, detail)
     finally:
         im_ci.bootstrap_bounds = saved
+        sensitivity_models.BoundedSA._finalize = finalize
+    check(
+        "(5b) perf and query pad with EPS_TOL kept (pad_tolerance 0.0 on every padded model)",
+        bool(pads) and all(tol == 0.0 for tol in pads),
+        f"{len(pads)} pads, tolerances {sorted(set(pads))}",
+    )
 
 
 def slope(xs, ys):
@@ -925,9 +1004,22 @@ def leg_6(quick):
                 f"(6) {param}: the {status} column is the raw run's",
                 all(np.array_equal(column(statuses[n], status), column(plain_statuses[n], status)) for n in statuses),
             )
+        # the im-ci run pads by eps* alone, the raw run by eps* + EPS_TOL: the unpadded
+        # methods agree in every metric, the padded ones are narrower by at most 2 EPS_TOL
+        padded = {n for n in raw if n.startswith(("DA+", "PI&DA+"))}
         check(
-            f"(6) {param}: the raw run's metrics == results_raw",
-            all(close(raw[n][m], plain[n][m], rtol=1e-9, atol=0) for n in raw for m in raw[n] if m != "wall_clock"),
+            f"(6) {param}: the raw run's metrics == results_raw on the unpadded methods",
+            all(
+                close(raw[n][m], plain[n][m], rtol=1e-9, atol=0)
+                for n in set(raw) - padded
+                for m in raw[n]
+                if m != "wall_clock"
+            ),
+        )
+        gaps = [plain[n]["interval_width"] - raw[n]["interval_width"] for n in padded]
+        check(
+            f"(6) {param}: ... and the padded ones' raw widths within 2 EPS_TOL below the raw run's",
+            all(np.all(np.isnan(g) | ((g >= -1e-9) & (g <= 2 * EPS_TOL + 1e-9))) for g in gaps),
         )
         files = set(os.listdir(sweep))
         want = {f"{param}_{stem}.pkl" for stem in ("values", "results", "results_raw", "statuses", "im_ci")}

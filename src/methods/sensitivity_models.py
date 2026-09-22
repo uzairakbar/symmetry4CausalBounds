@@ -63,6 +63,11 @@ class BoundedSA(SA):
     # the T-as-IV constraint reads `epsilon_iv`, and a plain ball only pads (the
     # perf sweep re-solves the former two and `repad`s the rest)
     solves_on_epsilon: bool = False
+    # taken off the pad, never off the constraint: the sweeps set it to EPS_TOL under
+    # the IM-CI (ParamSweepRunner), whose interval carries the sampling allowance the
+    # tolerance used to add to the pad. 0.0 everywhere else, so every other number is
+    # today's
+    pad_tolerance: float = 0.0
 
     def __init__(
         self,
@@ -208,8 +213,9 @@ class BoundedSA(SA):
     @property
     def pad_amount(self) -> float:
         """Thm. 3.A's epsilon: `pad_epsilon` when supplied, else the constraint's
-        own (L2) epsilon -- see `__init__` for why those are not the same thing."""
-        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon)
+        own (L2) epsilon -- see `__init__` for why those are not the same thing --
+        less `pad_tolerance` (0.0 unless a sweep runs under the IM-CI)."""
+        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon) - self.pad_tolerance
 
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
@@ -913,7 +919,7 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
     def _branch(self, pad):
         # rho = 1 at construction: the DA branch's factor is only known once
         # both branches are fitted (`_fit_branches` sets it)
-        return PartialR2(
+        branch = PartialR2(
             gamma=self.gamma,
             epsilon=self.epsilon,
             pad=pad,
@@ -923,6 +929,8 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
         )
+        branch.pad_tolerance = self.pad_tolerance  # the sweeps' IM-CI setting reaches the DA branch
+        return branch
 
     def _fit_branches(self, X, y, GX, G, Z=None):
         self.baseline = self._branch(pad=False).fit(X, y)
@@ -978,7 +986,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     def _branch(self, pad):
         # rho = 1 at construction: the DA branch's factor is only known once both
         # branches are fitted (`_fit_branches` sets it)
-        return InstrumentalVariablePartialR2(
+        branch = InstrumentalVariablePartialR2(
             gamma=self.gamma,
             gamma_z=self.gamma_z,
             epsilon=self.epsilon,
@@ -991,6 +999,8 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
         )
+        branch.pad_tolerance = self.pad_tolerance
+        return branch
 
     def _fit_branches(self, X, y, GX, G, Z=None):
         # empty is spelled (n, 0), and a branch handed it carries no constraint

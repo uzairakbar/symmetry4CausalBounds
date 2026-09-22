@@ -9,11 +9,15 @@ metrics reading the Imbens-Manski CI, the sampling allowance on the INTERVAL is 
 CI's job, so 1b is the redundancy candidate; an empty set has no CI, so 1a is not.
 The audit decides both with data, on the n and m sweeps of the three datasets:
 
-  V0  today's raw bounds (the V1 run's `{param}_results_raw.pkl`)
-  V1  today's budgets, im-ci as configured (the reference run, e.g. SS13's tree)
-  V2  V1 with the pad tolerance removed: every padded model, and the DA branch of
-      every intersection after its fit (`_branch` does not forward `pad_epsilon`),
-      pads by `epsilon - EPS_TOL` = eps* alone; the constraint budgets unchanged
+  V0  the raw bounds of the V1 run (its `{param}_results_raw.pkl`)
+  V1  the pre-retirement pad, eps* + EPS_TOL, im-ci as configured: an existing tree
+      (`--v1`, e.g. a run from before the retirement) or run here with the runner's
+      `pad_tolerance` forced to 0
+  V2  the pad by `epsilon - EPS_TOL` = eps* alone on every padded model, the
+      intersections' DA branches (`_branch` forwards it) and the replicates; the
+      constraint budgets unchanged. Since 1b was retired this IS the shipped
+      im-ci sweep (`ParamSweepRunner.pad_tolerance`); the patch sets the same
+      `pad_tolerance`, so it never subtracts twice and also works under im-ci 0
   V3  V1 with `EPS_TOL = 0` on the modules that add it (base, generic_runner,
       optical_device, cigarettes, and the two `_epsilon_budget` defaults)
 
@@ -29,8 +33,8 @@ replicates (built in the workers) are padded the same way as the point fit.
      V3 exceeds V1's by at most 5 points at every step. A verdict with no cell
      checked prints as undecided.
 
-    uv run python scripts/a73_tolerance_audit.py --config YAML --v1 ARTIFACTS --out DIR
-        [--variants V2,V3] [--reuse]
+    uv run python scripts/a73_tolerance_audit.py --config YAML --out DIR
+        [--v1 ARTIFACTS] [--variants V2,V3] [--reuse]
 
 `--config` is the multi-block yaml the V1 tree was run from, each dataset block with
 `experiment.sweep.param` naming the swept params (n and m are audited); each
@@ -81,20 +85,10 @@ INFEASIBLE_SLACK = 0.05
 
 def _padded_model(builder, tol):
     """`builder()` padding by its constraint epsilon minus `tol` (eps* alone); an
-    intersection's DA branch is built at fit, so it is re-padded right after."""
+    intersection hands the setting to its DA branch when it builds it at fit."""
     model = builder()
-    if getattr(model, "pad", False) and hasattr(model, "pad_epsilon"):
-        model.pad_epsilon = max(float(model.epsilon) - tol, 0.0)
-    if hasattr(model, "_fit_branches"):
-        original = model._fit_branches
-
-        def fit_branches(*args, **kwargs):
-            original(*args, **kwargs)
-            branch = model.augmented
-            branch.pad_epsilon = max(float(branch.epsilon) - tol, 0.0)
-            del model.__dict__["_fit_branches"]  # the instance override never travels
-
-        model._fit_branches = fit_branches
+    if hasattr(model, "pad_tolerance"):
+        model.pad_tolerance = tol
     return model
 
 
@@ -134,6 +128,11 @@ def run_task(config_path, variant, dataset, param, workdir):
     block["experiment"] = {"sweep": {**sweep, "param": [param]}}
     plan = parse_experiment_plan(block["experiment"])
     block = resolve_dataset_block(dataset, block)
+    if variant == "V1":
+        # the pre-retirement pad: nothing dropped, point models and replicates alike
+        import src.experiments.base as base
+
+        base.ParamSweepRunner.pad_tolerance = property(lambda runner: 0.0)
     if variant == "V3":
         _zero_tolerance()
     os.chdir(workdir)
@@ -250,7 +249,7 @@ def figure(plt, cell, dataset, param, out):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="the multi-block yaml the V1 tree was run from")
-    parser.add_argument("--v1", required=True, help="the V1 run's artifacts/ tree")
+    parser.add_argument("--v1", help="an existing V1 artifacts/ tree; omitted = run V1 here")
     parser.add_argument("--out", required=True, help="where the V2 / V3 trees, the table and the figures go")
     parser.add_argument("--variants", default="V2,V3")
     parser.add_argument("--reuse", action="store_true", help="keep a (variant, dataset, param) already written")
@@ -273,7 +272,11 @@ def main():
         and isinstance(block, dict)
         and set(PARAMS) & set(((block.get("experiment") or {}).get("sweep") or {}).get("param") or [])
     ]
-    for variant in [v.strip() for v in args.variants.split(",") if v.strip()]:
+    variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    if args.v1 is None and "V1" not in variants:
+        variants.insert(0, "V1")
+    v1_root = os.path.abspath(args.v1) if args.v1 else os.path.join(out, "V1", "artifacts")
+    for variant in variants:
         root = os.path.join(out, variant)
         os.makedirs(root, exist_ok=True)
         if not os.path.exists(os.path.join(root, "data")) and os.path.isdir(os.path.join(REPO, "data")):
@@ -284,7 +287,7 @@ def main():
                     print(f"{variant} {dataset} {param}: reused", flush=True)
                     continue
                 command = [sys.executable, os.path.abspath(__file__), "--config", config_path]
-                command += ["--v1", args.v1, "--out", out, "--task", variant, dataset, param]
+                command += ["--out", out, "--task", variant, dataset, param]
                 with tempfile.TemporaryFile() as log:
                     done = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)  # noqa: S603
                     log.seek(0)
@@ -294,7 +297,7 @@ def main():
                     print(tail)
                     return 1
 
-    table, failures, checked, missing = audit(os.path.abspath(args.v1), out, datasets)
+    table, failures, checked, missing = audit(v1_root, out, datasets)
     with open(os.path.join(out, "audit.json"), "w") as handle:
         json.dump({"table": table, "failures": failures, "checked": checked, "missing": missing}, handle, indent=1)
     if missing:

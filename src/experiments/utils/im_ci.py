@@ -115,7 +115,9 @@ def resample_fit_arrays(fit_arrays: dict, rows: NDArray, base_rows: NDArray | No
     return out
 
 
-def _replicate(builders, name, arrays, rows, base_rows, X_test, predict_kwargs, hyperparameters, da) -> NDArray:
+def _replicate(
+    builders, name, arrays, rows, base_rows, X_test, predict_kwargs, hyperparameters, da, pad_tolerance=0.0
+) -> NDArray:
     """The loky worker: ONE method refit on one replicate's rows, then predicted at
     every step in step order (the models are stateful in `epsilon` / `recalibrate`,
     as in the production loop). Returns (n_steps, n_queries, 2), NaN on every
@@ -128,6 +130,8 @@ def _replicate(builders, name, arrays, rows, base_rows, X_test, predict_kwargs, 
             model = builders[name]()
             if hasattr(model, "n_jobs"):
                 model.n_jobs = 1  # the intersections build their branches from it at fit
+            if pad_tolerance and hasattr(model, "pad_tolerance"):
+                model.pad_tolerance = pad_tolerance  # the point model's pad, branches included
             fit_model(
                 model=model,
                 method_name=name,
@@ -158,6 +162,7 @@ def bootstrap_bounds(
     n_jobs: int = 1,
     hyperparameters=None,
     da=None,
+    pad_tolerance: float = 0.0,
 ) -> dict[str, NDArray]:
     """Replicate bounds of one sweep cell: {name: (n_steps, B, n_queries, 2)}.
 
@@ -168,7 +173,8 @@ def bootstrap_bounds(
     order, method-major, so a caller that passes the slowest method first leaves a
     short tail. Every index is drawn here, before dispatch, so the replicates do not
     depend on the scheduling or on `n_jobs`; the models inside solve serially, and
-    the pool is joined before this returns."""
+    the pool is joined before this returns. `pad_tolerance` is set on every replicate
+    model as the runner sets it on the point models."""
     names = [name for name in method_names if name != "ATE"]
     arrays = data.fit_arrays
     n_base = None if arrays.get("X_base") is None else len(arrays["X_base"])
@@ -186,6 +192,7 @@ def bootstrap_bounds(
                 predict_kwargs,
                 hyperparameters,
                 da,
+                pad_tolerance,
             )
             for name, b in tasks
         )
