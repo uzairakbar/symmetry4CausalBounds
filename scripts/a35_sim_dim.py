@@ -65,7 +65,7 @@ def load_block(path):
         cfg = yaml.safe_load(fh)
     if "simulation" not in cfg:
         return None
-    return {**cfg.get("defaults", {}), **cfg["simulation"]}
+    return {**cfg.get("defaults", {}), **cfg["simulation"], "im-ci": 0}
 
 
 def orchestrator(treatment_dim):

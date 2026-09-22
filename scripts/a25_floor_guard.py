@@ -170,7 +170,7 @@ def recipe_runner(dataset, param, n_experiments=1, steps=8, methods=None, **over
     defaults = config.pop("defaults", {}) or {}
     if dataset not in config:
         raise KeyError(f"recipes/{OMEGA_RECIPE} carries no `{dataset}:` block, only {sorted(config)}")
-    block = {**defaults, **config[dataset]}
+    block = {**defaults, **config[dataset], "im-ci": 0}
     block.pop("experiment", None)
     block.update(n_experiments=n_experiments, sweep_samples=steps, n_jobs=1, **overrides)
     if methods is not None:

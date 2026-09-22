@@ -363,7 +363,7 @@ def recipe(name, fname=None):
     with open(os.path.join(REPO, "recipes", f"{fname}.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
-    return {**defaults, **config[name]}
+    return {**defaults, **config[name], "im-ci": 0}
 
 
 def sweep_metrics(name):

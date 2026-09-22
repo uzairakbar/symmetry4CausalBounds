@@ -139,7 +139,7 @@ def shipped_block(path):
     main.py merges it, minus the `experiment` plan."""
     with open(path) as handle:
         config = yaml.safe_load(handle) or {}
-    block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
+    block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {}), "im-ci": 0}
     block.pop("experiment", None)
     return block
 

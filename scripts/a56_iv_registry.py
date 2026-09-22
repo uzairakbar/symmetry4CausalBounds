@@ -205,7 +205,7 @@ def recipe_blocks(fname):
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
     config.pop("hyperparameters", None)
-    return {name: {**defaults, **block} for name, block in config.items()}
+    return {name: {**defaults, **block, "im-ci": 0} for name, block in config.items()}
 
 
 def load_recipe(fname, dataset):
@@ -367,7 +367,7 @@ def leg_i():
         active = sorted(set(raw) & {"iv", "gamma_z"})
         if active:
             print(f"      report: the WORKING-tree config.yaml {name} carries {active}; uncommitted, so not a FAIL")
-        check(f"(i) config.yaml {name}: resolves", rejection(name, **{**defaults, **raw}) is None)
+        check(f"(i) config.yaml {name}: resolves", rejection(name, **{**defaults, **raw, "im-ci": 0}) is None)
     for name in digest_leg.DATASETS:
         block = {**digest_leg.TOGGLES, **digest_leg.BLOCKS[name]}
         check(f"(i) leg (D) block {name}: no iv key, resolves", "iv" not in block and rejection(name, **block) is None)
