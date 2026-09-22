@@ -84,8 +84,9 @@ Four things changed across the board, not per file:
 - **`DA+IV` / `DA+PI+IV` respelled `(T)` on the two headline query recipes.** Same
   estimator, the mode written out; see the grammar below.
 - **`im-ci: 95` on the six sweep recipes.** Every sweep metric now reads the 95%
-  Imbens-Manski CI around each bound (a bootstrap of each method's own fitted rows)
-  instead of the raw bound, and the raw record sits beside it in
+  Imbens-Manski CI around each bound (a bootstrap of the fitted units, a unit being
+  a row and, on the fold sweep, a base row with its m augmented copies) instead of
+  the raw bound, and the raw record sits beside it in
   `{param}_results_raw.pkl`; `im-ci: 0` gives the raw numbers back. Under the CI the
   DA+ pad is eps* alone (the `EPS_TOL` it carried is the CI's job now; a73), so the
   raw record's DA+ widths are up to 2 `EPS_TOL` narrower than an `im-ci: 0` run's
