@@ -50,6 +50,16 @@ on it instead: `a32` (b) to (f) render a fixture tree written under `TMPROOT` wh
 `smoke_do_mnist.py` is an end-to-end query sweep at reduced scale (perf logs a warning and skips there);
 `--full` runs it at the config's own numbers.
 
+`sbatch_sweeps.py` is not a gate: it fans a config's sweeps out over a Slurm job
+array, one task per (dataset, sweep param) and one per perf block (do-MNIST blocks
+never), each running `src/main.py` unchanged in its own directory with `artifacts/`
+and `data/` linked to the repo's, so every task writes into the one shared tree.
+Every directive is a flag or an `SBATCH_SWEEPS_*` variable and none has a site
+default; `--dry-run` writes the task yamls and `run.sbatch` without submitting. On a
+laptop `uv run python src/main.py` stays the whole story, only slower. EXAMPLE, on
+PACE ICE: `--partition coc-cpu --account oms-csp --qos coc-ice --env-setup "module
+load uv" --out ~/scratch/runs/<name>` (the `--help` epilogue has the full line).
+
 ## Mean matching (Lem. 2)
 
 Every PI program solves on the mean-matched slice `E_n[h(X)] = E_n[Y]`, the

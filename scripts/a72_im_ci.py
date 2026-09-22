@@ -1075,7 +1075,6 @@ def leg_8():
     for source in ("config.yaml", "recipes/nEfficiencyFig13.yaml"):
         with open(os.path.join(REPO, source)) as handle:
             config = yaml.safe_load(handle) or {}
-        defaults = config.get("defaults") or {}
         expected = set()
         for dataset, blk in config.items():
             if dataset in ("defaults", "hyperparameters") or not isinstance(blk, dict):
@@ -1100,11 +1099,16 @@ def leg_8():
             for task in sorted(emitted):
                 with open(os.path.join(out, "configs", f"{task}.yaml")) as handle:
                     cfg = yaml.safe_load(handle)
+                check(
+                    f"(8) {task}.yaml carries the source's defaults and hyperparameters verbatim",
+                    cfg.get("defaults") == config.get("defaults")
+                    and cfg.get("hyperparameters") == config.get("hyperparameters"),
+                )
                 try:
                     for dataset, blk in cfg.items():
                         if dataset in ("defaults", "hyperparameters"):
                             continue
-                        merged = {**(cfg.get("defaults") or defaults), **blk}
+                        merged = {**(cfg.get("defaults") or {}), **blk}
                         plan = parse_experiment_plan(merged.get("experiment"))
                         resolve_dataset_block(dataset, merged)
                         stems += [(dataset, "sweep", p) for p in (plan.sweep.param if plan.sweep else ())]
@@ -1115,13 +1119,13 @@ def leg_8():
                 check(f"(8) {task}.yaml resolves", ok, detail)
             check(f"(8) {source}: no two tasks share a (dataset, subdir, stem)", len(stems) == len(set(stems)))
             script = read(os.path.join(out, "run.sbatch"))
-            asked = re.findall(r"^#SBATCH\s+--(partition|account|qos)", script, re.MULTILINE)
-            check(f"(8) {source}: no partition / account / QOS directive unasked", not asked, f"{asked}")
+            asked = re.findall(r"^#SBATCH\s+--(partition|account|qos|cpus-per-task|mem)", script, re.MULTILINE)
+            check(f"(8) {source}: no partition / account / QOS / cpus / mem directive unasked", not asked, f"{asked}")
             check(f"(8) {source}: no env-setup line unasked", "module load" not in script)
             links = glob.glob(os.path.join(out, "task_*"))
             good = [
-                os.path.abspath(os.readlink(os.path.join(t, "artifacts"))) == os.path.join(REPO, "artifacts")
-                and os.path.abspath(os.readlink(os.path.join(t, "data"))) == os.path.join(REPO, "data")
+                os.path.realpath(os.path.join(t, "artifacts")) == os.path.realpath(os.path.join(REPO, "artifacts"))
+                and os.path.realpath(os.path.join(t, "data")) == os.path.realpath(os.path.join(REPO, "data"))
                 for t in links
                 if os.path.islink(os.path.join(t, "artifacts")) and os.path.islink(os.path.join(t, "data"))
             ]
@@ -1131,7 +1135,8 @@ def leg_8():
             )
     with workdir("launch_flags_") as out:
         flags = ["--partition", "P0", "--account", "A0", "--qos", "Q0", "--env-setup", "echo setup"]
-        subprocess.run(  # noqa: S603 - our own script
+        flags += ["--cpus-per-task", "3", "--mem", "5G"]
+        done = subprocess.run(  # noqa: S603 - our own script
             [
                 sys.executable,
                 launcher,
@@ -1146,11 +1151,33 @@ def leg_8():
             text=True,
             cwd=REPO,
         )
+        check("(8) the flagged dry run exits 0", done.returncode == 0, done.stderr[-300:])
         script = read(os.path.join(out, "run.sbatch"))
-        check(
-            "(8) asked directives are emitted",
-            all(s in script for s in ("--partition=P0", "--account=A0", "--qos=Q0", "echo setup")),
+        asked = ("--partition=P0", "--account=A0", "--qos=Q0", "--cpus-per-task=3", "--mem=5G", "echo setup")
+        check("(8) asked directives are emitted", all(s in script for s in asked))
+
+    with workdir("launch_domnist_") as out:
+        synthetic = os.path.join(out, "with_do_mnist.yaml")
+        with open(synthetic, "w") as handle:
+            yaml.safe_dump(
+                {
+                    "defaults": {"n_jobs": 1},
+                    "simulation": {"seed": 42, "kernel_dim": 0, "experiment": {"sweep": {"param": ["n"]}}},
+                    "do_mnist": {
+                        "seed": 42,
+                        "experiment": {"sweep": {"param": ["m"]}, "perf": {"metric": ["seed_var"]}},
+                    },
+                },
+                handle,
+            )
+        subprocess.run(  # noqa: S603 - our own script
+            [sys.executable, launcher, "--config", synthetic, "--out", out, "--dry-run", "--tasks", "sweep,perf,query"],
+            capture_output=True,
+            text=True,
+            cwd=REPO,
         )
+        emitted = sorted(os.path.basename(p) for p in glob.glob(os.path.join(out, "configs", "*.yaml")))
+        check("(8) a do_mnist block is never fanned out", emitted == ["simulation_n.yaml"], f"{emitted}")
 
     hits = []
     paths = glob.glob(os.path.join(REPO, "src", "**", "*.py"), recursive=True)
