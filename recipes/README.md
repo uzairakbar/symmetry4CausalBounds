@@ -68,7 +68,7 @@ Read the other way:
 | `cigarettes-plasmode_fig12b.yaml` | the six sweep recipes + `latencyFig15` + `stabilityFig16` |
 | `iv_fig13.yaml` | `ivSimulationFig5` (query) + `validityFig9`, `robustnessFig11`, `sharpnessInformativenessFig10`, `nEfficiencyFig13`, `mEfficiencyFig14` (sweeps) |
 
-Three things changed across the board, not per file:
+Four things changed across the board, not per file:
 
 - **`calibrate: false` -> `recalibrate: true`.** Eight of the twelve old recipes
   (`simulation_fig5`, `optical-device_fig6`, `sharpness_fig7`, `informativeness_fig7`,
@@ -83,6 +83,11 @@ Three things changed across the board, not per file:
   `m-efficiency_fig10`).
 - **`DA+IV` / `DA+PI+IV` respelled `(T)` on the two headline query recipes.** Same
   estimator, the mode written out; see the grammar below.
+- **`im-ci: 95` on the six sweep recipes.** Every sweep metric now reads the 95%
+  Imbens-Manski CI around each bound (a bootstrap of each method's own fitted rows)
+  instead of the raw bound, and the raw record sits beside it in
+  `{param}_results_raw.pkl`; `im-ci: 0` gives the raw numbers back. The query and
+  perf recipes carry no key: neither path reads it.
 
 Two sweep params did not survive: the old `worst_error` and `width` x-axes of
 `informativeness_fig7` / `sharpness_fig7` are now metrics on the `omega` x-axis. The
