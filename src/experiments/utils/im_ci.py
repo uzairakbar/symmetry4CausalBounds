@@ -4,9 +4,9 @@ back as sampling error).
 
 Per sweep cell, B nonparametric bootstrap replicates of the fitted units are refit
 and re-solved on the cell's queries at the cell's budgets (a unit is a row; on the
-fold sweep it is a base row with its m augmented copies, carried together); per query the replicate
-spread gives s_L and s_U, and the interval [L - C s_L, U + C s_U] at the `im-ci`
-level replaces the finalised bounds before the metrics read them. Only
+fold sweep it is a base row with its m augmented copies, carried together); per
+query the replicate spread gives s_L and s_U, and the interval [L - C s_L, U + C s_U]
+at the `im-ci` level replaces the finalised bounds before the metrics read them. Only
 `ParamSweepRunner.run` calls this module.
 """
 
