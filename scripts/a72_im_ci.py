@@ -20,15 +20,17 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      symmetric case matches the closed form with the ddof-1 SD. Catches: the two z's
      swapped, an extra sqrt(n), the clamp missing, ddof 0, a NaN leaking into a
      raw-OK query.
-  2. resampling: an n-sweep cell has one index vector shared by X/y/GX/G/Z; an m = 4
-     sim cell draws n units once per replicate, the base rows are that draw and the
+  2. resampling: an n-sweep cell has one index vector shared by X/y/GX/G/Z, drawn
+     as the iid stream (one `rng.integers` per replicate); an m = 4 sim cell with an
+     instrument draws n units once per replicate, the base rows are that draw and the
      tiled rows its block-major expansion (block k = the draw + k n), the cell's
      tiling is what that expansion assumes (block k of X / y / Z is the base group,
      the GX blocks differ), a non-whole fold count raises, and through `fit_model`
      with recording stubs the baselines are fitted on n rows and the DA+ methods and
-     intersections on 4n; the same seed gives the same indices, another
-     cell others; replicate bounds bit-identical under pools of 1, 2 and -1 (the hard
-     assertion); speed on a warmed pool, printed and RECORDED, only > 1 asserted.
+     intersections on 4n; the same seed gives the same indices, another cell others;
+     replicate bounds bit-identical under pools of 1, 2 and -1 on the n cell and of 1
+     and -1 on an m = 4 cell (the hard assertions); speed on a warmed pool, printed
+     and RECORDED, only > 1 asserted.
   3. `im-ci: 0` reproduces `finite`: the fixture sweep (sim, n on [128, 512], 1
      experiment, PI / DA+PI / PI&DA+PI, the config.yaml toggles, serial solves)
      equals the digests RECORDED on the pre-change tree; at 95 its `results_raw`
@@ -52,7 +54,7 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      the valid fractions; on m the CI excess width per step too) printed and compared
      with RECORDED; the n readings must equal RECORDED exactly (the unit bootstrap is
      the iid one off the fold sweep), and PI, a base-group method, must read on m
-     what it read under the iid rule, within the tolerances.
+     what it read under the iid rule (its CI excess within `IID_EXCESS_RTOL`).
   7. render: the width figure of leg 6's record drawn without a swallowed error; its
      line is the CI record's nanmean in sorted-x order.
   8. the Slurm launcher (`sbatch_sweeps.py --dry-run`), no submission: one yaml per
@@ -264,9 +266,12 @@ RECORDED_6 = {
 }
 # leg 6's m readings of PI under the iid row bootstrap (RECORDED_6["m"] before the unit
 # bootstrap): a base-group method, whose resampling law the unit bootstrap leaves alone,
-# so its readings must hold; never bit for bit (another draw), so the width is read as the
-# CI excess (ratio - 1) within IID_EXCESS_RTOL: one SD from B = 100 replicates is ~7%
-# noisy, and two independent draws of it differ by ~10% at one sigma
+# so its readings must hold, but never bit for bit: the unit draw is another draw. The
+# width is read as the CI excess (ratio - 1) within IID_EXCESS_RTOL, a one-time band on
+# that change of draw: the largest step gap measured was 5.8% (0.2706 vs 0.2558), the
+# SDs being averaged over 12 queries and 2 experiments; the bugs it guards against (the
+# base group left alone, or fed the tiled rows) move the excess by -100% or about -65%.
+# From here on the 1% pin of RECORDED_6["m"]["PI"] is the tighter guard
 IID_M_PI = {
     "coverage": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
@@ -522,11 +527,18 @@ def leg_2():
     other, _ = im_ci.replicate_rows(len(arrays["X"]), None, 3, [IM_CI_SEED_OFFSET, 42, 0, 1])
     check("(2) the same seed gives the same indices, another cell others", np.array_equal(rows, again))
     check("(2) ... another (j, i) other indices", not np.array_equal(rows, other))
+    stream = np.random.default_rng([IM_CI_SEED_OFFSET, 42, 0, 0])
+    check(
+        "(2) off the fold sweep the draws are the iid stream, one rng.integers per replicate",
+        np.array_equal(rows, np.stack([stream.integers(0, len(arrays["X"]), len(arrays["X"])) for _ in range(3)])),
+    )
 
-    m_runner = runner_for(orch, "m")
+    # with an instrument, so the Z checks below compare real columns
+    m_runner = runner_for(sim_orchestrator(["PI"], iv=4), "m")
     folds = SweepData.coerce(m_runner.generate_data(0, 4))
     arrays = folds.fit_arrays
     n = len(arrays["X_base"])
+    check("(2) m = 4 cell: Z has instrument columns", arrays["Z"].shape[1] > 0, f"{arrays['Z'].shape}")
     rows, base_rows = im_ci.replicate_rows(len(arrays["X"]), n, 2, [IM_CI_SEED_OFFSET, 42, 0, 3])
     check("(2) m = 4 cell: 4n tiled rows, n base rows", rows.shape == (2, 4 * n) and base_rows.shape == (2, n))
     check(
@@ -616,6 +628,18 @@ def leg_2():
         "(2) replicate bounds bit-identical under pools of 1, 2 and -1",
         same,
         f"{ {k: v.shape for k, v in out[1].items()} }",
+    )
+    runner = runner_for(sim_orchestrator(FIXTURE_METHODS, im_ci_level=95.0), "m")
+    cell = SweepData.coerce(runner.generate_data(0, 4))
+    runner.build_models(0, 0, cell)
+    out = {}
+    with replicates(4):
+        for n_jobs in (1, -1):
+            runner.n_jobs = n_jobs
+            out[n_jobs] = runner.bootstrap_bounds(0, 0, cell, [4])
+    check(
+        "(2) ... and on the m = 4 cell under the unit indices, pools of 1 and -1",
+        all(np.array_equal(out[1][k], out[-1][k], equal_nan=True) for k in out[1]),
     )
 
     # speed: the first cell of a process pays the workers' spawn and imports once
