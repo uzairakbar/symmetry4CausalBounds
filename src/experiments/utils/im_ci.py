@@ -2,8 +2,9 @@
 Imbens-Manski confidence intervals around the sweep bounds (App. E's gamma_n, put
 back as sampling error).
 
-Per sweep cell, B nonparametric bootstrap replicates of the FITTED rows are refit
-and re-solved on the cell's queries at the cell's budgets; per query the replicate
+Per sweep cell, B nonparametric bootstrap replicates of the fitted units are refit
+and re-solved on the cell's queries at the cell's budgets (a unit is a row; on the
+fold sweep it is a base row with its m augmented copies, carried together); per query the replicate
 spread gives s_L and s_U, and the interval [L - C s_L, U + C s_U] at the `im-ci`
 level replaces the finalised bounds before the metrics read them. Only
 `ParamSweepRunner.run` calls this module.
@@ -90,17 +91,24 @@ def imbens_manski_bounds(estimate: NDArray, replicate_bounds: NDArray, level: fl
 
 
 def replicate_rows(n_rows: int, n_base: int | None, replicates: int, seed) -> tuple[NDArray, NDArray | None]:
-    """The iid row indices of every replicate, drawn in a fixed order: per
-    replicate `rows` over the tiled group, then `base_rows` over the base group
-    when there is one (`n_base` is None otherwise, and so is `base_rows`). Each
-    method thereby resamples exactly the rows it is fitted on (SS4.2); the two
-    draws are independent, since no method consumes both groups."""
+    """One draw of units per replicate. Off the fold sweep (`n_base` None) a unit
+    is a row and `rows` is its iid resample. On the fold sweep a unit is a base row
+    with its m tiled copies (`FoldStrategy` tiles, so copy k of unit i is row
+    k * n_base + i): `base_rows` is the n_base-unit draw and `rows` carries every
+    copy of every drawn unit block by block, so a replicate is again m DA passes
+    over n_base units. No method consumes both groups, and the one draw keeps every
+    method on the same units within a replicate."""
     rng = np.random.default_rng(seed)
+    units = n_rows if n_base is None else n_base
+    folds, remainder = divmod(n_rows, units)
+    if remainder:
+        raise ValueError(f"{n_rows} tiled rows is not a whole number of {units}-row folds")
+    offsets = np.arange(folds)[:, None] * units
     rows, base_rows = [], []
     for _ in range(replicates):
-        rows.append(rng.integers(0, n_rows, n_rows))
-        if n_base is not None:
-            base_rows.append(rng.integers(0, n_base, n_base))
+        draw = rng.integers(0, units, units)
+        rows.append((offsets + draw[None, :]).ravel())
+        base_rows.append(draw)
     return np.asarray(rows), (None if n_base is None else np.asarray(base_rows))
 
 

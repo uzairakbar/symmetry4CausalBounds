@@ -240,7 +240,8 @@ EPS_TOL: float = 2**-5
 # constraint's knife edge still needs it.
 
 # the Imbens-Manski CI of the `im-ci` toggle (SS3): B nonparametric bootstrap refits
-# of each method's own fitted rows per sweep cell; the replicate spread gives s_L, s_U
+# of the base units per sweep cell, a unit being a row and, on the fold sweep, its m
+# augmented copies; the replicate spread gives s_L, s_U
 IM_CI_REPLICATES: int = 100
 # a log threshold and nothing else: a cell whose mean valid-replicate fraction is
 # under it is logged as a WARNING; with < 2 valid replicates a query keeps its raw bounds
