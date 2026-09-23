@@ -12,7 +12,8 @@ Static legs (no MNIST; the tiny AL fit runs on whatever `device()` picks, second
         at the 60k and the 1.2M draw sizes, and a tiny fit at two sizes updates at
         exactly those steps, `updates_per_epoch` times per epoch at the larger one.
   (iv)  the plumbing: `erm_inv_fit_kwargs` carries the `DOMNIST_CONFIG` constants and
-        the epoch override, the default `erm_inv_tau` is 4e-4, and the orchestrator
+        the epoch override, which `train_erm_inv` honours over the pair's own
+        `epochs`, the default `erm_inv_tau` is 4e-4, and the orchestrator
         trains the ERM+INV net iff PI+INV runs under `inv` or ERM+INV is listed.
 
 GPU leg (`--nets`, a 60k draw, about two minutes):
@@ -157,6 +158,16 @@ def leg_iv():
     expected = TRAIN_KW["epochs"] if DOMNIST_CONFIG.erm_inv_epochs is None else DOMNIST_CONFIG.erm_inv_epochs
     check("(iv) the epoch count is erm_inv_epochs, else the pair's", kw["epochs"] == expected)
     check("(iv) an explicit epoch count wins", erm_inv_fit_kwargs(TRAIN_KW, 4e-4, epochs=2)["epochs"] == 2)
+    # the pair's dict carries `epochs` too: train_erm_inv must not let it shadow the
+    # override (20 batches at window 1, so the trace length counts the epochs)
+    rng = np.random.default_rng(1)
+    X = rng.random((64 * 20, 3 * 14 * 14), dtype=np.float32)
+    GX, y = X[::-1].copy(), (X[:, 0] > 0.5).astype(np.float32)
+    small = {**TRAIN_KW, "batch": 64}
+    two = train_erm_inv(X, GX, y, 0, 1e-3, small, epochs=2)
+    check("(iv) train_erm_inv honours the epoch override over the pair's", len(two.al_trace_) == 40)
+    default = train_erm_inv(X, GX, y, 0, 1e-3, small)
+    check("(iv) train_erm_inv defaults to erm_inv_epochs, else the pair's", len(default.al_trace_) == 20 * expected)
     cases = (
         ("inv", ["PI", "PI+INV"], True),
         ("off", ["PI", "PI+INV"], False),
@@ -215,8 +226,8 @@ def leg_v():
 
     def hook(X, GX, y, init_seed, train_kw):
         # the diagnostic pattern: another point first, then the configured one
-        train_erm_inv(X, GX, y, init_seed=init_seed, tau=tau * 10, **train_kw)
-        fitted["net"] = train_erm_inv(X, GX, y, init_seed=init_seed, tau=tau, **train_kw)
+        train_erm_inv(X, GX, y, init_seed, tau * 10, train_kw)
+        fitted["net"] = train_erm_inv(X, GX, y, init_seed, tau, train_kw)
         fitted["pairs"] = (X.copy(), GX.copy(), np.asarray(y).copy())
         return fitted["net"]
 
@@ -234,7 +245,7 @@ def leg_v():
     check("(v) run.json provenance carries the sha1", with_inv.diagnostics["erm_inv_state_sha1"] == sha)
 
     X, GX, y = fitted["pairs"]
-    again = train_erm_inv(X, GX, y, init_seed=block["seed"], tau=tau, **TRAIN_KW)
+    again = train_erm_inv(X, GX, y, block["seed"], tau, TRAIN_KW)
     check("(v) the AL fit is deterministic at a fixed init_seed", again.state_sha1() == sha)
 
     d = with_inv.diagnostics

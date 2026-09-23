@@ -1120,3 +1120,47 @@ def create_coverage_plot(
 
     if savefig:
         save(fig, fname, experiment, format, subdir=subdir, dpi=PLOT_DPI)
+
+
+def create_al_trace_plot(
+    traces: dict[tuple[float, int], NDArray],
+    n_batches: int,
+    savefig: bool = True,
+    format: str = PLOT_FORMAT,
+    experiment: str = "do_mnist",
+    fname: str = "erm_inv_trace",
+    subdir: str = "select",
+):
+    """The ERM+INV augmented Lagrangian's window-mean invariance error against
+    training progress, one panel per epoch count and one line per target tau, the
+    target drawn dotted in the line's colour (`scripts/diagnose_domnist_erm_inv.py`).
+
+    Args:
+        traces: {(tau, epochs): (n_updates, 4) rows of (step, c_bar, lam, mu)}
+        n_batches: steps per epoch, so the x-axis reads in epochs
+    """
+    plt.rcParams.update(RC_PARAMS)
+    colors = sns.color_palette("deep")
+    epochs = sorted({e for _, e in traces})
+    taus = sorted({t for t, _ in traces}, reverse=True)
+    fig, axes = plt.subplots(1, len(epochs), figsize=(PAGE_WIDTH, 2.6), sharey=True, squeeze=False)
+    for ax, e in zip(axes[0], epochs, strict=True):
+        for i, tau in enumerate(taus):
+            trace = np.asarray(traces.get((tau, e), np.empty((0, 4))), dtype=float)
+            if not len(trace):
+                continue
+            color = colors[i % len(colors)]
+            ax.plot(trace[:, 0] / n_batches, trace[:, 1], color=color, linewidth=1.4, label=rf"$\tau = {tau:g}$")
+            ax.axhline(tau, color=color, linewidth=0.9, linestyle=":")
+        ax.set_yscale("log")
+        ax.set_xlabel("epoch", fontsize=FS_LABEL - 8)
+        ax.set_title(f"{e} epoch{'s' if e > 1 else ''}", fontsize=FS_LABEL - 10)
+        ax.tick_params(labelsize=FS_TICK - 4)
+    axes[0][0].set_ylabel(r"window mean of $c$", fontsize=FS_LABEL - 8)
+    axes[0][-1].legend(fontsize=FS_TICK - 5, frameon=False, loc="best")
+    fig.tight_layout()
+
+    plt.show()
+
+    if savefig:
+        save(fig, fname, experiment, format, subdir=subdir, dpi=PLOT_DPI)

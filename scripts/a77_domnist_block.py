@@ -17,8 +17,9 @@ net, no run; seconds on a CPU).
         do-MNIST orchestrator's own registry builds the block's method list lazily
         (no net needed until a builder is CALLED).
   (iv)  the orchestrator: only the `gamma` sweep is wired, perf is skipped with a
-        warning, the query runner class carries the block's knobs, and
-        `DoMNISTSEM.f` raises (the estimand is analytic).
+        warning, the query runner class carries the block's knobs,
+        `DoMNISTSEM.f` raises (the estimand is analytic), and the selection script's
+        shared gamma is PI's alone (a source check: no max over methods).
 
 Run: uv run python scripts/a77_domnist_block.py
 """
@@ -247,6 +248,17 @@ def leg_iv():
     with open(os.path.join(REPO, "src", "sem", "do_mnist.py")) as fh:
         source = fh.read()
     check("(iv) DoMNISTSEM.f raises", "def f(self, X)" in source and "raise NotImplementedError" in source)
+    with open(os.path.join(REPO, "scripts", "select_domnist_gamma.py")) as fh:
+        selection = fh.read()
+    check(
+        "(iv) the selection calibrates on PI", re.search(r'^CALIBRATED_ON = "PI"$', selection, flags=re.M) is not None
+    )
+    check(
+        "(iv) the shared gamma is PI's alone",
+        'shared = float(record[CALIBRATED_ON]["gamma"])' in selection and "shared_gamma=shared" in selection,
+    )
+    no_max = re.search(r"\bmax\([^)]*\[.gamma.\]", selection) is None and "put the max" not in selection
+    check("(iv) the selection takes no max over the methods' gammas", no_max)
     for path in ("src/methods/partial_r2_net.py", "src/methods/partial_r2_net_jax.py"):
         check(f"(iv) {path} is gone", not os.path.exists(os.path.join(REPO, path)))
 

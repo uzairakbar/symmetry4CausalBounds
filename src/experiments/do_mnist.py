@@ -103,8 +103,10 @@ def erm_inv_fit_kwargs(train_kw: dict[str, Any], tau: float, epochs: int | None 
     return kw
 
 
-def train_erm_inv(X, GX, y, init_seed, tau, net="domnist-fast", epochs=None, **train_kw):
-    """The ERM+INV net on the UNMIXED pairs, matched to the pair by `init_seed`."""
+def train_erm_inv(X, GX, y, init_seed, tau, train_kw, net="domnist-fast", epochs=None):
+    """The ERM+INV net on the UNMIXED pairs, matched to the pair by `init_seed`.
+    `train_kw` is the pair's training dict, taken whole: its `epochs` yields to
+    `epochs`, then to `erm_inv_epochs` (`erm_inv_fit_kwargs`)."""
     kw = erm_inv_fit_kwargs(train_kw, tau, epochs)
     logger.info(f"do-mnist: training ERM+INV on {len(X):,} pairs, tau {tau:g}, {kw.get('epochs', 1)} epoch(s)")
     return InvariantGradientDescentERM(net).fit(X, y, GX=GX, init_seed=init_seed, **kw)
@@ -319,7 +321,7 @@ def draw_replicate(
         if inv_fits is not None:
             inv_net = inv_fits(X=X, GX=GX, y=y, init_seed=seed, train_kw=train_kw)
         else:
-            inv_net = train_erm_inv(X, GX, y, init_seed=seed, tau=tau, net=net, **train_kw)
+            inv_net = train_erm_inv(X, GX, y, init_seed=seed, tau=tau, train_kw=train_kw, net=net)
         seconds["INV"] = time.perf_counter() - start
     # mix-in IN PLACE on the A-draw GX: the ERM (and ERM+INV) are done with the
     # unmixed pairs, and the DA+ERM is the only consumer left. X is never written

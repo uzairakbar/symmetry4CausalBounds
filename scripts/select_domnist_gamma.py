@@ -1,13 +1,17 @@
 """Select the do-MNIST gamma by population coverage of h_* on split C.
 
 The block's gamma is EXPLICIT: this script picks it, the user pastes it into
-`config.yaml::do_mnist.gamma`. For each of PI and DA+PI it trains the block's
-replicate exactly as the run does (the nets on split A, the mix-in, the B rows),
-draws `n_select` rows from split C at `seed + 1` (never the run's evaluation
-population, which is MNIST test at `pop_seed`), bisects log gamma to the smallest
-value whose coverage of h_* reaches `target_coverage`, verifies the gaussian
-closed form when the link is gaussian, evaluates both on a common grid and
-writes `artifacts/do_mnist/select/gamma_selection.json` and `coverage.pdf`.
+`config.yaml::do_mnist.gamma`. One gamma serves every method, and it is calibrated
+on baseline PI alone. The script trains the block's replicate exactly as the run
+does (the nets on split A, the mix-in, the B rows), draws `n_select` rows from
+split C at `seed + 1` (never the run's evaluation population, which is MNIST test
+at `pop_seed`), and for each of PI and DA+PI bisects log gamma to the smallest
+value whose coverage of h_* reaches `target_coverage`. The shared value is PI's
+(`shared_gamma`, `calibrated_on: PI`); DA+PI's own bisection is a diagnostic, and
+its split-C coverage and width at the shared gamma are recorded beside it. The
+script verifies the gaussian closed form when the link is gaussian, evaluates both
+on a common grid and writes `artifacts/do_mnist/select/gamma_selection.json` and
+`coverage.pdf`.
 
 Run from a SCRATCH cwd holding the `config.yaml` (only its `defaults`,
 `hyperparameters` and `do_mnist` entries are read; the other blocks are never
@@ -30,13 +34,15 @@ from munch import munchify  # noqa: E402
 from src.experiments.configs import DOMNIST_CONFIG, resolve_dataset_block  # noqa: E402
 from src.experiments.do_mnist import EXPERIMENT_NAME, DoMNISTOrchestrator, population  # noqa: E402
 from src.experiments.utils import fit_model, save, set_seed  # noqa: E402
-from src.experiments.utils.coverage import bisect_gamma, grid_curves, required_gamma  # noqa: E402
+from src.experiments.utils.coverage import bisect_gamma, coverage_at, grid_curves, required_gamma  # noqa: E402
 from src.experiments.utils.diagnostics import centre_error_report  # noqa: E402
 from src.experiments.utils.plotting import create_coverage_plot  # noqa: E402
 from src.sem.do_mnist import SPLIT_DEFAULT  # noqa: E402
 
 SUBDIR = "select"
 SELECTED = ("PI", "DA+PI")
+#: the method the one shared gamma is calibrated on; the other is a diagnostic
+CALIBRATED_ON = "PI"
 
 
 def load_block(path: str) -> tuple[dict, dict]:
@@ -142,6 +148,16 @@ def select_gamma(block: dict, hyperparameters: dict, n_select: int, target: floa
             )
         record[name] = entry
 
+    # the one gamma of the run: PI's, fixed for every method
+    shared = float(record[CALIBRATED_ON]["gamma"])
+    record.update(shared_gamma=shared, calibrated_on=CALIBRATED_ON)
+    for name, model in models.items():
+        if name == CALIBRATED_ON:
+            continue
+        coverage, width = coverage_at(model, Xc, hc, shared)
+        record[name]["at_shared_gamma"] = dict(gamma=shared, coverage=float(coverage), width=float(width))
+        logger.info(f"{name} at the shared gamma {shared:.5g}: coverage {coverage:.4f} width {width:.4f} on C")
+
     # the bisections evaluate different gammas, so the figure gets ONE common grid
     grid = np.geomspace(lo, hi, DOMNIST_CONFIG.plot_points)
     sweep = {name: {"C": grid_curves(model, Xc, hc, grid)} for name, model in models.items()}
@@ -173,10 +189,14 @@ def main():
     n_select = DOMNIST_CONFIG.n_select if args.n_select is None else args.n_select
     target = float(block.get("target_coverage", 0.99)) if args.target is None else args.target
     record = select_gamma(block, hyperparameters, n_select, target, plot=not args.no_plot)
-    print(f"\n=== smallest gamma with coverage of h* >= {target} on split C (put the max into config) ===")
+    print(f"\n=== smallest gamma with coverage of h* >= {target} on split C (put PI's value into config) ===")
     for name in SELECTED:
         entry = record[name]
         print(f"{name}: gamma={entry['gamma']:.5g} coverage={entry['coverage']:.4f} width={entry['width']:.4f}")
+        if "at_shared_gamma" in entry:
+            at = entry["at_shared_gamma"]
+            print(f"{name} at PI's gamma: coverage={at['coverage']:.4f} width={at['width']:.4f}")
+    print(f"shared gamma (calibrated on {record['calibrated_on']}): {record['shared_gamma']:.17g}")
 
 
 if __name__ == "__main__":
