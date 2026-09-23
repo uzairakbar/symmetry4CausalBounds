@@ -186,24 +186,9 @@ class GradientDescentERM(pointEstimator):
         self.model = model
         super().__init__()
 
-    def _fit(
-        self,
-        X,
-        y,
-        lr=0.01,
-        batch=256,
-        epochs=1,
-        weight_decay=0.0,
-        label_smoothing=0.0,
-        optimizer="adam",
-        loss="mse",
-        betas=(0.7, 0.9),
-        onecycle=True,
-        init_seed=None,
-        **kwargs,
-    ):
+    def _setup(self, X, lr, weight_decay, betas, init_seed):
+        """Seed, build the net and its Adam; returns (device, optimizer)."""
         import torch
-        import torch.nn.functional as F
 
         from src.methods.nets import NETS, device
 
@@ -222,18 +207,14 @@ class GradientDescentERM(pointEstimator):
         self.f = NETS[self.model](self._input_dim).float().to(dev)
         self.f.train()
         opt = torch.optim.Adam(self.f.parameters(), lr=lr, weight_decay=weight_decay, betas=tuple(betas))
+        return dev, opt
 
-        Xt = torch.tensor(np.asarray(X), dtype=torch.float, device=dev)
-        yt = torch.tensor(np.asarray(y).reshape(-1, 1), dtype=torch.float, device=dev)
+    def _criterion(self, loss, label_smoothing):
+        """The per-batch fit loss on the net's output."""
+        import torch
+        import torch.nn.functional as F
+
         sig = isinstance(self.f[-1], torch.nn.Sigmoid)
-
-        # data already lives on the device; a DataLoader here is pure overhead
-        n_train, n_batches = len(Xt), max(1, int(np.ceil(len(Xt) / batch)))
-        sched = (
-            torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=int(epochs) * n_batches)
-            if onecycle
-            else None
-        )
 
         def _loss(p, target):
             t = target * (1 - 2 * label_smoothing) + label_smoothing if sig else target
@@ -242,6 +223,49 @@ class GradientDescentERM(pointEstimator):
             if not sig or loss == "mse":
                 return F.mse_loss(p, t)
             return F.binary_cross_entropy(p, t)
+
+        return _loss
+
+    @staticmethod
+    def _scheduler(opt, lr, epochs, n_batches, onecycle):
+        import torch
+
+        if not onecycle:
+            return None
+        return torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=int(epochs) * n_batches)
+
+    def _finish(self):
+        self.f.eval()
+        self._W = np.concatenate([w.detach().cpu().numpy().ravel() for w in self.f.parameters()])[:, None]
+        self.prefit_ = True  # PartialR2Net: reuse instead of refitting
+        return self
+
+    def _fit(
+        self,
+        X,
+        y,
+        lr=0.01,
+        batch=256,
+        epochs=1,
+        weight_decay=0.0,
+        label_smoothing=0.0,
+        optimizer="adam",
+        loss="mse",
+        betas=(0.7, 0.9),
+        onecycle=True,
+        init_seed=None,
+        **kwargs,
+    ):
+        import torch
+
+        dev, opt = self._setup(X, lr, weight_decay, betas, init_seed)
+        Xt = torch.tensor(np.asarray(X), dtype=torch.float, device=dev)
+        yt = torch.tensor(np.asarray(y).reshape(-1, 1), dtype=torch.float, device=dev)
+        _loss = self._criterion(loss, label_smoothing)
+
+        # data already lives on the device; a DataLoader here is pure overhead
+        n_train, n_batches = len(Xt), max(1, int(np.ceil(len(Xt) / batch)))
+        sched = self._scheduler(opt, lr, epochs, n_batches, onecycle)
 
         for _ in range(int(epochs)):
             perm = torch.randperm(n_train, device=dev)
@@ -253,11 +277,8 @@ class GradientDescentERM(pointEstimator):
                 if sched is not None:
                     sched.step()
 
-        self.f.eval()
         del Xt, yt
-        self._W = np.concatenate([w.detach().cpu().numpy().ravel() for w in self.f.parameters()])[:, None]
-        self.prefit_ = True  # PartialR2Net: reuse instead of refitting
-        return self
+        return self._finish()
 
     def _predict(self, X, **kwargs):
         import torch
@@ -278,28 +299,35 @@ class GradientDescentERM(pointEstimator):
         """Outcome-model protocol; mu_y is a flat (n,)."""
         return self._predict(np.asarray(X).reshape(len(X), -1)).ravel()
 
+    def state_sha1(self) -> str:
+        """sha1 over the float32 parameters in `state_dict` order: the net's identity."""
+        import hashlib
+
+        digest = hashlib.sha1()  # noqa: S324 (provenance digest, not security)
+        for value in self.f.state_dict().values():
+            digest.update(np.ascontiguousarray(value.detach().cpu().numpy(), dtype=np.float32).tobytes())
+        return digest.hexdigest()
+
     # -- state round-trip: `self.f` only exists after _fit, so caching needs this --
+
+    def state_blob(self) -> dict:
+        """The CPU copy `save_state` writes and `from_blob` reads back (about 1 MB)."""
+        return {
+            "model": self.model,
+            "input_dim": self._input_dim,
+            "state": {k: v.detach().cpu() for k, v in self.f.state_dict().items()},
+        }
 
     def save_state(self, path):
         import torch
 
-        torch.save(
-            {
-                "model": self.model,
-                "input_dim": self._input_dim,
-                "state": {k: v.detach().cpu() for k, v in self.f.state_dict().items()},
-            },
-            path,
-        )
+        torch.save(self.state_blob(), path)
         return path
 
     @classmethod
-    def load_state(cls, path):
-        import torch
-
+    def from_blob(cls, blob):
         from src.methods.nets import NETS, device
 
-        blob = torch.load(path, map_location="cpu", weights_only=True)
         self = cls(blob["model"])
         self._input_dim = int(blob["input_dim"])
         self.f = NETS[self.model](self._input_dim).float().to(device())
@@ -308,6 +336,116 @@ class GradientDescentERM(pointEstimator):
         self._W = np.concatenate([w.detach().cpu().numpy().ravel() for w in self.f.parameters()])[:, None]
         self.prefit_ = True
         return self
+
+    @classmethod
+    def load_state(cls, path):
+        import torch
+
+        return cls.from_blob(torch.load(path, map_location="cpu", weights_only=True))
+
+
+class InvariantGradientDescentERM(GradientDescentERM):
+    """ERM+INV: the ERM risk minimised subject to invariance on the DA pairs,
+
+        min E[(y - h(X))^2]  s.t.  c = E[(h(X) - h(GX))^2] <= tau,
+
+    by an augmented Lagrangian on `c / tau - 1 <= 0`. Same net, Adam, OneCycle,
+    batch order and `init_seed` reseeding as `GradientDescentERM`, so it is a
+    matched third member of the ERM / DA+ERM pair; X and GX are row-aligned and
+    share one permutation. `c` is read on the net's raw output.
+
+    The multiplier schedule is in epoch units: each epoch is cut into
+    `al_updates_per_epoch` windows of `n_batches // al_updates_per_epoch` steps (at
+    least 1), so a fit makes the same number of updates at 60k and at 1.2M draws.
+    At each window end `lam = max(0, lam + mu v)` on the window mean `v`, and `mu`
+    grows by `al_growth` (capped at `al_mu_max`) unless the violation fell below a
+    quarter of the previous window's. `al_trace_` keeps `(step, c_bar, lam, mu)`
+    per window. At tau = 0 the constraint has no interior and the scheme is an
+    increasing penalty; tau > 0 is a regular inequality.
+    """
+
+    @staticmethod
+    def al_window(n_batches: int, al_updates_per_epoch: int) -> int:
+        """Steps per multiplier update."""
+        return max(1, int(n_batches) // max(1, int(al_updates_per_epoch)))
+
+    def _fit(
+        self,
+        X,
+        y,
+        GX=None,
+        lr=0.01,
+        batch=256,
+        epochs=1,
+        weight_decay=0.0,
+        label_smoothing=0.0,
+        optimizer="adam",
+        loss="mse",
+        betas=(0.7, 0.9),
+        onecycle=True,
+        init_seed=None,
+        al_tau=4e-4,
+        al_mu0=1.0,
+        al_growth=4.0,
+        al_updates_per_epoch=20,
+        al_mu_max=1e4,
+        **kwargs,
+    ):
+        import torch
+
+        if GX is None:
+            raise ValueError("InvariantGradientDescentERM needs the DA pairs GX, row-aligned with X.")
+        GX = np.asarray(GX).reshape(len(GX), -1)
+        if GX.shape != np.asarray(X).shape:
+            raise ValueError(f"GX {GX.shape} is not row-aligned with X {np.asarray(X).shape}.")
+        if not al_tau > 0:
+            raise ValueError(f"al_tau must be positive; got {al_tau!r}.")
+        tau = float(al_tau)
+
+        dev, opt = self._setup(X, lr, weight_decay, betas, init_seed)
+        Xt = torch.tensor(np.asarray(X), dtype=torch.float, device=dev)
+        GXt = torch.tensor(GX, dtype=torch.float, device=dev)
+        yt = torch.tensor(np.asarray(y).reshape(-1, 1), dtype=torch.float, device=dev)
+        _loss = self._criterion(loss, label_smoothing)
+
+        n_train, n_batches = len(Xt), max(1, int(np.ceil(len(Xt) / batch)))
+        sched = self._scheduler(opt, lr, epochs, n_batches, onecycle)
+        window = self.al_window(n_batches, al_updates_per_epoch)
+
+        lam, mu, previous = 0.0, float(al_mu0), np.inf
+        running, count, step = torch.zeros((), device=dev), 0, 0
+        self.al_trace_ = []
+        for _ in range(int(epochs)):
+            perm = torch.randperm(n_train, device=dev)
+            for b in range(n_batches):
+                idx = perm[b * batch : (b + 1) * batch]
+                opt.zero_grad(set_to_none=True)
+                out = self.f(torch.cat([Xt[idx], GXt[idx]]))
+                p, pg = out[: len(idx)], out[len(idx) :]
+                c = ((p - pg) ** 2).mean()
+                t = torch.clamp(lam + mu * (c / tau - 1.0), min=0.0)
+                (_loss(p, yt[idx]) + (t**2 - lam**2) / (2.0 * mu)).backward()
+                opt.step()
+                if sched is not None:
+                    sched.step()
+                running += c.detach()
+                count += 1
+                step += 1
+                if count == window:
+                    # one host sync per window, not per step
+                    c_bar = float(running) / count
+                    violation = c_bar / tau - 1.0
+                    lam = max(0.0, lam + mu * violation)
+                    if max(violation, 0.0) > 0.25 * previous:
+                        mu = min(mu * float(al_growth), float(al_mu_max))
+                    previous = max(violation, 0.0)
+                    self.al_trace_.append((step, c_bar, lam, mu))
+                    running.zero_()
+                    count = 0
+
+        del Xt, GXt, yt
+        self.al_tau_ = tau
+        return self._finish()
 
 
 class GeneralizedMomentMethodIV(pointEstimator):
