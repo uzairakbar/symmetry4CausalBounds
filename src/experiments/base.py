@@ -73,6 +73,11 @@ class ExperimentDataContext:
     oracle: Any | None = None  # OracleParameters; unused by default
     # the real instrument, (n, m); None is spelled (n, 0) on construction (SS2.5)
     Z: np.ndarray | None = None
+    # a second augmented copy of the same rows for the invariance pairs, where the
+    # DA measure the DA+ methods fit on is not the pairs' measure (do-MNIST mixes
+    # observed rows into `GX`; the PI+INV pairs must stay unmixed). None everywhere
+    # else: `fit_model` then pairs X with `GX`
+    GX_inv: np.ndarray | None = None
 
     def __post_init__(self):
         self.Z = instrument_columns(self.Z, len(self.X))
@@ -98,6 +103,8 @@ class SweepData:
     # consumer ever sees one (SS2.5)
     Z: np.ndarray | None = None
     Z_base: np.ndarray | None = None
+    # the unmixed pairs for PI+INV, see `ExperimentDataContext.GX_inv`
+    GX_inv: np.ndarray | None = None
 
     def __post_init__(self):
         self.Z = instrument_columns(self.Z, len(self.X))
@@ -124,6 +131,7 @@ class SweepData:
             y_base=self.y_base,
             Z=self.Z,
             Z_base=self.Z_base,
+            GX_inv=self.GX_inv,
         )
 
     @property
@@ -212,13 +220,17 @@ class QuerySweepRunner(BaseExperimentRunner):
             Tuple of (query_points, predictions_dict)
         """
         context = self.setup_data()
+        self.context_ = context
         queries = self.get_sweep_values()
         results = {}
+        # the fitted models, by name: a runner that scores them elsewhere than on the
+        # sweep queries (do-MNIST's population metrics) reads them off here
+        self.models_ = {}
 
         with MANAGER.counter(total=len(self.methods), desc=desc, unit="methods") as pbar:
             for name, builder in self.methods.items():
                 if name == "ATE":
-                    predictions = context.sem.f(queries)
+                    predictions = self.estimand(queries)
                 else:
                     model = builder()
 
@@ -231,11 +243,13 @@ class QuerySweepRunner(BaseExperimentRunner):
                         GX=context.GX,
                         G=context.G,
                         Z=context.Z,
+                        GX_inv=context.GX_inv,
                         hyperparameters=self.hyperparameters,
                         da=context.da,
                     )
 
                     predictions = model.predict(queries)
+                    self.models_[name] = model
 
                 # Reshape for consistent output format
                 if "PI" in name:
@@ -246,6 +260,12 @@ class QuerySweepRunner(BaseExperimentRunner):
                 pbar.update()
 
         return queries, results
+
+    def estimand(self, queries) -> np.ndarray:
+        """The causal target at the queries, `sem.f` by default. A SEM whose target
+        is not a function of the query features (do-MNIST's h_* is a function of
+        the digit label) overrides this beside `get_sweep_values`."""
+        return self.context_.sem.f(queries)
 
     @abstractmethod
     def setup_data(self) -> ExperimentDataContext:

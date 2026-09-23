@@ -66,8 +66,8 @@ class BoundedSA(SA):
     # taken off the pad, never off the constraint: the sweeps set it to EPS_TOL under
     # the IM-CI (ParamSweepRunner), whose interval carries the sampling allowance the
     # tolerance used to add to the pad. 0.0 everywhere else, so every other number is
-    # today's. The net backend's own intersections (`partial_r2_net._branch_kwargs`)
-    # do not forward it; do-MNIST is the only caller and the config forces its
+    # today's. The CopSens intersections (`copsens._branch_kwargs`) forward it to
+    # their DA branch; do-MNIST is their only caller and the config forces its
     # `im-ci` to 0, so it never leaves 0.0 there
     pad_tolerance: float = 0.0
 
@@ -490,7 +490,7 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
 def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True, rho=1.0, recalibrate=True):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
-    Returned SQUARED, matching `PartialR2Net._budget()`, so the smallest admissible
+    Returned SQUARED, matching `CopSensPI._budget()`, so the smallest admissible
     budget is `sqrt(floor)` on BOTH backends even though the partial-r2 constraint
     is natively a norm. A budget below it makes every query
     INFEASIBLE -- that is what this exists to prevent.

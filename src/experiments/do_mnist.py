@@ -1,55 +1,76 @@
 """
-do-MNIST experiment: partial-r2 identification over a last-l-layer refit.
+do-MNIST experiment: a CopSens latent-factor ball around a prefit CNN.
 
-Two things differ from the linear experiments and shape everything here.
+Three things differ from the linear experiments and shape everything here.
 
-1. **The estimand is a trained net.** h_* is not linear in pixels, so `sem.solution`
-   does not exist and `sem.f` is a CNN fitted on interventional draws. Sound because
-   E[Y | X=x, do] = h_*(x) exactly. It is COUPLED to the ERM -- same images, same
-   init_seed -- so the estimation error the two share cancels in |mu_erm - h^|,
-   whose p95 is what sets the PI width.
+1. **The estimand is analytic.** h_*(x) = E[Y | do(x)] is a function of the digit
+   label alone (`sem.ate_of`, `sem.h_star`), never of the pixels, so `sem.f` does
+   not exist. The query path scores the exemplars through `estimand`, the sweep
+   path fills `SweepData.estimand` from the population draw's labels.
 
-2. **The outcome nets are PREFIT.** SOURCE trains one ERM on X and one on GX per
-   replicate and hands the appropriate one to every PI variant. Refitting inside
-   each `_fit` would cost four extra CNN fits, train on the n_pi subset, and break
-   the ERM/PI matching. That inverts the usual build order: methods can only be
-   built AFTER the data exists.
+2. **The outcome nets are PREFIT.** One ERM on the observed draw and one DA+ERM on
+   the augmented draw are trained per replicate and handed to every PI variant as
+   its centre. That inverts the usual build order: methods can only be built AFTER
+   the data exists, so the runners rebuild through the method factory once the
+   nets are there.
 
-Phase 1 is the query sweep; perf waits on the epsilon sweep. The sweep grids are
-Phase 2 -- see `get_sweep_runner_cls` for what each one still needs.
+3. **The split and mix-in protocol.** The 60k training images are partitioned
+   once (split A trains the nets, B is the only thing the PI machinery sees, C is
+   what the gamma selection bisects on); a `mix_in` share of the DA measure's rows
+   is swapped back to its observed row on the DA+ family only (Asm. 1b), so the
+   DA+ methods fit on a mixed `GX` while the PI+INV pairs stay unmixed (`GX_inv`).
+   `draw_replicate` performs the whole protocol in the reference order, so the
+   torch stream is consumed identically on the query and the sweep path.
+
+The query path is the exemplar figure plus the population `run.json`. Of the
+sweeps only `gamma` is wired (a ratio grid around the DECLARED gamma); see
+`DoMNISTOrchestrator.get_sweep_runner_cls` for what the others still need.
 """
+
+import time
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from loguru import logger
 
 from src.data_augmentors.do_mnist import DoMNISTDA as DA
-from src.experiments.base import ExperimentOrchestrator
+from src.experiments.base import ExperimentDataContext, ExperimentOrchestrator, SweepData
 from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import save
 from src.experiments.utils.constants import SUBDIR_QUERY
+from src.experiments.utils.diagnostics import erm_report, prescreen, probe
+from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
 from src.experiments.utils.plotting import create_digit_sweep_plot
 from src.methods.regression import GradientDescentERM
-from src.sem.do_mnist import DoMNISTSEM as SEM
+from src.oracle import OracleParameters
+from src.sem.do_mnist import SPLIT_DEFAULT, DoMNISTSEM, split_key
 
 EXPERIMENT_NAME = "do_mnist"
 
-# test draws must not collide with the train stream
-TEST_SEED_OFFSET: int = 77_000
+#: the point estimators of the backend; everything else predicts an interval
+POINT_METHODS: frozenset = frozenset({"ERM", "DA+ERM"})
 
 
 class Flatten:
     """Duck-types PolynomialFeatures, so images reach the methods through the
-    existing `poly_transform` hook and no base class has to learn about pixels."""
+    existing `poly_transform` hook and no base class has to learn about pixels.
+    A 2-D input is already flat and comes back as is."""
 
     def fit_transform(self, X):
         X = np.asarray(X)
-        # reshape on a C-contiguous array is a VIEW, which is what keeps X_raw + X
-        # at ~2.8 GB rather than 5.6 GB at 1.2M draws. Enforce it, so a future
-        # slicing change cannot silently double the footprint.
+        # reshape on a C-contiguous array is a VIEW, which is what keeps the 1.2M
+        # draw at ~2.8 GB rather than 5.6 GB. Enforce it, so a future slicing
+        # change cannot silently double the footprint.
         if not X.flags["C_CONTIGUOUS"]:
             raise ValueError("Flatten needs C-contiguous input to stay a view")
         return X.reshape(len(X), -1)
+
+
+def flat(X) -> np.ndarray:
+    """(N, ...) images to (N, d) float32 rows, the layout every method sees."""
+    return np.ascontiguousarray(np.asarray(X).reshape(len(X), -1), dtype=np.float32)
 
 
 def train_pair(X, GX, y, init_seed, net="domnist-fast", **train_kw):
@@ -77,12 +98,6 @@ def _net_rho(nets, X, GX, y) -> float:
     return mse_gx / mse_x
 
 
-def pi_subset(n_total: int, n_pi: int, seed: int) -> np.ndarray:
-    """Rows the latent model and constraints are fit on. Drawn once per experiment,
-    so PI and DA+PI see the same rows."""
-    return np.random.default_rng(seed).choice(n_total, min(n_pi, n_total), replace=False)
-
-
 def log_vacuous(bounds: dict[str, np.ndarray]):
     """An all-INFEASIBLE method draws nothing, so the figure shows only a legend
     entry. Say so, or it reads as a plotting bug."""
@@ -96,27 +111,28 @@ def log_vacuous(bounds: dict[str, np.ndarray]):
             )
 
 
-#: (constrained method, the UNCONSTRAINED model on the same ball). PI+INV is paired
-#: with DA+PI, not PI: `RecentredInvPartialR2Net` fits the post-DA measure, so
-#: DA+PI is its parent and PI is a different ball entirely.
-NESTED_IN = {
-    "PI+INV": "DA+PI",
-    "DA+PI+IV": "DA+PI",
-    "PI&DA+PI": "DA+PI",
-    "PI&DA+PI+IV": "DA+PI",
-}
+#: (constrained method, the UNCONSTRAINED model on the same ball), by the PI+INV
+#: centre: under `off` PI+INV is the X-centred ball with the pairs bolted on, so
+#: PI is its parent; under `on` (`RecentredInvCopSens`) it is the post-DA ball
+def nested_in(inv_recenter: str) -> dict[str, str]:
+    return {
+        "PI+INV": "DA+PI" if inv_recenter == "on" else "PI",
+        "DA+PI+IV": "DA+PI",
+        "PI&DA+PI": "DA+PI",
+        "PI&DA+PI+IV": "DA+PI",
+    }
 
 
-def log_nesting(bounds: dict[str, np.ndarray]):
-    """R5: the SLSQP multi-start is non-convex, so `constrained subset parent` is not
-    guaranteed. Logged, never raised -- a violation is information about the
+def log_nesting(bounds: dict[str, np.ndarray], inv_recenter: str = "off"):
+    """The SLSQP multi-start is non-convex, so `constrained subset parent` is not
+    guaranteed. Logged, never raised: a violation is information about the
     optimiser, not a reason to discard the run.
 
     Adding a constraint can only shrink the feasible set, so a constrained method
     must never come out WIDER than its parent. Coming out much narrower while the
     constraint is inactive is the other tell, and it is the one that under-covers.
     """
-    for name, parent in NESTED_IN.items():
+    for name, parent in nested_in(inv_recenter).items():
         if not {name, parent} <= set(bounds):
             continue
         child = np.asarray(bounds[name])
@@ -134,6 +150,168 @@ def log_nesting(bounds: dict[str, np.ndarray]):
             )
 
 
+def domnist_oracle(sem) -> OracleParameters:
+    """The oracle record of a do-MNIST pair. The augmentation is exactly invariant
+    by construction (a small translation, rotation or colour shift never moves
+    E[Y | do(x)]), so eps* and the T piece are 0, and gamma* is Lemma 2's
+    bias^2/sigma^2, which the CopSens LATENT budget does not measure (the sweeps
+    read the declared gamma instead, `DoMNISTMixin.fit_gamma`). Nothing here
+    calls the pixel-level oracle, which would need a `sem.f`."""
+    bias_sq, sigma_sq = float(sem.bias_sq), float(sem.sigma_sq)
+    logger.info(
+        f"do-mnist oracle: bias^2 {bias_sq:.4g} sigma^2 {sigma_sq:.4g} (Lemma-2 gamma* {bias_sq / sigma_sq:.4g}, "
+        "not the CopSens budget); eps* 0 by exact invariance."
+    )
+    return OracleParameters(
+        gamma_star=bias_sq / sigma_sq,
+        epsilon_star=0.0,
+        gamma_z_star=None,
+        bias_sq=bias_sq,
+        sigma_sq=sigma_sq,
+        rho=None,
+        eps_iv_star=0.0,
+        eps_iv_z_star=0.0,
+        eps_rms=0.0,
+        eta=0.0,
+        epsilon_star_pointwise=0.0,
+    )
+
+
+def population(sem_test, n: int, seed: int):
+    """The evaluation population: `n` observational draws from MNIST TEST at `seed`
+    (never in A/B/C) with the analytic target. Coverage and width are reported HERE,
+    not on the exemplars. Returns (P, h_star, h_erm, f) with P flat float32."""
+    X_img, _ = sem_test.sample(n, seed=seed)
+    last = dict(sem_test.last_)
+    return flat(X_img), sem_test.h_star(last["f"]), sem_test.h_erm(last["f"], last["C"]), last["f"]
+
+
+# =============================================================================
+# THE REPLICATE PROTOCOL
+# =============================================================================
+
+
+@dataclass
+class DoMNISTData:
+    """One replicate's fit arrays, flat float32 rows from split B.
+
+    `GX` and `G` are the MIXED augmentation (the DA+ family's measure, identity
+    rows where the mix-in swapped the observed row back in); `GX_inv` is the same
+    rows' UNMIXED augmentation, the PI+INV pairs. `nets` is the prefit pair.
+    """
+
+    X: np.ndarray
+    GX: np.ndarray
+    GX_inv: np.ndarray
+    y: np.ndarray
+    G: np.ndarray
+    nets: dict[str, Any]
+    mask_a: np.ndarray
+    mask_b: np.ndarray
+    split_key: str
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+def draw_replicate(
+    sem_train,
+    sem_test,
+    da,
+    seed: int,
+    n_samples: int,
+    n_pi: int,
+    mix_in: float,
+    hyperparameters: dict[str, Any] | None,
+    net: str,
+    split: dict[str, int] | None,
+    split_seed: int,
+) -> DoMNISTData:
+    """The reference protocol, in the reference order, so the torch stream is
+    consumed identically by every caller:
+
+    1. the image-level split of the training set at `split_seed`;
+    2. the nets' draw from A at `seed`, augmented on the global torch stream;
+    3. the ERM on the observed draw, the mix-in IN PLACE on the augmented draw
+       (seed `[seed, 1]`), the DA+ERM on the mixture;
+    4. the ERM report on the held-out probe;
+    5. the PI rows from B at `seed + 1`, augmented, and a mixed COPY at `[seed, 2]`
+       for the DA+ family; the pairs stay unmixed;
+    6. the prescreen (rho and the shift-operator spectrum) on the mixed B rows.
+    """
+    from src.experiments.utils import set_seed
+
+    set_seed(seed)
+    parts = sem_train.split(split or SPLIT_DEFAULT, split_seed)
+    key = split_key(parts)
+    logger.info(f"do-mnist: split { ({k: len(v) for k, v in parts.items()}) } seed {split_seed} key {key}")
+
+    train_kw = dict(hyperparameters or {})
+    sem_a = parts["A"]
+    X_img, y = sem_a.sample(n_samples, seed=seed)
+    GX_img, _ = da(X_img)
+    X = flat(X_img)
+    del X_img
+    GX = flat(GX_img)
+    del GX_img
+
+    # every net in a replicate shares init_seed: a matched pair, differing only in inputs
+    erm = GradientDescentERM(net).fit(X, y, init_seed=seed, **train_kw)
+    # mix-in IN PLACE on the A-draw GX: the ERM is done with the unmixed pairs, and
+    # the DA+ERM is the only consumer left. X itself is never written
+    GX, _, mask_a = da.mix_in(X, GX, None, mix_in, seed=[seed, 1], inplace=True)
+    logger.info(f"do-mnist: mix_in A-draw {int(mask_a.sum()):,} / {len(GX):,} rows observed (DA+ERM)")
+    da_erm = GradientDescentERM(net).fit(GX, y, init_seed=seed, **train_kw)
+    del X, GX
+    nets = {"X": erm, "GX": da_erm}
+
+    diagnostics = erm_report(erm, probe(sem_test, DOMNIST_CONFIG.probe_samples, DOMNIST_CONFIG.probe_seed))
+
+    # the PI rows: a draw from B at seed + 1, never the nets' draw
+    sem_b = parts["B"]
+    Xb_img, yb = sem_b.sample(n_pi, seed=seed + 1)
+    idx = sem_b.last_["idx"]
+    if not (np.isin(idx, sem_b.subset_).all() and not np.isin(idx, sem_a.subset_).any()):
+        raise RuntimeError("do-mnist: the PI rows left split B")
+    GXb_img, Gb = da(Xb_img)
+    Xb = flat(Xb_img)
+    del Xb_img
+    GXb = flat(GXb_img)
+    del GXb_img
+    # a mixed COPY for the DA+ family (DA+PI, DA+PI+IV and the prescreen whose rho
+    # feeds DA+PI+IV); GXb / Gb stay unmixed for the PI+INV pairs in every mode
+    GXb_da, Gb_da, mask_b = da.mix_in(Xb, GXb, Gb, mix_in, seed=[seed, 2])
+    logger.info(f"do-mnist: mix_in B-rows {int(mask_b.sum()):,} / {len(GXb):,} (DA+PI, DA+PI+IV, prescreen)")
+    diagnostics.update(mix_in_n_A=float(mask_a.sum()), mix_in_n_B=float(mask_b.sum()))
+    diagnostics.update(prescreen(Xb, yb, GXb_da, link=DOMNIST_CONFIG.link, keep=DOMNIST_CONFIG.spectrum_keep))
+    logger.info(
+        f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} tr(S)/k={diagnostics['tr_S_over_k']:.4f} "
+        f"contracts={diagnostics['contracts']}"
+    )
+    return DoMNISTData(
+        X=Xb,
+        GX=GXb_da,
+        GX_inv=GXb,
+        y=yb,
+        G=np.asarray(Gb_da, dtype=float),
+        nets=nets,
+        mask_a=mask_a,
+        mask_b=mask_b,
+        split_key=key,
+        diagnostics=diagnostics,
+    )
+
+
+def _jsonable(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(v) for v in value]
+    return value
+
+
 # =============================================================================
 # QUERY SWEEP
 # =============================================================================
@@ -144,16 +322,36 @@ class DoMNISTQuerySweep(GenericQuerySweep):
     reverse order, so the early build is suppressed and redone once nets exist."""
 
     def __init__(
-        self, method_factory=None, sem_test_factory=None, n_pi=60_000, default_gamma=0.1, default_epsilon=0.05, **kwargs
+        self,
+        method_factory=None,
+        sem_test_factory=None,
+        n_pi: int = 60_000,
+        n_queries: int = 2_000,
+        mix_in: float = 0.05,
+        split: dict[str, int] | None = None,
+        split_seed: int = 420,
+        pop_seed: int = 44,
+        exemplar_seed: int = 420,
+        net: str = "domnist-fast",
+        inv_recenter: str = "off",
+        default_gamma: float = 0.1,
+        default_epsilon: float = 0.05,
+        **kwargs,
     ):
-        self.sem_test_factory, self.n_pi = sem_test_factory, n_pi
+        self.sem_test_factory = sem_test_factory
+        self.n_pi, self.n_queries, self.mix_in = n_pi, n_queries, mix_in
+        self.split, self.split_seed, self.pop_seed = split, split_seed, pop_seed
+        self.exemplar_seed, self.net, self.inv_recenter = exemplar_seed, net, inv_recenter
         self.nets = None
-        # FORWARD the budgets: GenericQuerySweep stores them (its IV floor guard
-        # needs default_gamma). Setting them here instead would be silently
-        # overwritten by super's own defaults -- gamma 0.1 -> 1.0, which is a
-        # vacuous ball and flat bounds on every method.
+        self.data_ = None
+        # FORWARD the budgets: GenericQuerySweep stores them. Setting them here
+        # instead would be silently overwritten by super's own defaults.
         super().__init__(method_factory=None, default_gamma=default_gamma, default_epsilon=default_epsilon, **kwargs)
 
+        # rebuilt here, not in the base: handing the factory up would make
+        # GenericQuerySweep read `epsilon_iv`, which runs the linear constraint
+        # floor on the pixel design and logs a meaningless number. The T-as-IV
+        # budget is the block epsilon (the reference's `from_eps`)
         if method_factory is not None:
             self.methods = method_factory(
                 gamma=self.default_gamma,
@@ -163,40 +361,88 @@ class DoMNISTQuerySweep(GenericQuerySweep):
                 outcome_models=self.nets,
             )
 
+    def prepare_pair(self, sem, da, features=None):
+        return domnist_oracle(sem)
+
     def fit_rho(self) -> float:
-        """rho on the prefit nets' MSE over the n_pi rows, the same ratio the
-        intersections read off their branches (`IntersectedPartialR2Net.rho`)."""
+        """rho on the prefit nets' MSE over the B rows, the same ratio the
+        intersections read off their branches (`IntersectedCopSens.rho`)."""
         return _net_rho(self.nets, self.X, self.GX, self.y)
 
     def _load_data(self):
-        """ONE paired draw, which the SEM's target net drew identically (same N,
-        same seed) -- that is what couples the estimand to the ERM."""
-        X_raw, y, _ = self.sem.sample_paired(self.n_samples, seed=self.sem.seed)
-        GX_raw, G = self.da(X_raw)
-
-        # nets see the FULL draw; the PI machinery only the n_pi subset
-        self.nets = train_pair(
-            self.poly.fit_transform(X_raw),
-            self.poly.fit_transform(GX_raw),
-            y,
-            init_seed=self.sem.seed,
-            net=self.sem.net,
-            **(self.hyperparameters or {}),
+        """The replicate protocol at the runner's seed; (X, GX, y, G) flat, the
+        unmixed pairs kept on `data_` for `setup_data`."""
+        self.sem_test = self.sem_test_factory()
+        self.data_ = draw_replicate(
+            self.sem,
+            self.sem_test,
+            self.da,
+            seed=self.seed,
+            n_samples=self.n_samples,
+            n_pi=self.n_pi,
+            mix_in=self.mix_in,
+            hyperparameters=self.hyperparameters,
+            net=self.net,
+            split=self.split,
+            split_seed=self.split_seed,
         )
+        self.nets = self.data_.nets
+        return self.data_.X, self.data_.GX, self.data_.y, self.data_.G
 
-        keep = pi_subset(len(X_raw), self.n_pi, self.seed)
-        return X_raw[keep], GX_raw[keep], y[keep], G[keep]
+    def setup_data(self) -> ExperimentDataContext:
+        context = super().setup_data()
+        context.GX_inv = self.data_.GX_inv
+        return context
 
     def get_sweep_values(self) -> np.ndarray:
-        """The 10 frozen digit exemplars, from the TEST SEM -- the nets never saw
-        these images. GenericQuerySweep would run a PCA over (N,3,14,14) here,
-        which is a crash rather than a bad plot."""
-        sem_test = self.sem_test_factory()
-        self.exemplars_, self.digits_ = sem_test.exemplars(DOMNIST_CONFIG.exemplar_seed)
+        """The frozen digit exemplars from the UNRESTRICTED training set at
+        `exemplar_seed`, a visualisation set that is never scored. GenericQuerySweep
+        would run a PCA over the images here, which is a crash rather than a bad plot."""
+        colors = DOMNIST_CONFIG.exemplar_colors
+        exemplars, self.digits_ = self.sem.exemplars(self.exemplar_seed, colors=colors)
         # same digits and tints at full resolution: `subsample` is a modelling
         # choice, and the figure has no reason to inherit it
-        self.exemplar_images_, _ = sem_test.exemplars(DOMNIST_CONFIG.exemplar_seed, subsample=1)
-        return self.poly.fit_transform(self.exemplars_)
+        self.exemplar_images_, _ = self.sem.exemplars(self.exemplar_seed, colors=colors, subsample=1)
+        logger.info(f"do-mnist: exemplar digits {np.asarray(self.digits_).tolist()}")
+        return flat(exemplars)
+
+    def estimand(self, queries) -> np.ndarray:
+        """h_* at the exemplars, off their digit labels."""
+        return self.sem.ate_of(self.digits_)
+
+    # ------------------------------------------------------------- population
+
+    def evaluate_population(self) -> dict[str, Any]:
+        """Every fitted model scored on the evaluation population: coverage, width,
+        approximation and worst error, wall clock and the status split for the
+        intervals, RMSE for the point estimators, the NaN-row share, and the
+        INV floor / budget pair where PI+INV was fitted. A method whose every
+        interval is NaN reads coverage NaN (`evaluate_queries`), not 0."""
+        P, h_star, _, _ = population(self.sem_test, self.n_queries, self.pop_seed)
+        target = np.asarray(h_star).reshape(-1, 1)  # (n, 1), the shape `sem.f` gives elsewhere
+        out: dict[str, Any] = {}
+        for name, model in self.models_.items():
+            start = time.perf_counter()
+            prediction = np.asarray(model.predict(P))
+            elapsed = time.perf_counter() - start
+            if name in POINT_METHODS or prediction.ndim == 1 or prediction.shape[1] != 2:
+                out[f"rmse_{name}"] = float(np.sqrt(np.nanmean((prediction.ravel() - target.ravel()) ** 2)))
+                continue
+            record = evaluate_queries(
+                target, prediction, statuses=getattr(model, "query_status", None), elapsed=elapsed
+            )
+            out[f"coverage_{name}"] = float(record.coverage)
+            out[f"width_{name}"] = float(record.interval_width)
+            out[f"approx_error_{name}"] = float(record.approximation_error)
+            out[f"worst_error_{name}"] = float(record.worst_error)
+            out[f"wall_clock_{name}"] = float(record.wall_clock)
+            out[f"nan_{name}"] = float(np.isnan(prediction).any(axis=1).mean())
+            out[f"status_{name}"] = dict(zip(STATUS_CATEGORIES, [int(c) for c in record.status_counts], strict=True))
+            if name == "PI+INV":
+                out["inv_floor"] = float(model.constraint_floor(model._radius(model.gamma)))
+                out["inv_budget"] = float(model._budget())
+                logger.info(f"PI+INV: floor {out['inv_floor']:.4g} against budget eps^2 {out['inv_budget']:.4g}")
+        return out
 
 
 # =============================================================================
@@ -205,41 +451,62 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 
 
 class DoMNISTMixin:
-    """Prefit nets + the n_pi subset, composed OVER a sweep strategy.
+    """Prefit nets and the B rows, composed OVER a sweep strategy.
 
-    A mixin and not a base class: perf routes through `STRATEGIES['m']`, which has
-    its own `generate_data`, so this has to sit ahead of it in the MRO rather than
-    replace it.
+    A mixin and not a base class: it has to sit ahead of the strategy in the MRO
+    rather than replace it. The sweep is data-constant: the B draw is the step's
+    data, so no re-augmentation happens per step.
     """
 
-    def __init__(self, sem_test_factory=None, n_pi=60_000, n_queries=512, **kwargs):
+    def __init__(
+        self,
+        sem_test_factory=None,
+        n_pi: int = 60_000,
+        n_queries: int = 2_000,
+        mix_in: float = 0.05,
+        split: dict[str, int] | None = None,
+        split_seed: int = 420,
+        pop_seed: int = 44,
+        net: str = "domnist-fast",
+        **kwargs,
+    ):
         self.sem_test_factory = sem_test_factory
-        self.n_pi, self.n_queries = n_pi, n_queries
+        self.n_pi, self.n_queries, self.mix_in = n_pi, n_queries, mix_in
+        self.split, self.split_seed, self.pop_seed, self.net = split, split_seed, pop_seed, net
         self._nets = {}
+        self._data = {}
+        self._population = None
         super().__init__(**kwargs)
 
     def setup_sems_and_das(self):
         super().setup_sems_and_das()
-        # the test SEM holds the held-out MNIST images; queries are drawn from it
+        # the test SEM holds the held-out MNIST images; the population is drawn from it
         self.sems_test = [self.sem_test_factory() for _ in range(self.n_experiments)]
+
+    def prepare_pair(self, sem, da, features=None):
+        return domnist_oracle(sem)
 
     # -------------------------------------------------------- per-experiment policy
 
-    # fit_gamma is NOT overridden: the partial_r2_net ball lives in the same
-    # Lemma-2 function space as gamma* = bias_sq/sigma_sq, so the oracle value is
-    # principled again and the base-class default consumes it.
+    def fit_gamma(self, experiment_index: int) -> float:
+        """The DECLARED gamma, not the oracle gamma*: the CopSens budget is a
+        latent-space quantity (a radius on the factor scores of the outcome net's
+        input) that Lemma 2's bias^2/sigma^2 does not measure. The gamma sweep
+        therefore runs its ratio grid around the selected value."""
+        return float(self.default_gamma)
 
     def fit_epsilon(self, experiment_index: int, step_index: int = 0, data=None) -> float:
-        """A MODELLING ASSUMPTION, not estimable. The oracle eps* here measures the
-        TARGET NET's approximation error, not h_*'s invariance defect -- which is 0
-        for these ops, since none of them can change E[Y|do(x)]."""
-        return self.default_epsilon
+        """A MODELLING ASSUMPTION, not estimable: the true invariance defect of h_*
+        is 0 for these ops (none of them can change E[Y | do(x)]), and the
+        configured value is finite-sample slack. No floor report: the linear
+        `constraint_floor` does not apply to the latent ball."""
+        return float(self.default_epsilon)
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
-        """Same reasoning as fit_epsilon: eps_iv_star is not h_*'s defect either, so
-        the budget is the configured one and `ratio` (the epsilon sweep's per-step
+    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float:
+        """Same reasoning as fit_epsilon: the T-as-IV budget is the block epsilon
+        (the reference's `from_eps`), and `ratio` (the epsilon sweep's per-step
         call) does not move it."""
-        return self.default_epsilon
+        return float(self.default_epsilon)
 
     def fit_rho(self, experiment_index: int, data=None) -> float:
         """rho on the prefit nets' MSE over the step's rows (see `_net_rho`); the
@@ -253,40 +520,45 @@ class DoMNISTMixin:
 
     # ------------------------------------------------------------- base sample
 
+    def _shared_population(self):
+        """One population for every experiment, at `pop_seed` from MNIST test."""
+        if self._population is None:
+            P, h_star, _, _ = population(self.sems_test[0], self.n_queries, self.pop_seed)
+            self._population = (P, np.asarray(h_star).reshape(-1, 1))
+        return self._population
+
     def _draw_base(self, experiment_index: int, n_samples=None):
-        """Paired draw -> train the pair on the FULL draw -> subset for the PI.
-
-        The strategy re-augments the subset for the PI fits, so DA+ERM saw a
-        different DA realisation of the same images than DA+PI's GX. Statistically
-        the same draw; ~1 s over 60k images, against a full second pass over 1.2M.
-        """
-        sem = self.sems[experiment_index]
+        """The replicate protocol at `seed + j`; the population as the test set and
+        its analytic h_* as the estimand."""
         n_total = self.n_samples if n_samples is None else int(n_samples)
-
-        X_raw, y, _ = sem.sample_paired(n_total, seed=sem.seed)
-        GX_raw, _ = self.das[experiment_index](X_raw)
-        self._nets[experiment_index] = train_pair(
-            self.apply_transform(X_raw),
-            self.apply_transform(GX_raw),
-            y,
-            init_seed=sem.seed,
-            net=sem.net,
-            **(self.hyperparameters or {}),
+        data = draw_replicate(
+            self.sems[experiment_index],
+            self.sems_test[experiment_index],
+            self.das[experiment_index],
+            seed=self.seed + experiment_index,
+            n_samples=n_total,
+            n_pi=self.n_pi,
+            mix_in=self.mix_in,
+            hyperparameters=self.hyperparameters,
+            net=self.net,
+            split=self.split,
+            split_seed=self.split_seed,
         )
-        del GX_raw
+        self._nets[experiment_index] = data.nets
+        self._data[(experiment_index, n_samples)] = data
+        P, h_star = self._shared_population()
+        return (data.X, data.X, data.y, P, h_star)
 
-        keep = pi_subset(len(X_raw), self.n_pi, self.seed + experiment_index)
-        X_raw, y = X_raw[keep], y[keep]
-
-        # queries: interventional draws from the HELD-OUT images. n_queries, not
-        # test_fraction * n: at 1.2M that would be 120k queries x ~0.1 s = days.
-        sem_test = self.sems_test[experiment_index]
-        X_test_raw, _ = sem_test(
-            N=self.n_queries, intervention=True, seed=self.seed + TEST_SEED_OFFSET + experiment_index
-        )
-        X_test = self.apply_transform(X_test_raw)
-
-        return (X_raw, self.apply_transform(X_raw), y, X_test, sem.f(X_test))
+    def _sweep_data(
+        self, experiment_index: int, n_samples: int | None = None, common_random: bool = False, **augment_kwargs
+    ) -> SweepData:
+        """The B draw as the step's data: the mixed GX and G for the DA+ family, the
+        unmixed pairs for PI+INV. No second DA pass, no common-random-number knob."""
+        if augment_kwargs:
+            raise NotImplementedError(f"do-mnist: the DA is not re-drawn per step ({sorted(augment_kwargs)}).")
+        X_raw, X, y, X_test, estimand, Z = self._base_data(experiment_index, n_samples)
+        data = self._data[(experiment_index, n_samples)]
+        return SweepData(X=X, y=y, GX=data.GX, G=data.G, X_test=X_test, estimand=estimand, Z=Z, GX_inv=data.GX_inv)
 
 
 # =============================================================================
@@ -305,16 +577,31 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         gamma: float,
         epsilon: float,
         n_pi: int = 60_000,
-        n_queries: int = 512,
+        n_queries: int = 2_000,
         net: str = "domnist-fast",
-        unfrozen_layers: int = DOMNIST_CONFIG.unfrozen_layers,
+        n_components: int = 32,
+        mix_in: float = 0.05,
+        target_coverage: float = 0.99,
+        inv_recenter: str = "off",
+        gamma_z_star: float = 0.0,
+        calibrate_sigma: bool = True,
+        split: dict[str, int] | None = None,
+        split_seed: int = 420,
+        pop_seed: int = 44,
+        exemplar_seed: int = 420,
+        augmentation_amounts: dict[str, float] | None = None,
         **kwargs,
     ):
         self.augmentation = augmentation
+        self.augmentation_amounts = augmentation_amounts
         self.gamma, self.epsilon = gamma, epsilon
-        self.n_pi, self.n_queries = n_pi, n_queries
-        self.net = net
-        self.unfrozen_layers = unfrozen_layers
+        self.n_pi, self.n_queries, self.net = n_pi, n_queries, net
+        self.n_components, self.mix_in = n_components, mix_in
+        self.target_coverage = target_coverage
+        self.inv_recenter = {True: "on", False: "off"}.get(inv_recenter, str(inv_recenter).strip().lower())
+        self.gamma_z_star, self.calibrate_sigma = gamma_z_star, calibrate_sigma
+        self.split = {k: int(v) for k, v in (split or SPLIT_DEFAULT).items()}
+        self.split_seed, self.pop_seed, self.exemplar_seed = split_seed, pop_seed, exemplar_seed
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
@@ -322,70 +609,89 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             n_jobs=kwargs.get("n_jobs", 1),
             mean_match=kwargs.get("mean_match", True),
         )
-        toggles = self.toggles
         outer = self
 
         class DoMNISTRegistry(MethodRegistry):
             @staticmethod
             def build_methods(names):
-                return MethodRegistry.build_methods(
-                    names,
-                    gamma=gamma,
-                    epsilon=epsilon,
-                    backend="partial_r2_net",
-                    unfrozen_layers=outer.unfrozen_layers,
-                    **toggles,
-                )
+                return outer._build(names, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon, **outer.toggles)
 
         super().__init__(EXPERIMENT_NAME, DoMNISTRegistry(), **kwargs)
 
     # ---------------------------------------------------------------- factories
 
     def _sem_factory(self, train: bool = True):
-        return SEM(
+        return DoMNISTSEM(
             seed=self.kwargs["seed"],
             train=train,
-            net=self.net,
             alpha=DOMNIST_CONFIG.alpha,
             beta=DOMNIST_CONFIG.beta,
             eta=DOMNIST_CONFIG.eta,
             subsample=DOMNIST_CONFIG.subsample,
-            # the target net draws at exactly (n_samples, seed), which is what the
-            # runners draw too -- that identity IS the coupling
-            target_samples=self.kwargs["n_samples"],
-            target_kw=dict(self.kwargs.get("hyperparameters") or {}),
         )
 
     def _sem_test_factory(self):
         return self._sem_factory(train=False)
 
-    def _da_factory(self, sem=None):
-        return DA(self.augmentation)
+    def _da_factory(self, sem=None, append=None):
+        if append is not None:
+            raise NotImplementedError("do-mnist: the DA chain is fixed by the block; no robustness chain is appended.")
+        return DA(self.augmentation, amounts=self.augmentation_amounts)
 
     def _poly_factory(self):
         return Flatten()
 
-    def build_methods(
-        self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None, epsilon_iv_z=0.0
-    ):
-        """Methods at explicit budgets. `n_jobs` overrides the toggle -- perf needs
-        serial models to time methods, not the harness. `epsilon_iv_z` is accepted
-        because the runner hands it to every factory; the net backend has no
-        real-Z instrument and never reads it."""
-        toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
+    def _build(self, names, gamma, epsilon, epsilon_iv=None, rho=1.0, outcome_models=None, **toggles):
         return MethodRegistry.build_methods(
-            self.kwargs["methods"],
+            names,
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
             rho=rho,
-            backend="partial_r2_net",
+            backend="copsens",
             outcome_models=outcome_models,
-            unfrozen_layers=self.unfrozen_layers,
+            n_components=self.n_components,
+            inv_recenter=self.inv_recenter,
+            calibrate_sigma=self.calibrate_sigma,
+            gamma_z_star=self.gamma_z_star,
+            **toggles,
+        )
+
+    def build_methods(
+        self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None, epsilon_iv_z=0.0
+    ):
+        """Methods at explicit budgets. `n_jobs` overrides the toggle. `epsilon_iv_z`
+        is accepted because the runner hands it to every factory; the backend has
+        no real-Z instrument and never reads it."""
+        toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
+        return self._build(
+            self.kwargs["methods"],
+            gamma=gamma,
+            epsilon=epsilon,
+            epsilon_iv=self.epsilon if epsilon_iv is None else epsilon_iv,
+            rho=rho,
+            outcome_models=outcome_models,
             **toggles,
         )
 
     # ------------------------------------------------------------------ runners
+
+    def _runner_kwargs(self) -> dict[str, Any]:
+        return dict(
+            sem_factory=self._sem_factory,
+            sem_test_factory=self._sem_test_factory,
+            da_factory=self._da_factory,
+            poly_transform=self._poly_factory(),
+            default_gamma=self.gamma,
+            default_epsilon=self.epsilon,
+            n_pi=self.n_pi,
+            n_queries=self.n_queries,
+            mix_in=self.mix_in,
+            split=self.split,
+            split_seed=self.split_seed,
+            pop_seed=self.pop_seed,
+            net=self.net,
+        )
 
     def get_query_runner_cls(self) -> type[GenericQuerySweep]:
         outer = self
@@ -393,30 +699,23 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         class ConfiguredQuerySweep(DoMNISTQuerySweep):
             def __init__(inner, **kwargs):
                 super().__init__(
-                    sem_factory=outer._sem_factory,
-                    sem_test_factory=outer._sem_test_factory,
-                    da_factory=outer._da_factory,
-                    poly_transform=outer._poly_factory(),
                     method_factory=outer.build_methods,
-                    default_gamma=outer.gamma,
-                    default_epsilon=outer.epsilon,
-                    n_pi=outer.n_pi,
+                    exemplar_seed=outer.exemplar_seed,
+                    inv_recenter=outer.inv_recenter,
+                    **outer._runner_kwargs(),
                     **kwargs,
                 )
 
         return ConfiguredQuerySweep
 
     def get_sweep_runner_cls(self, param: str) -> type:
-        if param != "m":
+        if param != "gamma":
             raise NotImplementedError(
-                f"do_mnist {param} sweep is Phase 2. Blockers: "
-                "(a) epsilon -- needs a trusted eps*, which the estimated target does "
-                "not give (see fit_epsilon); (b) omega -- needs augment_kwargs_fn "
-                "wired to DA.strength, and _augment_once must pass its seed through "
-                "to the DA so common random numbers reach the torch draws; "
-                "(c) n -- needs the nets retrained per step. gamma is no longer "
-                "blocked -- gamma* is principled under partial_r2_net -- but its "
-                "grid is still unwired."
+                f"do_mnist {param} sweep is not wired. What each needs: epsilon, an "
+                "absolute grid (eps* is 0 here, so a ratio of it is empty); omega, an "
+                "augment_kwargs_fn on DA.strength with common random numbers through "
+                "the torch generator; n, the nets retrained per step; m, a tiled fit "
+                "of the prefit nets' ball; recalibrate, a rho the latent ball reads."
             )
 
         outer, Strategy = self, STRATEGIES[param]
@@ -424,35 +723,86 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         class ConfiguredSweep(DoMNISTMixin, Strategy):  # MRO: mixin first
             def __init__(inner, **kwargs):
                 super().__init__(
-                    sem_factory=outer._sem_factory,
-                    sem_test_factory=outer._sem_test_factory,
-                    da_factory=outer._da_factory,
-                    poly_transform=outer._poly_factory(),
                     test_fraction=DOMNIST_CONFIG.test_fraction,
-                    default_gamma=outer.gamma,
-                    default_epsilon=outer.epsilon,
                     experiment_name=EXPERIMENT_NAME,
-                    n_pi=outer.n_pi,
-                    n_queries=outer.n_queries,
+                    **outer._runner_kwargs(),
                     **kwargs,
                 )
 
         return ConfiguredSweep
 
     def _run_perf(self, perf_spec):
-        """The perf sweeps run on the epsilon grid, which is Phase 2 here
-        (`get_sweep_runner_cls`); the init-seed seed_var is a later round."""
+        """The perf sweeps run on the epsilon grid, which is not wired here
+        (`get_sweep_runner_cls`)."""
         logger.warning("do-mnist: perf skipped, the epsilon sweep it runs on is not wired here.")
 
     # --------------------------------------------------------------------- plot
 
     def _plot_query_sweep(self, runner, results):
-        """x-axis is 10 digit exemplars, so thumbnails replace a numeric axis."""
-        log_nesting(results)
+        """x-axis is the digit exemplars, so thumbnails replace a numeric axis. The
+        population metrics, the ERM report, the prescreen and the provenance go to
+        `run.json` beside the pkls."""
+        log_nesting(results, self.inv_recenter)
         log_vacuous(results)
-        digits = list(runner.digits_)
+        digits = [int(d) for d in runner.digits_]
 
         save(np.asarray(digits), "treatment_values", self.name, "pkl", subdir=SUBDIR_QUERY)
         save(results, "outcome_values", self.name, "pkl", subdir=SUBDIR_QUERY)
 
+        ate = np.asarray(results["ATE"]).reshape(len(digits), -1) if "ATE" in results else runner.estimand(None)
+        record = dict(runner.data_.diagnostics)
+        record.update(runner.evaluate_population())
+        record.update(self._exemplar_summary(results, ate))
+        record.update(
+            gamma=float(self.gamma),
+            epsilon=float(self.epsilon),
+            target_coverage=float(self.target_coverage),
+            gamma_z_star=float(self.gamma_z_star),
+            inv_recenter=self.inv_recenter,
+            iv_rho=float(runner.fit_rho()),
+            n_components=int(self.n_components),
+            calibrate_sigma=bool(self.calibrate_sigma),
+            link=DOMNIST_CONFIG.link,
+            mix_in=float(self.mix_in),
+            augmentation=self.augmentation,
+            augmentation_amounts=self.augmentation_amounts,
+            n=int(self.kwargs["n_samples"]),
+            n_pi=int(self.n_pi),
+            n_queries=int(self.n_queries),
+            seed=int(self.kwargs["seed"]),
+            alpha=DOMNIST_CONFIG.alpha,
+            beta=DOMNIST_CONFIG.beta,
+            eta=DOMNIST_CONFIG.eta,
+            subsample=DOMNIST_CONFIG.subsample,
+            split=self.split,
+            split_seed=int(self.split_seed),
+            split_key=runner.data_.split_key,
+            pop_seed=int(self.pop_seed),
+            exemplar_seed=int(self.exemplar_seed),
+            digits=digits,
+            ate=np.asarray(ate).ravel().tolist(),
+            methods=list(self.kwargs["methods"]),
+            **{f"toggle_{k}": v for k, v in self.toggles.items()},
+        )
+        save(_jsonable(record), "run", self.name, "json", subdir=SUBDIR_QUERY)
+        headline = {k: v for k, v in record.items() if k.startswith(("coverage_", "width_", "rmse_"))}
+        logger.info(f"do-mnist population: {headline}")
+
         create_digit_sweep_plot(runner.exemplar_images_, results, labels=digits, experiment=self.name)
+
+    @staticmethod
+    def _exemplar_summary(results, ate) -> dict[str, float]:
+        """EXEMPLAR-only width and coverage (the visualisation queries). The
+        headline numbers are the population ones. `ate` is (n_queries, 1)."""
+        out = {}
+        for name, p in results.items():
+            if name == "ATE":
+                continue
+            p = np.asarray(p)
+            if p.ndim == 3:
+                lo, hi = p[:, :, 0], p[:, :, 1]
+                out[f"width_exemplar_{name}"] = float(np.nanmean(hi - lo))
+                out[f"coverage_exemplar_{name}"] = float(np.nanmean((lo <= ate) & (ate <= hi)))
+            else:
+                out[f"rmse_exemplar_{name}"] = float(np.sqrt(np.nanmean((p - ate) ** 2)))
+        return out

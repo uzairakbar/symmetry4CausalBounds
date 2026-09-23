@@ -17,12 +17,13 @@ from src.experiments.utils.constants import (
     spelled_method,
     validate_plot_keys,
 )
-from src.methods.partial_r2_net import (
-    IntersectedIVPartialR2Net,
-    IntersectedPartialR2Net,
-    IVConstrainedPartialR2Net,
-    PartialR2Net,
-    RecentredInvPartialR2Net,
+from src.methods.copsens import (
+    CopSensPI,
+    IntersectedCopSens,
+    IntersectedIVCopSens,
+    InvarianceConstrainedCopSens,
+    IVConstrainedCopSens,
+    RecentredInvCopSens,
 )
 from src.methods.regression import (
     LeastSquaresClosedForm as ERM,
@@ -140,11 +141,37 @@ class DoMNISTConfig:
     beta: float = 0.4
     eta: float = 0.25
     subsample: int = 2  # 1 = 28x28 (d=2352), 2 = 14x14 (d=588)
-    exemplar_seed: int = 1  # digit exemplars, frozen across replicates
-    link: Literal["probit", "logistic"] = "probit"
-    # how many trailing layers of the prefit net are refit. l=1 is the 257-param
-    # head; l=2 adds the ~74k-param fc1 (slow, AL solver).
-    unfrozen_layers: int = 1
+    # the CopSens outcome link: probit is the configured one (the closed-form h is
+    # a Gaussian cdf of the latent shift), gaussian the identity link the closed
+    # form verifier of the selection script uses. Not a block key: a run never
+    # restates it, and the selection script's verifier reads it
+    link: Literal["probit", "gaussian"] = "probit"
+    # the CopSens plumbing (src/methods/copsens.py): anchors of the marginalising
+    # average, the smaller anchor set of the constraint, the constraint rows of the
+    # INV and IV cones, analytic JAX gradients for the SLSQP solves, and the clip
+    # of the outcome net's mean to the attainable range
+    n_anchors: int = 128
+    n_anchors_c: int = 48
+    n_constraint_inv: int = 192
+    n_constraint_iv: int = 384
+    jax_grad: bool = True
+    mu_clip: bool = True
+    # the exemplar tints on the query axis, alternating red/blue down the digits
+    exemplar_colors: Literal["alternating", "random"] = "alternating"
+    # the held-out probe of the ERM report: obs/do paired draws from MNIST test
+    probe_seed: int = 7
+    probe_samples: int = 10_000
+    # the gamma selection (scripts/select_domnist_gamma.py): rows drawn from
+    # split C, the bisection bracket on log gamma, its tolerance, the iteration
+    # cap and the number of grid points of the coverage figure
+    n_select: int = 5_000
+    gamma_lo: float = 1e-4
+    gamma_hi: float = 10.0
+    gamma_tol: float = 0.05
+    max_iter: int = 20
+    plot_points: int = 8
+    # the shift-operator spectrum cut of the prescreen (`diagnostics.shift_operators`)
+    spectrum_keep: float = 0.999
     test_fraction: float = 0.1
 
     @property
@@ -690,7 +717,7 @@ ALL_METHODS: tuple[str, ...] = (
 # a strict subset of ALL_METHODS: no point-estimate IV of either kind. It DOES define the
 # intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
 # membership fact, not a claim that the two balls share a parameterisation.
-PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
+COPSENS_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
@@ -703,7 +730,7 @@ PARTIAL_R2_NET_METHODS: tuple[str, ...] = (
 )
 
 
-def _partial_r2_net_builders(
+def _copsens_builders(
     method_names,
     gamma,
     epsilon,
@@ -715,66 +742,85 @@ def _partial_r2_net_builders(
     mean_match,
     rho,
     outcome_models,
-    unfrozen_layers,
+    n_components,
+    inv_recenter,
+    calibrate_sigma,
+    gamma_z_star,
 ):
-    """partial_r2_net backend (App. D, (P2)). Every method refits the last
-    `unfrozen_layers` layers of a PREFIT outcome net, so only the constraint set
-    differs between them."""
+    """The CopSens backend (do-MNIST): a latent-factor ball around a PREFIT outcome
+    net, so only the centre net, the fit rows and the constraint set differ between
+    the methods. `inv_recenter` picks PI+INV's centre: `off` is the X net with the
+    ball on X and the pairs (X, GX), `on` the GX net with the ball on the unmixed GX
+    and the pairs (GX, X)."""
     common = dict(
         link=DOMNIST_CONFIG.link,
-        unfrozen_layers=unfrozen_layers,
+        n_components=n_components,
+        n_anchors=DOMNIST_CONFIG.n_anchors,
+        n_anchors_c=DOMNIST_CONFIG.n_anchors_c,
+        calibrate_sigma=calibrate_sigma,
+        # mu_y outside the attainable range is impossible under the SEM
+        mu_clip=DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else None,
+        jax_grad=DOMNIST_CONFIG.jax_grad,
         recalibrate=recalibrate,
         clipy=clipy,
         n_jobs=n_jobs,
         mean_match=mean_match,
     )
     # the standalone DA+ balls carry the step's rho; the intersections read
-    # theirs off their two branches (`IntersectedPartialR2Net.rho`)
+    # theirs off their two branches (`IntersectedCopSens.rho`)
     da_common = dict(common, rho=rho)
+    inv = dict(n_constraint=DOMNIST_CONFIG.n_constraint_inv)
+    iv = dict(n_constraint=DOMNIST_CONFIG.n_constraint_iv, gamma_z_star=gamma_z_star)
 
     def net(key):
         if outcome_models is None:
             raise ValueError(
-                "partial_r2_net methods need the prefit outcome nets. "
+                "copsens methods need the prefit outcome nets. "
                 "`ExperimentOrchestrator.methods` names them only -- the runner "
                 "must rebuild via method_factory(..., outcome_models=...) once the "
                 "nets exist."
             )
         return outcome_models[key]
 
+    def pi_inv():
+        if inv_recenter == "on":
+            return RecentredInvCopSens(
+                gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **inv, **common
+            )
+        return InvarianceConstrainedCopSens(
+            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **inv, **common
+        )
+
     all_builders = {
-        "ATE": lambda: None,  # computed via sem.f
+        "ATE": lambda: None,  # the analytic target, `sem.ate_of` / `sem.h_star`
         "ERM": lambda: net("X"),  # the prefit net, not a fresh one
         "DA+ERM": lambda: net("GX"),
-        "PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
-        "DA+PI": lambda: PartialR2Net(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **da_common),
-        # recentred on the post-DA measure: from an X-centred ball the invariant
-        # slice is out of reach at any reasonable eps
-        "PI+INV": lambda: RecentredInvPartialR2Net(
-            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **common
-        ),
-        "DA+PI+IV": lambda: IVConstrainedPartialR2Net(
-            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad, outcome_model=net("GX"), **da_common
+        "PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
+        "DA+PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **da_common),
+        "PI+INV": pi_inv,
+        "DA+PI+IV": lambda: IVConstrainedCopSens(
+            gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon_iv, pad=pad, outcome_model=net("GX"), **iv, **da_common
         ),
         # `pad` reaches the DA branch only (Cor. 1)
-        "PI&DA+PI": lambda: IntersectedPartialR2Net(
+        "PI&DA+PI": lambda: IntersectedCopSens(
             gamma=gamma, epsilon=epsilon, pad=pad, outcome_models={"X": net("X"), "GX": net("GX")}, **common
         ),
-        "PI&DA+PI+IV": lambda: IntersectedIVPartialR2Net(
+        "PI&DA+PI+IV": lambda: IntersectedIVCopSens(
             gamma=gamma,
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
             pad=pad,
             outcome_models={"X": net("X"), "GX": net("GX")},
+            **iv,
             **common,
         ),
     }
-    if set(all_builders) != set(PARTIAL_R2_NET_METHODS):
-        raise ValueError("PARTIAL_R2_NET_METHODS out of sync.")
+    if set(all_builders) != set(COPSENS_METHODS):
+        raise ValueError("COPSENS_METHODS out of sync.")
 
     unknown = sorted(set(method_names) - set(all_builders))
     if unknown:
-        raise ValueError(f"the partial_r2_net backend does not define {unknown}; valid: {sorted(all_builders)}.")
+        raise ValueError(f"the copsens backend does not define {unknown}; valid: {sorted(all_builders)}.")
     return {name: all_builders[name] for name in method_names}
 
 
@@ -796,9 +842,12 @@ class MethodRegistry:
         n_jobs: int = 1,
         mean_match: bool = True,
         rho: float = 1.0,
-        backend: Literal["partial_r2", "partial_r2_net"] = "partial_r2",
+        backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
-        unfrozen_layers: int = 1,
+        n_components: int = 32,
+        inv_recenter: Literal["off", "on"] = "off",
+        calibrate_sigma: bool = True,
+        gamma_z_star: float = 0.0,
     ) -> dict[str, Callable]:
         """
         Build only requested methods with given hyperparameters.
@@ -848,16 +897,22 @@ class MethodRegistry:
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
-                'partial_r2_net' the do-MNIST last-l-layer refit (same Lemma-2
-                gamma units, so oracle gamma* is principled).
-            outcome_models: {'X': net, 'GX': net}, prefit. partial_r2_net only.
-            unfrozen_layers: refit depth `l`. partial_r2_net only.
+                'copsens' the do-MNIST latent-factor ball around a prefit net
+                (gamma is a LATENT budget there, not the Lemma-2 gamma*).
+            outcome_models: {'X': net, 'GX': net}, prefit. copsens only.
+            n_components: latent dimension of the CopSens factor model. copsens only.
+            inv_recenter: PI+INV's centre, 'off' (the X net) or 'on' (the GX net,
+                the ball on the unmixed GX). copsens only.
+            calibrate_sigma: radius sigma-hat sqrt(gamma) with sigma-hat^2 the
+                outcome net's own noise on the fit rows. copsens only.
+            gamma_z_star: the true baseline IV budget of the T-as-IV cone
+                (`copsens.iv_budget`); 0 is none. copsens only.
 
         Returns:
             Dictionary mapping method names to builder functions
         """
-        if backend == "partial_r2_net":
-            return _partial_r2_net_builders(
+        if backend == "copsens":
+            return _copsens_builders(
                 method_names,
                 gamma=gamma,
                 epsilon=epsilon,
@@ -869,13 +924,16 @@ class MethodRegistry:
                 mean_match=mean_match,
                 rho=rho,
                 outcome_models=outcome_models,
-                unfrozen_layers=unfrozen_layers,
+                n_components=n_components,
+                inv_recenter=inv_recenter,
+                calibrate_sigma=calibrate_sigma,
+                gamma_z_star=gamma_z_star,
             )
 
         if backend != "partial_r2":
             # a hard error: an unknown backend must not fall through to the linear
             # SOCP and quietly report numbers from a model nobody asked for
-            raise ValueError(f"unknown backend {backend!r}; valid: 'partial_r2', 'partial_r2_net'.")
+            raise ValueError(f"unknown backend {backend!r}; valid: 'partial_r2', 'copsens'.")
 
         common = dict(
             epsilon=epsilon,
@@ -995,7 +1053,17 @@ DATASET_KEYS: dict[str, set] = {
         "n_pi",
         "n_queries",
         "net",
-        "unfrozen_layers",
+        "n_components",
+        "mix_in",
+        "target_coverage",
+        "inv_recenter",
+        "gamma_z_star",
+        "calibrate_sigma",
+        "split",
+        "split_seed",
+        "pop_seed",
+        "exemplar_seed",
+        "augmentation_amounts",
     },
 }
 
@@ -1011,7 +1079,7 @@ REQUIRED_KEYS: dict[str, set] = {
     # `target` and `spec` decide what h_* IS, so neither has a defensible default
     "cigarettes": {"seed", "augmentation", "target", "spec"},
     # `methods` is required HERE and nowhere else: the fallback below is the whole
-    # of ALL_METHODS, and the partial_r2_net backend defines only 9. Omitting it
+    # of ALL_METHODS, and the copsens backend defines only 9. Omitting it
     # would be a hard error mid-run rather than a config error up front.
     "do_mnist": {"seed", "augmentation", "gamma", "epsilon", "methods"},
 }
@@ -1062,6 +1130,59 @@ def _check_instruments(name: str, block: dict[str, Any]) -> bool:
             )
         return len(iv) > 0
     return False
+
+
+def _check_domnist(block: dict[str, Any]) -> None:
+    """The do-MNIST run knobs: every one optional (the orchestrator's constructor
+    holds the default), each rejected up front rather than minutes into the nets.
+    `inv_recenter` accepts YAML's bare on/off, which the loader reads as booleans."""
+    prefix = "config.do_mnist"
+
+    def number(key, low, high, integer=False, closed=True):
+        value = block.get(key, ...)
+        if value is ...:
+            return
+        kind = int if integer else (int | float)
+        inside = (low <= value <= high) if closed else (low <= value < high)
+        if isinstance(value, bool) or not isinstance(value, kind) or not inside:
+            span = f"[{low}, {high}{']' if closed else ')'}"
+            raise ValueError(f"{prefix}.{key} must be {'an int' if integer else 'a number'} in {span}; got {value!r}.")
+
+    number("mix_in", 0.0, 1.0, closed=False)
+    number("target_coverage", 0.0, 1.0)
+    number("gamma_z_star", 0.0, float("inf"))
+    number("n_components", 1, 10**6, integer=True)
+    for key in ("split_seed", "pop_seed", "exemplar_seed", "n_pi", "n_queries"):
+        number(key, 0, 2**32, integer=True)
+    if "calibrate_sigma" in block and not isinstance(block["calibrate_sigma"], bool):
+        raise ValueError(f"{prefix}.calibrate_sigma must be a bool; got {block['calibrate_sigma']!r}.")
+    if "inv_recenter" in block:
+        recenter = {True: "on", False: "off"}.get(block["inv_recenter"], str(block["inv_recenter"]).strip().lower())
+        if recenter not in ("off", "on"):
+            raise ValueError(f"{prefix}.inv_recenter must be off or on; got {block['inv_recenter']!r}.")
+        block["inv_recenter"] = recenter
+    split = block.get("split")
+    if split is not None:
+        parts = {"A", "B", "C"}
+        if not isinstance(split, dict) or set(split) != parts:
+            raise ValueError(f"{prefix}.split must be a dict with exactly the keys A, B, C; got {split!r}.")
+        for part, size in split.items():
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ValueError(f"{prefix}.split.{part} must be a positive int; got {size!r}.")
+    if "pop_seed" in block and block["pop_seed"] == block["seed"] + 1:
+        raise ValueError(
+            f"{prefix}.pop_seed = {block['pop_seed']} equals seed + 1, the seed the selection script draws its "
+            "split-C rows with; the evaluation population must not coincide with it."
+        )
+    amounts = block.get("augmentation_amounts")
+    if amounts is not None:
+        from src.data_augmentors.do_mnist import COLOR_AMOUNTS
+
+        if not isinstance(amounts, dict) or not set(amounts) <= set(COLOR_AMOUNTS):
+            raise ValueError(f"{prefix}.augmentation_amounts must map ops in {sorted(COLOR_AMOUNTS)}; got {amounts!r}.")
+        for op, amount in amounts.items():
+            if isinstance(amount, bool) or not isinstance(amount, int | float) or amount < 0:
+                raise ValueError(f"{prefix}.augmentation_amounts.{op} must be a non-negative number; got {amount!r}.")
 
 
 def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
@@ -1127,6 +1248,8 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"config.cigarettes.da_amplitude must be a positive float; got {amplitude!r}.")
         if not isinstance(block.get("sliver", False), bool):
             raise ValueError(f"config.cigarettes.sliver must be a bool; got {block.get('sliver')!r}.")
+    if name == "do_mnist":
+        _check_domnist(block)
 
     defaults = DATASET_DEFAULTS[name]
     for key in ("n_samples", "n_experiments", "sweep_samples"):

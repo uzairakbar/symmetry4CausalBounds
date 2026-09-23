@@ -1006,21 +1006,117 @@ def create_digit_sweep_plot(
 
     fig.subplots_adjust(bottom=0.26, right=1.0 - legend_width)
 
-    # single column to the right, unframed
-    ax.legend(
-        handles=handles,
-        labels=_apply_tex_highlighting(all_labels, hilight_ours),
-        fontsize=FS_TICK - 2,
-        ncol=1,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
-        frameon=False,
-        borderpad=0.4,
-        handlelength=1.6,
-        labelspacing=0.8,
-    )
+    # single column to the right, unframed, stretched to the axes box height: the
+    # spacing is measured, corrected and left to settle, so seven entries fill
+    # the column as evenly as four do
+    labels_ = _apply_tex_highlighting(all_labels, hilight_ours)
+    fs, n = FS_TICK - 2, max(len(labels_), 1)
+
+    def legend(spacing):
+        return ax.legend(
+            handles=handles,
+            labels=labels_,
+            fontsize=fs,
+            ncol=1,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=False,
+            borderpad=0.4,
+            handlelength=1.6,
+            labelspacing=spacing,
+        )
+
+    target = ax.get_window_extent().height
+    spacing = 0.5
+    for _ in range(3):  # measure, correct, settle
+        leg = legend(spacing)
+        fig.canvas.draw()
+        got = leg.get_window_extent().height
+        if abs(got - target) < 1.0:
+            break
+        spacing = max(spacing + (target - got) / (max(n - 1, 1) * fs * fig.dpi / 72.0), 0.0)
 
     plt.show()
 
     if savefig:
         save(fig, fname, experiment, format, subdir=SUBDIR_QUERY, dpi=PLOT_DPI)
+
+
+def create_coverage_plot(
+    sweep: dict[str, dict[str, dict[str, NDArray]]],
+    gammas: NDArray,
+    marks: dict[str, float] | None = None,
+    ref_width: float | None = None,
+    targets: tuple[float, ...] = (0.95, 0.99, 1.0),
+    ylabel: str = "population coverage",
+    savefig: bool = True,
+    format: str = PLOT_FORMAT,
+    experiment: str = "do_mnist",
+    fname: str = "coverage",
+    subdir: str = "select",
+):
+    """Population coverage and mean width against gamma, the figure of the do-MNIST
+    gamma selection (`scripts/select_domnist_gamma.py`).
+
+    Args:
+        sweep: {'PI': {'C': {'coverage': ..., 'width': ...}}, 'DA+PI': {...}}, one
+            curve per (method, population)
+        gammas: the common gamma grid
+        marks: vertical lines, e.g. {'DA+PI gamma': 0.085}
+        ref_width: horizontal reference on the width panel (2|bias|, the optimal width)
+        targets: coverage targets drawn as horizontal lines
+    """
+    plt.rcParams.update(RC_PARAMS)
+    sns.set_palette("deep")
+    colors = sns.color_palette()
+    fig, axes = plt.subplots(1, 2, figsize=(PAGE_WIDTH, 2.9))
+    g = np.asarray(gammas, dtype=float)
+    styles = {"C": "-", "train": "-", "test": (0, (4, 1.5))}
+
+    for method, splits in sweep.items():
+        color = colors[COLOR_MAP.get(method, 0)]
+        label = TEX_MAPPER.get(method, method)
+        for split, curves in splits.items():
+            linestyle = styles.get(split, "-")
+            axes[0].plot(
+                g, curves["coverage"], color=color, linestyle=linestyle, linewidth=1.8, label=f"{label} {split}"
+            )
+            axes[1].plot(g, curves["width"], color=color, linestyle=linestyle, linewidth=1.8, label=f"{label} {split}")
+
+    for t in targets:
+        axes[0].axhline(t, color="0.6", linewidth=0.8, linestyle=":")
+        axes[0].annotate(f"{t:.2f}", (g[0], t), fontsize=FS_TICK - 4, color="0.4", va="bottom", ha="left")
+    if ref_width is not None:
+        axes[1].axhline(ref_width, color="k", linewidth=1.0, linestyle=":")
+        axes[1].annotate(r"$2|b|$", (g[0], ref_width), fontsize=FS_TICK - 3, va="bottom", ha="left")
+    for name, value in (marks or {}).items():
+        for ax in axes:
+            ax.axvline(value, color="k", linewidth=1.0, linestyle="-.", alpha=0.7)
+        axes[0].annotate(name, (value, 0.02), fontsize=FS_TICK - 4, rotation=90, va="bottom", ha="right")
+
+    axes[0].set_ylabel(ylabel, fontsize=FS_LABEL - 8)
+    axes[1].set_ylabel("mean interval width", fontsize=FS_LABEL - 8)
+    # log y: the scale BEFORE the limits, with a positive lower bound (ylim(0, ..)
+    # on a log axis is dropped and leaves the transform singular)
+    positive = [
+        np.min(c["coverage"][c["coverage"] > 0])
+        for s in sweep.values()
+        for c in s.values()
+        if np.any(c["coverage"] > 0)
+    ]
+    axes[0].set_yscale("log")
+    axes[1].set_yscale("log")
+    axes[0].set_ylim(max(min(positive or [1e-3]) * 0.8, 1e-4), 1.05)
+
+    for ax in axes:
+        ax.set_xlabel(r"$\gamma$", fontsize=FS_LABEL - 6)
+        ax.set_xscale("log")
+        ax.set_xlim(g.min(), g.max())
+        ax.tick_params(labelsize=FS_TICK - 2)
+    axes[1].legend(fontsize=FS_TICK - 4, frameon=False, loc="best")
+    fig.tight_layout()
+
+    plt.show()
+
+    if savefig:
+        save(fig, fname, experiment, format, subdir=subdir, dpi=PLOT_DPI)

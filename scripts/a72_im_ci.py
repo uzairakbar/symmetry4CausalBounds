@@ -890,7 +890,7 @@ def leg_4():
 # The scan reads dict displays only: a merge written as `dict.update` or `|` would
 # slip past it, and a pin in a gate that never runs a sweep is a harmless no-op
 # (the key is simply 0 there, as it was before the toggle existed)
-PIN_EXEMPT = ("a72_im_ci.py", "a73_tolerance_audit.py", "smoke_do_mnist.py", "select_domnist_budgets.py")
+PIN_EXEMPT = ("a72_im_ci.py", "a73_tolerance_audit.py")
 
 
 def unpinned_merges(path):
@@ -952,16 +952,12 @@ def leg_5a():
     tokens = ("im_ci", "imbens", "bootstrap_bounds")
     for rel in (
         "src/experiments/do_mnist.py",
-        "src/methods/partial_r2_net.py",
-        "src/methods/partial_r2_net_jax.py",
+        "src/methods/copsens.py",
+        "src/methods/copsens_jax.py",
         "src/experiments/perf.py",
     ):
         text = read(os.path.join(REPO, rel))
         check(f"(5a) {rel} names none of {tokens}", not any(t in text for t in tokens))
-    # the net backend's intersections do not forward `pad_tolerance` to their branches;
-    # do-MNIST is their only caller and its `im-ci` is forced to 0, so it stays 0.0 there
-    nets = read(os.path.join(REPO, "src/methods/partial_r2_net.py"))
-    check("(5a) partial_r2_net.py never forwards pad_tolerance", "pad_tolerance" not in nets)
     for obj in (QuerySweepRunner, PanelBuilder):
         text = inspect.getsource(obj)
         check(f"(5a) {obj.__name__} names none of {tokens}", not any(t in text for t in tokens))

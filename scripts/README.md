@@ -12,15 +12,8 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A1 | `a1_a2_sem.py --check` | SEM structural laws vs closed form |
 | A2 | `a1_a2_sem.py` | SEM draws bit-identical to SOURCE |
 | A3 | `a3_da_parity.py` | DA `(GX, G)` bit-identical to SOURCE |
-| A4 | `a4_partial_r2_net_regression.py` | `partial_r2_net` bounds + intermediates vs a frozen dump |
-| A5 | `a5_njobs_exactness.py` | `n_jobs` changes nothing but wall clock (`--micro` for a 4k/512/8 fixture) |
-| A6-A8, A11-A14 | `a6_a14_pipeline.py` | perf fairness, status, JAX≡FD, config, recipe, cost, memory |
-| A9 | `a6_a14_pipeline.py --full` | the estimand is the CAUSAL one (needs 1.2M draws) |
 | A10 | `a10_partial_r2_regression.py` | `PartialR2` digest; every bound moved with the sigma-scaled ball (see A10 below) |
-| A21 | `a6_a14_pipeline.py` | intersection wiring: branch nets, fit ball, `pad`, `n_jobs` |
-| A24 | `a24_budget_selection.py` | bisection contract, floor cache, budget-report schema |
 | A25 | `a25_floor_guard.py` | closed-form floor vs cvxpy; no budget is ever raised (feasible and infeasible cells return the raw oracle budget, an infeasible one logs one INFO BELOW line); an omega knob under its T floor reads all-INFEASIBLE with a gap in the width line; a completeness grep finds nothing of the old guard in `src` or `scripts` |
-| A27 | `a27_domnist_r2.py` | partial_r2_net backend: nesting, h_* membership at gamma*, Lem. 2 band, JAX≡FD, l=2 path (`--micro`, `--band-se`, `--polish-compare`, `--compare-off`) |
 | A28 | `a28_mean_match.py` | Lem. 2 slice: classes == an explicit intercept+equality reference, Cor. 3 closed form, floors, coverage |
 | A29 | `a29_thm1_ceiling.py` | Thm. 1: eps+ tight at gamma_min, gamma_min == the fitted DA+PI transition on sim, optical reported as a reference |
 | A30 | `a30_optical_truth.py` | optical estimand: h_* on Lem. 2's slice, gamma* over span(phi, 1), both epsilon budgets vs the measured defect, lazy data load |
@@ -36,6 +29,10 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A40 | `a40_eps_star.py` | robustness eps* per dataset: `ROBUSTNESS_EPSILON_TRUE[experiment_name]` reaches the epsilon runner of both orchestrators and the tuned DA lands on it (sim 3.0, optical 5.0), the sim constant clears the post-DA radius sqrt(gamma*) and sigma sqrt(gamma*), on two sim experiments (5 steps) DA+PI coverage dips below 1 at the smallest r, is 1 at r = 1 and never falls under 0.7; the optical epsilon runner's DA is config.yaml's chain plus the `ROBUSTNESS_AUGMENTATION` component (gaussian-noise) while every other strategy's runner, the query runner and the budget DA keep config.yaml's chain, the same dip (lowest of DA+PI and DA+PI+IV) on three optical experiments, and the optical constant stays 5.0 at under 10 std of h*; `--seed` |
 | A54 | `a54_cigarettes_runner.py` | the cigarette orchestrator: validation, the declared budget at the solver, the gamma sweep (the INV / baseline width ratio), the recalibrated omega axis, target routing and both replicate schemes, each on the block as given AND on its other instrument declaration (`--config PATH` reads the cigarettes block of another yaml, default `config.yaml`; `--seed`) |
 | A64 | `a64_perf_aggregate.py` | round 12: the `(T)` instrument mode (grammar, display tables, dispatch on fitted attributes, `(T)` equal to `(T,Z)` under an empty set), the perf sweeps (`src/experiments/perf.py`: the cumulation table on `_prepare` call counts, D(eps) on a synthetic record with planted failures, `clip_y` on rendered artists, the simulation perf path end to end at 4 steps on all three perf metrics), and `python -m src.aggregate` on a synthetic tree with blank cells and on the shipped artifacts (`--shipped DIR`); `--only LEG` runs one leg, `--skip-digest` drops (D) |
+| A74 | `a74_domnist_sem.py` | the do-MNIST SEM, split and DA: the analytic target, the `h_erm` cell table, Bayes and ERM accuracy on obs and do, the tint round trip, the colour ops exogenous and support-preserving, `amounts`, `identity_params`, `mix_in` (counts, masks, seeds, `frac 0` untouched), the A/B/C partition and `split_key`, `pop_seed != seed + 1`, `centre_error_report`, `bisect_gamma` on a stub; `--nets` adds the `init_seed` coupling (GPU) |
+| A75 | `a75_copsens.py` | the copsens backend on a synthetic factor SEM: gamma 0 is the ERM, ordered bounds in [0, 1], gaussian and probit closed forms, the latent model, INV and IV nested in PI and monotone in gamma, `iv_budget`, JAX gradients against finite differences, `n_jobs 4` bit-identical to `n_jobs 1`, `recalibrate`/`rho` reaching the radius, `mean_match` inert |
+| A76 | `a76_domnist_parity.py` | two-stage parity against the reference checkout: `--source DIR` under its env dumps the nets, the B arrays and the bounds, `--check DIR` refits the ported classes on the frozen arrays and compares bounds to 5e-4 and intermediates to 1e-6 |
+| A77 | `a77_domnist_block.py` | the do-MNIST block, the recipe and the registry, static: validation of every key, the shipped block and the recipe agree, `copsens` builds its nine, the old backend is gone, only the `gamma` sweep is wired |
 | A70 | `a70_perf_feasibility.py` | the `feasibility` perf metric (the share of the seed_var backends returning a usable bound, per method, step and query): the config (perf only, `normalize` rejected), the formula against `solver_stability`'s failure count on a64's synthetic record, the simulation perf path end to end (PI+INV 0 where refuted and 1 at r = 1, the figure on `CLAMP_YLIM`, seed_var unchanged beside it), no failure marker on the stability figure, the feasible rate stacked under the stability in the aggregate's `epsilon_seed_var.pdf` (no `epsilon_feasibility.pdf`), a completeness grep for the removed marker code, and do-MNIST perf still skipping (source text only); `--only LEG` runs one leg |
 | A71 | `a71_empty_cells.py` | empty cells drop out of the coverage rows (D1c): `evaluate_queries` gives coverage NaN iff every query's interval has a NaN bound (exactly when `interval_width` is NaN), under INFEASIBLE and FAILURE alike, the status split untouched; a partly empty cell keeps `coverage`'s number and a point estimate is never NaN; `coverage` itself unchanged; the NaN rules agree on random masks; `_draw_series` draws an all-empty step as a gap, not 0; `--only LEG` runs one leg |
 | A72 | `a72_im_ci.py` | Imbens-Manski CIs on the sweep bounds (`im-ci` in `defaults:`): the n and m grids read `sweep_samples` (bit-identical at 16), the critical value's two limits and its equation on synthetic inputs, the unit bootstrap (a row; on the fold sweep a base row with its m augmented copies, carried together, one draw for both groups) and its determinism across pool sizes, `im-ci: 0` bit-identical to the recorded `finite` digest, under 95 the pad at eps* alone (point models, intersection branches and replicates; `results_raw` finite's on the unpadded methods, up to 2 `EPS_TOL` narrower on the padded ones), perf and query padding as before, the config validation, every yaml-reading gate pinning `im-ci` off, and the do-MNIST block forced off (static), perf and query never reaching the helper (sim only), the sim n and m sweeps at sweep_samples 8 on config.yaml's six methods (CI never under raw, the CI excess falling as a power of n, the n readings exact, PI on m within tolerance of the iid rule's, pinned readings), the pkls and the render reading the CI, the Slurm launcher's dry run; `--only LEG`, `--quick` |
@@ -48,8 +45,10 @@ never folded into a silent PASS. Where a synthetic input can stand in, the leg r
 on it instead: `a32` (b) to (f) render a fixture tree written under `TMPROOT` when
 `--artifacts` carries none of the pkls they read, and name the tree they used.
 
-`smoke_do_mnist.py` is an end-to-end query sweep at reduced scale (perf logs a warning and skips there);
-`--full` runs it at the config's own numbers.
+`smoke_do_mnist.py` is an end-to-end do-MNIST query sweep at reduced scale on the
+copsens block (perf logs a warning and skips there); `--full` runs it at the block's
+own numbers, `--methods` restricts the list. Run it from a scratch cwd: `save` writes
+`./artifacts`.
 
 `sbatch_sweeps.py` is not a gate: it fans a config's sweeps out over a Slurm job
 array, one task per (dataset, sweep param) and one per perf block (do-MNIST blocks
@@ -69,34 +68,13 @@ restores the pre-2026-09 uncentred, intercept-free ball; `a10 --mean-match false
 reproduces the pre-change digest byte-for-byte, which is what pins the old path.
 
 The linear backend enforces the slice EXACTLY (it eliminates the intercept by
-centring). The `partial_r2_net` backend cannot: the constraint is nonlinear in the
-head weights and the solver backtracks along segments, so it enforces a BAND
-`|mean_n h - ybar| <= tau` with `tau = 2 sqrt((sigma_hat^2 + b_r2) / n_pi)`, where
-`b_r2` is the ball's own budget -- two standard errors of the level under the
-sensitivity model's own bound on `Var(U + xi)` (see `MEAN_BAND_SE`; the second term
-is the budget, not `sigma_hat^2 gamma`, so the recalibrated budget is the one in the band). It
-enters as the PAIR `(m <= tau, -m <= tau)`, linear in `m`; the squared form
-`m^2 <= tau^2` is ill-conditioned as the slab thins. The band is a live constraint,
-so PI/DA+PI take the full multi-start polish there; `a27 --polish-compare` at
-production scale is what would license flipping `SINGLE_POLISH_WITH_BAND` back on.
+centring). The copsens backend (do-MNIST) has no mean-matched slice: its ball lives on
+the latent factor scores of a prefit net, so `mean_match` is accepted for the uniform
+signature and logged as inert (A75 pins that).
 
-`a27 --micro --band-se 0.146` is the leg that drives `theta_c` out of the band and
-so exercises the slab anchor; run it after any change to the band, because a slab
-too thin to travel in narrows the bounds SILENTLY rather than erroring.
-`a27 --compare-off` solves the same fixture with `mean_match: false` and prints
-what the band cost. Note the two runs differ in anchor, starts and polish policy as
-well as in the feasible set, so their widths are two heuristic optima of nested
-sets: band-on coming out slightly wider says the band-OFF solve was the looser one.
-
-`gate_band` is written so that deleting the band clause from `_feasible` makes it
-FAIL (checked 2026-09-03: 6/6 methods). Keep that property -- the obvious probe,
-shifting the level far out and checking it is rejected, is answered by the R^2 ball
-long before the band is consulted and passes a model with no band at all.
-
-do-MNIST gates were run at `--micro` scale only for this change. Before trusting
-the full figures, re-run at full scale: `a27`, `a27 --polish-compare`, `a5`,
-`a4 --dump`/`--check` (the band moves the frozen numbers), `a6_a14_pipeline.py`
-and `smoke_do_mnist.py`. Expect the PI family to be ~2x slower per query.
+The do-MNIST estimand is analytic since the copsens port (`sem.ate_of`,
+`sem.h_star`); the fitted target net and its gates (A4 to A9, A21, A24, A27) went with
+the `partial_r2_net` backend they tested.
 
 ## The optical estimand (A30)
 
@@ -154,35 +132,25 @@ make it fail (checked 2026-09-03, 8 checks across 3 augmentations), and an earli
 version that tested `_epsilon_budget(None)` against `measured_epsilon_star()` was
 asserting `x + EPS_TOL >= x` and passed that pin happily.
 
-## Budget selection
+## do-MNIST gamma selection
 
-`select_domnist_budgets.py` picks `gamma`, `epsilon` and `epsilon_iv` by POPULATION
-coverage and writes `artifacts/domnist-budget_report.json`. DEMOTED to a sanity
-check: the pipeline consumes oracle `gamma* = bias_sq/sigma_sq` directly (the
-`partial_r2_net` ball is the Lemma-2 ball in function space) and A27 gates
-membership, so nothing here needs a coverage-selected budget.
-
-Three sequential legs at one target coverage `X` (`--target-coverage`, or
-`do_mnist.target_coverage`; 0.95 or 0.99):
-
-1. lowest `gamma` with coverage ≥ `X` on `PI` — **fixed, never re-selected**
-2. lowest `epsilon_iv` with coverage ≥ `X` on `DA+PI+IV`, at that `gamma`
-3. lowest `epsilon` with coverage ≥ `X` on `PI+INV`, at that `gamma`
-
-One `gamma` for every method, because that is how the pipeline consumes it.
-`DA+PI+IV` and `PI+INV` are subsets of `DA+PI`, so if `DA+PI` misses `X` at the
-selected `gamma`, no budget can reach it — the leg is marked
-`target_reachable: false` and reports the lowest budget attaining the ceiling.
+`select_domnist_gamma.py` picks the block's `gamma` by POPULATION coverage of h_* on
+split C: it trains the block's replicate exactly as the run does (nets on A, the
+mix-in, the PI balls on the B rows), draws `n_select` rows from C at `seed + 1`,
+bisects log gamma per method (PI and DA+PI) to the smallest value whose coverage
+reaches `target_coverage`, writes `artifacts/do_mnist/select/gamma_selection.json`
+and `coverage.pdf`, and prints one line per method. The selected value (the max over
+the two) is pasted into `config.yaml::do_mnist.gamma` by hand; the run errors
+without one. The CopSens gamma is a LATENT budget the Lemma-2 oracle gamma* does not
+measure, which is why the sweeps read the declared value.
 
 ```bash
-python scripts/select_domnist_budgets.py            # 1.2M draws, 10k eval, hours
-python scripts/select_domnist_budgets.py --smoke    # 60k / 6k / 2k, minutes
-python scripts/a24_budget_selection.py artifacts/domnist-budget_report_smoke.json
+D=~/scratch/domnist_runs/port_full && mkdir -p $D && cp config.yaml $D/   # do_mnist block active
+(cd $D && PYTHONPATH=$REPO uv run --project $REPO python $REPO/scripts/select_domnist_gamma.py)
 ```
 
-Budgets are conditional on every setting the report records (`pad`, `recalibrate`,
-`n_pi`, `net`, ...). Change one and they are stale. Read `warnings[]` first: it flags
-an inert budget and a `DA+PI` ceiling below target.
+The selection is conditional on every block key it records (`mix_in`, `n_pi`,
+`n_components`, `augmentation`, ...). Change one and it is stale.
 
 ## Two-stage gates
 
@@ -194,8 +162,11 @@ $SRC/.venv/bin/python scripts/a3_da_parity.py --source /tmp/a3.npz
 uv run python scripts/a1_a2_sem.py    --check /tmp/a2.npz
 uv run python scripts/a3_da_parity.py --check /tmp/a3.npz
 
-uv run python scripts/a4_partial_r2_net_regression.py --dump  ~/scratch/a4
-uv run python scripts/a4_partial_r2_net_regression.py --check ~/scratch/a4
+# do-MNIST parity against the reference checkout (its env for the source stage, CPU)
+SRC=~/close-this/copsens/symmetry4CausalBounds
+(cd $SRC && CUDA_VISIBLE_DEVICES= PYTHONPATH=$SRC ~/scratch/uv_envs/symmetry4CausalBounds/bin/python \
+    $REPO/scripts/a76_domnist_parity.py --source ~/scratch/a76/fix)
+uv run python scripts/a76_domnist_parity.py --check ~/scratch/a76/fix
 ```
 
 ## A10

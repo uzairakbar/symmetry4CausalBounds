@@ -325,17 +325,17 @@ def leg_iv():
 def leg_v():
     print("(v) do-MNIST, STATIC ONLY: no net, no data, no run")
     import src.experiments.do_mnist as do_mnist
-    import src.methods.partial_r2_net as nets
+    import src.methods.copsens as copsens
 
     params = inspect.signature(do_mnist.DoMNISTMixin.fit_epsilon_iv).parameters
     check(
         "(v) DoMNISTMixin.fit_epsilon_iv takes ratio, default 1.0", "ratio" in params and params["ratio"].default == 1.0
     )
-    precompute = inspect.signature(nets.IVConstrainedPartialR2Net._precompute).parameters
-    check("(v) IVConstrainedPartialR2Net._precompute takes T", "T" in precompute)
+    precompute = inspect.signature(copsens.IVConstrainedCopSens._precompute).parameters
+    check("(v) IVConstrainedCopSens._precompute takes T", "T" in precompute)
     check("(v) and still accepts Z", "Z" in precompute)
-    source = inspect.getsource(nets.IntersectedIVPartialR2Net._fit_branches)
-    check("(v) IntersectedIVPartialR2Net fits its DA branch with T=G", "T=G" in source and "Z=G" not in source)
+    source = inspect.getsource(copsens.IntersectedIVCopSens._fit_branches)
+    check("(v) IntersectedIVCopSens fits its DA branch with T=G", "T=G" in source and "Z=G" not in source)
 
 
 def leg_vi():

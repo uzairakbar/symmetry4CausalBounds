@@ -41,7 +41,7 @@ Legs:
         column is a spurious moment, SS2.1), a bool passing as an int. Misses: a
         legal-looking name the panel does not carry, which the loader catches.
   (iv)  the registry builds exactly ALL_METHODS in the plan's order, and
-        PARTIAL_R2_NET_METHODS is the unchanged nine. Catches: a builder missing or
+        COPSENS_METHODS is the unchanged nine. Catches: a builder missing or
         out of sync, a name added to the do-MNIST backend. Misses: what a builder
         builds; that is (vi) and a57.
   (v)   every ALL_METHODS name and the nine stored mode spellings (`base(Z)`, `base(T)`,
@@ -90,12 +90,12 @@ import src.methods.sensitivity_models as solvers  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     ALL_METHODS,
+    COPSENS_METHODS,
     DATASET_KEYS,
     EPS_TOL,
     GAMMA_Z_DEFAULT,
-    PARTIAL_R2_NET_METHODS,
     MethodRegistry,
-    _partial_r2_net_builders,
+    _copsens_builders,
     parse_experiment_plan,
     resolve_dataset_block,
 )
@@ -422,12 +422,12 @@ def leg_iv():
     check("(iv) ALL_METHODS is the plan's tuple, in order", ALL_METHODS == PLAN_METHODS, repr(ALL_METHODS))
     built = MethodRegistry.build_methods(list(ALL_METHODS), gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL)
     check("(iv) build_methods returns every name, in order", tuple(built) == ALL_METHODS, repr(tuple(built)))
-    check("(iv) PARTIAL_R2_NET_METHODS unchanged", PARTIAL_R2_NET_METHODS == NET_METHODS, repr(PARTIAL_R2_NET_METHODS))
-    net = _partial_r2_net_builders(
-        list(PARTIAL_R2_NET_METHODS),
-        gamma=0.067,
-        epsilon=0.1,
-        epsilon_iv=0.1,
+    check("(iv) COPSENS_METHODS unchanged", COPSENS_METHODS == NET_METHODS, repr(COPSENS_METHODS))
+    net = _copsens_builders(
+        list(COPSENS_METHODS),
+        gamma=0.085,
+        epsilon=0.04,
+        epsilon_iv=0.04,
         recalibrate=False,
         pad=False,
         clipy=True,
@@ -435,12 +435,15 @@ def leg_iv():
         mean_match=True,
         rho=1.0,
         outcome_models=None,
-        unfrozen_layers=1,
+        n_components=32,
+        inv_recenter="off",
+        calibrate_sigma=True,
+        gamma_z_star=0.0,
     )
-    check("(iv) the net backend still builds exactly its nine", tuple(net) == NET_METHODS)
+    check("(iv) the copsens backend still builds exactly its nine", tuple(net) == NET_METHODS)
     check(
-        "(iv) ERM+IV and PI+INV+IV are not net methods",
-        not ({"ERM+IV", "DA+ERM+IV", "PI+INV+IV"} & set(PARTIAL_R2_NET_METHODS)),
+        "(iv) ERM+IV and PI+INV+IV are not copsens methods",
+        not ({"ERM+IV", "DA+ERM+IV", "PI+INV+IV"} & set(COPSENS_METHODS)),
     )
 
 

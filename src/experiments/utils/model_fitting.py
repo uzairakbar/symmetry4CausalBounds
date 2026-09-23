@@ -46,6 +46,7 @@ def fit_model(
     y_base=None,
     Z=None,
     Z_base=None,
+    GX_inv=None,
     hyperparameters: dict[str, Any] | None = None,
     **kwargs,
 ):
@@ -75,6 +76,9 @@ def fit_model(
         y_base: Untiled y, paired with X_base
         Z: the real instrument, (n, m); None or (n, 0) is no instrument
         Z_base: Untiled Z, paired with X_base
+        GX_inv: the invariance PAIRS of X when they are not `GX` (do-MNIST mixes
+            observed rows into the DA+ methods' GX; the PI+INV cone must see the
+            unmixed augmentation). None pairs X with GX, which is every other dataset
         hyperparameters: Training hyperparameters (optional)
         **kwargs: Additional arguments (e.g., pbar_manager, da)
     """
@@ -109,6 +113,8 @@ def fit_model(
     # without a G
     t_da = None if mode == "Z" else _translation(G, len(X), required=mode == "T")
     z_da = None if mode == "T" else Z
+    # the invariance pairs: the DA+ methods' GX unless a second copy was handed in
+    pairs = GX if GX_inv is None else GX_inv
 
     # Dispatch based on the base name to use correct data
     if base == "PI":
@@ -121,7 +127,7 @@ def fit_model(
 
     elif base == "PI+INV":
         # PI+INV uses both original and augmented data
-        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+        model.fit(X=X, y=y, GX=pairs, G=G, **fit_kwargs)
 
     elif base == "PI+IV":
         # the real instrument alone, never G; empty reduces it to PI exactly
@@ -129,7 +135,7 @@ def fit_model(
 
     elif base == "PI+INV+IV":
         # the INV cone needs GX, the IV cone the real Z; empty is PI+INV exactly
-        model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
+        model.fit(X=X, y=y, GX=pairs, G=G, Z=Z, **fit_kwargs)
 
     elif base == "DA+PI+IV":
         # the DA ball on GX with one constraint per block it is handed; an empty
