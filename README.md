@@ -1,5 +1,5 @@
-# Symmetry-Constrained Causal Partial Identification
-> Implementation for *"Symmetry-Constrained Causal Partial Identification"* (Preprint 2026).
+# Symmetry-Informed Causal Partial Identification
+> Implementation for *"Symmetry-Informed Causal Partial Identification"* (Preprint 2026).
 <p align="center">
     <img src="https://uzairakbar.github.io/symmetry4CausalBounds/card.png"
     alt="Symmetry for Causal Bounds"
