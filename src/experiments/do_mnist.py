@@ -354,8 +354,8 @@ def draw_replicate(
     logger.info(f"do-mnist: mix_in B-rows {int(mask_b.sum()):,} / {len(GXb):,} (DA+PI, DA+PI+IV, prescreen)")
     diagnostics.update(mix_in_n_A=float(mask_a.sum()), mix_in_n_B=float(mask_b.sum()))
     # each net's invariance error on the UNMIXED B pairs, clipped as PI+INV reads it
-    for key, model in nets.items():
-        diagnostics[f"E_inv_B_{key}"] = e_inv(model, Xb, GXb)
+    for name, model in nets.items():
+        diagnostics[f"E_inv_B_{name}"] = e_inv(model, Xb, GXb)
     if "INV" in nets:
         diagnostics.update(_erm_inv_record(nets["INV"]))
         logger.info(

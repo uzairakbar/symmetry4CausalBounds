@@ -244,6 +244,8 @@ def leg_v():
         a, b, c = (np.asarray(getattr(d, field)) for d in (plain, with_inv, hooked))
         check(f"(v) the B array {field} is bit-identical", np.array_equal(a, b) and np.array_equal(a, c))
     check("(v) no INV net unless asked", "INV" not in plain.nets)
+    same_key = plain.split_key == with_inv.split_key == hooked.split_key and len(plain.split_key) == 40
+    check("(v) the split key is the partition sha1 on every path", same_key, with_inv.split_key)
     sha = with_inv.nets["INV"].state_sha1()
     check("(v) the inv_fits hook trains the run's net (sha1)", hooked.nets["INV"].state_sha1() == sha)
     check("(v) run.json provenance carries the sha1", with_inv.diagnostics["erm_inv_state_sha1"] == sha)
