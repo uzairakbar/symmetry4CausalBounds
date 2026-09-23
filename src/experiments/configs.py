@@ -158,6 +158,10 @@ class DoMNISTConfig:
     mu_clip: bool = True
     # the exemplar tints on the query axis, alternating red/blue down the digits
     exemplar_colors: Literal["alternating", "random"] = "alternating"
+    # the tint sweep's image per digit: `test` draws it from MNIST test (an image no
+    # net trained on), `exemplar` reuses the exemplar figure's training image; both
+    # at `exemplar_seed` (`DoMNISTSEM.tinted`)
+    tint_image_source: Literal["test", "exemplar"] = "test"
     # the held-out probe of the ERM report: obs/do paired draws from MNIST test
     probe_seed: int = 7
     probe_samples: int = 10_000

@@ -24,8 +24,10 @@ Three things differ from the linear experiments and shape everything here.
    `draw_replicate` performs the whole protocol in the reference order, so the
    torch stream is consumed identically on the query and the sweep path.
 
-The query path is the exemplar figure plus the population `run.json`. Of the
-sweeps only `gamma` is wired (a ratio grid around the DECLARED gamma); see
+The query path is the exemplar figure plus the population `run.json`, and, under
+`experiment.query.tint`, one tint sweep per digit (`run_tint_sweep`): a single image
+rendered from blue to red and scored by every fitted method, with the target
+constant along it. Of the sweeps only `gamma` is wired (a ratio grid around the DECLARED gamma); see
 `DoMNISTOrchestrator.get_sweep_runner_cls` for what the others still need.
 """
 
@@ -39,16 +41,16 @@ from loguru import logger
 
 from src.data_augmentors.do_mnist import DoMNISTDA as DA
 from src.experiments.base import ExperimentDataContext, ExperimentOrchestrator, SweepData
-from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry
+from src.experiments.configs import ANNOTATE_SWEEP_PLOT, DOMNIST_CONFIG, MethodRegistry, TintSpec
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import save
 from src.experiments.utils.constants import SUBDIR_QUERY
 from src.experiments.utils.diagnostics import erm_report, prescreen, probe
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
-from src.experiments.utils.plotting import create_digit_sweep_plot
+from src.experiments.utils.plotting import create_digit_sweep_plot, create_query_sweep_plot
 from src.methods.regression import GradientDescentERM, InvariantGradientDescentERM
 from src.oracle import OracleParameters
-from src.sem.do_mnist import SPLIT_DEFAULT, DoMNISTSEM, split_key
+from src.sem.do_mnist import SPLIT_DEFAULT, DoMNISTSEM, split_key, tint_of
 
 EXPERIMENT_NAME = "do_mnist"
 
@@ -567,6 +569,81 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 
 
 # =============================================================================
+# TINT SWEEP
+# =============================================================================
+
+
+def _tints_of_rows(X) -> np.ndarray:
+    """`tint_of` on flat (n, 3 s^2) rows; `s` from the row width, not hard-coded."""
+    X = np.asarray(X)
+    side = int(round(np.sqrt(X.shape[1] / 3)))
+    if 3 * side * side != X.shape[1]:
+        raise ValueError(f"rows of width {X.shape[1]} are not (3, s, s) images")
+    return tint_of(X.reshape(len(X), 3, side, side))
+
+
+def run_tint_sweep(runner, spec: TintSpec, experiment: str = EXPERIMENT_NAME) -> dict[str, Any]:
+    """One image per digit rendered at every tint of the grid and scored by every
+    fitted model of the query run (no refit). Saves per digit `tint_{d}_values`,
+    `tint_{d}_outcomes` (the query results layout, ATE first) and `tint_{d}_images`
+    (the full-resolution blue and red endpoints), the figure `tint_{d}_sweep`, and
+    once `tint_density` (the B rows' tints before and after DA). Returns the
+    `run.json` entry."""
+    tints = np.linspace(spec.range[0], spec.range[1], spec.sweep_samples)
+    digits = sorted(spec.digits)
+    source = DOMNIST_CONFIG.tint_image_source
+    sem = runner.sem_test if source == "test" else runner.sem
+    n = len(tints)
+    queries = np.concatenate([flat(sem.tinted(runner.exemplar_seed, d, tints)) for d in digits])
+    target = np.asarray(runner.sem.ate_of(np.repeat(digits, n)), dtype=float).reshape(-1, 1)
+
+    # one predict per method over every digit at once: the per-predict set-up is paid once
+    predictions, status = {}, {}
+    for name, model in runner.models_.items():
+        prediction = np.asarray(model.predict(queries))
+        predictions[name] = prediction
+        if name not in POINT_METHODS and prediction.ndim == 2 and prediction.shape[1] == 2:
+            record = evaluate_queries(target, prediction, statuses=getattr(model, "query_status", None))
+            status[name] = dict(zip(STATUS_CATEGORIES, [int(c) for c in record.status_counts], strict=True))
+
+    for i, digit in enumerate(digits):
+        rows = slice(i * n, (i + 1) * n)
+        outcomes = {"ATE": target[rows]} if "ATE" in runner.methods else {}
+        for name in runner.methods:
+            if name not in predictions:
+                continue
+            p = predictions[name][rows]
+            outcomes[name] = p[:, np.newaxis, :] if "PI" in name else p.reshape(n, 1)
+        endpoints = sem.tinted(runner.exemplar_seed, digit, tints[[0, -1]], subsample=1)
+        save(tints, f"tint_{digit}_values", experiment, "pkl", subdir=SUBDIR_QUERY)
+        save(outcomes, f"tint_{digit}_outcomes", experiment, "pkl", subdir=SUBDIR_QUERY)
+        save(endpoints, f"tint_{digit}_images", experiment, "pkl", subdir=SUBDIR_QUERY)
+        log_vacuous(outcomes)
+        create_query_sweep_plot(
+            tints, outcomes, fname=f"tint_{digit}", experiment=experiment, **ANNOTATE_SWEEP_PLOT["tint"]
+        )
+
+    # the DA measure the DA+ methods fit on (the mixed GX), against the observed rows
+    density = {"before": _tints_of_rows(runner.data_.X), "after": _tints_of_rows(runner.data_.GX)}
+    save(density, "tint_density", experiment, "pkl", subdir=SUBDIR_QUERY)
+    logger.info(f"do-mnist tint sweep: digits {digits}, {n} tints on {spec.range}, image from {source}")
+    return dict(
+        digits=digits,
+        grid=tints.tolist(),
+        range=list(spec.range),
+        sweep_samples=int(spec.sweep_samples),
+        image_source=source,
+        image_seed=int(runner.exemplar_seed),
+        status=status,
+        # provenance, so the aggregate can tell sweeps of different runs apart
+        split_key=runner.data_.split_key,
+        inv_recenter=runner.inv_recenter,
+        gamma=float(runner.default_gamma),
+        epsilon=float(runner.default_epsilon),
+    )
+
+
+# =============================================================================
 # PARAMETER SWEEP MIXIN
 # =============================================================================
 
@@ -897,6 +974,9 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         record = dict(runner.data_.diagnostics)
         record.update(runner.evaluate_population())
         record.update(self._exemplar_summary(results, ate))
+        if self.tint_ is not None:
+            # after the population: its status split is read right after its own predict
+            record["tint"] = run_tint_sweep(runner, self.tint_, self.name)
         record.update(
             gamma=float(self.gamma),
             epsilon=float(self.epsilon),
