@@ -9,17 +9,19 @@ split-A pairs, before the mix-in. The configured net is the one the replicate ke
 so everything downstream is the run's. Per point it records
 
   - the achieved invariance error on the unmixed B pairs, mu clipped as the PI+INV
-    constraint reads it (`E_inv_B`), and whether the AL converged (<= 1.5 tau);
+    constraint reads it (`E_inv_B`), and `constraint_met` (E_inv_B <= 1.5 tau).
+    That flag reads the constraint alone: a net collapsed to a constant meets it,
+    so f-accuracy is recorded beside it, as a diagnostic and never a criterion;
   - f-accuracy and RMSE to h_* on its own 1,000 rows from split C at `seed + 1`
     (never MNIST test, the evaluation population's pool);
   - the PI+INV constraint value at the centre (`con0`) and the floor on the ball at
     the block's gamma, both against eps^2;
   - the training time, the `state_sha1` and the AL trace.
 
-The one thing it can change is the epoch count: if the configured tau does not
-converge at 1 epoch but does at 2, the `recommended` entry says 2 and
-`DoMNISTConfig.erm_inv_epochs = 2` is pasted by hand. If it converges at neither,
-the configured values stay and a WARNING is logged. The `recommended` entry's
+The one thing it can change is the epoch count: if the configured tau's constraint
+is not met at 1 epoch but is at 2, the `recommended` entry says 2 and
+`DoMNISTConfig.erm_inv_epochs = 2` is pasted by hand. If it is met at neither, the
+configured values stay and a WARNING is logged. The `recommended` entry's
 `state_sha1` is what the run's `run.json` `erm_inv_state_sha1` must equal once the
 epoch count is pasted. Writes `artifacts/do_mnist/select/erm_inv_diagnostics.json`
 and `erm_inv_trace.pdf`.
@@ -60,9 +62,9 @@ SUBDIR = "select"
 TAUS = (1e-3, 4e-4, 1e-4)
 EPOCHS = (1, 2)
 N_C = 1_000
-#: the AL counts as converged when the achieved E_inv on the B pairs is within this
+#: the constraint counts as met when the achieved E_inv on the B pairs is within this
 #: factor of its target
-CONVERGED = 1.5
+CONSTRAINT_MET = 1.5
 
 
 def centre_record(net, data, Xc, hc, fc) -> dict:
@@ -176,14 +178,14 @@ def diagnose(block: dict, hyperparameters: dict, plot: bool = True) -> dict:
         net = data.nets["INV"] if (t, e) == (tau, epochs) else InvariantGradientDescentERM.from_blob(fit["blob"])
         entry = dict(tau=t, epochs=e, state_sha1=fit["state_sha1"], train_seconds=fit["train_seconds"])
         entry.update(centre_record(net, data, Xc, hc, fc))
-        entry["converged"] = bool(entry["E_inv_B"] <= CONVERGED * t)
+        entry["constraint_met"] = bool(entry["E_inv_B"] <= CONSTRAINT_MET * t)
         entry.update(inv_floor(orchestrator, net, data, hyperparameters))
         entry["trace"] = fit["trace"]
         points.append(entry)
-        state = "converged" if entry["converged"] else "NOT converged"
+        state = "constraint met" if entry["constraint_met"] else "constraint NOT met"
         logger.info(
-            f"tau {t:g} x {e}: E_inv_B {entry['E_inv_B']:.4g} ({state}) "
-            f"f-acc {entry['f_accuracy_C']:.4f} RMSE {entry['rmse_h_star_C']:.4f} con0 {entry['con0']:.4g} "
+            f"tau {t:g} x {e}: E_inv_B {entry['E_inv_B']:.4g} ({state}, f-acc {entry['f_accuracy_C']:.4f}) "
+            f"RMSE {entry['rmse_h_star_C']:.4f} con0 {entry['con0']:.4g} "
             f"floor {entry['floor']:.4g} vs eps^2 {entry['budget']:.4g}"
         )
     reference = {
@@ -193,21 +195,27 @@ def diagnose(block: dict, hyperparameters: dict, plot: bool = True) -> dict:
     def point(t, e):
         return next(p for p in points if p["tau"] == t and p["epochs"] == e)
 
-    # the one rule: raise the epoch count to 2 only if 1 does not converge and 2 does
+    # the one rule: raise the epoch count to 2 only if the constraint is not met at 1
+    # and is at 2. Accuracy is reported, never selected on
     chosen = epochs
-    if not point(tau, epochs)["converged"]:
-        if epochs == 1 and 2 in epoch_grid and point(tau, 2)["converged"]:
+    if not point(tau, epochs)["constraint_met"]:
+        if epochs == 1 and 2 in epoch_grid and point(tau, 2)["constraint_met"]:
             chosen = 2
             logger.warning(
-                f"ERM+INV: tau {tau:g} does not converge at 1 epoch but does at 2; "
-                "set DoMNISTConfig.erm_inv_epochs = 2."
+                f"ERM+INV: tau {tau:g} constraint not met at 1 epoch but met at 2 "
+                f"(f-acc {point(tau, 2)['f_accuracy_C']:.4f}); set DoMNISTConfig.erm_inv_epochs = 2."
             )
         else:
             logger.warning(
-                f"ERM+INV: tau {tau:g} converges at none of the epoch counts {epoch_grid}; the configured values "
-                "stay, and the eps^2 check decides whether PI+INV is usable."
+                f"ERM+INV: tau {tau:g} constraint met at none of the epoch counts {epoch_grid}; the configured "
+                "values stay, and the eps^2 check decides whether PI+INV is usable."
             )
     recommended = point(tau, chosen)
+    met = "met" if recommended["constraint_met"] else "NOT met"
+    logger.info(
+        f"ERM+INV recommended: tau {tau:g} x {chosen}: constraint {met}, "
+        f"f-acc {recommended['f_accuracy_C']:.4f} on split C (ERM {reference['ERM']['f_accuracy_C']:.4f})"
+    )
     if recommended["con0"] > recommended["budget"] or recommended["floor"] > recommended["budget"]:
         logger.warning(
             f"ERM+INV: con0 {recommended['con0']:.4g} / floor {recommended['floor']:.4g} against eps^2 "
@@ -217,7 +225,9 @@ def diagnose(block: dict, hyperparameters: dict, plot: bool = True) -> dict:
     record = dict(
         erm_inv_tau=tau,
         configured_epochs=epochs,
-        converged_factor=CONVERGED,
+        constraint_met_factor=CONSTRAINT_MET,
+        constraint_met_means="E_inv_B <= constraint_met_factor * tau; the constraint alone, not fit quality "
+        "(a constant net meets it). f_accuracy_C beside it is a diagnostic, never a selection criterion",
         taus=taus,
         epochs=epoch_grid,
         n_c=N_C,
@@ -268,7 +278,7 @@ def main():
     for p in record["points"]:
         print(
             f"tau {p['tau']:<7g} epochs {p['epochs']}: E_inv_B {p['E_inv_B']:.4g} "
-            f"{'converged' if p['converged'] else 'NOT converged':<13} f-acc {p['f_accuracy_C']:.4f} "
+            f"{'constraint met' if p['constraint_met'] else 'constraint NOT met':<18} f-acc {p['f_accuracy_C']:.4f} "
             f"RMSE {p['rmse_h_star_C']:.4f} con0 {p['con0']:.4g} floor {p['floor']:.4g} (eps^2 {p['budget']:.4g})"
         )
     for name, r in record["reference"].items():

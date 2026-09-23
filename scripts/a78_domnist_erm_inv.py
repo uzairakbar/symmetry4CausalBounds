@@ -8,9 +8,10 @@ Static legs (no MNIST; the tiny AL fit runs on whatever `device()` picks, second
         INV net itself; a bogus `inv_recenter` raises when PI+INV is built.
   (ii)  nesting: `nested_in("inv")` has no PI+INV entry (off/on keep theirs), and
         `log_nesting` under `inv` stays quiet on a PI+INV wider than PI.
-  (iii) the AL schedule: the window is `n_batches // updates_per_epoch` (at least 1)
-        at the 60k and the 1.2M draw sizes, and a tiny fit at two sizes updates at
-        exactly those steps, `updates_per_epoch` times per epoch at the larger one.
+  (iii) the AL schedule: each epoch's batches split into `updates_per_epoch`
+        near-equal windows, so both the 60k and the 1.2M draw update exactly that
+        many times per epoch (one per batch when an epoch is shorter), and a tiny
+        fit at two sizes updates at exactly the window ends.
   (iv)  the plumbing: `erm_inv_fit_kwargs` carries the `DOMNIST_CONFIG` constants and
         the epoch override, which `train_erm_inv` honours over the pair's own
         `epochs`, the default `erm_inv_tau` is 4e-4, and the orchestrator
@@ -111,35 +112,38 @@ def leg_ii():
 
 
 def leg_iii():
-    print("(iii) the AL window is in epoch units")
-    window = InvariantGradientDescentERM.al_window
+    print("(iii) the AL windows split each epoch evenly")
+    ends_of = InvariantGradientDescentERM.al_window_ends
     upe = DOMNIST_CONFIG.erm_inv_updates_per_epoch
     for n in (60_000, 1_200_000):
         n_batches = int(np.ceil(n / 256))
-        check(f"(iii) window at n={n:,} is n_batches // {upe}", window(n_batches, upe) == n_batches // upe)
-    check("(iii) the window is at least 1", window(3, 20) == 1)
+        ends = ends_of(n_batches, upe)
+        sizes = np.diff([-1, *ends])
+        check(f"(iii) n={n:,}: exactly {upe} updates per epoch", len(ends) == upe, str(len(ends)))
+        check(f"(iii) n={n:,}: the last window ends the epoch", ends[-1] == n_batches - 1)
+        check(f"(iii) n={n:,}: window sizes differ by at most 1", sizes.max() - sizes.min() <= 1, str(sizes))
+    check("(iii) fewer batches than updates: one per batch", ends_of(3, 20) == [0, 1, 2])
 
     rng = np.random.default_rng(0)
-    for n_batches, epochs in ((10, 1), (100, 2)):
+    for n_batches, epochs in ((10, 1), (107, 2)):
         n = 64 * n_batches
         X = rng.random((n, 3 * 14 * 14), dtype=np.float32)
         GX = np.clip(X + 0.2 * rng.standard_normal(X.shape).astype(np.float32), 0, 1)
         y = (X[:, :50].mean(axis=1) > 0.5).astype(np.float32)
         kw = erm_inv_fit_kwargs({**TRAIN_KW, "batch": 64}, 1e-4, epochs=epochs)
         net = InvariantGradientDescentERM("domnist-fast").fit(X, y, GX=GX, init_seed=0, **kw)
-        w = window(n_batches, upe)
+        per_epoch = [end + 1 for end in ends_of(n_batches, upe)]
+        expected = [e * n_batches + step for e in range(epochs) for step in per_epoch]
         steps = [row[0] for row in net.al_trace_]
+        check(f"(iii) {n_batches} batches x {epochs} epochs: updates at the window ends", steps == expected, str(steps))
         check(
-            f"(iii) {n_batches} batches x {epochs} epochs: an update every {w} steps",
-            steps == list(range(w, n_batches * epochs + 1, w)),
-            str(steps[:5]),
+            f"(iii) {n_batches} batches x {epochs} epochs: {min(upe, n_batches)} updates per epoch",
+            len(steps) == min(upe, n_batches) * epochs,
+            str(len(steps)),
         )
-        if n_batches % upe == 0:
-            check(f"(iii) {n_batches} batches: {upe} updates per epoch", len(steps) == upe * epochs, str(len(steps)))
         mus = [row[3] for row in net.al_trace_]
-        check(
-            "(iii) mu never shrinks and stays capped", mus == sorted(mus) and max(mus) <= DOMNIST_CONFIG.erm_inv_mu_max
-        )
+        capped = max(mus) <= DOMNIST_CONFIG.erm_inv_mu_max
+        check("(iii) mu never shrinks and stays capped", mus == sorted(mus) and capped)
         check("(iii) lam stays non-negative", min(row[2] for row in net.al_trace_) >= 0.0)
 
 
@@ -159,7 +163,7 @@ def leg_iv():
     check("(iv) the epoch count is erm_inv_epochs, else the pair's", kw["epochs"] == expected)
     check("(iv) an explicit epoch count wins", erm_inv_fit_kwargs(TRAIN_KW, 4e-4, epochs=2)["epochs"] == 2)
     # the pair's dict carries `epochs` too: train_erm_inv must not let it shadow the
-    # override (20 batches at window 1, so the trace length counts the epochs)
+    # override (20 batches, 20 updates per epoch, so the trace length counts the epochs)
     rng = np.random.default_rng(1)
     X = rng.random((64 * 20, 3 * 14 * 14), dtype=np.float32)
     GX, y = X[::-1].copy(), (X[:, 0] > 0.5).astype(np.float32)

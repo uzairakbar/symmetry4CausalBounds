@@ -354,9 +354,10 @@ class InvariantGradientDescentERM(GradientDescentERM):
     matched third member of the ERM / DA+ERM pair; X and GX are row-aligned and
     share one permutation. `c` is read on the net's raw output.
 
-    The multiplier schedule is in epoch units: each epoch is cut into
-    `al_updates_per_epoch` windows of `n_batches // al_updates_per_epoch` steps (at
-    least 1), so a fit makes the same number of updates at 60k and at 1.2M draws.
+    The multiplier schedule is in epoch units: each epoch's batches are split into
+    `al_updates_per_epoch` near-equal windows (`np.array_split`; fewer when an epoch
+    has fewer batches), so a fit makes exactly that many updates per epoch at 60k and
+    at 1.2M draws.
     At each window end `lam = max(0, lam + mu v)` on the window mean `v`, and `mu`
     grows by `al_growth` (capped at `al_mu_max`) unless the violation fell below a
     quarter of the previous window's. `al_trace_` keeps `(step, c_bar, lam, mu)`
@@ -365,9 +366,11 @@ class InvariantGradientDescentERM(GradientDescentERM):
     """
 
     @staticmethod
-    def al_window(n_batches: int, al_updates_per_epoch: int) -> int:
-        """Steps per multiplier update."""
-        return max(1, int(n_batches) // max(1, int(al_updates_per_epoch)))
+    def al_window_ends(n_batches: int, al_updates_per_epoch: int) -> list[int]:
+        """The 0-based batch indices within an epoch after which the multipliers
+        update: the last batch of each of the near-equal windows."""
+        windows = np.array_split(np.arange(int(n_batches)), min(max(1, int(al_updates_per_epoch)), int(n_batches)))
+        return [int(w[-1]) for w in windows]
 
     def _fit(
         self,
@@ -410,7 +413,7 @@ class InvariantGradientDescentERM(GradientDescentERM):
 
         n_train, n_batches = len(Xt), max(1, int(np.ceil(len(Xt) / batch)))
         sched = self._scheduler(opt, lr, epochs, n_batches, onecycle)
-        window = self.al_window(n_batches, al_updates_per_epoch)
+        ends = set(self.al_window_ends(n_batches, al_updates_per_epoch))
 
         lam, mu, previous = 0.0, float(al_mu0), np.inf
         running, count, step = torch.zeros((), device=dev), 0, 0
@@ -431,7 +434,7 @@ class InvariantGradientDescentERM(GradientDescentERM):
                 running += c.detach()
                 count += 1
                 step += 1
-                if count == window:
+                if b in ends:
                     # one host sync per window, not per step
                     c_bar = float(running) / count
                     violation = c_bar / tau - 1.0
