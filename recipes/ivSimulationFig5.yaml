@@ -12,7 +12,7 @@ simulation:
     treatment_dim: 32
     iv: 4
     n_experiments: 8
-    sweep_samples: 12
+    sweep_samples: 8
     methods:
         - ATE
         - ERM+IV
