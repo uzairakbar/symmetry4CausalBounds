@@ -29,6 +29,7 @@ sweeps only `gamma` is wired (a ratio grid around the DECLARED gamma); see
 `DoMNISTOrchestrator.get_sweep_runner_cls` for what the others still need.
 """
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -729,6 +730,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         self.gamma_z_star, self.calibrate_sigma = gamma_z_star, calibrate_sigma
         self.split = {k: int(v) for k, v in (split or SPLIT_DEFAULT).items()}
         self.split_seed, self.pop_seed, self.exemplar_seed = split_seed, pop_seed, exemplar_seed
+        self.tint_ = None  # the query tint spec, set by `run`
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
@@ -866,6 +868,12 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
                 )
 
         return ConfiguredSweep
+
+    def run(self, plan):
+        """Keep the tint spec for `_plot_query_sweep`, and hand the base a plan
+        without it (the base refuses one)."""
+        self.tint_ = plan.tint
+        super().run(dataclasses.replace(plan, tint=None))
 
     def _run_perf(self, perf_spec):
         """The perf sweeps run on the epsilon grid, which is not wired here

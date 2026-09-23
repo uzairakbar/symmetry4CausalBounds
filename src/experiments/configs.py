@@ -574,12 +574,24 @@ class PerfSpec:
 
 
 @dataclass(frozen=True)
+class TintSpec:
+    """The do-MNIST tint sweep under `query`: one image per digit, rendered at
+    `sweep_samples` tints evenly spaced over `range` (0 pure blue, 1 pure red)."""
+
+    digits: tuple[int, ...]
+    sweep_samples: int = 8
+    range: tuple[float, float] = (0.0, 1.0)
+
+
+@dataclass(frozen=True)
 class ExperimentPlan:
-    """Which experiment types to run. Panel is bound to `query`."""
+    """Which experiment types to run. Panel is bound to `query`. `tint` is the
+    do-MNIST tint sweep, read by that orchestrator alone."""
 
     query: bool = False
     sweep: SweepSpec | None = None
     perf: PerfSpec | None = None
+    tint: TintSpec | None = None
 
 
 def _reject_unknown(got, allowed, where: str):
@@ -594,10 +606,49 @@ def _check_values(values, allowed, where: str) -> tuple:
     return values
 
 
+def _parse_tint(tint: Any) -> TintSpec:
+    """`experiment.query.tint`: `digit` an int or a list of unique ints in 0..9,
+    `sweep_samples` an int >= 2 (default 8), `range` two numbers 0 <= lo < hi <= 1
+    (default [0, 1])."""
+    where = "experiment.query.tint"
+    if not isinstance(tint, dict):
+        raise ValueError(f"{where} must be a mapping with `digit` (and `sweep_samples`, `range`); got {tint!r}.")
+    _reject_unknown(tint, {"digit", "sweep_samples", "range"}, where)
+    if "digit" not in tint:
+        raise ValueError(f"{where} needs `digit`: an int or a list of ints in 0..9.")
+    digits = tint["digit"] if isinstance(tint["digit"], list | tuple) else [tint["digit"]]
+    if not digits or any(isinstance(d, bool) or not isinstance(d, int) or not 0 <= d <= 9 for d in digits):
+        raise ValueError(f"{where}.digit must be an int or a non-empty list of ints in 0..9; got {tint['digit']!r}.")
+    if len(set(digits)) != len(digits):
+        raise ValueError(f"{where}.digit repeats a digit: {tint['digit']!r}.")
+    samples = tint.get("sweep_samples", 8)
+    if isinstance(samples, bool) or not isinstance(samples, int) or samples < 2:
+        raise ValueError(f"{where}.sweep_samples must be an int >= 2; got {samples!r}.")
+    span = tint.get("range", [0.0, 1.0])
+    number = (int, float)
+    valid = (
+        isinstance(span, list | tuple)
+        and len(span) == 2
+        and all(isinstance(v, number) and not isinstance(v, bool) for v in span)
+        and 0.0 <= span[0] < span[1] <= 1.0
+    )
+    if not valid:
+        raise ValueError(f"{where}.range must be [lo, hi] with 0 <= lo < hi <= 1; got {span!r}.")
+    return TintSpec(digits=tuple(int(d) for d in digits), sweep_samples=samples, range=(float(span[0]), float(span[1])))
+
+
 def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
-    """Parse+validate the `experiment:` block. Unknown keys are a hard error."""
+    """Parse+validate the `experiment:` block. Unknown keys are a hard error.
+    `query` is a bool, or a mapping with the one key `tint` (the do-MNIST tint
+    sweep), which implies `query: true`."""
     block = dict(block or {})
     _reject_unknown(block, {"query", "sweep", "perf"}, "experiment")
+
+    query, tint = block.get("query", False), None
+    if isinstance(query, dict):
+        _reject_unknown(query, {"tint"}, "experiment.query")
+        tint = _parse_tint(query["tint"]) if "tint" in query else None
+        query = True
 
     sweep_metrics = {k for k, v in METRIC_SPECS.items() if not v.perf_only}
     perf_metrics = {k for k, v in METRIC_SPECS.items() if v.perf_only}
@@ -622,9 +673,10 @@ def parse_experiment_plan(block: dict[str, Any] | None) -> ExperimentPlan:
         )
 
     return ExperimentPlan(
-        query=bool(block.get("query", False)),
+        query=bool(query),
         sweep=sweep,
         perf=perf,
+        tint=tint,
     )
 
 
@@ -701,6 +753,9 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xscale": "log",
     },
 }
+
+# do-MNIST: the tint sweep, one figure per digit (`tint_{d}`), all sharing this id
+ANNOTATE_SWEEP_PLOT["tint"] = {"xlabel": r"tint", "xscale": "linear"}
 
 validate_plot_keys("ANNOTATE_SWEEP_PLOT", ANNOTATE_SWEEP_PLOT, {"xlabel", "xscale"} | _STYLE_KEYS)
 

@@ -20,6 +20,11 @@ net, no run; seconds on a CPU).
         warning, the query runner class carries the block's knobs,
         `DoMNISTSEM.f` raises (the estimand is analytic), and the selection script's
         shared gamma is PI's alone (a source check: no max over methods).
+  (v)   the query tint spec: `experiment.query.tint` parses (an int or a list of
+        digits, default 8 samples on [0, 1]) and implies `query`; bad digits, a
+        repeat, too few samples, a bad range and unknown keys raise; `query: true`
+        parses to no tint; the base orchestrator refuses a tint spec, and the
+        do-MNIST one keeps it and forwards a plan without it.
 
 Run: uv run python scripts/a77_domnist_block.py
 """
@@ -263,11 +268,77 @@ def leg_iv():
         check(f"(iv) {path} is gone", not os.path.exists(os.path.join(REPO, path)))
 
 
+def leg_v():
+    print("(v) the query tint spec")
+    from src.experiments.base import ExperimentOrchestrator
+    from src.experiments.configs import TintSpec, parse_experiment_plan
+
+    plan = parse_experiment_plan({"query": {"tint": {"digit": 7}}})
+    check("(v) a bare digit parses, query implied", plan.query is True and plan.tint == TintSpec(digits=(7,)))
+    check("(v) the defaults are 8 samples on [0, 1]", plan.tint.sweep_samples == 8 and plan.tint.range == (0.0, 1.0))
+    plan = parse_experiment_plan({"query": {"tint": {"digit": [9, 0, 3], "sweep_samples": 5, "range": [0.1, 0.9]}}})
+    check("(v) a list, samples and range parse", plan.tint == TintSpec((9, 0, 3), 5, (0.1, 0.9)))
+    check("(v) query: true has no tint", parse_experiment_plan({"query": True}).tint is None)
+    check("(v) query: {} is a query without tint", parse_experiment_plan({"query": {}}).query is True)
+    bad = (
+        ({"digit": 10}, "digit 10"),
+        ({"digit": -1}, "digit -1"),
+        ({"digit": [1, 1]}, "a repeated digit"),
+        ({"digit": []}, "no digit"),
+        ({"digit": True}, "a bool digit"),
+        ({"digit": "7"}, "a string digit"),
+        ({}, "a missing digit"),
+        ({"digit": 7, "sweep_samples": 1}, "one sample"),
+        ({"digit": 7, "sweep_samples": 2.0}, "a float sample count"),
+        ({"digit": 7, "range": [0.5, 0.5]}, "an empty range"),
+        ({"digit": 7, "range": [0.9, 0.1]}, "a reversed range"),
+        ({"digit": 7, "range": [-0.1, 1.0]}, "a range below 0"),
+        ({"digit": 7, "range": [0.0, 1.1]}, "a range above 1"),
+        ({"digit": 7, "range": [0.0]}, "a one-sided range"),
+        ({"digit": 7, "colour": "red"}, "an unknown key"),
+    )
+    for tint, why in bad:
+        try:
+            parse_experiment_plan({"query": {"tint": tint}})
+            raised = False
+        except ValueError:
+            raised = True
+        check(f"(v) {why} raises", raised)
+    try:
+        parse_experiment_plan({"query": {"tint": {"digit": 7}, "exemplars": True}})
+        raised = False
+    except ValueError:
+        raised = True
+    check("(v) an unknown query key raises", raised)
+
+    tinted = parse_experiment_plan({"query": {"tint": {"digit": 7}}})
+    try:
+        ExperimentOrchestrator.run(type("Stub", (), {"name": "optical_device"})(), tinted)
+        raised = False
+    except ValueError as error:
+        raised = "tint" in str(error)
+    check("(v) the base orchestrator refuses a tint spec", raised)
+
+    from munch import munchify
+
+    from src.experiments.do_mnist import DoMNISTOrchestrator
+
+    block = resolve_dataset_block("do_mnist", {**shipped_block(), "im-ci": 0})
+    block.pop("experiment", None)
+    orchestrator = DoMNISTOrchestrator(**block, hyperparameters=munchify({"epochs": 1}))
+    forwarded = []
+    orchestrator._run_query_sweep = lambda: forwarded.append("query")
+    orchestrator.run(tinted)
+    check("(v) the do-MNIST orchestrator keeps the spec", orchestrator.tint_ == tinted.tint)
+    check("(v) and still runs the query", forwarded == ["query"])
+
+
 def main():
     leg_i()
     leg_ii()
     leg_iii()
     leg_iv()
+    leg_v()
     print(f"\nA77 {'PASS' if not FAILURES else 'FAIL'} ({PASSES} passed, {len(FAILURES)} failed)")
     for name in FAILURES:
         print(f"  FAILED: {name}")

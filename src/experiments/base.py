@@ -755,6 +755,8 @@ class ExperimentOrchestrator(ABC):
 
     def run(self, plan):
         """Run the experiment types the `experiment:` block asked for."""
+        if getattr(plan, "tint", None) is not None:
+            raise ValueError(f"experiment.query.tint is a do-MNIST sweep; {self.name} has none.")
         if plan.query:
             self._run_query_sweep()
         if plan.sweep:
