@@ -7,6 +7,8 @@ digit identity does. The confounding is therefore ADDITIVE in probability and
 CONSTANT in x: |h_erm - h_*| = beta(1/2 - eta).
 """
 
+import copy
+import hashlib
 import os
 from collections.abc import Sequence
 
@@ -19,6 +21,10 @@ from src.sem.abstract import StructuralEquationModel
 
 DATA_DIR: str = os.environ.get("MNIST_DIR", os.path.expanduser("~/scratch/data/mnist"))
 TINT_LO, TINT_HI, TINT_JITTER = 0.1, 0.9, 0.05
+# image-level partition of the 60k training images: A trains the nets, B is the only
+# thing the PI machinery sees, C selects gamma. The SEM owns the split, so the default
+# lives here.
+SPLIT_DEFAULT: dict[str, int] = {"A": 40_000, "B": 10_000, "C": 10_000}
 
 
 def tint(grey: NDArray, t: NDArray) -> NDArray:
@@ -28,10 +34,44 @@ def tint(grey: NDArray, t: NDArray) -> NDArray:
     return np.stack([t * grey, np.zeros_like(grey), (1.0 - t) * grey], axis=1)
 
 
+def tint_of(X: NDArray) -> NDArray:
+    """t = sumR / (sumR + sumB). Exact, invariant to the ink amount."""
+    X = np.asarray(X)
+    R, B = X[:, 0].sum((-2, -1)), X[:, 2].sum((-2, -1))
+    return R / np.maximum(R + B, 1e-12)
+
+
 def grey_of(X: NDArray) -> NDArray:
     """Ink mask: R + B = grey (the green channel is identically 0)."""
     X = np.asarray(X)
     return X[:, 0] + X[:, 2]
+
+
+def split_indices(n: int, sizes: dict[str, int], seed: int) -> dict[str, NDArray]:
+    """Disjoint image-index sets from ONE permutation of range(n); sizes must sum to n.
+
+    Asserts pairwise disjointness and full coverage every time: the acceptance check
+    is not a test-only property.
+    """
+    sizes = {k: int(v) for k, v in sizes.items()}
+    if sum(sizes.values()) != n:
+        raise ValueError(f"split sizes {sizes} sum to {sum(sizes.values())}, not {n}")
+    perm = np.random.default_rng(seed).permutation(n)
+    cuts = np.cumsum([0] + list(sizes.values()))
+    out = {k: np.sort(perm[a:b]) for k, a, b in zip(sizes, cuts[:-1], cuts[1:], strict=True)}
+    if len(np.unique(np.concatenate(list(out.values())))) != n:
+        raise AssertionError("split parts must be disjoint and cover every image")
+    return out
+
+
+def split_key(parts: dict[str, "DoMNISTSEM"]) -> str:
+    """ONE sha1 over 'A' + sorted A indices + 'B' + ...: a single provenance string for
+    the whole partition, written as `split_key` by every entry point that uses it."""
+    h = hashlib.sha1()  # noqa: S324 (provenance digest, not security)
+    for k in sorted(parts):
+        h.update(k.encode())
+        h.update(np.sort(parts[k].subset_).astype(np.int64).tobytes())
+    return h.hexdigest()
 
 
 def _bern(p, n, rng) -> NDArray:
@@ -46,9 +86,10 @@ class DoMNISTSEM(StructuralEquationModel):
     """
     f := 1[digit >= 5] is the invariant causal label; colour carries the confounding.
 
-    h_* is NOT linear in pixels, so `solution` does not exist and `f` is a fitted
-    net on interventional draws -- sound because sample(intervention=True) resamples
-    U for the outcome line only, so E[Y | X=x, do] = h_*(x) exactly.
+    h_* is NOT linear in pixels, so `solution` does not exist, and it is a function
+    of the digit label alone, so `f` does not exist either: the analytic target is
+    `ate_of(digits)` for a set of queries and `h_star(f)` for a draw (`last_["f"]`),
+    which is what every runner scores against.
     """
 
     def __init__(
@@ -60,9 +101,6 @@ class DoMNISTSEM(StructuralEquationModel):
         eta: float = 0.25,
         jitter: float = TINT_JITTER,
         subsample: int = 2,
-        net: str = "domnist-fast",
-        target_samples: int = 1_200_000,
-        target_kw: dict | None = None,
         directory: str = DATA_DIR,
     ):
         ds = datasets.MNIST(directory, train=train, download=True)
@@ -70,17 +108,37 @@ class DoMNISTSEM(StructuralEquationModel):
         self.images, self.targets = ds.data.numpy(), ds.targets.numpy()
         self.alpha, self.beta, self.eta, self.jitter = alpha, beta, eta, jitter
         self.sub = subsample
-        self.net, self.target_samples = net, target_samples
-        self.target_kw = dict(target_kw or {})
-        self._target = None
         is_high = self.targets >= 5
         self._pools = (np.flatnonzero(~is_high), np.flatnonzero(is_high))
+        self.subset_ = None  # global MNIST indices this SEM may draw from; None = all
         logger.info(
             f"do-mnist: n={len(self.images):,} train={train} alpha={alpha} beta={beta} eta={eta} sub={subsample}"
         )
 
     def __len__(self) -> int:
-        return len(self.images)
+        return len(self.subset_) if self.subset_ is not None else len(self.images)
+
+    # ------------------------------------------------------------------ split
+
+    def restrict(self, idx) -> "DoMNISTSEM":
+        """A shallow copy that draws only from the images `idx` (GLOBAL MNIST indices).
+
+        Shares images/targets with self; only the class pools change, so `_balanced`
+        still rebalances to P(f=1) = 1/2 and `last_['idx']` stays a global index.
+        """
+        sem = copy.copy(self)
+        sem.__dict__.pop("last_", None)
+        sem.subset_ = np.sort(np.asarray(idx, dtype=np.int64))
+        is_high = self.targets[sem.subset_] >= 5
+        sem._pools = (sem.subset_[~is_high], sem.subset_[is_high])
+        return sem
+
+    def split(self, sizes: dict[str, int] | None = None, seed: int = 420) -> dict[str, "DoMNISTSEM"]:
+        """{'A': sem_A, 'B': sem_B, 'C': sem_C}: disjoint restrictions covering every image."""
+        if self.subset_ is not None:
+            raise ValueError("split() partitions the full image set; call it on an unrestricted SEM")
+        idx = split_indices(len(self.images), sizes or SPLIT_DEFAULT, seed)
+        return {k: self.restrict(v) for k, v in idx.items()}
 
     # ------------------------------------------------- structural (closed form)
 
@@ -101,7 +159,7 @@ class DoMNISTSEM(StructuralEquationModel):
 
     @property
     def solution(self) -> NDArray:
-        raise NotImplementedError("do-MNIST h_* is not linear in pixels; use sem.f(X) instead.")
+        raise NotImplementedError("do-MNIST h_* is not linear in pixels; use ate_of / h_star instead.")
 
     @property
     def bias_sq(self) -> float:
@@ -158,11 +216,11 @@ class DoMNISTSEM(StructuralEquationModel):
         self.last_ = dict(idx=d["idx"], digits=d["digits"], f=d["f"], U=d["U"], C=d["C"], t=d["t"], S=d["S"], mode=mode)
 
     def sample(
-        self, N: int = 1, intervention: bool = False, seed: int | None = None, **kwargs
+        self, N: int | None = 1, intervention: bool = False, seed: int | None = None, **kwargs
     ) -> tuple[NDArray, NDArray]:
         """intervention=False uses the image's own U; True resamples it for Y only."""
         rng = np.random.default_rng(seed) if seed is not None else np.random
-        N = len(self.images) if (N is None or N <= 0) else int(N)
+        N = len(self) if (N is None or N <= 0) else int(N)  # N > len(self) is fine: fresh (U,C,S) per draw
         d = self._draw(N, rng)
         U_out = _bern(0.5, N, rng) if intervention else d["U"]
         y = np.where(d["S"] > 0.5, U_out, d["y_causal"])
@@ -172,13 +230,11 @@ class DoMNISTSEM(StructuralEquationModel):
     def sample_paired(self, N: int, seed: int):
         """(X, y_obs, y_do) from ONE draw: same images and (U,C,t,S), only U_out differs.
 
-        Common random numbers for the ERM/target pair -- the estimation error the two
-        nets share then cancels in |mu_erm - h^|, whose p95 sets the PI width.
-        `seed` is REQUIRED: the estimand must not depend on which call site happened
-        to trigger the lazy target fit.
+        Common random numbers for the obs and do label lines, so the ERM report's
+        accuracies on both are measured on the same images. `seed` is REQUIRED.
         """
         rng = np.random.default_rng(seed)
-        N = len(self.images) if (N is None or N <= 0) else int(N)
+        N = len(self) if (N is None or N <= 0) else int(N)
         d = self._draw(N, rng)
         y_obs = np.where(d["S"] > 0.5, d["U"], d["y_causal"])
         y_do = np.where(d["S"] > 0.5, _bern(0.5, N, rng), d["y_causal"])
@@ -187,24 +243,8 @@ class DoMNISTSEM(StructuralEquationModel):
 
     # ------------------------------------------------------- the estimand h_*
 
-    @property
-    def target(self):
-        """h_*, estimated. One net per SEM: every method in an experiment must be
-        scored against the same estimand. Fitted lazily, then frozen."""
-        if self._target is None:
-            from src.methods.regression import GradientDescentERM
-
-            logger.info(f"do-mnist: fitting the target net on {self.target_samples:,} interventional draws")
-            X, _, y_do = self.sample_paired(self.target_samples, seed=self.seed)
-            # Same draw and same init_seed as the runner's ERM pair (which draws at
-            # this same (N, seed)) => the two nets are coupled and share error.
-            self._target = GradientDescentERM(self.net).fit(_flat(X), y_do, init_seed=self.seed, **self.target_kw)
-            del X
-        return self._target
-
     def f(self, X) -> NDArray:
-        """h_*(x) on FLAT (N, d) pixels -> (N, 1), matching the linear SEMs' shape."""
-        return np.asarray(self.target.predict_mean(X), dtype=float).reshape(-1, 1)
+        raise NotImplementedError("do-MNIST h_* is a function of the digit: use ate_of(digits) or h_star(last_['f'])")
 
     # ------------------------------------------------------------- exemplars
 
