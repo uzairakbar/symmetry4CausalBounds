@@ -248,6 +248,11 @@ class DoMNISTSEM(StructuralEquationModel):
 
     # ------------------------------------------------------------- exemplars
 
+    def _exemplar_indices(self, rng, digits: Sequence[int] = range(10)) -> NDArray:
+        """One image index per digit, off `rng` in digit order. Takes the generator,
+        not a seed, so `exemplars` draws its tints from the same stream after it."""
+        return np.array([int(rng.choice(np.flatnonzero(self.targets == d))) for d in digits])
+
     def exemplars(
         self,
         seed: int = 420,
@@ -266,7 +271,7 @@ class DoMNISTSEM(StructuralEquationModel):
         resolution -- for the figure, while the models keep the subsampled ones.
         """
         rng = np.random.default_rng(seed)
-        idx = np.array([int(rng.choice(np.flatnonzero(self.targets == d))) for d in digits])
+        idx = self._exemplar_indices(rng, digits)
         n = len(idx)
         if colors == "alternating":
             C = (np.arange(n) % 2).astype(float)  # 0=blue, 1=red
@@ -275,3 +280,18 @@ class DoMNISTSEM(StructuralEquationModel):
             C = np.logical_xor(U > 0.5, _bern(self.eta, n, rng) > 0.5).astype(float)
         t = np.clip(np.where(C > 0.5, TINT_HI, TINT_LO) + rng.normal(0, self.jitter, n), 0.0, 1.0)
         return tint(self._grey(idx, subsample), t).astype(np.float32), self.targets[idx]
+
+    def tinted(self, seed: int, digit: int, tints: Sequence[float], subsample: int | None = None) -> NDArray:
+        """ONE image of `digit` rendered at every tint in `tints`: (N, 3, H, W).
+
+        The image is the one `exemplars(seed)` draws for that digit on this SEM, so
+        the grey ink is identical along the row and only the tint moves. On the
+        training SEM it IS the exemplar image; on the test SEM it is an image no net
+        trained on. A VISUALISATION set, like the exemplars, never scored.
+        """
+        if int(digit) not in range(10):
+            raise ValueError(f"digit must be in 0..9; got {digit!r}")
+        idx = self._exemplar_indices(np.random.default_rng(seed))[int(digit)]
+        t = np.asarray(tints, dtype=np.float32).ravel()
+        grey = np.repeat(self._grey(np.array([idx]), subsample), len(t), axis=0)
+        return tint(grey, t).astype(np.float32)
