@@ -2,14 +2,17 @@
 net, no run; seconds on a CPU).
 
   (i)   `resolve_dataset_block("do_mnist", ...)`: the five required keys, every new key
-        optional; `inv_recenter` accepts off/on and YAML's bare booleans and rejects
-        `fallback`; `mix_in` outside [0, 1), a `split` without exactly A/B/C, a
+        optional; `inv_recenter` accepts off/on/inv and YAML's bare booleans and
+        rejects `fallback`; `erm_inv_tau` must be a positive number; `ERM+INV` is
+        accepted on do-MNIST and rejected on every other block; `mix_in` outside
+        [0, 1), a `split` without exactly A/B/C, a
         non-positive split size, `pop_seed == seed + 1`, an unknown augmentation amount,
         an instrument-mode spelling and the old `backend`/`unfrozen_layers`/`link`/
         `solver` keys all raise; `im-ci` is forced to 0.
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
-        the seven methods with PI+INV last, and agree on every key.
-  (iii) the registry: `backend="copsens"` builds exactly the nine `COPSENS_METHODS`, an
+        the seven methods with PI+INV last and `ERM+INV` commented out, and agree on
+        every key.
+  (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
         unknown backend raises, `partial_r2` still builds `ALL_METHODS`, and the
         do-MNIST orchestrator's own registry builds the block's method list lazily
         (no net needed until a builder is CALLED).
@@ -28,7 +31,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import yaml  # noqa: E402
 
-from src.experiments.configs import ALL_METHODS, COPSENS_METHODS, MethodRegistry, resolve_dataset_block  # noqa: E402
+from src.experiments.configs import (  # noqa: E402
+    ALL_METHODS,
+    COPSENS_METHODS,
+    DOMNIST_ONLY_METHODS,
+    MethodRegistry,
+    resolve_dataset_block,
+)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAILURES: list[str] = []
@@ -92,7 +101,34 @@ def leg_i():
     for value in ("off", "on", True, False, "ON", " off "):
         block = resolve_dataset_block("do_mnist", {**MINIMAL, "inv_recenter": value})
         check(f"(i) inv_recenter {value!r} resolves to off/on", block["inv_recenter"] in ("off", "on"))
+    for value in ("inv", "INV", " inv "):
+        block = resolve_dataset_block("do_mnist", {**MINIMAL, "inv_recenter": value})
+        check(f"(i) inv_recenter {value!r} resolves to inv", block["inv_recenter"] == "inv")
     check("(i) inv_recenter fallback rejected", rejection(inv_recenter="fallback") is not None)
+    check("(i) inv_recenter erm-inv rejected", rejection(inv_recenter="erm-inv") is not None)
+    check("(i) erm_inv_tau 4e-4 resolves", rejection(erm_inv_tau=4e-4) is None)
+    check("(i) erm_inv_tau 1 resolves (an int)", rejection(erm_inv_tau=1) is None)
+    for value in (0, 0.0, -1e-4, True, "4e-4", None, float("inf")):
+        check(f"(i) erm_inv_tau {value!r} rejected", rejection(erm_inv_tau=value) is not None)
+    check("(i) erm_inv_tau is optional", "erm_inv_tau" not in resolve_dataset_block("do_mnist", dict(MINIMAL)))
+    check("(i) ERM+INV resolves on do-MNIST", rejection(methods=["ERM", "ERM+INV", "PI+INV"]) is None)
+    others = {
+        "simulation": dict(seed=42, kernel_dim=0),
+        "optical_device": dict(seed=42, augmentation="rotation"),
+        "cigarettes": dict(seed=42, augmentation="rotation", target="plasmode", spec="s"),
+    }
+    for name, block in others.items():
+        try:
+            resolve_dataset_block(name, {**block, "methods": ["PI"], "im-ci": 0})
+            baseline = True
+        except ValueError:
+            baseline = False
+        try:
+            resolve_dataset_block(name, {**block, "methods": ["PI", "ERM+INV"], "im-ci": 0})
+            rejected = False
+        except ValueError as error:
+            rejected = "ERM+INV" in str(error)
+        check(f"(i) ERM+INV rejected on {name} (its PI-only block resolves)", baseline and rejected)
     check("(i) mix_in 1.0 rejected", rejection(mix_in=1.0) is not None)
     check("(i) mix_in -0.1 rejected", rejection(mix_in=-0.1) is not None)
     check("(i) mix_in 0.05 resolves", rejection(mix_in=0.05) is None)
@@ -127,12 +163,17 @@ def leg_ii():
         methods = resolved["methods"]
         seven = len(methods) == 7 and methods[-1] == "PI+INV"
         check(f"(ii) {name} lists seven methods, PI+INV last", seven, str(methods))
+        check(f"(ii) {name} does not list ERM+INV", "ERM+INV" not in methods)
         check(f"(ii) {name} inv_recenter off", resolved["inv_recenter"] == "off")
         check(f"(ii) {name} gamma 0.08505", abs(resolved["gamma"] - 0.08505258154439962) < 1e-12)
         check(f"(ii) {name} epsilon 0.04", resolved["epsilon"] == 0.04)
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
         check(f"(ii) {name} split 40k/10k/10k", resolved["split"] == {"A": 40_000, "B": 10_000, "C": 10_000})
+    for name in ("config.yaml", os.path.join("recipes", "doMnistFigF1.yaml")):
+        with open(os.path.join(REPO, name)) as fh:
+            listed = re.search(r"^\s*# - ERM\+INV\b", fh.read(), flags=re.M) is not None
+        check(f"(ii) {name} carries ERM+INV commented out", listed)
     shared = set(shipped) & set(block_r) - {"experiment"}
     same = [k for k in shared if shipped[k] == block_r[k]]
     differ = sorted(set(shared) - set(same))
@@ -145,7 +186,17 @@ def leg_ii():
 def leg_iii():
     print("(iii) the registry")
     built = MethodRegistry.build_methods(list(COPSENS_METHODS), gamma=0.085, epsilon=0.04, backend="copsens")
-    check("(iii) copsens builds exactly its nine", tuple(built) == COPSENS_METHODS, str(tuple(built)))
+    check("(iii) copsens builds exactly its ten", tuple(built) == COPSENS_METHODS, str(tuple(built)))
+    check("(iii) ERM+INV is a copsens method", "ERM+INV" in COPSENS_METHODS)
+    check("(iii) ERM+INV is not in ALL_METHODS", "ERM+INV" not in ALL_METHODS and "ERM+INV" in DOMNIST_ONLY_METHODS)
+    try:
+        MethodRegistry.build_methods(
+            ["ERM+INV"], gamma=0.085, epsilon=0.04, backend="copsens", outcome_models={"X": 1, "GX": 2}
+        )["ERM+INV"]()
+        raised = False
+    except ValueError as error:
+        raised = "INV" in str(error)
+    check("(iii) ERM+INV without an INV net raises naming it", raised)
     try:
         MethodRegistry.build_methods(["PI"], gamma=0.085, epsilon=0.04, backend="partial_r2_net")
         raised = False

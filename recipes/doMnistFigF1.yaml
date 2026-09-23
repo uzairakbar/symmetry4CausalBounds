@@ -45,6 +45,7 @@ do_mnist:
         - ATE
         - ERM
         - DA+ERM
+        # - ERM+INV  # do-MNIST only; listing it trains the ERM+INV net
         - PI
         - DA+PI
         - DA+PI+IV

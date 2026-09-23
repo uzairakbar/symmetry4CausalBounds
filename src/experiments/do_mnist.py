@@ -10,9 +10,11 @@ Three things differ from the linear experiments and shape everything here.
 
 2. **The outcome nets are PREFIT.** One ERM on the observed draw and one DA+ERM on
    the augmented draw are trained per replicate and handed to every PI variant as
-   its centre. That inverts the usual build order: methods can only be built AFTER
-   the data exists, so the runners rebuild through the method factory once the
-   nets are there.
+   its centre; a third, the ERM+INV net (the ERM subject to invariance on the DA
+   pairs), is trained when PI+INV is centred on it (`inv_recenter: inv`) or
+   ERM+INV is listed. That inverts the usual build order: methods can only be
+   built AFTER the data exists, so the runners rebuild through the method factory
+   once the nets are there.
 
 3. **The split and mix-in protocol.** The 60k training images are partitioned
    once (split A trains the nets, B is the only thing the PI machinery sees, C is
@@ -43,14 +45,14 @@ from src.experiments.utils.constants import SUBDIR_QUERY
 from src.experiments.utils.diagnostics import erm_report, prescreen, probe
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
 from src.experiments.utils.plotting import create_digit_sweep_plot
-from src.methods.regression import GradientDescentERM
+from src.methods.regression import GradientDescentERM, InvariantGradientDescentERM
 from src.oracle import OracleParameters
 from src.sem.do_mnist import SPLIT_DEFAULT, DoMNISTSEM, split_key
 
 EXPERIMENT_NAME = "do_mnist"
 
 #: the point estimators of the backend; everything else predicts an interval
-POINT_METHODS: frozenset = frozenset({"ERM", "DA+ERM"})
+POINT_METHODS: frozenset = frozenset({"ERM", "DA+ERM", "ERM+INV"})
 
 
 class Flatten:
@@ -83,6 +85,41 @@ def train_pair(X, GX, y, init_seed, net="domnist-fast", **train_kw):
     }
 
 
+def erm_inv_fit_kwargs(train_kw: dict[str, Any], tau: float, epochs: int | None = None) -> dict[str, Any]:
+    """The ERM+INV net's fit kwargs: the pair's training kwargs, the augmented
+    Lagrangian's constants from `DOMNIST_CONFIG`, the invariance target `tau`, and
+    the epoch count (`epochs`, else `erm_inv_epochs`, else the pair's)."""
+    kw = dict(train_kw)
+    epochs = DOMNIST_CONFIG.erm_inv_epochs if epochs is None else epochs
+    if epochs is not None:
+        kw["epochs"] = int(epochs)
+    kw.update(
+        al_tau=float(tau),
+        al_mu0=DOMNIST_CONFIG.erm_inv_mu0,
+        al_growth=DOMNIST_CONFIG.erm_inv_growth,
+        al_updates_per_epoch=DOMNIST_CONFIG.erm_inv_updates_per_epoch,
+        al_mu_max=DOMNIST_CONFIG.erm_inv_mu_max,
+    )
+    return kw
+
+
+def train_erm_inv(X, GX, y, init_seed, tau, net="domnist-fast", epochs=None, **train_kw):
+    """The ERM+INV net on the UNMIXED pairs, matched to the pair by `init_seed`."""
+    kw = erm_inv_fit_kwargs(train_kw, tau, epochs)
+    logger.info(f"do-mnist: training ERM+INV on {len(X):,} pairs, tau {tau:g}, {kw.get('epochs', 1)} epoch(s)")
+    return InvariantGradientDescentERM(net).fit(X, y, GX=GX, init_seed=init_seed, **kw)
+
+
+def e_inv(net, X, GX) -> float:
+    """E[(mu(X) - mu(GX))^2] with mu clipped as the PI+INV constraint reads it."""
+    lo_hi = DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else None
+    mu_x = np.asarray(net.predict_mean(X), dtype=float).ravel()
+    mu_gx = np.asarray(net.predict_mean(GX), dtype=float).ravel()
+    if lo_hi is not None:
+        mu_x, mu_gx = np.clip(mu_x, *lo_hi), np.clip(mu_gx, *lo_hi)
+    return float(np.mean((mu_x - mu_gx) ** 2))
+
+
 def _net_rho(nets, X, GX, y) -> float:
     """sigma~^2/sigma^2 on the prefit pair: the GX net's MSE on GX over the X net's
     MSE on X, both against y on the SAME rows. NaN-free by construction unless the
@@ -113,14 +150,19 @@ def log_vacuous(bounds: dict[str, np.ndarray]):
 
 #: (constrained method, the UNCONSTRAINED model on the same ball), by the PI+INV
 #: centre: under `off` PI+INV is the X-centred ball with the pairs bolted on, so
-#: PI is its parent; under `on` (`RecentredInvCopSens`) it is the post-DA ball
+#: PI is its parent; under `on` (`RecentredInvCopSens`) it is the post-DA ball;
+#: under `inv` its parent would be a plain ball around the ERM+INV net, which is
+#: not built, so PI+INV has no entry
 def nested_in(inv_recenter: str) -> dict[str, str]:
-    return {
+    nesting = {
         "PI+INV": "DA+PI" if inv_recenter == "on" else "PI",
         "DA+PI+IV": "DA+PI",
         "PI&DA+PI": "DA+PI",
         "PI&DA+PI+IV": "DA+PI",
     }
+    if inv_recenter == "inv":
+        del nesting["PI+INV"]
+    return nesting
 
 
 def log_nesting(bounds: dict[str, np.ndarray], inv_recenter: str = "off"):
@@ -197,7 +239,8 @@ class DoMNISTData:
 
     `GX` and `G` are the MIXED augmentation (the DA+ family's measure, identity
     rows where the mix-in swapped the observed row back in); `GX_inv` is the same
-    rows' UNMIXED augmentation, the PI+INV pairs. `nets` is the prefit pair.
+    rows' UNMIXED augmentation, the PI+INV pairs. `nets` is the prefit pair, plus
+    the ERM+INV net under "INV" when the replicate trained it.
     """
 
     X: np.ndarray
@@ -224,18 +267,28 @@ def draw_replicate(
     net: str,
     split: dict[str, int] | None,
     split_seed: int,
+    train_inv: bool = False,
+    erm_inv_tau: float | None = None,
+    inv_fits=None,
 ) -> DoMNISTData:
     """The reference protocol, in the reference order, so the torch stream is
     consumed identically by every caller:
 
     1. the image-level split of the training set at `split_seed`;
     2. the nets' draw from A at `seed`, augmented on the global torch stream;
-    3. the ERM on the observed draw, the mix-in IN PLACE on the augmented draw
-       (seed `[seed, 1]`), the DA+ERM on the mixture;
+    3. the ERM on the observed draw, then (`train_inv`) the ERM+INV net on the
+       unmixed pairs, the mix-in IN PLACE on the augmented draw (seed `[seed, 1]`),
+       the DA+ERM on the mixture;
     4. the ERM report on the held-out probe;
     5. the PI rows from B at `seed + 1`, augmented, and a mixed COPY at `[seed, 2]`
        for the DA+ family; the pairs stay unmixed;
     6. the prescreen (rho and the shift-operator spectrum) on the mixed B rows.
+
+    The DA+ERM fit reseeds torch (CPU and CUDA) at its start, so everything from
+    it on is bit-identical with or without the ERM+INV fit. `inv_fits`, when
+    given, replaces that fit: it is called at the same point as
+    `inv_fits(X=X, GX=GX, y=y, init_seed=seed, train_kw=train_kw)` and returns the
+    net to keep (the diagnostic script fits several there).
     """
     from src.experiments.utils import set_seed
 
@@ -254,16 +307,32 @@ def draw_replicate(
     del GX_img
 
     # every net in a replicate shares init_seed: a matched pair, differing only in inputs
+    seconds = {}
+    start = time.perf_counter()
     erm = GradientDescentERM(net).fit(X, y, init_seed=seed, **train_kw)
-    # mix-in IN PLACE on the A-draw GX: the ERM is done with the unmixed pairs, and
-    # the DA+ERM is the only consumer left. X itself is never written
+    seconds["X"] = time.perf_counter() - start
+    inv_net = None
+    # the ERM+INV net needs the UNMIXED pairs, so it trains before the mix-in
+    if train_inv or inv_fits is not None:
+        tau = DOMNIST_CONFIG.erm_inv_tau if erm_inv_tau is None else float(erm_inv_tau)
+        start = time.perf_counter()
+        if inv_fits is not None:
+            inv_net = inv_fits(X=X, GX=GX, y=y, init_seed=seed, train_kw=train_kw)
+        else:
+            inv_net = train_erm_inv(X, GX, y, init_seed=seed, tau=tau, net=net, **train_kw)
+        seconds["INV"] = time.perf_counter() - start
+    # mix-in IN PLACE on the A-draw GX: the ERM (and ERM+INV) are done with the
+    # unmixed pairs, and the DA+ERM is the only consumer left. X is never written
     GX, _, mask_a = da.mix_in(X, GX, None, mix_in, seed=[seed, 1], inplace=True)
     logger.info(f"do-mnist: mix_in A-draw {int(mask_a.sum()):,} / {len(GX):,} rows observed (DA+ERM)")
+    start = time.perf_counter()
     da_erm = GradientDescentERM(net).fit(GX, y, init_seed=seed, **train_kw)
+    seconds["GX"] = time.perf_counter() - start
     del X, GX
-    nets = {"X": erm, "GX": da_erm}
+    nets = {"X": erm, "GX": da_erm} if inv_net is None else {"X": erm, "GX": da_erm, "INV": inv_net}
 
     diagnostics = erm_report(erm, probe(sem_test, DOMNIST_CONFIG.probe_samples, DOMNIST_CONFIG.probe_seed))
+    diagnostics.update({f"train_seconds_{key}": value for key, value in seconds.items()})
 
     # the PI rows: a draw from B at seed + 1, never the nets' draw
     sem_b = parts["B"]
@@ -281,6 +350,16 @@ def draw_replicate(
     GXb_da, Gb_da, mask_b = da.mix_in(Xb, GXb, Gb, mix_in, seed=[seed, 2])
     logger.info(f"do-mnist: mix_in B-rows {int(mask_b.sum()):,} / {len(GXb):,} (DA+PI, DA+PI+IV, prescreen)")
     diagnostics.update(mix_in_n_A=float(mask_a.sum()), mix_in_n_B=float(mask_b.sum()))
+    # each net's invariance error on the UNMIXED B pairs, clipped as PI+INV reads it
+    for key, model in nets.items():
+        diagnostics[f"E_inv_B_{key}"] = e_inv(model, Xb, GXb)
+    if "INV" in nets:
+        diagnostics.update(_erm_inv_record(nets["INV"]))
+        logger.info(
+            f"do-mnist: E_inv on the B pairs ERM {diagnostics['E_inv_B_X']:.4g} DA+ERM {diagnostics['E_inv_B_GX']:.4g} "
+            f"ERM+INV {diagnostics['E_inv_B_INV']:.4g} (tau {diagnostics.get('erm_inv_al_tau', float('nan')):g}); "
+            f"ERM+INV sha1 {diagnostics['erm_inv_state_sha1']}"
+        )
     diagnostics.update(prescreen(Xb, yb, GXb_da, link=DOMNIST_CONFIG.link, keep=DOMNIST_CONFIG.spectrum_keep))
     logger.info(
         f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} tr(S)/k={diagnostics['tr_S_over_k']:.4f} "
@@ -298,6 +377,20 @@ def draw_replicate(
         split_key=key,
         diagnostics=diagnostics,
     )
+
+
+def _erm_inv_record(model) -> dict[str, Any]:
+    """The ERM+INV net's provenance for `run.json`: its hash, its target and the
+    augmented Lagrangian's trace `(step, c_bar, lam, mu)` with its last window."""
+    record: dict[str, Any] = {"erm_inv_state_sha1": model.state_sha1()}
+    trace = getattr(model, "al_trace_", None)
+    if trace is not None:
+        record["erm_inv_al_tau"] = float(model.al_tau_)
+        record["erm_inv_al_trace"] = [list(row) for row in trace]
+        if trace:
+            _, c_bar, lam, mu = trace[-1]
+            record.update(erm_inv_al_updates=len(trace), erm_inv_al_c_bar=c_bar, erm_inv_al_lam=lam, erm_inv_al_mu=mu)
+    return record
 
 
 def _jsonable(value):
@@ -334,6 +427,8 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         exemplar_seed: int = 420,
         net: str = "domnist-fast",
         inv_recenter: str = "off",
+        train_inv: bool = False,
+        erm_inv_tau: float | None = None,
         default_gamma: float = 0.1,
         default_epsilon: float = 0.05,
         **kwargs,
@@ -342,6 +437,7 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         self.n_pi, self.n_queries, self.mix_in = n_pi, n_queries, mix_in
         self.split, self.split_seed, self.pop_seed = split, split_seed, pop_seed
         self.exemplar_seed, self.net, self.inv_recenter = exemplar_seed, net, inv_recenter
+        self.train_inv, self.erm_inv_tau = train_inv, erm_inv_tau
         self.nets = None
         self.data_ = None
         # FORWARD the budgets: GenericQuerySweep stores them. Setting them here
@@ -385,6 +481,8 @@ class DoMNISTQuerySweep(GenericQuerySweep):
             net=self.net,
             split=self.split,
             split_seed=self.split_seed,
+            train_inv=self.train_inv,
+            erm_inv_tau=self.erm_inv_tau,
         )
         self.nets = self.data_.nets
         return self.data_.X, self.data_.GX, self.data_.y, self.data_.G
@@ -416,7 +514,8 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         """Every fitted model scored on the evaluation population: coverage, width,
         approximation and worst error, wall clock and the status split for the
         intervals, RMSE for the point estimators, the NaN-row share, and the
-        INV floor / budget pair where PI+INV was fitted. A method whose every
+        INV floor / budget pair where PI+INV was fitted, and under `inv` the
+        ERM+INV centre's own constraint value `erm_inv_con0`. A method whose every
         interval is NaN reads coverage NaN (`evaluate_queries`), not 0."""
         P, h_star, _, _ = population(self.sem_test, self.n_queries, self.pop_seed)
         target = np.asarray(h_star).reshape(-1, 1)  # (n, 1), the shape `sem.f` gives elsewhere
@@ -442,7 +541,26 @@ class DoMNISTQuerySweep(GenericQuerySweep):
                 out["inv_floor"] = float(model.constraint_floor(model._radius(model.gamma)))
                 out["inv_budget"] = float(model._budget())
                 logger.info(f"PI+INV: floor {out['inv_floor']:.4g} against budget eps^2 {out['inv_budget']:.4g}")
+                if self.inv_recenter == "inv":
+                    out["erm_inv_con0"] = float(model._con_at_zero())
+                    self._check_inv_centre(out["erm_inv_con0"], out["inv_floor"], out["inv_budget"])
+        # the ERM+INV net scored as a point estimate even when it is not plotted
+        if self.nets is not None and "INV" in self.nets and "ERM+INV" not in self.models_:
+            prediction = np.asarray(self.nets["INV"].predict(P))
+            out["rmse_ERM+INV"] = float(np.sqrt(np.nanmean((prediction.ravel() - target.ravel()) ** 2)))
         return out
+
+    @staticmethod
+    def _check_inv_centre(con0: float, floor: float, budget: float):
+        """The one feasibility check of the ERM+INV centre: its own invariance error
+        on the PI+INV constraint rows, and the floor, inside the eps^2 ball. Warns,
+        never stops, never moves tau."""
+        logger.info(f"PI+INV (inv): the ERM+INV centre's constraint value {con0:.4g} against eps^2 {budget:.4g}")
+        if con0 > budget or floor > budget:
+            logger.warning(
+                f"PI+INV (inv): centre value {con0:.4g} / floor {floor:.4g} against eps^2 {budget:.4g}: PI+INV is "
+                "likely infeasible at this epsilon."
+            )
 
 
 # =============================================================================
@@ -468,11 +586,14 @@ class DoMNISTMixin:
         split_seed: int = 420,
         pop_seed: int = 44,
         net: str = "domnist-fast",
+        train_inv: bool = False,
+        erm_inv_tau: float | None = None,
         **kwargs,
     ):
         self.sem_test_factory = sem_test_factory
         self.n_pi, self.n_queries, self.mix_in = n_pi, n_queries, mix_in
         self.split, self.split_seed, self.pop_seed, self.net = split, split_seed, pop_seed, net
+        self.train_inv, self.erm_inv_tau = train_inv, erm_inv_tau
         self._nets = {}
         self._data = {}
         self._population = None
@@ -543,6 +664,8 @@ class DoMNISTMixin:
             net=self.net,
             split=self.split,
             split_seed=self.split_seed,
+            train_inv=self.train_inv,
+            erm_inv_tau=self.erm_inv_tau,
         )
         self._nets[experiment_index] = data.nets
         self._data[(experiment_index, n_samples)] = data
@@ -583,6 +706,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         mix_in: float = 0.05,
         target_coverage: float = 0.99,
         inv_recenter: str = "off",
+        erm_inv_tau: float | None = None,
         gamma_z_star: float = 0.0,
         calibrate_sigma: bool = True,
         split: dict[str, int] | None = None,
@@ -599,6 +723,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         self.n_components, self.mix_in = n_components, mix_in
         self.target_coverage = target_coverage
         self.inv_recenter = {True: "on", False: "off"}.get(inv_recenter, str(inv_recenter).strip().lower())
+        self.erm_inv_tau = float(DOMNIST_CONFIG.erm_inv_tau if erm_inv_tau is None else erm_inv_tau)
         self.gamma_z_star, self.calibrate_sigma = gamma_z_star, calibrate_sigma
         self.split = {k: int(v) for k, v in (split or SPLIT_DEFAULT).items()}
         self.split_seed, self.pop_seed, self.exemplar_seed = split_seed, pop_seed, exemplar_seed
@@ -617,6 +742,13 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
                 return outer._build(names, gamma=gamma, epsilon=epsilon, epsilon_iv=epsilon, **outer.toggles)
 
         super().__init__(EXPERIMENT_NAME, DoMNISTRegistry(), **kwargs)
+
+    @property
+    def train_inv(self) -> bool:
+        """The ERM+INV net is trained only when something reads it: PI+INV centred
+        on it, or ERM+INV listed. A PI / DA+PI selection run never pays for it."""
+        methods = set(self.kwargs.get("methods") or ())
+        return (self.inv_recenter == "inv" and "PI+INV" in methods) or "ERM+INV" in methods
 
     # ---------------------------------------------------------------- factories
 
@@ -691,6 +823,8 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             split_seed=self.split_seed,
             pop_seed=self.pop_seed,
             net=self.net,
+            train_inv=self.train_inv,
+            erm_inv_tau=self.erm_inv_tau,
         )
 
     def get_query_runner_cls(self) -> type[GenericQuerySweep]:
@@ -759,6 +893,8 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             target_coverage=float(self.target_coverage),
             gamma_z_star=float(self.gamma_z_star),
             inv_recenter=self.inv_recenter,
+            erm_inv_tau=float(self.erm_inv_tau),
+            train_inv=bool(self.train_inv),
             iv_rho=float(runner.fit_rho()),
             n_components=int(self.n_components),
             calibrate_sigma=bool(self.calibrate_sigma),

@@ -41,9 +41,9 @@ Legs:
         column is a spurious moment, SS2.1), a bool passing as an int. Misses: a
         legal-looking name the panel does not carry, which the loader catches.
   (iv)  the registry builds exactly ALL_METHODS in the plan's order, and
-        COPSENS_METHODS is the unchanged nine. Catches: a builder missing or
-        out of sync, a name added to the do-MNIST backend. Misses: what a builder
-        builds; that is (vi) and a57.
+        COPSENS_METHODS is the pinned ten (the nine plus the do-MNIST-only
+        ERM+INV). Catches: a builder missing or out of sync, a name added to the
+        do-MNIST backend. Misses: what a builder builds; that is (vi) and a57.
   (v)   every ALL_METHODS name and the nine stored mode spellings (`base(Z)`, `base(T)`,
         `base(T,Z)` on the DA+ IV methods) have a TEX_MAPPER, COLOR_MAP and
         ALPHA_MAP entry, the new TeX strings compose from the building blocks,
@@ -129,7 +129,7 @@ PLAN_METHODS = (
     "PI&DA+PI",
     "PI&DA+PI+IV",
 )
-NET_METHODS = ("ATE", "ERM", "DA+ERM", "PI+INV", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV")
+NET_METHODS = ("ATE", "ERM", "DA+ERM", "ERM+INV", "PI+INV", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV")
 CIGARETTE_IV = ["tax_s", "y", "cpi"]
 EXPERIMENT_TYPES = ("query", "sweep", "perf")
 # (recipe, dataset, iv, what the experiment plan must carry). This table pins what
@@ -422,7 +422,7 @@ def leg_iv():
     check("(iv) ALL_METHODS is the plan's tuple, in order", ALL_METHODS == PLAN_METHODS, repr(ALL_METHODS))
     built = MethodRegistry.build_methods(list(ALL_METHODS), gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL)
     check("(iv) build_methods returns every name, in order", tuple(built) == ALL_METHODS, repr(tuple(built)))
-    check("(iv) COPSENS_METHODS unchanged", COPSENS_METHODS == NET_METHODS, repr(COPSENS_METHODS))
+    check("(iv) COPSENS_METHODS is the pinned ten", COPSENS_METHODS == NET_METHODS, repr(COPSENS_METHODS))
     net = _copsens_builders(
         list(COPSENS_METHODS),
         gamma=0.085,
@@ -440,7 +440,7 @@ def leg_iv():
         calibrate_sigma=True,
         gamma_z_star=0.0,
     )
-    check("(iv) the copsens backend still builds exactly its nine", tuple(net) == NET_METHODS)
+    check("(iv) the copsens backend builds exactly its ten", tuple(net) == NET_METHODS)
     check(
         "(iv) ERM+IV and PI+INV+IV are not copsens methods",
         not ({"ERM+IV", "DA+ERM+IV", "PI+INV+IV"} & set(COPSENS_METHODS)),

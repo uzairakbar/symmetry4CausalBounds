@@ -114,10 +114,11 @@ do_mnist:
     augmentation_amounts: null      # per-op overrides, e.g. {hue: 0.4}; null = the
                                     # frozen defaults (contrast .15 saturation .10 hue
                                     # .025 brightness .15)
-    methods:                        # REQUIRED: the copsens backend defines 9, the
+    methods:                        # REQUIRED: the copsens backend defines 10, the
         - ATE                       # fallback is all of ALL_METHODS. PI+INV last: it is
         - ERM                       # the slow one when eps sits on a sliver
         - DA+ERM
+        # - ERM+INV                 # do-MNIST only; listing it trains the ERM+INV net
         - PI
         - DA+PI
         - DA+PI+IV

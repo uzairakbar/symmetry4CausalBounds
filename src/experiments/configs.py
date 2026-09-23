@@ -726,13 +726,21 @@ ALL_METHODS: tuple[str, ...] = (
     "PI&DA+PI+IV",
 )
 
-# a strict subset of ALL_METHODS: no point-estimate IV of either kind. It DOES define the
-# intersections -- Cor. 1 needs h_*(x) inside both intervals, which is a
-# membership fact, not a claim that the two balls share a parameterisation.
+# names only the do-MNIST block accepts, outside ALL_METHODS so the fallback method
+# list and the linear registry of the other experiments never see them. ERM+INV is
+# the prefit augmented-Lagrangian net (`InvariantGradientDescentERM`), plotted as a
+# point estimate
+DOMNIST_ONLY_METHODS: tuple[str, ...] = ("ERM+INV",)
+
+# ALL_METHODS without the point-estimate IV of either kind, plus the do-MNIST-only
+# ERM+INV. It DOES define the intersections -- Cor. 1 needs h_*(x) inside both
+# intervals, which is a membership fact, not a claim that the two balls share a
+# parameterisation.
 COPSENS_METHODS: tuple[str, ...] = (
     "ATE",
     "ERM",
     "DA+ERM",
+    "ERM+INV",
     "PI+INV",
     "PI",
     "DA+PI",
@@ -763,7 +771,8 @@ def _copsens_builders(
     net, so only the centre net, the fit rows and the constraint set differ between
     the methods. `inv_recenter` picks PI+INV's centre: `off` is the X net with the
     ball on X and the pairs (X, GX), `on` the GX net with the ball on the unmixed GX
-    and the pairs (GX, X)."""
+    and the pairs (GX, X), `inv` the ERM+INV net with the ball on X and the pairs
+    (X, GX)."""
     common = dict(
         link=DOMNIST_CONFIG.link,
         n_components=n_components,
@@ -792,6 +801,11 @@ def _copsens_builders(
                 "must rebuild via method_factory(..., outcome_models=...) once the "
                 "nets exist."
             )
+        if key not in outcome_models:
+            raise ValueError(
+                f"copsens: no prefit {key!r} net; the replicate trains the ERM+INV net only when "
+                "PI+INV runs under inv_recenter 'inv' or ERM+INV is listed (`draw_replicate(train_inv=True)`)."
+            )
         return outcome_models[key]
 
     def pi_inv():
@@ -799,14 +813,20 @@ def _copsens_builders(
             return RecentredInvCopSens(
                 gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **inv, **common
             )
+        if inv_recenter not in ("off", "inv"):
+            raise ValueError(f"inv_recenter must be 'off', 'on' or 'inv'; got {inv_recenter!r}.")
+        # `inv`: the same class as `off`, fitted on X with the (X, GX) pairs; only
+        # the centre moves, to the net trained to invariance on the DA pairs
+        centre = net("INV") if inv_recenter == "inv" else net("X")
         return InvarianceConstrainedCopSens(
-            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **inv, **common
+            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=centre, **inv, **common
         )
 
     all_builders = {
         "ATE": lambda: None,  # the analytic target, `sem.ate_of` / `sem.h_star`
         "ERM": lambda: net("X"),  # the prefit net, not a fresh one
         "DA+ERM": lambda: net("GX"),
+        "ERM+INV": lambda: net("INV"),
         "PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("X"), **common),
         "DA+PI": lambda: CopSensPI(gamma=gamma, epsilon=epsilon, pad=pad, outcome_model=net("GX"), **da_common),
         "PI+INV": pi_inv,
@@ -857,7 +877,7 @@ class MethodRegistry:
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
-        inv_recenter: Literal["off", "on"] = "off",
+        inv_recenter: Literal["off", "on", "inv"] = "off",
         calibrate_sigma: bool = True,
         gamma_z_star: float = 0.0,
     ) -> dict[str, Callable]:
@@ -911,10 +931,13 @@ class MethodRegistry:
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
                 'copsens' the do-MNIST latent-factor ball around a prefit net
                 (gamma is a LATENT budget there, not the Lemma-2 gamma*).
-            outcome_models: {'X': net, 'GX': net}, prefit. copsens only.
+            outcome_models: {'X': net, 'GX': net}, prefit, plus 'INV' (the
+                ERM+INV net) when PI+INV runs under `inv` or ERM+INV is built.
+                copsens only.
             n_components: latent dimension of the CopSens factor model. copsens only.
-            inv_recenter: PI+INV's centre, 'off' (the X net) or 'on' (the GX net,
-                the ball on the unmixed GX). copsens only.
+            inv_recenter: PI+INV's centre, 'off' (the X net), 'on' (the GX net,
+                the ball on the unmixed GX) or 'inv' (the ERM+INV net, the ball on
+                X). copsens only.
             calibrate_sigma: radius sigma-hat sqrt(gamma) with sigma-hat^2 the
                 outcome net's own noise on the fit rows. copsens only.
             gamma_z_star: the true baseline IV budget of the T-as-IV cone
@@ -1069,6 +1092,7 @@ DATASET_KEYS: dict[str, set] = {
         "mix_in",
         "target_coverage",
         "inv_recenter",
+        "erm_inv_tau",
         "gamma_z_star",
         "calibrate_sigma",
         "split",
@@ -1091,7 +1115,7 @@ REQUIRED_KEYS: dict[str, set] = {
     # `target` and `spec` decide what h_* IS, so neither has a defensible default
     "cigarettes": {"seed", "augmentation", "target", "spec"},
     # `methods` is required HERE and nowhere else: the fallback below is the whole
-    # of ALL_METHODS, and the copsens backend defines only 9. Omitting it
+    # of ALL_METHODS, and the copsens backend defines only 10. Omitting it
     # would be a hard error mid-run rather than a config error up front.
     "do_mnist": {"seed", "augmentation", "gamma", "epsilon", "methods"},
 }
@@ -1147,7 +1171,9 @@ def _check_instruments(name: str, block: dict[str, Any]) -> bool:
 def _check_domnist(block: dict[str, Any]) -> None:
     """The do-MNIST run knobs: every one optional (the orchestrator's constructor
     holds the default), each rejected up front rather than minutes into the nets.
-    `inv_recenter` accepts YAML's bare on/off, which the loader reads as booleans."""
+    `inv_recenter` accepts YAML's bare on/off, which the loader reads as booleans,
+    and `inv`. `erm_inv_tau` is on the squared scale of eps^2; above it the ERM+INV
+    centre may sit outside the eps^2 ball, which is a warning, not an error."""
     prefix = "config.do_mnist"
 
     def number(key, low, high, integer=False, closed=True):
@@ -1170,9 +1196,19 @@ def _check_domnist(block: dict[str, Any]) -> None:
         raise ValueError(f"{prefix}.calibrate_sigma must be a bool; got {block['calibrate_sigma']!r}.")
     if "inv_recenter" in block:
         recenter = {True: "on", False: "off"}.get(block["inv_recenter"], str(block["inv_recenter"]).strip().lower())
-        if recenter not in ("off", "on"):
-            raise ValueError(f"{prefix}.inv_recenter must be off or on; got {block['inv_recenter']!r}.")
+        if recenter not in ("off", "on", "inv"):
+            raise ValueError(f"{prefix}.inv_recenter must be off, on or inv; got {block['inv_recenter']!r}.")
         block["inv_recenter"] = recenter
+    if "erm_inv_tau" in block:
+        tau = block["erm_inv_tau"]
+        if isinstance(tau, bool) or not isinstance(tau, int | float) or not 0.0 < tau < float("inf"):
+            raise ValueError(f"{prefix}.erm_inv_tau must be a positive number (squared scale); got {tau!r}.")
+        epsilon = block.get("epsilon")
+        if isinstance(epsilon, int | float) and not isinstance(epsilon, bool) and tau > float(epsilon) ** 2:
+            logger.warning(
+                f"{prefix}.erm_inv_tau = {tau:g} exceeds epsilon^2 = {float(epsilon) ** 2:g}: the ERM+INV centre "
+                "may sit outside the eps^2 ball, and PI+INV under inv_recenter 'inv' may be infeasible."
+            )
     split = block.get("split")
     if split is not None:
         parts = {"A", "B", "C"}
@@ -1289,8 +1325,9 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
             base, mode = parse_method(entry)
         except ValueError as error:
             raise ValueError(f"config.{name}.methods: {error}") from None
-        if base not in ALL_METHODS:
-            _reject_unknown([entry], ALL_METHODS, f"config.{name}.methods")
+        legal = ALL_METHODS + DOMNIST_ONLY_METHODS if name == "do_mnist" else ALL_METHODS
+        if base not in legal:
+            _reject_unknown([entry], legal, f"config.{name}.methods")
         if name == "do_mnist" and "(" in entry:
             raise ValueError(f"config.do_mnist.methods: {entry!r} spells an instrument mode; that backend has none.")
         if (base, mode) in seen:

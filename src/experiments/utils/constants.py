@@ -98,6 +98,8 @@ TEX_MAPPER: dict[str, str] = {
     # estimators
     "ERM": rf"${ERM}$",
     "DA+ERM": rf"${DA_ERM}$",
+    # the do-MNIST ERM trained to invariance on the DA pairs (augmented Lagrangian)
+    "ERM+INV": rf"${ERM}+{INV}$",
     # instrumental variable. The tilde on the iv is the T-as-IV distinction, as on
     # the interval side: ERM+IV and DA+ERM+IV(Z) read the observed Z alone
     "ERM+IV": rf"${ERM}+{IV}$",
@@ -124,6 +126,7 @@ COLOR_MAP: dict[str, int] = {
     "ERM": 0,
     "DA+ERM": 3,
     "ERM+IV": 0,  # the blue family, ERM plus the observed Z
+    "ERM+INV": 7,  # the INV family's grey
     "DA+ERM+IV": 2,
     "PI+INV": 7,
     "PI": 0,
@@ -143,6 +146,7 @@ ALPHA_MAP: dict[str, float] = {
     "DA+ERM": 1.0,
     "ERM+IV": 1.0,
     "DA+ERM+IV": 1.0,
+    "ERM+INV": 1.0,
     # Partial identification methods (transparent)
     "PI+INV": 0.8,
     "PI": 0.2,
@@ -209,6 +213,8 @@ PAIR_ORDER: dict[str, tuple[int, int]] = {
     "PI&DA+PI+IV": (9, 0),
     "PI&DA+PI+IV(T)": (9, 0),
     "PI&DA+PI+IV(T,Z)": (9, 0),
+    # do-MNIST only; a new last group, so no existing legend moves
+    "ERM+INV": (10, 0),
 }
 # the coefficient labels of the cigarette price elasticities, paper notation
 # h_*(x) = theta_*' x on the four log treatments
@@ -227,6 +233,7 @@ POINT_ESTIMATES: list[str] = [
     "DA+ERM+IV(Z)",
     "DA+ERM+IV(T)",
     "DA+ERM+IV(T,Z)",
+    "ERM+INV",
 ]
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
 # REAL_Z_METHODS on the lines and band edges: the family's hue, this dash-dot pattern
