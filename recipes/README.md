@@ -1,7 +1,7 @@
 # Recipes
 
 One recipe per figure. Each file carries a `defaults:` block and one dataset block
-per dataset the figure covers (`simulation`, `optical_device`, `cigarettes`), and
+per dataset the figure covers (`simulation`, `optical_device`, `cigarettes`, `do_mnist`), and
 each block carries exactly ONE experiment type: `query:`, `sweep:` or `perf:`. Run
 one by copying its blocks into `config.yaml` and calling `python src/main.py`; gates
 read them in place.
@@ -50,6 +50,7 @@ cigarette files fan in.
 | `mEfficiencyFig14.yaml` | sim, optical, cigarettes | sweep `m` | `m-efficiency_fig10.yaml`, whose three metrics broaden to four; the `m` step of `iv_fig13.yaml` and the two cigarette files |
 | `latencyFig15.yaml` | sim, optical, cigarettes | perf `wall_clock` | the `wall_clock` half of `cigarettes-plasmode_fig12b.yaml`'s perf block; new on sim and optical |
 | `stabilityFig16.yaml` | sim, optical, cigarettes | perf `seed_var`, `feasibility` | the `seed_var` half of the same perf block; new on sim and optical. `feasibility` (the share of backends returning a usable bound) is new everywhere and reads the same backend runs |
+| `doMnistFigF1.yaml` | do-MNIST | query | the shipped `do_mnist:` block: the exemplar bands and the population `run.json` on the copsens backend. Named after the appendix section the paper reserves (F.1, a placeholder) until the figure number exists |
 
 Read the other way:
 

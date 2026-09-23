@@ -1,0 +1,53 @@
+# do-MNIST query figure (App. F.1, a placeholder until the figure number exists):
+# the exemplar bands plus the population run.json. The values are the shipped
+# `do_mnist:` block of config.yaml; see that block for what each key means.
+defaults:
+    recalibrate: false
+    pad: false
+    clipy: false
+    mean_match: true
+    n_jobs: -1
+    normalize: false
+hyperparameters:
+    lr: 0.01
+    batch: 256
+    epochs: 1
+    optimizer: adam
+    betas: [0.7, 0.9]
+    onecycle: true
+    loss: mse
+do_mnist:
+    seed: 42
+    n_experiments: 1
+    n_samples: 1_200_000
+    n_pi: 60_000
+    n_queries: 2_000
+    sweep_samples: 10
+    net: domnist-fast
+    n_components: 32
+    calibrate_sigma: true
+    gamma: 0.08505258154439962
+    target_coverage: 0.99
+    epsilon: 0.04
+    gamma_z_star: 0.0
+    inv_recenter: 'off'
+    mix_in: 0.05
+    split_seed: 420
+    split:
+        A: 40_000
+        B: 10_000
+        C: 10_000
+    pop_seed: 44
+    exemplar_seed: 420
+    augmentation: translate > rotation > contrast > saturation > hue
+    augmentation_amounts: null
+    methods:
+        - ATE
+        - ERM
+        - DA+ERM
+        - PI
+        - DA+PI
+        - DA+PI+IV
+        - PI+INV
+    experiment:
+        query: true

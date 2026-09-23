@@ -61,51 +61,76 @@ simulation:
         # perf:
         #     metric: [wall_clock, seed_var, feasibility]
 
-# do_mnist:
-#     seed: 42
-#     n_experiments: 4                # 1 replicate => no error bars; perf drops seed_var
-#     n_samples: 1_200_000            # SEM draws, NOT distinct images (60k images x ~20
-#                                     # fresh (U,C,S) draws). 60k memorises.
-#     n_pi: 60_000                    # subset the constraints are fit on; the nets
-#                                     # still see the full draw
-#     n_queries: 512                  # interventional evaluation set, drawn from the
-#                                     # HELD-OUT images
-#     sweep_samples: 10               # digit exemplars on the query x-axis
-#     net: domnist-fast
-#     unfrozen_layers: 1              # partial_r2_net refit depth l. 1 = the 257-param
-#                                     # head (SLSQP); 2 adds the ~74k-param fc1 (slow
-#                                     # augmented-Lagrangian path, correctness runs only)
-#     gamma: 0.067                    # = oracle gamma* = bias_sq/sigma_sq (paper units):
-#                                     # the partial_r2_net ball is the Lemma-2 ball in
-#                                     # function space, so gamma* is PRINCIPLED here.
-#     epsilon: 0.1                    # T-invariance defect of h*: a MODELLING ASSUMPTION,
-#                                     # not estimable. The true value is 0 for this
-#                                     # augmentation (+-10 deg cannot turn a 2 into a 5,
-#                                     # and colour never causes Y); this is finite-sample
-#                                     # slack. eps=0 makes the IV budget exactly 0.
-#                                     # PI+INV: measured floor at l=1, gamma*, n_pi=6k is
-#                                     # 0.004 < eps^2 0.01, so PI+INV is feasible there.
-#                                     # Re-read the floor/budget pair logged per
-#                                     # experiment at the real n_pi before deciding --
-#                                     # do NOT add tolerance to hide an INFEASIBLE.
-#     augmentation: translate > rotation > contrast > saturation > hue
-#     methods:                        # REQUIRED: the partial_r2_net backend defines only
-#         # - ATE                       # these 9; the fallback is all 11 of ALL_METHODS
-#         # - ERM
-#         # - DA+ERM
-#         - PI
-#         - DA+PI
-#         - PI+INV
-#         - DA+PI+IV
-#         - PI&DA+PI
-#         - PI&DA+PI+IV
-#     recalibrate: false              # inherited gamma: the block's gamma is already gamma*
-#     n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
-#                                     # bit-identical to n_jobs=1.
-#     experiment:
-#         # query: true                 # digit-exemplar sweep; the PC panel is off here
-#         perf:
-#             metric: [wall_clock, seed_var, feasibility]    # seed_var needs n_experiments >= 2
+do_mnist:
+    seed: 42
+    n_experiments: 1                # replicates: the query path runs one, the sweeps
+                                    # run this many, two 1.2M-draw nets retrained per
+                                    # replicate (~1 min each on a GPU plus the PI fits)
+    n_samples: 1_200_000            # SEM draws from split A (40k images x 30 fresh
+                                    # (U,C,t,S) draws); 60k draws memorise
+    n_pi: 60_000                    # rows the PI machinery is fit on, drawn from split B
+                                    # at seed + 1; never the nets' draw
+    n_queries: 2_000                # the evaluation population: MNIST TEST draws at
+                                    # pop_seed, never in A/B/C; coverage and width are
+                                    # reported here, not on the 10 exemplars
+    sweep_samples: 10               # digit exemplars on the query x-axis
+    net: domnist-fast
+    n_components: 32                # latent dimension of the CopSens factor model
+    calibrate_sigma: true           # radius sigma-hat sqrt(gamma), sigma-hat^2 =
+                                    # E[mu(1-mu)] on the fit rows (probit)
+    gamma: 0.08505258154439962      # EXPLICIT: the smallest gamma whose coverage of
+                                    # h* on split C reaches target_coverage, selected by
+                                    #   uv run python scripts/select_domnist_gamma.py
+                                    # (bisection on log gamma, max over PI 0.0362 and
+                                    # DA+PI 0.0851 at mix_in 0.05). A LATENT budget: the
+                                    # Lemma-2 oracle gamma* does not measure it, so the
+                                    # sweeps take this value, not the oracle
+    target_coverage: 0.99           # what the selection script targets; provenance only
+    epsilon: 0.04                   # T-invariance defect of h*: a MODELLING ASSUMPTION.
+                                    # The true value is 0 for this chain (+-10 deg cannot
+                                    # turn a 2 into a 5, colour never causes Y); this is
+                                    # finite-sample slack. INV budget eps^2, IV budget
+                                    # (eps + s sqrt(gamma_z_star))^2 = eps^2 at 0. With
+                                    # inv_recenter off the INV floor is 0.0198 > 0.0016,
+                                    # so PI+INV reads INFEASIBLE at every query; post-DA
+                                    # (on) it needs eps >= 0.055 to be well posed
+    gamma_z_star: 0.0               # true baseline IV budget of Thm. 3.B; 0 = none
+    inv_recenter: 'off'             # QUOTE it. off: PI+INV centred on the ERM, ball on
+                                    # X, pairs (X, GX). on: centred on DA+ERM, ball on the
+                                    # unmixed GX, pairs (GX, X)
+    mix_in: 0.05                    # share of the DA measure's rows swapped back to
+                                    # their observed row (Asm. 1b): DA+ERM's draw and the
+                                    # DA+PI / DA+PI+IV fit rows (identity G there); never
+                                    # PI or the PI+INV pairs. 0 = off
+    split_seed: 420                 # ONE frozen image-level partition of the 60k
+    split:                          # training images: A trains the nets, B is the only
+        A: 40_000                   # thing the PI machinery sees, C is what the
+        B: 10_000                   # selection script bisects on. Counts sum to 60k
+        C: 10_000
+    pop_seed: 44                    # must differ from seed + 1 (the C draw's seed)
+    exemplar_seed: 420              # the 10 digits on the x-axis, alternating tints;
+                                    # a VISUALISATION set, never scored
+    augmentation: translate > rotation > contrast > saturation > hue
+    augmentation_amounts: null      # per-op overrides, e.g. {hue: 0.4}; null = the
+                                    # frozen defaults (contrast .15 saturation .10 hue
+                                    # .025 brightness .15)
+    methods:                        # REQUIRED: the copsens backend defines 9, the
+        - ATE                       # fallback is all of ALL_METHODS. PI+INV last: it is
+        - ERM                       # the slow one when eps sits on a sliver
+        - DA+ERM
+        - PI
+        - DA+PI
+        - DA+PI+IV
+        - PI+INV
+    recalibrate: false              # the latent ball has no rho; the reference ran gamma as is
+    pad: false
+    n_jobs: -1                      # per-query SLSQP workers. EXACT: bounds come out
+                                    # bit-identical to n_jobs 1
+    experiment:
+        query: true                 # exemplar figure + population run.json
+        # sweep:
+        #     param:  [gamma]       # ratio grid around the declared gamma. PI+INV off
+        #     metric: [coverage, approx_error, worst_error, width]
 
 optical_device:
     seed: 42
