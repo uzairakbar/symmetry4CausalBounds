@@ -19,7 +19,9 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       blue endpoint and the right the red one, each at 2/3 of its former size (narrower image columns), the
       title is $h({\bm{x}})$ and the x-label `tint`; ERM and DA+ERM are not drawn;
       the one legend is the methods' in the bottom-right cell; the histogram is
-      the query panel's (`draw_da_density`); a failed tint gets its cross.
+      the query panel's (`draw_da_density`); a failed tint gets its cross; the
+      y ticks read 0 and 1 over a light line at 0.5; the title and the x-label
+      are the density label's size.
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
       centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
@@ -313,6 +315,15 @@ def leg_iv(scratch):
     check("(iv) the title is h(x) on the top row", bands[0].get_title() == r"$h({\bm{x}})$")
     bottom = min(fig.axes, key=lambda ax: ax.get_position().y0 if ax.axison else 9)
     check("(iv) the x-label tint sits under the histogram", bottom.get_xlabel() == "tint" and bottom.patches)
+    ticks = all(list(ax.get_yticks()) == [0.0, 1.0] for ax in bands)
+    texts = [[t.get_text() for t in ax.get_yticklabels()] for ax in bands]
+    check(
+        "(iv) the bounds' y ticks are 0 and 1, labelled without decimals", ticks and all(t == ["0", "1"] for t in texts)
+    )
+    mid = [ln for ax in bands for ln in ax.get_lines() if list(ln.get_ydata()) == [0.5, 0.5] and ln.get_zorder() < 1]
+    check("(iv) a light line at 0.5 behind the bands in every row", len(mid) == len(bands))
+    sizes = {bands[0].title.get_fontsize(), bottom.xaxis.label.get_fontsize(), bottom.yaxis.label.get_fontsize()}
+    check("(iv) the title, the x-label and the density label share one size", len(sizes) == 1, str(sizes))
     labels = {line.get_label() for ax in bands for line in ax.get_lines()}
     check("(iv) ERM and DA+ERM are not drawn", not labels & {TEX_MAPPER["ERM"], TEX_MAPPER["DA+ERM"]})
     legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + list(fig.legends)
@@ -329,7 +340,7 @@ def leg_iv(scratch):
         "(iv) the image columns hold 2/3 of their former 0.14-ratio share",
         np.isclose(share, 2 / 3 * 0.14 / 1.28 * 3 / 3.08),
     )
-    full = right[0].get_position().x1 - left[0].get_position().x0
+    full = fig.subplotpars.right - fig.subplotpars.left
     check("(iv) the tick labels have their own column", left[0].get_position().x1 < bands[0].get_position().x0)
     drawn = left[0].get_position().width / full
     check(

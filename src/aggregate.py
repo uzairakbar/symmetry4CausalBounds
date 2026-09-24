@@ -132,6 +132,11 @@ _TINT_SHARE: float = TINT_IMAGE_SCALE * _TINT_FORMER
 _TINT_CELLS: float = 4 / (4 + 3 * TINT_WSPACE)
 _TINT_IMAGE: float = _TINT_SHARE * (1 + TINT_TICK_PAD) / (_TINT_CELLS - 2 * _TINT_SHARE)
 TINT_WIDTHS: tuple[float, float, float, float] = (_TINT_IMAGE, TINT_TICK_PAD, 1.0, _TINT_IMAGE)
+# the bounds' y ticks and their mid reference line, and the gap (figure fraction)
+# between a blue image and the tick labels, and between a panel and its red image
+TINT_YTICKS: tuple[float, float] = (0.0, 1.0)
+TINT_MIDLINE: dict = {"y": 0.5, "color": "0.85", "linewidth": 0.6, "zorder": 0}
+TINT_LABEL_GAP: float = 0.008
 # the point estimators the stack leaves out (the bands and the target are what it compares)
 TINT_OMIT: tuple[str, ...] = ("ERM", "DA+ERM")
 # the do-MNIST table: the bootstrap band's level (%) and resample count
@@ -592,6 +597,30 @@ def _tint_image(ax, image) -> None:
     ax.axis("off")
 
 
+def _clear_tick_labels(fig, bounds_axes, image_axes) -> None:
+    """Set the blue images' ink `TINT_LABEL_GAP` left of the bounds' y tick labels
+    and the red images the same gap right of their panel, each image keeping its size."""
+    if not image_axes:
+        return
+    fig.canvas.draw()
+    to_figure = fig.transFigure.inverted()
+    labels = [t.get_window_extent() for ax in bounds_axes for t in ax.get_yticklabels() if t.get_text()]
+    if not labels:
+        return
+    left = to_figure.transform((min(b.x0 for b in labels), 0))[0]
+    right = max(ax.get_position().x1 for ax in bounds_axes)
+    # the gap is to the INK: the image is 28 pixels wide and the digit sits in its
+    # middle, so the box edge would leave a margin of blank pixels on top of the gap
+    ink = [np.flatnonzero(blue.images[0].get_array()[..., 3].max(axis=0) > 0.1) for blue, _ in image_axes]
+    width = max(blue.images[0].get_array().shape[1] for blue, _ in image_axes)
+    inked = max((cols[-1] + 1) / width for cols in ink if len(cols)) if any(len(c) for c in ink) else 1.0
+    for blue, red in image_axes:
+        box = blue.get_position()
+        blue.set_position([left - TINT_LABEL_GAP - inked * box.width, box.y0, box.width, box.height])
+        box = red.get_position()
+        red.set_position([right + TINT_LABEL_GAP, box.y0, box.width, box.height])
+
+
 def tint_stack(artifacts: str, out: str | None = None):
     """The do-MNIST tint sweeps stacked, one row per digit (0 at the top); saved
     under `out` when given. Returns the figure, or None with no sweep."""
@@ -612,7 +641,7 @@ def tint_stack(artifacts: str, out: str | None = None):
         rows, 4, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=TINT_WSPACE
     )
 
-    handles, grids, shared, bounds_axes = {}, {}, None, []
+    handles, grids, shared, bounds_axes, image_axes = {}, {}, None, [], []
     for r, digit in enumerate(digits):
         x = np.asarray(load(f"{folder}/tint_{digit}_values.pkl"), dtype=float)
         grids[digit] = x
@@ -624,15 +653,18 @@ def tint_stack(artifacts: str, out: str | None = None):
         for name, handle in drawn.items():
             handles.setdefault(parse_method(name), (handle, name))
         ax.set_ylim(*TINT_YLIM)
-        ax.set_yticks([0.0, 0.5, 1.0])
+        ax.set_yticks(TINT_YTICKS, [f"{t:g}" for t in TINT_YTICKS])
+        ax.axhline(**TINT_MIDLINE)
         ax.tick_params(labelsize=FS_TICK - 4, labelbottom=False)
         bounds_axes.append(ax)
         images = f"{folder}/tint_{digit}_images.pkl"
         if os.path.exists(images):
             blue, red = load(images)
-            _tint_image(fig.add_subplot(grid[r, 0]), blue)
-            _tint_image(fig.add_subplot(grid[r, 3]), red)
-    bounds_axes[0].set_title(TINT_TITLE, fontsize=FS_LABEL)
+            image_axes.append((fig.add_subplot(grid[r, 0]), fig.add_subplot(grid[r, 3])))
+            _tint_image(image_axes[-1][0], blue)
+            _tint_image(image_axes[-1][1], red)
+    # the title and the x-label at the size of the "density" label
+    bounds_axes[0].set_title(TINT_TITLE, fontsize=FS_TICK)
     _tint_provenance(artifacts, digits, grids)
 
     bottom = bounds_axes[-1]
@@ -644,7 +676,7 @@ def tint_stack(artifacts: str, out: str | None = None):
         bottom.set_ylabel("density", fontsize=FS_TICK)
         bottom.tick_params(labelsize=FS_TICK - 4)
     bottom.tick_params(labelbottom=True)
-    bottom.set_xlabel(ANNOTATE_SWEEP_PLOT["tint"]["xlabel"], fontsize=FS_LABEL)
+    bottom.set_xlabel(ANNOTATE_SWEEP_PLOT["tint"]["xlabel"], fontsize=FS_TICK)
     x = grids[digits[0]]
     shared.set_xlim(float(x.min()), float(x.max()))
     _label_major_ticks_only(*bounds_axes, bottom)
@@ -667,6 +699,7 @@ def tint_stack(artifacts: str, out: str | None = None):
             fancybox=False,
         )
     fig.subplots_adjust(left=0.02, right=0.98, top=0.95, bottom=0.6 / fig.get_figheight())
+    _clear_tick_labels(fig, bounds_axes, image_axes)
     path = None if out is None else f"{out}/do_mnist_tint.{PLOT_FORMAT}"
     if path is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
