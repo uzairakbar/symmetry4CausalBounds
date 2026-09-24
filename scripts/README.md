@@ -181,7 +181,7 @@ must equal its hash. Writes `artifacts/do_mnist/select/erm_inv_diagnostics.json`
 
 ```bash
 D=~/scratch/domnist_runs/erm_inv_diag && mkdir -p $D && cp recipes/doMnistFigF1.yaml $D/config.yaml
-(cd $D && PYTHONPATH=$REPO uv run --project $REPO python $REPO/scripts/diagnose_domnist_erm_inv.py)
+(cd $D && PYTHONPATH=$REPO uv run --frozen --project $REPO python $REPO/scripts/diagnose_domnist_erm_inv.py)
 ```
 
 On the shipped settings (tau 4e-4, mu0 1e-4, growth 2, 2 epochs) the configured net
