@@ -74,6 +74,7 @@ from src.experiments.utils.plotting import (
     _line_style,
     _mark_frame,
     _pad,
+    mark_failed,
     normalize_sweep,
 )
 
@@ -578,7 +579,9 @@ def tint_stack(artifacts: str, out: str | None = None):
         grids[digit] = x
         ax = fig.add_subplot(grid[r, 1], sharex=shared)
         shared = shared or ax
-        drawn, _, _ = _draw_bands(ax, x, load(f"{folder}/tint_{digit}_outcomes.pkl"))
+        outcomes = load(f"{folder}/tint_{digit}_outcomes.pkl")
+        drawn, _, _ = _draw_bands(ax, x, outcomes)
+        mark_failed(ax, x, outcomes)
         for name, handle in drawn.items():
             handles.setdefault(parse_method(name), (handle, name))
         ax.set_ylim(*TINT_YLIM)
@@ -597,11 +600,11 @@ def tint_stack(artifacts: str, out: str | None = None):
     if has_density:
         density = load(density_path)
         bottom = fig.add_subplot(grid[-1, 1], sharex=shared)
-        bars = []
-        for key, color in zip(("before", "after"), TINT_DENSITY_COLORS, strict=True):
-            bars.append(
-                bottom.hist(np.asarray(density[key]), bins=50, density=True, alpha=0.45, color=colors[color])[2][0]
-            )
+        # pre-DA filled, post-DA an outline over it: two fills would blend to one hue
+        before, after = (colors[i] for i in TINT_DENSITY_COLORS)
+        pre = bottom.hist(np.asarray(density["before"]), bins=50, density=True, alpha=0.45, color=before)[2]
+        post = bottom.hist(np.asarray(density["after"]), bins=50, density=True, histtype="step", lw=1.5, color=after)[2]
+        bars = [pre[0], post[0]]
         bottom.set_ylabel("density", fontsize=FS_TICK)
         bottom.tick_params(labelsize=FS_TICK - 4)
         side = fig.add_subplot(grid[-1, 2])

@@ -604,6 +604,10 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 # =============================================================================
 
 
+#: the per-digit tint figure's legend column, a figure fraction (the digit sweep's)
+TINT_LEGEND_WIDTH: float = 0.24
+
+
 def _tints_of_rows(X) -> np.ndarray:
     """`tint_of` on flat (n, 3 s^2) rows; `s` from the row width, not hard-coded."""
     X = np.asarray(X)
@@ -644,14 +648,20 @@ def run_tint_sweep(runner, spec: TintSpec, experiment: str = EXPERIMENT_NAME) ->
             if name not in predictions:
                 continue
             p = predictions[name][rows]
-            outcomes[name] = p[:, np.newaxis, :] if "PI" in name else p.reshape(n, 1)
+            outcomes[name] = p.reshape(n, 1) if name in POINT_METHODS else p[:, np.newaxis, :]
         endpoints = sem.tinted(runner.exemplar_seed, digit, tints[[0, -1]], subsample=1)
         save(tints, f"tint_{digit}_values", experiment, "pkl", subdir=SUBDIR_QUERY)
         save(outcomes, f"tint_{digit}_outcomes", experiment, "pkl", subdir=SUBDIR_QUERY)
         save(endpoints, f"tint_{digit}_images", experiment, "pkl", subdir=SUBDIR_QUERY)
         log_vacuous(outcomes)
         create_query_sweep_plot(
-            tints, outcomes, fname=f"tint_{digit}", experiment=experiment, **ANNOTATE_SWEEP_PLOT["tint"]
+            tints,
+            outcomes,
+            fname=f"tint_{digit}",
+            experiment=experiment,
+            legend_width=TINT_LEGEND_WIDTH,
+            mark_missing=True,
+            **ANNOTATE_SWEEP_PLOT["tint"],
         )
 
     # the DA measure the DA+ methods fit on (the mixed GX), against the observed rows

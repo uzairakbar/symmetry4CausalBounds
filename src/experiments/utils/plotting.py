@@ -366,6 +366,35 @@ def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray]):
     return handles, lo, hi
 
 
+def mark_failed(ax, x_values: NDArray, y_results: dict[str, NDArray], height: float = 0.04) -> int:
+    """A small cross on the x-axis, in the method's hue, at every x where an
+    interval method returned no bound (NaN: a failed or infeasible solve), so a
+    gap in a band reads as a missing solve rather than as a jump. Returns the
+    number of crosses drawn."""
+    colors = sns.color_palette()
+    x_values = np.asarray(x_values, dtype=float)
+    drawn = 0
+    for method_name, predictions in y_results.items():
+        predictions = np.asarray(predictions)
+        if predictions.ndim != 3:
+            continue
+        missing = ~np.isfinite(predictions).all(axis=(1, 2))
+        if missing.any():
+            ax.scatter(
+                x_values[missing],
+                np.full(int(missing.sum()), height),
+                transform=ax.get_xaxis_transform(),
+                marker="x",
+                s=18,
+                linewidths=1.2,
+                color=colors[COLOR_MAP[method_name]],
+                clip_on=False,
+                zorder=5,
+            )
+            drawn += int(missing.sum())
+    return drawn
+
+
 def _mark_frame(x_values: NDArray, vlines, xscale: str) -> tuple[float, float, list[float]]:
     """(x_lo, x_hi, marks): the grid, widened to cover every finite mark with a
     small margin, so a mark beyond the solved grid (F1's feasibility floor, its
@@ -660,6 +689,8 @@ def create_query_sweep_plot(
     title_color: str = "k",
     fname: str | None = None,
     vlines: tuple[float, ...] = (),
+    legend_width: float | None = None,
+    mark_missing: bool = False,
 ):
     """
     Create a query sweep plot showing predictions across treatment values.
@@ -690,6 +721,11 @@ def create_query_sweep_plot(
             `xlabel`, which is what every shipped figure is named by. Given when
             several figures share an axis label, or when the derived name is
             unreadable (a TeX label reduces to e.g. 'logmathrmCPI').
+        legend_width: None keeps the legend inside the axes; a figure fraction puts
+            it in an unframed column of that width to the right, as the digit sweep
+            does, with the figure widened so the axes keep their size.
+        mark_missing: a cross on the x-axis where an interval method has no bound
+            (`mark_failed`).
     """
     legend_items = [item for item in (legend_items or []) if item in y_results]
     cfg = _plot_config(experiment, "query")
@@ -717,6 +753,8 @@ def create_query_sweep_plot(
     _at_least_two_major_ticks(plt.gca())
     for x in marks:
         plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
+    if mark_missing:
+        mark_failed(plt.gca(), x_values, y_results)
 
     # Legend
     hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
@@ -725,17 +763,33 @@ def create_query_sweep_plot(
         handles = [plot_handles[all_labels.index(item)] for item in labels]
         labels = _apply_tex_highlighting(labels, hilight_ours)
 
-        plt.legend(
-            handles=handles,
-            labels=labels,
-            fontsize=FS_TICK,
-            loc=legend_loc,
-            frameon=True,
-            edgecolor="black",
-            fancybox=False,
-        )
+        if legend_width is None:
+            plt.legend(
+                handles=handles,
+                labels=labels,
+                fontsize=FS_TICK,
+                loc=legend_loc,
+                frameon=True,
+                edgecolor="black",
+                fancybox=False,
+            )
+        else:
+            plt.legend(
+                handles=handles,
+                labels=labels,
+                fontsize=FS_TICK - 2,
+                ncol=1,
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.5),
+                frameon=False,
+            )
 
-    plt.tight_layout()
+    if legend_width is None:
+        plt.tight_layout()
+    else:
+        width, height = fig.get_size_inches()
+        fig.set_size_inches(width / (1.0 - legend_width), height)
+        plt.tight_layout(rect=(0, 0, 1.0 - legend_width, 1))
     plt.show()
 
     if savefig:
