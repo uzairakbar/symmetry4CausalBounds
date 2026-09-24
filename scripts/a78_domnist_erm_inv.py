@@ -4,7 +4,8 @@ Static legs (no MNIST; the tiny AL fit runs on whatever `device()` picks, second
 
   (i)   the registry: PI+INV is `InvarianceConstrainedCopSens` on `nets["X"]` under
         `off`, `RecentredInvCopSens` on `nets["GX"]` under `on`, and
-        `InvarianceConstrainedCopSens` on `nets["INV"]` under `inv`; `ERM+INV` is the
+        `InvarianceConstrainedCopSens` on `nets["INV"]` under `inv`, each taking
+        sigma-hat from `nets["X"]` (`sigma_model`, PI's radius); `ERM+INV` is the
         INV net itself; a bogus `inv_recenter` raises when PI+INV is built.
   (ii)  nesting: `nested_in("inv")` has no PI+INV entry (off/on keep theirs), and
         `log_nesting` under `inv` stays quiet on a PI+INV wider than PI.
@@ -24,7 +25,9 @@ GPU legs (`--nets`, a 60k draw, about two minutes, then (vii)):
         `draw_replicate(train_inv=True)` leaves the ERM and DA+ERM nets (state sha1)
         and the B arrays (`X`, `GX`, `GX_inv`, `y`, `G`) bit-identical to
         `train_inv=False`; an `inv_fits` hook that fits the configured knobs returns
-        a net whose sha1 equals the plain `train_inv=True` path's.
+        a net whose sha1 equals the plain `train_inv=True` path's; PI+INV's sigma2_
+        equals PI's, the ERM's clipped mean mu(1-mu) on the B rows, under off, on
+        and inv.
 
 Static leg (the pooled head, seconds):
 
@@ -94,6 +97,9 @@ def leg_i():
     check("(i) inv: InvarianceConstrainedCopSens", type(inv) is InvarianceConstrainedCopSens)
     check("(i) inv: centre is nets['INV']", inv.outcome_model is nets["INV"])
     check("(i) inv: the block epsilon is the budget", inv.epsilon == 0.04 and inv._budget() == 0.04**2)
+    erm_sigma = all(m.sigma_model is nets["X"] for m in (off, on, inv))
+    check("(i) PI+INV's sigma model is nets['X'] under off, on and inv", erm_sigma)
+    check("(i) PI carries no sigma model", build("off", "PI").sigma_model is None)
     check("(i) ERM+INV is the INV net", build("off", "ERM+INV") is nets["INV"])
     try:
         build("fallback")
@@ -293,6 +299,29 @@ def leg_v():
     )
     for key in ("train_seconds_X", "train_seconds_GX", "train_seconds_INV", "erm_inv_al_trace", "erm_inv_al_tau"):
         check(f"(v) the diagnostics carry {key}", key in d)
+
+    # PI+INV's radius on the replicate's nets: the ERM's sigma-hat under every centre
+    lo_hi = DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else (0.0, 1.0)
+    mu = np.clip(np.asarray(with_inv.nets["X"].predict_mean(with_inv.X), dtype=float).ravel(), *lo_hi)
+    erm_sigma2 = float(np.mean(mu * (1 - mu)))
+    for recenter in ("off", "on", "inv"):
+        built = MethodRegistry.build_methods(
+            ["PI", "PI+INV"],
+            gamma=0.085,
+            epsilon=0.04,
+            backend="copsens",
+            outcome_models=with_inv.nets,
+            inv_recenter=recenter,
+        )
+        pi = built["PI"]().fit(with_inv.X, with_inv.y)
+        pi_inv = built["PI+INV"]().fit(with_inv.X, with_inv.y, GX=with_inv.GX_inv)
+        check(
+            f"(v) {recenter}: PI+INV's sigma2_ is the ERM's mean mu(1-mu), PI's",
+            pi_inv.sigma2_ == pi.sigma2_
+            and pi_inv._radius(0.085) == pi._radius(0.085)
+            and np.isclose(pi.sigma2_, erm_sigma2, rtol=1e-6),
+            f"{pi_inv.sigma2_!r} vs {pi.sigma2_!r} vs {erm_sigma2!r}",
+        )
     return replicate, with_inv
 
 

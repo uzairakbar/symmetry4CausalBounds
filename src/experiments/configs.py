@@ -839,7 +839,8 @@ def _copsens_builders(
     the methods. `inv_recenter` picks PI+INV's centre: `off` is the X net with the
     ball on X and the pairs (X, GX), `on` the GX net with the ball on the unmixed GX
     and the pairs (GX, X), `inv` the ERM+INV net with the ball on X and the pairs
-    (X, GX)."""
+    (X, GX). Under all three PI+INV takes sigma-hat from the ERM on X
+    (`sigma_model`), so its radius is PI's (Cor. 1, Prop. 3)."""
     common = dict(
         link=DOMNIST_CONFIG.link,
         n_components=n_components,
@@ -879,7 +880,7 @@ def _copsens_builders(
     def pi_inv():
         if inv_recenter == "on":
             return RecentredInvCopSens(
-                gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), **inv, **common
+                gamma=gamma, epsilon=epsilon, pad=False, outcome_model=net("GX"), sigma_model=net("X"), **inv, **common
             )
         if inv_recenter not in ("off", "inv"):
             raise ValueError(f"inv_recenter must be 'off', 'on' or 'inv'; got {inv_recenter!r}.")
@@ -887,7 +888,7 @@ def _copsens_builders(
         # the centre moves, to the net trained to invariance on the DA pairs
         centre = net("INV") if inv_recenter == "inv" else net("X")
         return InvarianceConstrainedCopSens(
-            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=centre, **inv, **common
+            gamma=gamma, epsilon=epsilon, pad=False, outcome_model=centre, sigma_model=net("X"), **inv, **common
         )
 
     all_builders = {
