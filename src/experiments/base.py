@@ -236,6 +236,7 @@ class QuerySweepRunner(BaseExperimentRunner):
                 else:
                     model = builder()
 
+                    self.before_fit(name)
                     # Pass method name so fit_model knows which data to use
                     start = time.perf_counter()
                     fit_model(
@@ -265,6 +266,10 @@ class QuerySweepRunner(BaseExperimentRunner):
                 pbar.update()
 
         return queries, results
+
+    def before_fit(self, name: str) -> None:
+        """Called right before each method's `fit_model`, outside its timer. A no-op
+        here; do-MNIST records the load average in it."""
 
     def after_fit(self, name: str, model) -> None:
         """Called right after each method's `fit_model`, before its first predict.

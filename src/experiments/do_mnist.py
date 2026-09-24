@@ -74,6 +74,12 @@ class Flatten:
         return X.reshape(len(X), -1)
 
 
+def load_1min() -> float:
+    """The 1-minute load average (NaN where the OS has none), read outside every
+    timer so the results table can state what the timings ran under."""
+    return float(os.getloadavg()[0]) if hasattr(os, "getloadavg") else float("nan")
+
+
 def flat(X) -> np.ndarray:
     """(N, ...) images to (N, d) float32 rows, the layout every method sees."""
     return np.ascontiguousarray(np.asarray(X).reshape(len(X), -1), dtype=np.float32)
@@ -315,32 +321,39 @@ def draw_replicate(
     del GX_img
 
     # every net in a replicate shares init_seed: a matched pair, differing only in inputs
-    seconds = {}
+    seconds, loads = {}, {}
+    loads["X"] = [load_1min()]
     start = time.perf_counter()
     erm = GradientDescentERM(net).fit(X, y, init_seed=seed, **train_kw)
     seconds["X"] = time.perf_counter() - start
+    loads["X"].append(load_1min())
     inv_net = None
     # the ERM+INV net needs the UNMIXED pairs, so it trains before the mix-in
     if train_inv or inv_fits is not None:
         tau = DOMNIST_CONFIG.erm_inv_tau if erm_inv_tau is None else float(erm_inv_tau)
+        loads["INV"] = [load_1min()]
         start = time.perf_counter()
         if inv_fits is not None:
             inv_net = inv_fits(X=X, GX=GX, y=y, init_seed=seed, train_kw=train_kw)
         else:
             inv_net = train_erm_inv(X, GX, y, init_seed=seed, tau=tau, train_kw=train_kw, net=net)
         seconds["INV"] = time.perf_counter() - start
+        loads["INV"].append(load_1min())
     # mix-in IN PLACE on the A-draw GX: the ERM (and ERM+INV) are done with the
     # unmixed pairs, and the DA+ERM is the only consumer left. X is never written
     GX, _, mask_a = da.mix_in(X, GX, None, mix_in, seed=[seed, 1], inplace=True)
     logger.info(f"do-mnist: mix_in A-draw {int(mask_a.sum()):,} / {len(GX):,} rows observed (DA+ERM)")
+    loads["GX"] = [load_1min()]
     start = time.perf_counter()
     da_erm = GradientDescentERM(net).fit(GX, y, init_seed=seed, **train_kw)
     seconds["GX"] = time.perf_counter() - start
+    loads["GX"].append(load_1min())
     del X, GX
     nets = {"X": erm, "GX": da_erm} if inv_net is None else {"X": erm, "GX": da_erm, "INV": inv_net}
 
     diagnostics = erm_report(erm, probe(sem_test, DOMNIST_CONFIG.probe_samples, DOMNIST_CONFIG.probe_seed))
     diagnostics.update({f"train_seconds_{key}": value for key, value in seconds.items()})
+    diagnostics.update({f"train_load_{key}": value for key, value in loads.items()})
 
     # the PI rows: a draw from B at seed + 1, never the nets' draw
     sem_b = parts["B"]
@@ -504,21 +517,32 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         context.GX_inv = self.data_.GX_inv
         return context
 
+    def _load(self, name: str, phase: str) -> None:
+        """The 1-minute load average at a phase boundary, outside every timer, so
+        the table can say what the latency was timed under. Same for every method."""
+        if not hasattr(self, "load_"):
+            self.load_ = {}
+        self.load_.setdefault(name, {})[phase] = load_1min()
+
+    def before_fit(self, name: str) -> None:
+        self._load(name, "fit_before")
+
     def after_fit(self, name: str, model) -> None:
         """Solve each constrained model's floor once, timed, before its first
         predict: PI+INV and DA+PI+IV directly, an intersection through its DA
         branch. The floor is cached on (radius, n_starts), so the floor gate inside
-        the first predict reuses it and the predict time is the solves alone."""
+        the first predict reuses it and the predict time is the solves alone. The
+        fit phase's closing load is read after the floor, the last part it charges."""
         if not hasattr(self, "floor_seconds_"):
             self.floor_seconds_ = {}
         branch = getattr(model, "augmented", None)
         target = model if branch is None else branch
         budget = getattr(target, "_budget", None)
-        if budget is None or budget() is None:
-            return
-        start = time.perf_counter()
-        target.constraint_floor(target._radius(target.gamma))
-        self.floor_seconds_[name] = time.perf_counter() - start
+        if budget is not None and budget() is not None:
+            start = time.perf_counter()
+            target.constraint_floor(target._radius(target.gamma))
+            self.floor_seconds_[name] = time.perf_counter() - start
+        self._load(name, "fit_after")
 
     def get_sweep_values(self) -> np.ndarray:
         """The frozen digit exemplars from the UNRESTRICTED training set at
@@ -551,10 +575,13 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         out: dict[str, Any] = {}
         outcomes: dict[str, np.ndarray] = {}
         for name, model in self.models_.items():
+            self._load(name, "predict_before")
             start = time.perf_counter()
             prediction = np.asarray(model.predict(P))
             elapsed = time.perf_counter() - start
+            self._load(name, "predict_after")
             outcomes[name] = prediction
+            out[f"load_{name}"] = dict(self.load_[name])
             out[f"fit_seconds_{name}"] = float(self.fit_seconds_.get(name, float("nan")))
             if name in getattr(self, "floor_seconds_", {}):
                 out[f"floor_seconds_{name}"] = float(self.floor_seconds_[name])

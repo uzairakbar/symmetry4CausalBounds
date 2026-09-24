@@ -27,7 +27,8 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
       centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
-      by the query count), n_jobs and the BLAS cap in the comment lines, and the
+      by the query count), n_jobs and the BLAS cap in the comment lines, one load
+      line per method with load records (none for an older run.json), and the
       tex compiles under `pdflatex` when it is on PATH ([SKIP] otherwise);
       `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
 (vi)  the table's gamma provenance: with no selection beside the run it claims no
@@ -277,6 +278,10 @@ def _tree(root, digits=(7, 0, 3), n=6):
         "worst_error_DA+PI": 0.64,
         "worst_error_PI+INV": 0.0225,
         "rmse_ERM": 0.1,
+        "train_load_X": [1.0, 2.0],
+        "train_load_INV": [3.0, 4.0],
+        "load_PI": {"fit_before": 2.5, "fit_after": 3.0, "predict_before": 3.0, "predict_after": 9.0},
+        "load_PI+INV": {"fit_before": 4.0, "fit_after": 5.0, "predict_before": 9.0, "predict_after": 12.5},
         "split_key": "k",
         "tint": {"digits": sorted(digits), "grid": grid.tolist()},
     }
@@ -412,7 +417,7 @@ def leg_iv(scratch):
 
 def leg_v(scratch):
     print("(v) domnist_table on the synthetic tree")
-    from src.aggregate import domnist_table, fit_parts
+    from src.aggregate import _tint_folder, domnist_table, fit_parts
     from src.aggregate import main as aggregate_main
 
     root = os.path.join(scratch, "tree")
@@ -436,6 +441,18 @@ def leg_v(scratch):
     check("(v) Omega-hat on DA+PI only", body[2].split(" & ")[3] == "$0.750$" and pi[3] == "--")
     check("(v) the centre follows inv_recenter", fit_parts("PI+INV", "off")[0] == "train_seconds_X")
     check("(v) n_jobs and the BLAS cap in the comments", "n_jobs -1 on 32 cores" in tex and "BLAS at 8" in tex)
+    check("(v) the load header in the comments", "% 1-min load average, before -> after each timed phase" in tex)
+    check("(v) PI's load line", "%   PI: net X 1.0 -> 2.0, fit 2.5 -> 3.0, solve 3.0 -> 9.0." in tex)
+    check("(v) PI+INV's load line", "%   PI+INV: net INV 3.0 -> 4.0, fit 4.0 -> 5.0, solve 9.0 -> 12.5." in tex)
+    check("(v) no load line without load records (DA+PI)", "%   DA+PI:" not in tex.split("load average")[1])
+    path = os.path.join(_tint_folder(root), "run.json")
+    with open(path) as fh:
+        run = json.load(fh)
+    with open(path, "w") as fh:
+        json.dump({k: v for k, v in run.items() if "load_" not in k}, fh)
+    check("(v) an older run.json without loads: no load lines", "load average" not in domnist_table(root))
+    with open(path, "w") as fh:
+        json.dump(run, fh)
     if shutil.which("pdflatex"):
         doc = os.path.join(scratch, "doc")
         os.makedirs(doc, exist_ok=True)

@@ -814,6 +814,26 @@ def _calibration(artifacts: str, run: dict) -> list[str]:
     return lines
 
 
+def _load_line(run: dict, method: str, parts: list[str]) -> str | None:
+    """One method's load averages around its timed phases: the net it trains
+    (`train_load_*`), its `fit_model` plus floor, and its population solve. None
+    for a run.json that predates the load records."""
+
+    def span(pair) -> str:
+        return f"{pair[0]:.1f} -> {pair[1]:.1f}"
+
+    cells = [
+        f"net {key.removeprefix('train_seconds_')} {span(run[load])}"
+        for key in parts
+        if key.startswith("train_seconds_") and (load := key.replace("train_seconds_", "train_load_")) in run
+    ]
+    phases = run.get(f"load_{method}") or {}
+    for label, phase in (("fit", "fit"), ("solve", "predict")):
+        if f"{phase}_before" in phases and f"{phase}_after" in phases:
+            cells.append(f"{label} {span((phases[f'{phase}_before'], phases[f'{phase}_after']))}")
+    return f"{method}: {', '.join(cells)}." if cells else None
+
+
 def _seconds(run: dict, key: str) -> float:
     """A `run.json` time, 0 when absent (a method without a floor has none)."""
     value = run.get(key)
@@ -843,7 +863,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     methods = [m for m in ALL_METHODS if m in outcomes and np.ndim(outcomes[m]) == 2 and np.shape(outcomes[m])[1] == 2]
     omega = float(run["rho"]) * float(run["tr_S_over_k"]) if "rho" in run and "tr_S_over_k" in run else float("nan")
 
-    rows, charges, solved = [], [], []
+    rows, charges, solved, loads = [], [], [], []
     for m in methods:
         bounds = np.asarray(outcomes[m], dtype=float)
         lo, hi = bounds[:, 0], bounds[:, 1]
@@ -856,6 +876,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         fit = sum(_seconds(run, k) for k in parts)
         solve = float(run.get(f"wall_clock_{m}", float("nan")))
         charges.append(f"{m}: " + " + ".join(parts))
+        loads.append(_load_line(run, m, parts))
         solved.append(f"{m} {int((~empty).sum())}/{len(empty)}")
         (coverage, coverage_band), (mean_width, width_band) = _band(covered, ".3f"), _band(width, ".3f")
         rows.append(
@@ -902,6 +923,12 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         f"BLAS at {run.get('blas_threads')} threads.",
         f"% net training (s): {nets}; augmentation (s): A {_seconds(run, 'augment_seconds_A'):.2f}, "
         f"B {_seconds(run, 'augment_seconds_B'):.2f}.",
+        *(
+            [f"% 1-min load average, before -> after each timed phase, on {run.get('cpu_count')} cores:"]
+            + [f"%   {line}" for line in loads if line]
+            if any(loads)
+            else []
+        ),
         f"% PI+INV floor {run.get('inv_floor', float('nan')):.4g} vs budget eps^2 "
         f"{run.get('inv_budget', float('nan')):.4g}, feasible share {feasible:.3f}.",
         f"% point estimators, population RMSE to h_*: {rmse}.",
