@@ -224,8 +224,10 @@ class QuerySweepRunner(BaseExperimentRunner):
         queries = self.get_sweep_values()
         results = {}
         # the fitted models, by name: a runner that scores them elsewhere than on the
-        # sweep queries (do-MNIST's population metrics) reads them off here
+        # sweep queries (do-MNIST's population metrics) reads them off here, beside
+        # each one's `fit_model` seconds
         self.models_ = {}
+        self.fit_seconds_ = {}
 
         with MANAGER.counter(total=len(self.methods), desc=desc, unit="methods") as pbar:
             for name, builder in self.methods.items():
@@ -235,6 +237,7 @@ class QuerySweepRunner(BaseExperimentRunner):
                     model = builder()
 
                     # Pass method name so fit_model knows which data to use
+                    start = time.perf_counter()
                     fit_model(
                         model=model,
                         method_name=name,
@@ -247,6 +250,8 @@ class QuerySweepRunner(BaseExperimentRunner):
                         hyperparameters=self.hyperparameters,
                         da=context.da,
                     )
+                    self.fit_seconds_[name] = time.perf_counter() - start
+                    self.after_fit(name, model)
 
                     predictions = model.predict(queries)
                     self.models_[name] = model
@@ -260,6 +265,10 @@ class QuerySweepRunner(BaseExperimentRunner):
                 pbar.update()
 
         return queries, results
+
+    def after_fit(self, name: str, model) -> None:
+        """Called right after each method's `fit_model`, before its first predict.
+        A no-op here; do-MNIST times its constraint floors in it."""
 
     def estimand(self, queries) -> np.ndarray:
         """The causal target at the queries, `sem.f` by default. A SEM whose target

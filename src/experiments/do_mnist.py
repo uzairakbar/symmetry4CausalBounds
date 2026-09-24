@@ -305,7 +305,9 @@ def draw_replicate(
     train_kw = dict(hyperparameters or {})
     sem_a = parts["A"]
     X_img, y = sem_a.sample(n_samples, seed=seed)
+    start = time.perf_counter()
     GX_img, _ = da(X_img)
+    augment_seconds_a = time.perf_counter() - start
     X = flat(X_img)
     del X_img
     GX = flat(GX_img)
@@ -345,7 +347,9 @@ def draw_replicate(
     idx = sem_b.last_["idx"]
     if not (np.isin(idx, sem_b.subset_).all() and not np.isin(idx, sem_a.subset_).any()):
         raise RuntimeError("do-mnist: the PI rows left split B")
+    start = time.perf_counter()
     GXb_img, Gb = da(Xb_img)
+    augment_seconds_b = time.perf_counter() - start
     Xb = flat(Xb_img)
     del Xb_img
     GXb = flat(GXb_img)
@@ -355,6 +359,8 @@ def draw_replicate(
     GXb_da, Gb_da, mask_b = da.mix_in(Xb, GXb, Gb, mix_in, seed=[seed, 2])
     logger.info(f"do-mnist: mix_in B-rows {int(mask_b.sum()):,} / {len(GXb):,} (DA+PI, DA+PI+IV, prescreen)")
     diagnostics.update(mix_in_n_A=float(mask_a.sum()), mix_in_n_B=float(mask_b.sum()))
+    # the two DA passes, charged by the table to the methods that consume them
+    diagnostics.update(augment_seconds_A=augment_seconds_a, augment_seconds_B=augment_seconds_b)
     # each net's invariance error on the UNMIXED B pairs, clipped as PI+INV reads it
     for name, model in nets.items():
         diagnostics[f"E_inv_B_{name}"] = e_inv(model, Xb, GXb)
@@ -497,6 +503,22 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         context.GX_inv = self.data_.GX_inv
         return context
 
+    def after_fit(self, name: str, model) -> None:
+        """Solve each constrained model's floor once, timed, before its first
+        predict: PI+INV and DA+PI+IV directly, an intersection through its DA
+        branch. The floor is cached on (radius, n_starts), so the floor gate inside
+        the first predict reuses it and the predict time is the solves alone."""
+        if not hasattr(self, "floor_seconds_"):
+            self.floor_seconds_ = {}
+        branch = getattr(model, "augmented", None)
+        target = model if branch is None else branch
+        budget = getattr(target, "_budget", None)
+        if budget is None or budget() is None:
+            return
+        start = time.perf_counter()
+        target.constraint_floor(target._radius(target.gamma))
+        self.floor_seconds_[name] = time.perf_counter() - start
+
     def get_sweep_values(self) -> np.ndarray:
         """The frozen digit exemplars from the UNRESTRICTED training set at
         `exemplar_seed`, a visualisation set that is never scored. GenericQuerySweep
@@ -517,18 +539,24 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 
     def evaluate_population(self) -> dict[str, Any]:
         """Every fitted model scored on the evaluation population: coverage, width,
-        approximation and worst error, wall clock and the status split for the
-        intervals, RMSE for the point estimators, the NaN-row share, and the
+        approximation and worst error, wall clock (predict seconds per query) and
+        the status split for the intervals, RMSE for the point estimators, each
+        method's `fit_model` and floor seconds, the NaN-row share, and the
         INV floor / budget pair where PI+INV was fitted, and under `inv` the
         ERM+INV centre's own constraint value `erm_inv_con0`. A method whose every
         interval is NaN reads coverage NaN (`evaluate_queries`), not 0."""
         P, h_star, _, _ = population(self.sem_test, self.n_queries, self.pop_seed)
         target = np.asarray(h_star).reshape(-1, 1)  # (n, 1), the shape `sem.f` gives elsewhere
         out: dict[str, Any] = {}
+        outcomes: dict[str, np.ndarray] = {}
         for name, model in self.models_.items():
             start = time.perf_counter()
             prediction = np.asarray(model.predict(P))
             elapsed = time.perf_counter() - start
+            outcomes[name] = prediction
+            out[f"fit_seconds_{name}"] = float(self.fit_seconds_.get(name, float("nan")))
+            if name in getattr(self, "floor_seconds_", {}):
+                out[f"floor_seconds_{name}"] = float(self.floor_seconds_[name])
             if name in POINT_METHODS or prediction.ndim == 1 or prediction.shape[1] != 2:
                 out[f"rmse_{name}"] = float(np.sqrt(np.nanmean((prediction.ravel() - target.ravel()) ** 2)))
                 continue
@@ -553,6 +581,9 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         if self.nets is not None and "INV" in self.nets and "ERM+INV" not in self.models_:
             prediction = np.asarray(self.nets["INV"].predict(P))
             out["rmse_ERM+INV"] = float(np.sqrt(np.nanmean((prediction.ravel() - target.ravel()) ** 2)))
+        # per query, so the table can bootstrap its bands instead of reading means
+        save(target, "population_values", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
+        save(outcomes, "population_outcomes", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
         return out
 
     @staticmethod
