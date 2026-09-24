@@ -847,8 +847,10 @@ def _omega_line(run: dict) -> str:
     head = f"% Omega-hat = rho-hat tr(S)/k on the mixed B rows (Prop. 2), tr(S)/k {trace:.4f} from the linear shift "
     if "rho_linear" not in run:
         return head + f"operators and rho-hat {rho:.4f} the pixel-logistic ratio (a run before the nets' rho)."
+    band = run.get("rho_band")
+    band = f" (95% paired bootstrap band [{band[0]:.4f}, {band[1]:.4f}])" if band else ""
     return head + (
-        f"operators and rho-hat {rho:.4f} = DA+ERM's / ERM's held-out squared error on those rows (the paper's "
+        f"operators and rho-hat {rho:.4f}{band} = DA+ERM's / ERM's held-out squared error on those rows (the paper's "
         f"best-achievable errors, via the nets); the pixel-logistic rho_linear {float(run['rho_linear']):.4f} is "
         "kept for provenance only."
     )

@@ -388,7 +388,8 @@ def draw_replicate(
         prescreen(Xb, yb, GXb_da, link=DOMNIST_CONFIG.link, keep=DOMNIST_CONFIG.spectrum_keep, nets=nets)
     )
     logger.info(
-        f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} (nets; linear {diagnostics['rho_linear']:.4f}) "
+        f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} (nets, band {diagnostics.get('rho_band')}; "
+        f"linear {diagnostics['rho_linear']:.4f}) "
         f"tr(S)/k={diagnostics['tr_S_over_k']:.4f} contracts={diagnostics['contracts']}"
     )
     return DoMNISTData(

@@ -74,7 +74,20 @@ def shift_operators(X: NDArray, GX: NDArray, keep: float = 0.999) -> dict[str, f
     }
 
 
-def net_noise(nets, X: NDArray, GX: NDArray, y: NDArray) -> dict[str, float]:
+def ratio_band(num: NDArray, den: NDArray, n_boot: int = 1000, level: float = 0.95, seed: int = 0) -> list[float]:
+    """Percentile bootstrap band of mean(num) / mean(den), the rows resampled PAIRED
+    (one index draw for both), so the shared row noise cancels in the ratio."""
+    num, den = np.asarray(num, dtype=float).ravel(), np.asarray(den, dtype=float).ravel()
+    rng = np.random.default_rng(seed)
+    ratios = []
+    for size in np.diff(np.r_[0:n_boot:100, n_boot]):  # chunks of 100 resamples
+        idx = rng.integers(0, len(num), size=(size, len(num)))
+        ratios.append(num[idx].mean(axis=1) / den[idx].mean(axis=1))
+    tail = 100.0 * (1.0 - level) / 2.0
+    return [float(q) for q in np.percentile(np.concatenate(ratios), [tail, 100.0 - tail])]
+
+
+def net_noise(nets, X: NDArray, GX: NDArray, y: NDArray, n_boot: int = 0) -> dict[str, float]:
     """sigma^2, sigma~^2 and rho = sigma~^2 / sigma^2 off the prefit nets.
 
     The paper's sigma^2 := min_h R_erm(h) and sigma~^2 := min_h R_erm~(h) are the
@@ -92,24 +105,32 @@ def net_noise(nets, X: NDArray, GX: NDArray, y: NDArray) -> dict[str, float]:
         the DA moves the pixels, which is why it overstates rho;
       - mu unclipped: the clip is a device of the PI ball, not of the risk.
     rho falls back to 1 when the X net fits y exactly or the GX error is not finite.
+    `n_boot` > 0 adds `rho_band`, the 95% paired bootstrap band over the rows
+    (`ratio_band`): the Prop. 3 radius sigma sqrt(1 + gamma - rho) moves a lot with
+    rho near 1 + gamma, so nothing should build on rho without it.
     """
     y = np.asarray(y).ravel().astype(float)
-    s2 = float(np.mean((y - np.asarray(nets["X"].predict_mean(X)).ravel()) ** 2))
-    s2t = float(np.mean((y - np.asarray(nets["GX"].predict_mean(GX)).ravel()) ** 2))
+    e = (y - np.asarray(nets["X"].predict_mean(X)).ravel()) ** 2
+    et = (y - np.asarray(nets["GX"].predict_mean(GX)).ravel()) ** 2
+    s2, s2t = float(np.mean(e)), float(np.mean(et))
     ok = s2 > 0.0 and np.isfinite(s2t)
-    return {"sigma2": s2, "sigma2_tilde": s2t, "rho": s2t / s2 if ok else 1.0, "rho_ok": bool(ok)}
+    out = {"sigma2": s2, "sigma2_tilde": s2t, "rho": s2t / s2 if ok else 1.0, "rho_ok": bool(ok)}
+    if n_boot > 0 and ok:
+        out["rho_band"] = ratio_band(et, e, n_boot=n_boot)
+    return out
 
 
 def prescreen(
-    X: NDArray, y: NDArray, GX: NDArray, link: str = "probit", keep: float = 0.999, nets=None
+    X: NDArray, y: NDArray, GX: NDArray, link: str = "probit", keep: float = 0.999, nets=None, n_boot: int = 1000
 ) -> dict[str, float]:
     """Selection criterion: tr(S)/k <= 1 (Prop. 2 with an absolute budget).
 
     The radius is absolute, so rho does not enter the sufficient condition for
     sharpening; it enters Omega-hat = rho tr(S)/k and the calibrated criterion.
     `rho` (with `sigma2`, `sigma2_tilde`) is `net_noise` on the prefit `nets` when
-    given, else the pixel-logistic ratio; that ratio is always kept as
-    `rho_linear` (`sigma2_linear`, `sigma2_tilde_linear`).
+    given, with its `rho_band` over `n_boot` paired resamples, else the
+    pixel-logistic ratio; that ratio is always kept as `rho_linear`
+    (`sigma2_linear`, `sigma2_tilde_linear`).
     """
     X, GX = _flat(X), _flat(GX)
     s2, s2t = mmse(X, y, link), mmse(GX, y, link)
@@ -118,7 +139,7 @@ def prescreen(
     if nets is None:
         out.update(sigma2=s2, sigma2_tilde=s2t, rho=rho_linear)
     else:
-        noise = net_noise(nets, X, GX, y)
+        noise = net_noise(nets, X, GX, y, n_boot=n_boot)
         noise.pop("rho_ok")
         out.update(noise)
     rho = out["rho"]

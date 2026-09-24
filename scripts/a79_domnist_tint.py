@@ -260,6 +260,7 @@ def _tree(root, digits=(7, 0, 3), n=6):
         "pop_seed": 44,
         "rho": 1.5,
         "rho_linear": 1.2,
+        "rho_band": [1.4, 1.6],
         "tr_S_over_k": 0.5,
         "iv_rho": 1.1,
         "toggle_n_jobs": -1,
@@ -446,7 +447,9 @@ def leg_v(scratch):
     omega_line = next((line for line in tex.splitlines() if line.startswith("% Omega-hat")), "")
     check(
         "(v) the Omega-hat comment names the nets' rho and keeps rho_linear",
-        "rho-hat 1.5000 = DA+ERM's / ERM's held-out squared error" in omega_line and "rho_linear 1.2000" in omega_line,
+        "rho-hat 1.5000 (95% paired bootstrap band [1.4000, 1.6000]) = DA+ERM's / ERM's held-out squared error"
+        in omega_line
+        and "rho_linear 1.2000" in omega_line,
         omega_line,
     )
     check("(v) the centre follows inv_recenter", fit_parts("PI+INV", "off")[0] == "train_seconds_X")

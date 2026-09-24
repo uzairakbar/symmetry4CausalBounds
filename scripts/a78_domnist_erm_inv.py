@@ -51,10 +51,11 @@ Static leg (the prescreen's rho, seconds):
         `net_noise`: the GX net's squared error on GX over the X net's on X, the
         ratio `_net_rho` (the runner's `fit_rho`) returns; the pixel-logistic ratio
         stays as `rho_linear`; `contracts_calibrated` and `da_inert` read the nets'
-        rho; without nets `rho` is the linear one.
+        rho; `rho_band` (a seeded 95% paired bootstrap over the rows) is present and
+        contains rho; without nets `rho` is the linear one and there is no band.
 
 GPU leg, with (v): the replicate's `rho` is `_net_rho` on its B rows, its
-`rho_linear` is kept, and both are finite.
+`rho_linear` is kept, and both are finite; its `rho_band` contains rho.
 
     uv run python scripts/a78_domnist_erm_inv.py            # static legs
     uv run python scripts/a78_domnist_erm_inv.py --nets     # + the GPU leg
@@ -316,7 +317,9 @@ def leg_v():
     net_rho = _net_rho(with_inv.nets, with_inv.X, with_inv.GX, with_inv.y)
     check("(v) the replicate's rho is the nets' ratio on its B rows", d["rho"] == net_rho, f"{d['rho']} vs {net_rho}")
     check("(v) rho_linear is kept", np.isfinite(d["rho_linear"]) and d["rho_linear"] != d["rho"])
-    print(f"  rho: nets {d['rho']:.5f} linear {d['rho_linear']:.5f}")
+    band = d.get("rho_band")
+    check("(v) the replicate's rho_band contains rho", band is not None and band[0] < d["rho"] < band[1], str(band))
+    print(f"  rho: nets {d['rho']:.5f} band {band} linear {d['rho_linear']:.5f}")
 
     # PI+INV's radius on the replicate's nets: the ERM's sigma-hat under every centre
     lo_hi = DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else (0.0, 1.0)
@@ -453,6 +456,10 @@ def leg_viii():
     check("(viii) sigma2 and sigma2_tilde are the nets'", (with_nets["sigma2"], with_nets["sigma2_tilde"]) == (s2, s2t))
     check("(viii) it is the runner's _net_rho", with_nets["rho"] == _net_rho(nets, X, GX, y))
     check("(viii) net_noise agrees", net_noise(nets, X, GX, y)["rho"] == with_nets["rho"])
+    band = with_nets.get("rho_band")
+    check("(viii) rho_band is present and contains rho", band is not None and band[0] < with_nets["rho"] < band[1])
+    check("(viii) no rho_band without nets", "rho_band" not in linear)
+    check("(viii) the band is seeded", prescreen(X, y, GX, keep=1.0, nets=nets)["rho_band"] == band)
     check(
         "(viii) rho_linear is the pixel-logistic ratio, kept either way",
         with_nets["rho_linear"] == linear["rho_linear"] == linear["rho"] != with_nets["rho"],
