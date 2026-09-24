@@ -1,4 +1,5 @@
-"""A79: the do-MNIST tint sweep's images (one MNIST load, no nets, CPU, seconds).
+"""A79: the do-MNIST tint sweep, its aggregate figure and the results table (two
+MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
 
 (i)   the exemplar pin: `exemplars(420)` draws the same 10 indices and tints, and
       both image arrays (the SEM's subsample and `subsample=1`) hash to the same
@@ -8,13 +9,34 @@
       grid, the ink (`grey_of`) is the same in every row, the image is the
       exemplar's on the same SEM and seed, `subsample` only changes the resolution,
       and a digit outside 0..9 raises.
+(iii) `run_tint_sweep` on a stub runner in a scratch cwd: the image is MNIST test's
+      (the configured source), not the training exemplar; the digits come out
+      sorted; ATE is constant along each sweep; intervals are (n, 1, 2) and points
+      (n, 1); a NaN interval reaches the status split; the density pkl holds the B
+      rows' tints before and after DA, bimodal at 0.1 and 0.9.
+(iv)  `tint_stack` on a synthetic tree written out of order (7, 0, 3): the rows
+      read 0, 3, 7 from the top, a missing digit is absent, the left image is the
+      blue endpoint and the right the red one, the title is $h({\bm{x}})$ and the
+      x-label `tint`; a failed tint gets its cross on the x-axis.
+(v)   `domnist_table` on the same tree: one row per interval method in
+      ALL_METHODS order, the point estimators absent, `fit_parts` charging the
+      centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
+      by the query count), n_jobs and the BLAS cap in the comment lines, and the
+      tex compiles under `pdflatex` when it is on PATH ([SKIP] otherwise);
+      `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
 
   uv run python scripts/a79_domnist_tint.py
 """
 
 import hashlib
+import json
 import os
+import pickle
+import shutil
+import subprocess
 import sys
+import tempfile
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -22,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from loguru import logger  # noqa: E402
 
+from src.experiments.utils.data_operations import load  # noqa: E402
 from src.sem.do_mnist import DoMNISTSEM, grey_of, tint_of  # noqa: E402
 
 SEM_KW = dict(seed=42, alpha=0.0, beta=0.4, eta=0.25, subsample=2)
@@ -105,12 +128,242 @@ def leg_ii(sem):
         check(f"(ii) digit {bad} raises", raised)
 
 
+class IntervalStub:
+    """An interval method: [0.1, 0.9] everywhere, NaN on every fifth query."""
+
+    def predict(self, X):
+        bounds = np.tile([0.1, 0.9], (len(X), 1)).astype(float)
+        bounds[::5] = np.nan
+        self.query_status = np.where(np.isnan(bounds[:, 0]), 2, 0)
+        return bounds
+
+
+class PointStub:
+    def predict(self, X):
+        return np.full((len(X), 1), 0.5)
+
+
+def leg_iii(sem, sem_test, scratch):
+    print("(iii) run_tint_sweep on a stub runner")
+    from src.experiments.configs import DOMNIST_CONFIG, TintSpec
+    from src.experiments.do_mnist import flat, run_tint_sweep
+
+    X, _ = sem.sample(2_000, seed=0)
+    GX = X.copy()
+    runner = SimpleNamespace(
+        sem=sem,
+        sem_test=sem_test,
+        exemplar_seed=EXEMPLAR_SEED,
+        methods={"ATE": None, "ERM": None, "PI": None},
+        models_={"ERM": PointStub(), "PI": IntervalStub()},
+        data_=SimpleNamespace(X=flat(X), GX=flat(GX), split_key="stub"),
+        inv_recenter="inv",
+        default_gamma=0.1,
+        default_epsilon=0.04,
+    )
+    spec = TintSpec(digits=(7, 2), sweep_samples=5)
+    cwd = os.getcwd()
+    os.chdir(scratch)
+    try:
+        record = run_tint_sweep(runner, spec)
+    finally:
+        os.chdir(cwd)
+    folder = os.path.join(scratch, "artifacts", "do_mnist", "query")
+
+    def pkl(name):
+        return load(os.path.join(folder, f"{name}.pkl"))
+
+    check("(iii) the source is MNIST test by default", DOMNIST_CONFIG.tint_image_source == "test")
+    check("(iii) the record says so", record["image_source"] == "test" and record["digits"] == [2, 7])
+    for digit in (2, 7):
+        images = pkl(f"tint_{digit}_images")
+        expected = sem_test.tinted(EXEMPLAR_SEED, digit, [0.0, 1.0], subsample=1)
+        check(f"(iii) digit {digit}: the endpoints are the test image", np.array_equal(images, expected))
+        train = sem.tinted(EXEMPLAR_SEED, digit, [0.0, 1.0], subsample=1)
+        check(f"(iii) digit {digit}: not the training exemplar", not np.array_equal(images, train))
+        outcomes = pkl(f"tint_{digit}_outcomes")
+        ate = np.asarray(outcomes["ATE"]).ravel()
+        check(f"(iii) digit {digit}: ATE constant along the sweep", np.all(ate == ate[0]) and len(ate) == 5)
+        check(f"(iii) digit {digit}: ATE is h_* of the digit", ate[0] == float(sem.ate_of([digit])[0, 0]))
+        check(f"(iii) digit {digit}: the interval is (5, 1, 2)", np.shape(outcomes["PI"]) == (5, 1, 2))
+        check(f"(iii) digit {digit}: the point estimate is (5, 1)", np.shape(outcomes["ERM"]) == (5, 1))
+        check(f"(iii) digit {digit}: the grid", np.allclose(pkl(f"tint_{digit}_values"), np.linspace(0, 1, 5)))
+        check(f"(iii) digit {digit}: the figure", os.path.exists(os.path.join(folder, f"tint_{digit}_sweep.pdf")))
+    check("(iii) a NaN interval reaches the status split", record["status"]["PI"]["solver_failure"] == 2)
+    density = pkl("tint_density")
+    before = np.asarray(density["before"])
+    bimodal = abs(np.median(before[before < 0.5]) - 0.1) < 0.03 and abs(np.median(before[before > 0.5]) - 0.9) < 0.03
+    check("(iii) the density is the B rows' tints, bimodal at 0.1 and 0.9", len(before) == 2_000 and bimodal)
+    check("(iii) the density carries the post-DA tints", len(density["after"]) == 2_000)
+
+
+def _tree(root, digits=(7, 0, 3), n=6):
+    """A synthetic `do_mnist/query/` tree: tint sweeps with ATE = d / 10, one NaN
+    tint on PI+INV, the population pkls and a run.json."""
+    folder = os.path.join(root, "do_mnist", "query")
+    os.makedirs(folder, exist_ok=True)
+
+    def dump(name, obj):
+        with open(os.path.join(folder, f"{name}.pkl"), "wb") as fh:
+            pickle.dump(obj, fh)
+
+    grid = np.linspace(0.0, 1.0, n)
+    for d in digits:
+        ink = np.zeros((28, 28), dtype=np.float32)
+        ink[6:22, 12:16] = 1.0
+        blue = np.stack([0 * ink, 0 * ink, ink])
+        red = np.stack([ink, 0 * ink, 0 * ink])
+        pi_inv = np.tile([[0.2, 0.9]], (n, 1))[:, None, :].astype(float)
+        pi_inv[2] = np.nan
+        dump(f"tint_{d}_values", grid)
+        dump(f"tint_{d}_images", np.stack([blue, red]))
+        dump(
+            f"tint_{d}_outcomes",
+            {
+                "ATE": np.full((n, 1), d / 10),
+                "ERM": np.full((n, 1), 0.5),
+                "PI": np.tile([[0.0, 1.0]], (n, 1))[:, None, :],
+                "PI+INV": pi_inv,
+            },
+        )
+    rng = np.random.default_rng(0)
+    dump("tint_density", {"before": rng.normal(0.1, 0.05, 500), "after": rng.normal(0.9, 0.05, 500)})
+    q = 50
+    target = np.full((q, 1), 0.8)
+    wide = np.tile([0.0, 1.0], (q, 1))
+    narrow = np.tile([0.85, 0.95], (q, 1))
+    dump("population_values", target)
+    dump("population_outcomes", {"ERM": np.full((q, 1), 0.7), "PI+INV": narrow, "DA+PI": wide, "PI": wide})
+    run = {
+        "gamma": 0.05,
+        "epsilon": 0.04,
+        "inv_recenter": "inv",
+        "erm_inv_tau": 4e-4,
+        "target_coverage": 0.995,
+        "n_queries": q,
+        "pop_seed": 44,
+        "rho": 1.5,
+        "tr_S_over_k": 0.5,
+        "iv_rho": 1.1,
+        "toggle_n_jobs": -1,
+        "cpu_count": 32,
+        "blas_threads": 8,
+        "train_seconds_X": 1.0,
+        "train_seconds_GX": 2.0,
+        "train_seconds_INV": 4.0,
+        "augment_seconds_A": 0.5,
+        "augment_seconds_B": 0.25,
+        "fit_seconds_PI": 2.0,
+        "fit_seconds_DA+PI": 3.0,
+        "fit_seconds_PI+INV": 5.0,
+        "floor_seconds_PI+INV": 0.5,
+        "wall_clock_PI": 0.5,
+        "wall_clock_DA+PI": 0.25,
+        "wall_clock_PI+INV": 1.0,
+        "worst_error_PI": 0.64,
+        "worst_error_DA+PI": 0.64,
+        "worst_error_PI+INV": 0.0225,
+        "rmse_ERM": 0.1,
+        "tint": {"digits": sorted(digits), "grid": grid.tolist()},
+    }
+    with open(os.path.join(folder, "run.json"), "w") as fh:
+        json.dump(run, fh)
+    return run
+
+
+def leg_iv(scratch):
+    print("(iv) tint_stack on a synthetic tree")
+    import matplotlib.pyplot as plt
+
+    from src.aggregate import tint_stack
+    from src.experiments.utils.constants import TEX_MAPPER
+
+    root = os.path.join(scratch, "tree")
+    _tree(root)
+    fig = tint_stack(root)
+    bands = [ax for ax in fig.axes if any(line.get_label() == TEX_MAPPER["ATE"] for line in ax.get_lines())]
+    bands.sort(key=lambda ax: -ax.get_position().y0)
+    order = [
+        round(float(next(ln for ln in ax.get_lines() if ln.get_label() == TEX_MAPPER["ATE"]).get_ydata()[0]) * 10)
+        for ax in bands
+    ]
+    check("(iv) the rows read 0, 3, 7 from the top", order == [0, 3, 7], str(order))
+    check("(iv) a missing digit is absent (three rows)", len(bands) == 3)
+    images = [ax for ax in fig.axes if ax.images]
+    left = [ax for ax in images if ax.get_position().x0 < bands[0].get_position().x0]
+    right = [ax for ax in images if ax.get_position().x0 > bands[0].get_position().x1]
+    blue = all(ax.images[0].get_array()[..., 2].sum() > ax.images[0].get_array()[..., 0].sum() for ax in left)
+    red = all(ax.images[0].get_array()[..., 0].sum() > ax.images[0].get_array()[..., 2].sum() for ax in right)
+    check("(iv) three blue images on the left, three red on the right", len(left) == len(right) == 3 and blue and red)
+    background = left[0].images[0].get_array()[0, 0]
+    check("(iv) the image background is transparent (white page)", float(background[3]) == 0.0)
+    check("(iv) the title is h(x) on the top row", bands[0].get_title() == r"$h({\bm{x}})$")
+    bottom = min(fig.axes, key=lambda ax: ax.get_position().y0 if ax.axison else 9)
+    check("(iv) the x-label tint sits under the histogram", bottom.get_xlabel() == "tint" and bottom.patches)
+    crosses = [c for ax in bands for c in ax.collections if getattr(c, "get_offsets", None) and len(c.get_offsets())]
+    check("(iv) each row marks its failed tint", len(crosses) >= 3)
+    plt.close(fig)
+
+
+def leg_v(scratch):
+    print("(v) domnist_table on the synthetic tree")
+    from src.aggregate import domnist_table, fit_parts
+    from src.aggregate import main as aggregate_main
+
+    root = os.path.join(scratch, "tree")
+    tex = domnist_table(root)
+    body = tex.split("\\midrule\n")[1].split("\\bottomrule")[0].strip().splitlines()
+    check("(v) one row per interval method", len(body) == 3, str(len(body)))
+    from src.experiments.utils.constants import TEX_MAPPER
+
+    names = [row.split(" & ")[0] for row in body]
+    check("(v) ALL_METHODS order: PI+INV, PI, DA+PI", names == [TEX_MAPPER[m] for m in ("PI+INV", "PI", "DA+PI")])
+    check("(v) the point estimators are absent", TEX_MAPPER["ERM"] not in names)
+    pi = body[1].split(" & ")
+    check("(v) PI: fit = X net + fit (3.00 s)", pi[5] == "$3.00$", pi[5])
+    check("(v) PI: solve 500.00 ms per query", pi[6] == "$500.00$", pi[6])
+    check("(v) PI: latency = fit + solve, not fit / n_queries", pi[7].startswith("$3.50$"), pi[7])
+    inv = body[0].split(" & ")
+    check("(v) PI+INV (inv): INV net + both DA passes + fit + floor (10.25 s)", inv[5] == "$10.25$", inv[5])
+    check("(v) PI+INV covers nothing (0.000)", inv[1].startswith("$0.000$"))
+    check("(v) Omega-hat on DA+PI only", body[2].split(" & ")[3] == "$0.750$" and pi[3] == "--")
+    check("(v) the centre follows inv_recenter", fit_parts("PI+INV", "off")[0] == "train_seconds_X")
+    check("(v) n_jobs and the BLAS cap in the comments", "n_jobs -1 on 32 cores" in tex and "BLAS at 8" in tex)
+    if shutil.which("pdflatex"):
+        doc = os.path.join(scratch, "doc")
+        os.makedirs(doc, exist_ok=True)
+        with open(os.path.join(doc, "table.tex"), "w") as fh:
+            fh.write(tex)
+        with open(os.path.join(doc, "main.tex"), "w") as fh:
+            fh.write(
+                "\\documentclass{article}\\usepackage{booktabs,amsmath}\\usepackage[landscape]{geometry}"
+                "\\begin{document}\\input{table.tex}\\end{document}\n"
+            )
+        result = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main.tex"], cwd=doc, capture_output=True
+        )
+        check("(v) the tex compiles under pdflatex", result.returncode == 0)
+    else:
+        print("  [SKIP] (v) pdflatex not on PATH")
+
+    only = os.path.join(scratch, "only")
+    _tree(only, digits=(5,))
+    aggregate_main(["--artifacts", only])
+    written = [os.path.exists(os.path.join(only, "aggregate", f)) for f in ("do_mnist_tint.pdf", "do_mnist_table.tex")]
+    check("(v) aggregate.main on do_mnist/query alone writes the figure and the table", all(written))
+
+
 def main():
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
     sem = DoMNISTSEM(train=True, **SEM_KW)
     leg_i(sem)
     leg_ii(sem)
+    sem_test = DoMNISTSEM(train=False, **SEM_KW)
+    with tempfile.TemporaryDirectory() as scratch:
+        leg_iii(sem, sem_test, scratch)
+        leg_iv(scratch)
+        leg_v(scratch)
     print(f"\nA79 {'PASS' if not FAIL else 'FAIL'}")
     for name in FAIL:
         print(f"  FAILED: {name}")
