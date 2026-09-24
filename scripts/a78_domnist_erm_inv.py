@@ -4,8 +4,9 @@ Static legs (no MNIST; the tiny AL fit runs on whatever `device()` picks, second
 
   (i)   the registry: PI+INV is `InvarianceConstrainedCopSens` on `nets["X"]` under
         `off`, `RecentredInvCopSens` on `nets["GX"]` under `on`, and
-        `InvarianceConstrainedCopSens` on `nets["INV"]` under `inv`, each taking
-        sigma-hat from `nets["X"]` (`sigma_model`, PI's radius); `ERM+INV` is the
+        `InvarianceConstrainedCopSens` on `nets["INV"]` under `inv`, off and inv
+        taking sigma-hat from `nets["X"]` (`sigma_model`, PI's radius) and on keeping
+        the DA+ERM's (Prop. 3's sigma-tilde); `ERM+INV` is the
         INV net itself; a bogus `inv_recenter` raises when PI+INV is built.
   (ii)  nesting: `nested_in("inv")` has no PI+INV entry (off/on keep theirs), and
         `log_nesting` under `inv` stays quiet on a PI+INV wider than PI.
@@ -26,8 +27,8 @@ GPU legs (`--nets`, a 60k draw, about two minutes, then (vii)):
         and the B arrays (`X`, `GX`, `GX_inv`, `y`, `G`) bit-identical to
         `train_inv=False`; an `inv_fits` hook that fits the configured knobs returns
         a net whose sha1 equals the plain `train_inv=True` path's; PI+INV's sigma2_
-        equals PI's, the ERM's clipped mean mu(1-mu) on the B rows, under off, on
-        and inv.
+        equals PI's, the ERM's clipped mean mu(1-mu) on the B rows, under off and
+        inv, and under on equals DA+PI's on the unmixed GX rows.
 
 Static leg (the pooled head, seconds):
 
@@ -109,8 +110,9 @@ def leg_i():
     check("(i) inv: InvarianceConstrainedCopSens", type(inv) is InvarianceConstrainedCopSens)
     check("(i) inv: centre is nets['INV']", inv.outcome_model is nets["INV"])
     check("(i) inv: the block epsilon is the budget", inv.epsilon == 0.04 and inv._budget() == 0.04**2)
-    erm_sigma = all(m.sigma_model is nets["X"] for m in (off, on, inv))
-    check("(i) PI+INV's sigma model is nets['X'] under off, on and inv", erm_sigma)
+    erm_sigma = all(m.sigma_model is nets["X"] for m in (off, inv))
+    check("(i) PI+INV's sigma model is nets['X'] under off and inv", erm_sigma)
+    check("(i) on keeps the post-DA net's own sigma (no sigma model)", on.sigma_model is None)
     check("(i) PI carries no sigma model", build("off", "PI").sigma_model is None)
     check("(i) ERM+INV is the INV net", build("off", "ERM+INV") is nets["INV"])
     try:
@@ -320,6 +322,10 @@ def leg_v():
     lo_hi = DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else (0.0, 1.0)
     mu = np.clip(np.asarray(with_inv.nets["X"].predict_mean(with_inv.X), dtype=float).ravel(), *lo_hi)
     erm_sigma2 = float(np.mean(mu * (1 - mu)))
+    post = MethodRegistry.build_methods(
+        ["DA+PI"], gamma=0.085, epsilon=0.04, backend="copsens", outcome_models=with_inv.nets
+    )
+    post_da = post["DA+PI"]().fit(with_inv.GX_inv, with_inv.y)
     for recenter in ("off", "on", "inv"):
         built = MethodRegistry.build_methods(
             ["PI", "PI+INV"],
@@ -331,6 +337,13 @@ def leg_v():
         )
         pi = built["PI"]().fit(with_inv.X, with_inv.y)
         pi_inv = built["PI+INV"]().fit(with_inv.X, with_inv.y, GX=with_inv.GX_inv)
+        if recenter == "on":
+            check(
+                "(v) on: PI+INV keeps the DA+ERM's sigma2_ on the unmixed GX (Prop. 3's sigma-tilde)",
+                pi_inv.sigma2_ == post_da.sigma2_ != pi.sigma2_,
+                f"{pi_inv.sigma2_!r} vs {post_da.sigma2_!r}",
+            )
+            continue
         check(
             f"(v) {recenter}: PI+INV's sigma2_ is the ERM's mean mu(1-mu), PI's",
             pi_inv.sigma2_ == pi.sigma2_

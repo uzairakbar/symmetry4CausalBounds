@@ -36,7 +36,7 @@ acceptance test, the floor solve and both budgets. Four things differ by design:
 
 `sigma_model` (default None, the centre's own net) lets a ball borrow sigma-hat^2
 from another prefit net, read on the observed rows: the do-MNIST PI+INV takes the
-ERM's, so its radius is PI's whatever its centre.
+ERM's under the X-ball centres (off, inv), so its radius is PI's.
 
 `recalibrate` and `rho` reach the radius through `BoundedSA.budget`; `mean_match`
 is accepted for the uniform signature and does nothing (the latent ball has no
@@ -290,8 +290,9 @@ class CopSensPI(BoundedSA):
         self.outcome_model = outcome_model
         # sigma_model: a PREFIT net that sets sigma-hat^2 in place of the centre net,
         # read on the observed rows (`_sigma_rows`). None keeps the centre's own. The
-        # do-MNIST PI+INV passes the ERM, so its radius is PI's whatever its centre
-        # (Prop. 3 and Cor. 1 take sigma from the ERM)
+        # do-MNIST PI+INV passes the ERM under off and inv, so its radius is PI's
+        # (Prop. 3 and Cor. 1 take sigma from the ERM); the post-DA ball under on
+        # keeps the DA+ERM's sigma-tilde
         self.sigma_model = sigma_model
         # mu_clip: (lo, hi) the observational law can actually occupy. Outside it the
         # probit bounds CONTRACT to nothing (a fixed latent shift moves Phi by ~0
