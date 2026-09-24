@@ -26,10 +26,10 @@ do_mnist:
     n_pi: 60_000
     n_queries: 2_000
     sweep_samples: 10
-    net: domnist-fast
+    net: domnist-pool
     n_components: 32
     calibrate_sigma: true
-    gamma: 0.059352292722969865
+    gamma: 0.062082436071912536
     target_coverage: 0.995
     epsilon: 0.04
     erm_inv_tau: 0.0004

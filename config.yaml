@@ -74,16 +74,18 @@ do_mnist:
                                     # pop_seed, never in A/B/C; coverage and width are
                                     # reported here, not on the 10 exemplars
     sweep_samples: 10               # digit exemplars on the query x-axis
-    net: domnist-fast
+    net: domnist-pool               # the ERM, DA+ERM and ERM+INV nets: three convs, global
+                                    # average pooling, a 64-unit head (domnist-fast: the
+                                    # old flatten + dense head, the code default)
     n_components: 32                # latent dimension of the CopSens factor model
     calibrate_sigma: true           # radius sigma-hat sqrt(gamma), sigma-hat^2 =
                                     # E[mu(1-mu)] on the fit rows (probit)
-    gamma: 0.059352292722969865     # EXPLICIT, ONE for every method: PI's smallest gamma
+    gamma: 0.062082436071912536     # EXPLICIT, ONE for every method: PI's smallest gamma
                                     # whose coverage of h* on split C (5,000 rows) reaches
                                     # target_coverage, selected by
                                     #   uv run python scripts/select_domnist_gamma.py
-                                    # (bisection on log gamma; DA+PI's own 0.1596 is a
-                                    # diagnostic, 0.9818 on C at this gamma). A LATENT
+                                    # (bisection on log gamma; DA+PI's own 0.1219 is a
+                                    # diagnostic, 0.9904 on C at this gamma). A LATENT
                                     # budget: the Lemma-2 oracle gamma* does not measure
                                     # it, so the sweeps take this value, not the oracle
     target_coverage: 0.995          # the coverage PI's gamma is calibrated to on split C

@@ -148,8 +148,9 @@ and `coverage.pdf`, and prints one line per method. ONE gamma serves every metho
 PI's value (`shared_gamma`, `calibrated_on: PI`) is pasted into
 `config.yaml::do_mnist.gamma` by hand, and the run errors without one. DA+PI's own
 bisection is a diagnostic; its split-C coverage and width at the shared gamma are
-recorded beside it. The shipped value, 0.059352 at `target_coverage` 0.995 on 5,000
-rows, gives PI 0.9952 and DA+PI 0.9818 on C (DA+PI alone would need 0.1596). `--target`
+recorded beside it. The shipped value, 0.062082 at `target_coverage` 0.995 on 5,000
+rows with `net: domnist-pool`, gives PI 0.9950 and DA+PI 0.9904 on C (DA+PI alone
+would need 0.1219). The flat head's value was 0.059352. `--target`
 overrides the block's target for a one-off. The CopSens gamma is a LATENT budget the Lemma-2 oracle gamma* does not
 measure, which is why the sweeps read the declared value.
 
@@ -184,8 +185,10 @@ D=~/scratch/domnist_runs/erm_inv_diag && mkdir -p $D && cp recipes/doMnistFigF1.
 (cd $D && PYTHONPATH=$REPO uv run --frozen --project $REPO python $REPO/scripts/diagnose_domnist_erm_inv.py)
 ```
 
-On the shipped settings (tau 4e-4, mu0 1e-4, growth 2, 2 epochs) the configured net
-reaches E_inv_B = 0.98 tau and f-accuracy 0.825 on C (the ERM: 0.980) in an 18 s fit.
+On the shipped settings (tau 4e-4, mu0 1e-4, growth 2, 2 epochs, `net: domnist-pool`)
+the configured net reaches E_inv_B = 0.95 tau, f-accuracy 0.959 and RMSE 0.173 on C
+(the ERM: 0.982 and 0.124) in a 20 s fit. The flat head (`domnist-fast`) reached
+0.98 tau, 0.825 and 0.219 in 18 s.
 
 ## Two-stage gates
 

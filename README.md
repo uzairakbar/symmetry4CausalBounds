@@ -62,8 +62,12 @@ prefit nets. The main knobs:
   `methods:`; listing it trains the net and plots it.
 - `gamma` is ONE value for every method: PI's smallest gamma reaching
   `target_coverage` (0.995) on split C, from `scripts/select_domnist_gamma.py`
-  (0.059352). It replaced the earlier max over PI and DA+PI (0.0851), so the F1
-  figure's numbers moved with it.
+  (0.062082 with the pooled nets). It replaced the earlier max over PI and DA+PI
+  (0.0851), so the F1 figure's numbers moved with it.
+- `net: domnist-pool` trains all three nets (ERM, DA+ERM, ERM+INV) as a pooled CNN
+  (global average pooling over the last conv map). The flat head, `domnist-fast`,
+  stays the code default. Under the flat head the ERM+INV net met tau by giving up
+  most of its digit signal (f-accuracy 0.825 on split C); pooled, it keeps 0.959.
 - `experiment.query.tint: {digit: [...], sweep_samples: 8, range: [0, 1]}` adds one
   tint sweep per digit: one MNIST-test image rendered from blue (0) to red (1) and
   scored by every method, with the target constant along it

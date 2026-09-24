@@ -185,6 +185,8 @@ class DoMNISTConfig:
     # epoch count (None = the block's `hyperparameters.epochs`). The penalty starts
     # small so the net learns the digit before the invariance penalty tightens: at
     # mu0 = 1 the stiff quadratic held the near-constant initial net in place.
+    # On the full draw with `net: domnist-pool` the configured net reaches
+    # E_inv_B = 0.95 tau and f-accuracy 0.959 on split C (flat head: 0.825).
     # `InvariantGradientDescentERM`'s own defaults match these
     erm_inv_tau: float = 4e-4
     erm_inv_mu0: float = 1e-4

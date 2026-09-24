@@ -13,7 +13,7 @@ net, no run; seconds on a CPU).
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
         the seven methods with PI+INV last and `ERM+INV` commented out, carry the
         pinned values (`inv_recenter: inv`, PI's selected gamma, `target_coverage`
-        0.995, `erm_inv_tau` 4e-4), agree on every key, and the smoke script's
+        0.995, `erm_inv_tau` 4e-4, `net: domnist-pool`), agree on every key, and the smoke script's
         BLOCK mirrors them; the tint recipe F2 is F1's block plus the ten-digit
         tint spec.
   (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
@@ -64,8 +64,8 @@ def check(name: str, condition: bool, detail: str = ""):
         FAILURES.append(name)
 
 
-#: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows)
-GAMMA = 0.059352292722969865
+#: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows), pooled nets
+GAMMA = 0.062082436071912536
 MINIMAL = dict(seed=42, augmentation="translate", gamma=0.085, epsilon=0.04, methods=["PI"])
 
 
@@ -185,6 +185,7 @@ def leg_ii():
         check(f"(ii) {name} target_coverage 0.995", resolved["target_coverage"] == 0.995)
         check(f"(ii) {name} erm_inv_tau 4e-4", resolved["erm_inv_tau"] == 4e-4)
         check(f"(ii) {name} epsilon 0.04", resolved["epsilon"] == 0.04)
+        check(f"(ii) {name} net domnist-pool", resolved["net"] == "domnist-pool")
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
         check(f"(ii) {name} split 40k/10k/10k", resolved["split"] == {"A": 40_000, "B": 10_000, "C": 10_000})
@@ -218,7 +219,7 @@ def leg_ii():
     )
     from smoke_do_mnist import BLOCK
 
-    for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon"):
+    for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon", "net"):
         check(
             f"(ii) the smoke BLOCK mirrors the shipped {key}", BLOCK.get(key) == shipped.get(key), str(BLOCK.get(key))
         )
