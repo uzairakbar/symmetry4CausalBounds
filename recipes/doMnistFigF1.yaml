@@ -26,11 +26,12 @@ do_mnist:
     net: domnist-fast
     n_components: 32
     calibrate_sigma: true
-    gamma: 0.08505258154439962
-    target_coverage: 0.99
+    gamma: 0.059352292722969865
+    target_coverage: 0.995
     epsilon: 0.04
+    erm_inv_tau: 0.0004
     gamma_z_star: 0.0
-    inv_recenter: 'off'
+    inv_recenter: 'inv'
     mix_in: 0.05
     split_seed: 420
     split:

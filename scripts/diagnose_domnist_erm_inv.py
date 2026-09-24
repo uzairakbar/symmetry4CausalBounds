@@ -18,13 +18,13 @@ so everything downstream is the run's. Per point it records
     the block's gamma, both against eps^2;
   - the training time, the `state_sha1` and the AL trace.
 
-The one thing it can change is the epoch count: if the configured tau's constraint
-is not met at 1 epoch but is at 2, the `recommended` entry says 2 and
-`DoMNISTConfig.erm_inv_epochs = 2` is pasted by hand. If it is met at neither, the
-configured values stay and a WARNING is logged. The `recommended` entry's
-`state_sha1` is what the run's `run.json` `erm_inv_state_sha1` must equal once the
-epoch count is pasted. Writes `artifacts/do_mnist/select/erm_inv_diagnostics.json`
-and `erm_inv_trace.pdf`.
+It confirms the configured settings and changes nothing. The epoch rule (raise
+`erm_inv_epochs` to 2 when the constraint is met at 2 but not at 1) only acts when
+the configured count is 1; with `DoMNISTConfig.erm_inv_epochs = 2`, the shipped
+default, it cannot fire, and a constraint not met at 2 epochs is a WARNING. The
+`recommended` entry is the configured net, and its `state_sha1` is what the run's
+`run.json` `erm_inv_state_sha1` must equal. Writes
+`artifacts/do_mnist/select/erm_inv_diagnostics.json` and `erm_inv_trace.pdf`.
 
 Run from a SCRATCH cwd holding the `config.yaml` (its `defaults`, `hyperparameters`
 and `do_mnist` entries are read, as by `select_domnist_gamma.py`):

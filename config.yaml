@@ -78,26 +78,32 @@ do_mnist:
     n_components: 32                # latent dimension of the CopSens factor model
     calibrate_sigma: true           # radius sigma-hat sqrt(gamma), sigma-hat^2 =
                                     # E[mu(1-mu)] on the fit rows (probit)
-    gamma: 0.08505258154439962      # EXPLICIT: the smallest gamma whose coverage of
-                                    # h* on split C reaches target_coverage, selected by
+    gamma: 0.059352292722969865     # EXPLICIT, ONE for every method: PI's smallest gamma
+                                    # whose coverage of h* on split C (5,000 rows) reaches
+                                    # target_coverage, selected by
                                     #   uv run python scripts/select_domnist_gamma.py
-                                    # (bisection on log gamma, max over PI 0.0362 and
-                                    # DA+PI 0.0851 at mix_in 0.05). A LATENT budget: the
-                                    # Lemma-2 oracle gamma* does not measure it, so the
-                                    # sweeps take this value, not the oracle
-    target_coverage: 0.99           # what the selection script targets; provenance only
+                                    # (bisection on log gamma; DA+PI's own 0.1596 is a
+                                    # diagnostic, 0.9818 on C at this gamma). A LATENT
+                                    # budget: the Lemma-2 oracle gamma* does not measure
+                                    # it, so the sweeps take this value, not the oracle
+    target_coverage: 0.995          # the coverage PI's gamma is calibrated to on split C
+                                    # (the selection script reads it; the run records it)
     epsilon: 0.04                   # T-invariance defect of h*: a MODELLING ASSUMPTION.
                                     # The true value is 0 for this chain (+-10 deg cannot
                                     # turn a 2 into a 5, colour never causes Y); this is
-                                    # finite-sample slack. INV budget eps^2, IV budget
-                                    # (eps + s sqrt(gamma_z_star))^2 = eps^2 at 0. With
-                                    # inv_recenter off the INV floor is 0.0198 > 0.0016,
-                                    # so PI+INV reads INFEASIBLE at every query; post-DA
-                                    # (on) it needs eps >= 0.055 to be well posed
+                                    # finite-sample slack. INV budget eps^2 = 0.0016, IV
+                                    # budget (eps + s sqrt(gamma_z_star))^2 = eps^2 at 0
+    erm_inv_tau: 0.0004             # the ERM+INV net's invariance target, squared scale:
+                                    # E[(h(X) - h(GX))^2] <= tau, 4e-4 = 0.02^2 in epsilon
+                                    # units, inside the eps^2 = 0.0016 ball
     gamma_z_star: 0.0               # true baseline IV budget of Thm. 3.B; 0 = none
-    inv_recenter: 'off'             # QUOTE it. off: PI+INV centred on the ERM, ball on
-                                    # X, pairs (X, GX). on: centred on DA+ERM, ball on the
-                                    # unmixed GX, pairs (GX, X)
+    inv_recenter: 'inv'             # QUOTE it. PI+INV's centre. inv: the ERM+INV net
+                                    # (the ERM trained to erm_inv_tau on the DA pairs),
+                                    # ball on X, pairs (X, GX). off: the ERM, same ball
+                                    # and pairs; its INV floor is 0.0198 > 0.0016, so
+                                    # PI+INV reads INFEASIBLE at every query. on: DA+ERM,
+                                    # ball on the unmixed GX, pairs (GX, X); needs eps >=
+                                    # 0.055 to be well posed
     mix_in: 0.05                    # share of the DA measure's rows swapped back to
                                     # their observed row (Asm. 1b): DA+ERM's draw and the
                                     # DA+PI / DA+PI+IV fit rows (identity G there); never

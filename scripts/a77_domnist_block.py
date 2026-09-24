@@ -10,8 +10,10 @@ net, no run; seconds on a CPU).
         an instrument-mode spelling and the old `backend`/`unfrozen_layers`/`link`/
         `solver` keys all raise; `im-ci` is forced to 0.
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
-        the seven methods with PI+INV last and `ERM+INV` commented out, and agree on
-        every key.
+        the seven methods with PI+INV last and `ERM+INV` commented out, carry the
+        pinned values (`inv_recenter: inv`, PI's selected gamma, `target_coverage`
+        0.995, `erm_inv_tau` 4e-4), agree on every key, and the smoke script's
+        BLOCK mirrors them.
   (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
         unknown backend raises, `partial_r2` still builds `ALL_METHODS`, and the
         do-MNIST orchestrator's own registry builds the block's method list lazily
@@ -60,6 +62,8 @@ def check(name: str, condition: bool, detail: str = ""):
         FAILURES.append(name)
 
 
+#: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows)
+GAMMA = 0.059352292722969865
 MINIMAL = dict(seed=42, augmentation="translate", gamma=0.085, epsilon=0.04, methods=["PI"])
 
 
@@ -170,8 +174,10 @@ def leg_ii():
         seven = len(methods) == 7 and methods[-1] == "PI+INV"
         check(f"(ii) {name} lists seven methods, PI+INV last", seven, str(methods))
         check(f"(ii) {name} does not list ERM+INV", "ERM+INV" not in methods)
-        check(f"(ii) {name} inv_recenter off", resolved["inv_recenter"] == "off")
-        check(f"(ii) {name} gamma 0.08505", abs(resolved["gamma"] - 0.08505258154439962) < 1e-12)
+        check(f"(ii) {name} inv_recenter inv", resolved["inv_recenter"] == "inv")
+        check(f"(ii) {name} gamma is PI's selected {GAMMA}", resolved["gamma"] == GAMMA)
+        check(f"(ii) {name} target_coverage 0.995", resolved["target_coverage"] == 0.995)
+        check(f"(ii) {name} erm_inv_tau 4e-4", resolved["erm_inv_tau"] == 4e-4)
         check(f"(ii) {name} epsilon 0.04", resolved["epsilon"] == 0.04)
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
@@ -187,6 +193,12 @@ def leg_ii():
     check("(ii) the recipe carries the query experiment only", block_r["experiment"] == {"query": True})
     toggles = recipe["defaults"]
     check("(ii) the recipe pins the toggles", toggles["recalibrate"] is False and toggles["pad"] is False)
+    from smoke_do_mnist import BLOCK
+
+    for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon"):
+        check(
+            f"(ii) the smoke BLOCK mirrors the shipped {key}", BLOCK.get(key) == shipped.get(key), str(BLOCK.get(key))
+        )
 
 
 def leg_iii():
@@ -247,7 +259,8 @@ def leg_iv():
         except NotImplementedError:
             raised = True
         check(f"(iv) the {param} sweep raises NotImplementedError", raised)
-    check("(iv) inv_recenter is read as off", orchestrator.inv_recenter == "off")
+    check("(iv) inv_recenter is read as inv", orchestrator.inv_recenter == "inv")
+    check("(iv) the ERM+INV net trains under the shipped block", orchestrator.train_inv is True)
     check("(iv) the split is the block's", orchestrator.split == {"A": 40_000, "B": 10_000, "C": 10_000})
     check("(iv) DoMNISTSEM has no target net", not hasattr(DoMNISTSEM, "target"))
     with open(os.path.join(REPO, "src", "sem", "do_mnist.py")) as fh:
