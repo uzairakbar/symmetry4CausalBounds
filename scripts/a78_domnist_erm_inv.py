@@ -17,7 +17,7 @@ Static legs (no MNIST; the tiny AL fit runs on whatever `device()` picks, second
         `epochs`, the default `erm_inv_tau` is 4e-4, and the orchestrator
         trains the ERM+INV net iff PI+INV runs under `inv` or ERM+INV is listed.
 
-GPU leg (`--nets`, a 60k draw, about two minutes):
+GPU legs (`--nets`, a 60k draw, about two minutes, then (vii)):
 
   (v)   the AL fit is deterministic at a fixed `init_seed`; the replicate's ERM+INV
         net has a lower invariance error than the ERM on the held-out B pairs;
@@ -25,6 +25,21 @@ GPU leg (`--nets`, a 60k draw, about two minutes):
         and the B arrays (`X`, `GX`, `GX_inv`, `y`, `G`) bit-identical to
         `train_inv=False`; an `inv_fits` hook that fits the configured knobs returns
         a net whose sha1 equals the plain `train_inv=True` path's.
+
+Static leg (the pooled head, seconds):
+
+  (vi)  `NETS` carries `domnist-fast` and `domnist-pool`; on a 3x14x14 input the
+        pooled net ends in global average pooling and a 64-unit dense head (no
+        flatten over positions), the flat net does not pool, both map to (0, 1),
+        and the orchestrator's `net` defaults to the flat head and takes the block's.
+
+GPU leg (`--nets`, two more 60k replicates, about two minutes):
+
+  (vii) the flat head is bit-identical to 421549d: the (v) replicate's ERM, DA+ERM
+        and ERM+INV state sha1s equal the pins recorded there (L40S, CUDA); under
+        `net: domnist-pool` all three nets carry the pooled head, a second replicate
+        reproduces their sha1s, they differ from the flat ones, and the B arrays
+        equal the flat replicate's (the head changes the nets and nothing else).
 
     uv run python scripts/a78_domnist_erm_inv.py            # static legs
     uv run python scripts/a78_domnist_erm_inv.py --nets     # + the GPU leg
@@ -218,7 +233,7 @@ def leg_v():
     orchestrator = DoMNISTOrchestrator(**block, hyperparameters=TRAIN_KW)
     tau = orchestrator.erm_inv_tau
 
-    def replicate(**kwargs):
+    def replicate(net=orchestrator.net, **kwargs):
         set_seed(block["seed"])
         return draw_replicate(
             orchestrator._sem_factory(),
@@ -229,7 +244,7 @@ def leg_v():
             n_pi=6_000,
             mix_in=orchestrator.mix_in,
             hyperparameters=TRAIN_KW,
-            net=orchestrator.net,
+            net=net,
             split=orchestrator.split,
             split_seed=orchestrator.split_seed,
             **kwargs,
@@ -278,11 +293,82 @@ def leg_v():
     )
     for key in ("train_seconds_X", "train_seconds_GX", "train_seconds_INV", "erm_inv_al_trace", "erm_inv_al_tau"):
         check(f"(v) the diagnostics carry {key}", key in d)
+    return replicate, with_inv
+
+
+#: the (v) replicate's flat-head state sha1s at 421549d, before `domnist-pool` existed
+FLAT_SHA1 = {
+    "X": "359805f5fe039701ac5d013b014cba30bc7656e4",
+    "GX": "e5d4f0f68da809c1440c077c901f8fcad6adf8ee",
+    "INV": "c5f8eb50f0cf0ec6931390928e5a378ce01fed52",
+}
+NET_KEYS = ("X", "GX", "INV")
+
+
+def pooled(model) -> bool:
+    from torch import nn
+
+    return any(isinstance(m, nn.AdaptiveAvgPool2d) for m in model.modules())
+
+
+def leg_vi():
+    print("(vi) the pooled head")
+    import torch
+    from torch import nn
+
+    from src.methods.nets import NETS
+
+    check("(vi) NETS carries domnist-fast and domnist-pool", {"domnist-fast", "domnist-pool"} <= set(NETS))
+    d = 3 * 14 * 14
+    pool, fast = NETS["domnist-pool"](d), NETS["domnist-fast"](d)
+    layers = list(pool)
+    check(
+        "(vi) domnist-pool ends in GAP, a 64-unit dense layer and a sigmoid",
+        pooled(pool) and isinstance(layers[-1], nn.Sigmoid),
+    )
+    dense = [m for m in layers if isinstance(m, nn.Linear)]
+    check("(vi) domnist-pool's dense head reads 64 pooled channels", [m.in_features for m in dense] == [64, 64])
+    check("(vi) domnist-fast does not pool globally", not pooled(fast))
+    torch.manual_seed(0)
+    x = torch.rand(8, d)
+    with torch.no_grad():
+        outs = [net(x) for net in (pool, fast)]
+    check("(vi) both heads map to (0, 1)", all(o.shape == (8, 1) and bool(((o > 0) & (o < 1)).all()) for o in outs))
+    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "im-ci": 0})
+    block.pop("experiment", None)
+    check("(vi) the orchestrator defaults to the flat head", DoMNISTOrchestrator(**block).net == "domnist-fast")
+    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "net": "domnist-pool", "im-ci": 0})
+    block.pop("experiment", None)
+    check("(vi) the block's net reaches the orchestrator", DoMNISTOrchestrator(**block).net == "domnist-pool")
+
+
+def leg_vii(replicate, flat):
+    print("(vii) the head, GPU (60k draw)")
+    tau = flat.diagnostics["erm_inv_al_tau"]
+    for key in NET_KEYS:
+        sha = flat.nets[key].state_sha1()
+        check(f"(vii) flat nets['{key}'] is bit-identical to 421549d", sha == FLAT_SHA1[key], sha)
+    first = replicate(net="domnist-pool", train_inv=True, erm_inv_tau=tau)
+    again = replicate(net="domnist-pool", train_inv=True, erm_inv_tau=tau)
+    for key in NET_KEYS:
+        check(f"(vii) pooled nets['{key}'] carries the pooled head", pooled(first.nets[key].f))
+        sha = first.nets[key].state_sha1()
+        check(f"(vii) pooled nets['{key}'] is deterministic", sha == again.nets[key].state_sha1())
+        check(f"(vii) pooled nets['{key}'] differs from the flat one", sha != flat.nets[key].state_sha1())
+    for field in ("X", "GX", "GX_inv", "y", "G", "mask_a", "mask_b"):
+        same = np.array_equal(np.asarray(getattr(first, field)), np.asarray(getattr(flat, field)))
+        check(f"(vii) the B array {field} does not depend on the head", same)
+    d = first.diagnostics
+    print(
+        f"  pooled E_inv_B: ERM {d['E_inv_B_X']:.4g} DA+ERM {d['E_inv_B_GX']:.4g} ERM+INV {d['E_inv_B_INV']:.4g} "
+        f"(tau {tau:g}); train s X {d['train_seconds_X']:.1f} GX {d['train_seconds_GX']:.1f} "
+        f"INV {d['train_seconds_INV']:.1f}"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nets", action="store_true", help="add the GPU replicate leg (60k draw)")
+    parser.add_argument("--nets", action="store_true", help="add the GPU replicate legs (60k draws)")
     args = parser.parse_args()
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -290,8 +376,9 @@ def main():
     leg_ii()
     leg_iii()
     leg_iv()
+    leg_vi()
     if args.nets:
-        leg_v()
+        leg_vii(*leg_v())
     print(f"\nA78 {'PASS' if not FAIL else 'FAIL'}")
     for name in FAIL:
         print(f"  FAILED: {name}")

@@ -2,7 +2,8 @@
 net, no run; seconds on a CPU).
 
   (i)   `resolve_dataset_block("do_mnist", ...)`: the five required keys, every new key
-        optional; `inv_recenter` accepts off/on/inv and YAML's bare booleans and
+        optional; `net` must name a registered net (`domnist-fast` or
+        `domnist-pool`); `inv_recenter` accepts off/on/inv and YAML's bare booleans and
         rejects `fallback`; `erm_inv_tau` must be a positive number; `ERM+INV` is
         accepted on do-MNIST and rejected on every other block; `mix_in` outside
         [0, 1), a `split` without exactly A/B/C, a
@@ -123,6 +124,10 @@ def leg_i():
         check(f"(i) erm_inv_tau {value!r} rejected", rejection(erm_inv_tau=value) is not None)
     check("(i) erm_inv_tau is optional", "erm_inv_tau" not in resolve_dataset_block("do_mnist", dict(MINIMAL)))
     check("(i) ERM+INV resolves on do-MNIST", rejection(methods=["ERM", "ERM+INV", "PI+INV"]) is None)
+    for value in ("domnist-fast", "domnist-pool"):
+        check(f"(i) net {value} resolves", rejection(net=value) is None)
+    for value in ("domnist-gap", "", None, 1):
+        check(f"(i) net {value!r} rejected", rejection(net=value) is not None)
     others = {
         "simulation": dict(seed=42, kernel_dim=0),
         "optical_device": dict(seed=42, augmentation="rotation"),

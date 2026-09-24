@@ -33,8 +33,37 @@ def _domnist_fast(input_dim: int, channels: int = 3) -> nn.Sequential:
     )
 
 
+def _domnist_pool(input_dim: int, channels: int = 3) -> nn.Sequential:
+    """Pooled MNIST CNN: three 3x3 convs (32, 64, 64 channels, one 2x2 max pool),
+    then global average pooling over the last conv map and a 64-unit dense head.
+
+    It replaces `domnist-fast`'s flatten + dense head, which reads every spatial
+    position through its own weight. Averaging over positions makes translation
+    invariance cheap, which is what the ERM+INV fit needs. Same sigmoid output and
+    optimiser as `domnist-fast`, so the two are drop-in alternatives under `net:`.
+    """
+    side = int(round((input_dim / channels) ** 0.5))
+    return nn.Sequential(
+        nn.Unflatten(1, torch.Size([channels, side, side])),
+        nn.Conv2d(channels, 32, 3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(32, 64, 3, padding=1),
+        nn.ReLU(),
+        nn.MaxPool2d(2),
+        nn.Conv2d(64, 64, 3, padding=1),
+        nn.ReLU(),
+        nn.AdaptiveAvgPool2d(1),
+        nn.Flatten(1),
+        nn.Linear(64, 64),
+        nn.ReLU(),
+        nn.Linear(64, 1),
+        nn.Sigmoid(),
+    )
+
+
 NETS: dict[str, Callable[[int], nn.Sequential]] = {
     "domnist-fast": _domnist_fast,
+    "domnist-pool": _domnist_pool,
 }
 
 

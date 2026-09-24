@@ -1258,6 +1258,11 @@ def _check_domnist(block: dict[str, Any]) -> None:
     number("n_components", 1, 10**6, integer=True)
     for key in ("split_seed", "pop_seed", "exemplar_seed", "n_pi", "n_queries"):
         number(key, 0, 2**32, integer=True)
+    if "net" in block:
+        from src.methods.nets import NETS
+
+        if block["net"] not in NETS:
+            raise ValueError(f"{prefix}.net must be one of {sorted(NETS)}; got {block['net']!r}.")
     if "calibrate_sigma" in block and not isinstance(block["calibrate_sigma"], bool):
         raise ValueError(f"{prefix}.calibrate_sigma must be a bool; got {block['calibrate_sigma']!r}.")
     if "inv_recenter" in block:
