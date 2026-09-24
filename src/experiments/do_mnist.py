@@ -32,6 +32,7 @@ constant along it. Of the sweeps only `gamma` is wired (a ratio grid around the 
 """
 
 import dataclasses
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -1050,6 +1051,9 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             ate=np.asarray(ate).ravel().tolist(),
             methods=list(self.kwargs["methods"]),
             **{f"toggle_{k}": v for k, v in self.toggles.items()},
+            # the compute the timings were read on, for the results table
+            blas_threads=DOMNIST_CONFIG.blas_threads,
+            cpu_count=len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
         )
         save(_jsonable(record), "run", self.name, "json", subdir=SUBDIR_QUERY)
         headline = {k: v for k, v in record.items() if k.startswith(("coverage_", "width_", "rmse_"))}

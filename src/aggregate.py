@@ -27,7 +27,11 @@ upper left. From the do-MNIST tint sweep pkls, the stacked tint figure
 grid in the middle with the digit's blue-tint image on the left and its red-tint
 image on the right (full resolution, white background), titled $h({\bm{x}})$, the
 x-axis `tint` shared down to the bottom row, the tint histogram of the B rows
-before (blue) and after (red) DA, its legend at the bottom right.
+before (blue) and after (red) DA, its legend at the bottom right. From the
+do-MNIST population pkls and `run.json`, the results table (`do_mnist_table.tex`):
+one row per interval method, coverage and width with bootstrap bands over the
+population queries, Omega-hat on the DA+ rows, worst error, the one-time fit, the
+mean per-query solve and the latency (the fit plus the per-query solve).
 """
 
 import argparse
@@ -117,6 +121,9 @@ TINT_WIDTH: float = 2 * PANEL_WIDTH
 TINT_YLIM: tuple[float, float] = (-0.05, 1.05)
 TINT_DENSITY_COLORS: tuple[int, int] = (0, 3)
 TINT_TITLE: str = r"$h({\bm{x}})$"
+# the do-MNIST table: the bootstrap band's level (%) and resample count
+TABLE_BAND: float = 95.0
+TABLE_BOOTSTRAP: int = 1000
 
 
 # ------------------------------------------------------------------ discovery
@@ -173,6 +180,13 @@ def tint_digits(artifacts: str) -> list[int]:
 
 def _has_tint(artifacts: str) -> bool:
     return bool(tint_digits(artifacts))
+
+
+def _has_domnist_table(artifacts: str) -> bool:
+    folder = _tint_folder(artifacts)
+    return all(
+        os.path.exists(f"{folder}/{name}") for name in ("run.json", "population_values.pkl", "population_outcomes.pkl")
+    )
 
 
 def _has_perf(artifacts: str, dataset: str, metric: str) -> bool:
@@ -641,6 +655,155 @@ def tint_stack(artifacts: str, out: str | None = None):
     return fig
 
 
+def fit_parts(method: str, inv_recenter: str) -> tuple[str, ...]:
+    """The `run.json` seconds one method needs before its first solve: the nets it
+    is centred on, the DA passes it consumes (the A-draw pass for a centre trained
+    on GX, the B-row pass for a method that fits on or pairs with GX), its own
+    `fit_model` and its floor. A net shared by several methods is charged in full
+    to each, so every row is the cost of running that method alone."""
+    fit = (f"fit_seconds_{method}", f"floor_seconds_{method}")
+    da = ("augment_seconds_A", "augment_seconds_B")
+    if method == "PI":
+        return ("train_seconds_X", *fit)
+    if method in ("DA+PI", "DA+PI+IV"):
+        return ("train_seconds_GX", *da, *fit)
+    if method in ("PI&DA+PI", "PI&DA+PI+IV"):
+        return ("train_seconds_X", "train_seconds_GX", *da, *fit)
+    if method == "PI+INV":
+        centre = {"off": ("train_seconds_X",), "on": ("train_seconds_GX", "augment_seconds_A")}.get(
+            inv_recenter, ("train_seconds_INV", "augment_seconds_A")
+        )
+        return (*centre, "augment_seconds_B", *fit)
+    raise ValueError(f"no fit charge for {method!r}")
+
+
+def _band(values, fmt: str) -> str:
+    """`mean [lo, hi]` of a per-query series: the nan-mean and its bootstrap band."""
+    values = np.asarray(values, dtype=float)
+    if not np.isfinite(values).any():
+        return "--"
+    mean = float(np.nanmean(values))
+    draws = np.asarray(bootstrap({"PI": values}, n_samples=TABLE_BOOTSTRAP)["PI"]).ravel()
+    tail = (100.0 - TABLE_BAND) / 2
+    lo, hi = np.nanpercentile(draws, [tail, 100.0 - tail])
+    return rf"${mean:{fmt}}$ {{\scriptsize$[{lo:{fmt}}, {hi:{fmt}}]$}}"
+
+
+def _seconds(run: dict, key: str) -> float:
+    """A `run.json` time, 0 when absent (a method without a floor has none)."""
+    value = run.get(key)
+    return float(value) if value is not None and np.isfinite(value) else 0.0
+
+
+def domnist_table(artifacts: str, out: str | None = None) -> str | None:
+    """The do-MNIST results table on the evaluation population, written to
+    `out/do_mnist_table.tex` when given; returns the tex, or None without the pkls.
+
+    One row per interval method in `ALL_METHODS` order. Columns: coverage of h_*
+    (NaN bounds count as not covered, as in `run.json`) and mean width, each with a
+    bootstrap band over the queries; Omega-hat = rho-hat tr(S)/k from the prescreen,
+    on the DA+ rows; worst error (E+, the mean over queries of the larger squared
+    bound error); the one-time fit in seconds (every part in `fit_parts`); the mean
+    per-query solve in ms (the population predict at the run's `n_jobs`); and the
+    latency, the fit plus the mean per-query solve, in seconds.
+    """
+    if not _has_domnist_table(artifacts):
+        return None
+    folder = _tint_folder(artifacts)
+    with open(f"{folder}/run.json") as fh:
+        run = json.load(fh)
+    target = np.asarray(load(f"{folder}/population_values.pkl"), dtype=float).ravel()
+    outcomes = load(f"{folder}/population_outcomes.pkl")
+    recenter = run.get("inv_recenter", "off")
+    methods = [m for m in ALL_METHODS if m in outcomes and np.ndim(outcomes[m]) == 2 and np.shape(outcomes[m])[1] == 2]
+    omega = float(run["rho"]) * float(run["tr_S_over_k"]) if "rho" in run and "tr_S_over_k" in run else float("nan")
+
+    rows, charges = [], []
+    for m in methods:
+        bounds = np.asarray(outcomes[m], dtype=float)
+        lo, hi = bounds[:, 0], bounds[:, 1]
+        empty = ~np.isfinite(bounds).all(axis=1)
+        covered = np.where(empty, 0.0, ((lo <= target) & (target <= hi)).astype(float))
+        if empty.all():
+            covered = np.full(len(target), np.nan)
+        width = np.where(empty, np.nan, hi - lo)
+        parts = [k for k in fit_parts(m, recenter) if k in run]
+        fit = sum(_seconds(run, k) for k in parts)
+        solve = float(run.get(f"wall_clock_{m}", float("nan")))
+        charges.append(f"{m}: " + " + ".join(parts))
+        rows.append(
+            [
+                TEX_MAPPER.get(m, m),
+                _band(covered, ".3f"),
+                _band(width, ".3f"),
+                f"${omega:.3f}$" if "DA+" in m and np.isfinite(omega) else "--",
+                f"${float(run.get(f'worst_error_{m}', float('nan'))):.4f}$",
+                f"${fit:.2f}$",
+                f"${1e3 * solve:.2f}$",
+                f"${fit + solve:.2f}$",
+            ]
+        )
+
+    status = run.get("status_PI+INV")
+    feasible = (
+        (status["feasible_and_covers"] + status["feasible_and_noncovering"]) / max(sum(status.values()), 1)
+        if status
+        else float("nan")
+    )
+    nets = ", ".join(
+        f"{k} {_seconds(run, f'train_seconds_{k}'):.2f}" for k in ("X", "GX", "INV") if f"train_seconds_{k}" in run
+    )
+    rmse = ", ".join(f"{m} {run[f'rmse_{m}']:.4f}" for m in ("ERM", "DA+ERM", "ERM+INV") if f"rmse_{m}" in run)
+    lines = [
+        f"% do-MNIST results on the evaluation population: {run.get('n_queries')} MNIST-test draws at pop_seed "
+        f"{run.get('pop_seed')}, never in A/B/C.",
+        f"% gamma = {float(run['gamma']):.6g} for every method, calibrated on PI to target_coverage "
+        f"{run.get('target_coverage')} on split C; epsilon {run.get('epsilon')}; inv_recenter {recenter}; "
+        f"erm_inv_tau {run.get('erm_inv_tau')}.",
+        f"% coverage and width: mean with a {TABLE_BAND:g}% bootstrap band over the queries ({TABLE_BOOTSTRAP} "
+        "resamples); NaN bounds count as not covered.",
+        "% Omega-hat = rho-hat tr(S)/k from the prescreen on the mixed B rows (Prop. 2's linear diagnostic of the "
+        f"DA, not the latent ball's own ratio iv_rho {run.get('iv_rho', float('nan')):.4f}).",
+        "% latency (s) = the one-time fit (s) + the mean per-query solve; the fit charges every part a method "
+        "needs before its first solve, a shared net in full to each row:",
+        *[f"%   {charge}" for charge in charges],
+        f"% solves at n_jobs {run.get('toggle_n_jobs')} on {run.get('cpu_count')} cores; the CopSens fits cap "
+        f"BLAS at {run.get('blas_threads')} threads.",
+        f"% net training (s): {nets}; augmentation (s): A {_seconds(run, 'augment_seconds_A'):.2f}, "
+        f"B {_seconds(run, 'augment_seconds_B'):.2f}.",
+        f"% PI+INV floor {run.get('inv_floor', float('nan')):.4g} vs budget eps^2 "
+        f"{run.get('inv_budget', float('nan')):.4g}, feasible share {feasible:.3f}.",
+        f"% point estimators, population RMSE to h_*: {rmse}.",
+    ]
+    selection = f"{artifacts}/do_mnist/select/gamma_selection.json"
+    if os.path.exists(selection):
+        with open(selection) as fh:
+            chosen = json.load(fh)
+        cells = [f"PI {chosen['PI']['coverage']:.4f}"] if "PI" in chosen else []
+        shared = chosen.get("DA+PI", {}).get("at_shared_gamma")
+        if shared:
+            cells.append(f"DA+PI {shared['coverage']:.4f}")
+        lines.append(f"% split-C coverage at the shared gamma: {', '.join(cells)}.")
+    head = ["", "coverage", "width", r"$\hat{\Omega}$", "worst error", "fit (s)", "solve (ms/query)", "latency (s)"]
+    lines += [
+        r"\begin{tabular}{l" + "r" * (len(head) - 1) + "}",
+        r"\toprule",
+        " & ".join(head) + r" \\",
+        r"\midrule",
+        *[" & ".join(row) + r" \\" for row in rows],
+        r"\bottomrule",
+        r"\end{tabular}",
+    ]
+    tex = "\n".join(lines) + "\n"
+    if out is not None:
+        os.makedirs(out, exist_ok=True)
+        path = f"{out}/do_mnist_table.tex"
+        with open(path, "w") as fh:
+            fh.write(tex)
+        logger.info(f"aggregate: wrote {path}")
+    return tex
+
+
 # ------------------------------------------------------------------ cli
 
 
@@ -653,7 +816,8 @@ def main(argv=None) -> None:
     out = os.path.abspath(args.out) if args.out else f"{artifacts}/aggregate"
 
     datasets = columns(artifacts)
-    if not datasets and not _has_elasticities(artifacts) and not _has_tint(artifacts):
+    drawn = _has_elasticities(artifacts) or _has_tint(artifacts) or _has_domnist_table(artifacts)
+    if not datasets and not drawn:
         logger.warning(f"aggregate: nothing to draw under {artifacts}.")
         return
     for param in sweep_params(artifacts, datasets):
@@ -667,6 +831,8 @@ def main(argv=None) -> None:
         plt.close(elasticity_grid(artifacts, out))
     if _has_tint(artifacts):
         plt.close(tint_stack(artifacts, out))
+    if _has_domnist_table(artifacts):
+        domnist_table(artifacts, out)
 
 
 if __name__ == "__main__":
