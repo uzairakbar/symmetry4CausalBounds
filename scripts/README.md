@@ -28,11 +28,14 @@ same two-stage shape but both stages run here: `--dump` freezes, `--check` compa
 | A39 | `a39_recalibrate_sweep.py` | the `recalibrate` sweep (`param: [recalibrate]`): t on linspace(0, 1) re-solved through the predict-time knob on constant data, x = gamma~/gamma = (1 - t) + t/rho_hat from 1 down to 1/rho, PI unchanged and DA+PI narrower at every t per query, intersection == max/min of its branches, width(t)/width(0) == sqrt((1 - t) + t/rho_hat) with pad off, the t = 0 / t = 1 bounds equal to the `recalibrate: false` / `true` toggle runs on the same draw, `recalibrate_axis.pkl`, the render's sort, and the yaml plumbing (toggle and sweep together); `--optical` adds one optical experiment |
 | A40 | `a40_eps_star.py` | robustness eps* per dataset: `ROBUSTNESS_EPSILON_TRUE[experiment_name]` reaches the epsilon runner of both orchestrators and the tuned DA lands on it (sim 3.0, optical 5.0), the sim constant clears the post-DA radius sqrt(gamma*) and sigma sqrt(gamma*), on two sim experiments (5 steps) DA+PI coverage dips below 1 at the smallest r, is 1 at r = 1 and never falls under 0.7; the optical epsilon runner's DA is config.yaml's chain plus the `ROBUSTNESS_AUGMENTATION` component (gaussian-noise) while every other strategy's runner, the query runner and the budget DA keep config.yaml's chain, the same dip (lowest of DA+PI and DA+PI+IV) on three optical experiments, and the optical constant stays 5.0 at under 10 std of h*; `--seed` |
 | A54 | `a54_cigarettes_runner.py` | the cigarette orchestrator: validation, the declared budget at the solver, the gamma sweep (the INV / baseline width ratio), the recalibrated omega axis, target routing and both replicate schemes, each on the block as given AND on its other instrument declaration (`--config PATH` reads the cigarettes block of another yaml, default `config.yaml`; `--seed`) |
+| A56 | `a56_iv_registry.py` | the IV registry, the instrument sets and the display tables; `COPSENS_METHODS` is pinned at ten (the nine plus the do-MNIST-only `ERM+INV`). Its (D) leg runs the digest of the other experiments' query panels and gamma sweep steps, so do-MNIST work runs it with `--skip-digest` |
 | A64 | `a64_perf_aggregate.py` | round 12: the `(T)` instrument mode (grammar, display tables, dispatch on fitted attributes, `(T)` equal to `(T,Z)` under an empty set), the perf sweeps (`src/experiments/perf.py`: the cumulation table on `_prepare` call counts, D(eps) on a synthetic record with planted failures, `clip_y` on rendered artists, the simulation perf path end to end at 4 steps on all three perf metrics), and `python -m src.aggregate` on a synthetic tree with blank cells and on the shipped artifacts (`--shipped DIR`); `--only LEG` runs one leg, `--skip-digest` drops (D) |
 | A74 | `a74_domnist_sem.py` | the do-MNIST SEM, split and DA: the analytic target, the `h_erm` cell table, Bayes and ERM accuracy on obs and do, the tint round trip, the colour ops exogenous and support-preserving, `amounts`, `identity_params`, `mix_in` (counts, masks, seeds, `frac 0` untouched), the A/B/C partition and `split_key`, `pop_seed != seed + 1`, `centre_error_report`, `bisect_gamma` on a stub; `--nets` adds the `init_seed` coupling (GPU) |
 | A75 | `a75_copsens.py` | the copsens backend on a synthetic factor SEM: gamma 0 is the ERM, ordered bounds in [0, 1], gaussian and probit closed forms, the latent model, INV and IV nested in PI and monotone in gamma, `iv_budget`, JAX gradients against finite differences, `n_jobs 4` bit-identical to `n_jobs 1`, `recalibrate`/`rho` reaching the radius, `mean_match` inert |
 | A76 | `a76_domnist_parity.py` | two-stage parity against the reference checkout: `--source DIR` under its env dumps the nets, the B arrays and the bounds, `--check DIR` refits the ported classes on the frozen arrays and compares bounds to 5e-4 and intermediates to 1e-6 |
-| A77 | `a77_domnist_block.py` | the do-MNIST block, the recipe and the registry, static: validation of every key, the shipped block and the recipe agree, `copsens` builds its nine, the old backend is gone, only the `gamma` sweep is wired |
+| A77 | `a77_domnist_block.py` | the do-MNIST block, the recipes and the registry, static: validation of every key (`inv_recenter` off/on/inv, `erm_inv_tau` positive, `ERM+INV` on do-MNIST only), config.yaml, F1, F2 and the smoke `BLOCK` agree on the pinned values (`inv_recenter: inv`, PI's gamma, `target_coverage` 0.995, `erm_inv_tau` 4e-4), `ERM+INV` listed commented out, `copsens` builds its ten, the selection's shared gamma is PI's alone, the `experiment.query.tint` spec parses and rejects bad digits, ranges and keys, a tint spec on another orchestrator raises, only the `gamma` sweep is wired |
+| A78 | `a78_domnist_erm_inv.py` | the ERM+INV centre: PI+INV built on `nets["X"]` / `nets["GX"]` / `nets["INV"]` under off / on / inv, no PI+INV nesting under inv, the augmented Lagrangian's windows split each epoch evenly (20 updates per epoch at 60k and 1.2M), the class defaults equal `DoMNISTConfig`'s AL constants, `train_inv` only when PI+INV runs under inv or `ERM+INV` is listed; `--nets` (GPU, 60k draw, about a minute) adds: the AL fit deterministic at a fixed seed, ERM+INV more invariant than the ERM on the B pairs, the ERM and DA+ERM nets and every B array bit-identical with and without the ERM+INV fit, the `inv_fits` hook training the run's net (same `state_sha1`), `split_key` the partition's sha1 on every path |
+| A79 | `a79_domnist_tint.py` | the tint sweep, its figure and the results table (two MNIST loads, no nets, about a minute): the exemplar indices, tints and image sha1s pinned from `develop`; `tinted` (the grid round trip, one ink per row, the exemplar's image); `run_tint_sweep` on a stub runner (MNIST-test image, ATE constant, the result layout, the status split, the density pkl); `tint_stack` on a synthetic tree written out of order (0 at the top, a missing digit absent, blue image left and red right, the failed-tint crosses); `domnist_table` (one row per interval method with its band line, the fit charges, latency = fit + mean solve, n_jobs and the BLAS cap in the comments, `pdflatex` compiles it or `[SKIP]`); the table's gamma checked against the `gamma_selection.json` beside it; `aggregate.main` on a tree holding only `do_mnist/query/` |
 | A70 | `a70_perf_feasibility.py` | the `feasibility` perf metric (the share of the seed_var backends returning a usable bound, per method, step and query): the config (perf only, `normalize` rejected), the formula against `solver_stability`'s failure count on a64's synthetic record, the simulation perf path end to end (PI+INV 0 where refuted and 1 at r = 1, the figure on `CLAMP_YLIM`, seed_var unchanged beside it), no failure marker on the stability figure, the feasible rate stacked under the stability in the aggregate's `epsilon_seed_var.pdf` (no `epsilon_feasibility.pdf`), a completeness grep for the removed marker code, and do-MNIST perf still skipping (source text only); `--only LEG` runs one leg |
 | A71 | `a71_empty_cells.py` | empty cells drop out of the coverage rows (D1c): `evaluate_queries` gives coverage NaN iff every query's interval has a NaN bound (exactly when `interval_width` is NaN), under INFEASIBLE and FAILURE alike, the status split untouched; a partly empty cell keeps `coverage`'s number and a point estimate is never NaN; `coverage` itself unchanged; the NaN rules agree on random masks; `_draw_series` draws an all-empty step as a gap, not 0; `--only LEG` runs one leg |
 | A72 | `a72_im_ci.py` | Imbens-Manski CIs on the sweep bounds (`im-ci` in `defaults:`): the n and m grids read `sweep_samples` (bit-identical at 16), the critical value's two limits and its equation on synthetic inputs, the unit bootstrap (a row; on the fold sweep a base row with its m augmented copies, carried together, one draw for both groups) and its determinism across pool sizes, `im-ci: 0` bit-identical to the recorded `finite` digest, under 95 the pad at eps* alone (point models, intersection branches and replicates; `results_raw` finite's on the unpadded methods, up to 2 `EPS_TOL` narrower on the padded ones), perf and query padding as before, the config validation, every yaml-reading gate pinning `im-ci` off, and the do-MNIST block forced off (static), perf and query never reaching the helper (sim only), the sim n and m sweeps at sweep_samples 8 on config.yaml's six methods (CI never under raw, the CI excess falling as a power of n, the n readings exact, PI on m within tolerance of the iid rule's, pinned readings), the pkls and the render reading the CI, the Slurm launcher's dry run; `--only LEG`, `--quick` |
@@ -45,10 +48,12 @@ never folded into a silent PASS. Where a synthetic input can stand in, the leg r
 on it instead: `a32` (b) to (f) render a fixture tree written under `TMPROOT` when
 `--artifacts` carries none of the pkls they read, and name the tree they used.
 
-`smoke_do_mnist.py` is an end-to-end do-MNIST query sweep at reduced scale on the
-copsens block (perf logs a warning and skips there); `--full` runs it at the block's
-own numbers, `--methods` restricts the list. Run it from a scratch cwd: `save` writes
-`./artifacts`.
+`smoke_do_mnist.py` is an end-to-end do-MNIST query sweep at reduced scale (60k
+draw, 6k PI rows, 200 queries) on the copsens block (perf logs a warning and skips
+there); `--full` runs it at the block's own numbers, `--methods` restricts the list.
+A `config.yaml` in the cwd overrides its `BLOCK`, including `experiment`, so a tint
+sweep is `experiment: {query: {tint: {digit: [7], sweep_samples: 8}}}` there. Run it
+from a scratch cwd: `save` writes `./artifacts`.
 
 `sbatch_sweeps.py` is not a gate: it fans a config's sweeps out over a Slurm job
 array, one task per (dataset, sweep param) and one per perf block (do-MNIST blocks
@@ -139,9 +144,13 @@ split C: it trains the block's replicate exactly as the run does (nets on A, the
 mix-in, the PI balls on the B rows), draws `n_select` rows from C at `seed + 1`,
 bisects log gamma per method (PI and DA+PI) to the smallest value whose coverage
 reaches `target_coverage`, writes `artifacts/do_mnist/select/gamma_selection.json`
-and `coverage.pdf`, and prints one line per method. The selected value (the max over
-the two) is pasted into `config.yaml::do_mnist.gamma` by hand; the run errors
-without one. The CopSens gamma is a LATENT budget the Lemma-2 oracle gamma* does not
+and `coverage.pdf`, and prints one line per method. ONE gamma serves every method:
+PI's value (`shared_gamma`, `calibrated_on: PI`) is pasted into
+`config.yaml::do_mnist.gamma` by hand, and the run errors without one. DA+PI's own
+bisection is a diagnostic; its split-C coverage and width at the shared gamma are
+recorded beside it. The shipped value, 0.059352 at `target_coverage` 0.995 on 5,000
+rows, gives PI 0.9952 and DA+PI 0.9818 on C (DA+PI alone would need 0.1596). `--target`
+overrides the block's target for a one-off. The CopSens gamma is a LATENT budget the Lemma-2 oracle gamma* does not
 measure, which is why the sweeps read the declared value.
 
 ```bash
@@ -150,7 +159,33 @@ D=~/scratch/domnist_runs/port_full && mkdir -p $D && cp config.yaml $D/   # do_m
 ```
 
 The selection is conditional on every block key it records (`mix_in`, `n_pi`,
-`n_components`, `augmentation`, ...). Change one and it is stale.
+`n_components`, `augmentation`, ...). Change one and it is stale. The results table
+(`python -m src.aggregate`) states the calibration only when the
+`gamma_selection.json` in the run's `artifacts/do_mnist/select/` selected the run's
+gamma on the run's split; copy in the matching one, or it says the gamma is not from
+the selection beside it.
+
+## do-MNIST ERM+INV diagnostics
+
+`diagnose_domnist_erm_inv.py` is not a gate: it checks the ERM+INV centre (PI+INV's
+centre under `inv_recenter: inv`) on the full draw, on the GPU, without bound solves.
+Through `draw_replicate`'s `inv_fits` hook it fits one net per point of tau in
+{1e-3, 4e-4, 1e-4} x epochs in {1, 2} at the exact point where the run fits its own,
+and records per point the invariance error on the B pairs (`E_inv_B`, with
+`constraint_met` at <= 1.5 tau, which says nothing about fit quality), f-accuracy and
+RMSE to h_* on 1,000 split-C rows, the PI+INV constraint value at the centre and its
+floor against eps^2, the fit time, the AL trace and the net's `state_sha1`. The
+`recommended` entry is the configured net; the run's `run.json` `erm_inv_state_sha1`
+must equal its hash. Writes `artifacts/do_mnist/select/erm_inv_diagnostics.json` and
+`erm_inv_trace.pdf`; about 6 minutes on an L40S.
+
+```bash
+D=~/scratch/domnist_runs/erm_inv_diag && mkdir -p $D && cp recipes/doMnistFigF1.yaml $D/config.yaml
+(cd $D && PYTHONPATH=$REPO uv run --project $REPO python $REPO/scripts/diagnose_domnist_erm_inv.py)
+```
+
+On the shipped settings (tau 4e-4, mu0 1e-4, growth 2, 2 epochs) the configured net
+reaches E_inv_B = 0.98 tau and f-accuracy 0.825 on C (the ERM: 0.980) in an 18 s fit.
 
 ## Two-stage gates
 

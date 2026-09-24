@@ -13,7 +13,8 @@ net, no run; seconds on a CPU).
         the seven methods with PI+INV last and `ERM+INV` commented out, carry the
         pinned values (`inv_recenter: inv`, PI's selected gamma, `target_coverage`
         0.995, `erm_inv_tau` 4e-4), agree on every key, and the smoke script's
-        BLOCK mirrors them.
+        BLOCK mirrors them; the tint recipe F2 is F1's block plus the ten-digit
+        tint spec.
   (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
         unknown backend raises, `partial_r2` still builds `ALL_METHODS`, and the
         do-MNIST orchestrator's own registry builds the block's method list lazily
@@ -193,6 +194,23 @@ def leg_ii():
     check("(ii) the recipe carries the query experiment only", block_r["experiment"] == {"query": True})
     toggles = recipe["defaults"]
     check("(ii) the recipe pins the toggles", toggles["recalibrate"] is False and toggles["pad"] is False)
+    with open(os.path.join(REPO, "recipes", "doMnistTintFigF2.yaml")) as fh:
+        tint_recipe = yaml.safe_load(fh)
+    block_t = tint_recipe["do_mnist"]
+    same_t = {k for k in set(block_t) - {"experiment"} if block_t[k] == block_r.get(k)}
+    differ_t = sorted(set(block_t) - {"experiment"} - same_t)
+    check("(ii) the tint recipe F2 is F1's block key for key", not differ_t, str(differ_t))
+    check(
+        "(ii) F2 and F1 share their defaults and hyperparameters",
+        tint_recipe["defaults"] == recipe["defaults"] and tint_recipe["hyperparameters"] == recipe["hyperparameters"],
+    )
+    from src.experiments.configs import parse_experiment_plan
+
+    tint = parse_experiment_plan(block_t["experiment"]).tint
+    check(
+        "(ii) F2 sweeps all ten digits at 8 tints on [0, 1]",
+        tint is not None and tint.digits == tuple(range(10)) and tint.sweep_samples == 8 and tint.range == (0.0, 1.0),
+    )
     from smoke_do_mnist import BLOCK
 
     for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon"):

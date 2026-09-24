@@ -48,6 +48,35 @@ Comment out (or remove) the experiemnts from `./config.yaml` that you are not in
 
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
+## do-MNIST
+The `do_mnist:` block runs the query path on the CopSens latent-factor ball around
+prefit nets. The main knobs:
+
+- `inv_recenter` picks PI+INV's centre. `inv` (shipped) is the ERM+INV net, the ERM
+  trained by an augmented Lagrangian to E[(h(X) - h(GX))^2] <= `erm_inv_tau` (4e-4,
+  i.e. 0.02^2 in epsilon units) on the DA pairs; the ball sits on X with the pairs
+  (X, GX) and the budget eps^2 = 0.0016. `off` centres PI+INV on the ERM (its floor,
+  0.0198, is above eps^2, so it is infeasible at every query); `on` on DA+ERM.
+  `scripts/diagnose_domnist_erm_inv.py` checks the ERM+INV net on the full draw.
+- `ERM+INV` is also a do-MNIST-only point method, listed commented out under
+  `methods:`; listing it trains the net and plots it.
+- `gamma` is ONE value for every method: PI's smallest gamma reaching
+  `target_coverage` (0.995) on split C, from `scripts/select_domnist_gamma.py`
+  (0.059352). It replaced the earlier max over PI and DA+PI (0.0851), so the F1
+  figure's numbers moved with it.
+- `experiment.query.tint: {digit: [...], sweep_samples: 8, range: [0, 1]}` adds one
+  tint sweep per digit: one MNIST-test image rendered from blue (0) to red (1) and
+  scored by every method, with the target constant along it
+  (`recipes/doMnistTintFigF2.yaml` sweeps all ten).
+
+`python -m src.aggregate --artifacts DIR` then writes `DIR/aggregate/do_mnist_tint.pdf`
+(the sweeps stacked, 0 at the top, the tint histogram before and after DA at the
+bottom) and `DIR/aggregate/do_mnist_table.tex`: coverage and width with 95% bootstrap
+bands over the 2,000 population queries, Omega-hat, worst error, and the latency of
+each method, its one-time fit (every net, DA pass, model fit and floor it needs) plus
+its mean per-query solve at the run's `n_jobs`. The fit and the per-query solve are
+also columns of their own.
+
 ## CPU vs. GPU backend
 PyTorch picks CUDA/MPS automatically when available (only do-MNIST trains nets; `optical_device` and `simulation` never touch torch). To force CPU, set `CPU_ONLY = True` in `./src/methods/nets.py`.
 
@@ -57,6 +86,21 @@ Creates the env under `~/scratch/uv_envs/` and symlinks it to `./.venv`.
 ```bash
 bash setup_uv.sh
 ```
+
+In a later shell, set the same variables before any `uv run`, or uv builds a
+multi-GB `.venv` inside the repo:
+
+```bash
+module load uv
+export UV_CACHE_DIR=$HOME/scratch/.cache/uv
+export UV_PYTHON_INSTALL_DIR=$HOME/scratch/.local/uv/python
+export UV_PROJECT_ENVIRONMENT=$HOME/scratch/uv_envs/symmetry4CausalBounds-py313
+uv sync --frozen
+```
+
+Run experiments from a scratch directory holding the `config.yaml` (`save` writes
+`./artifacts` relative to it): `cd ~/scratch/domnist_runs/NAME && uv run --frozen
+--project $REPO python $REPO/src/main.py`.
 
 ## Citation
 If you find our work helpful, consider citing our paper and leaving a star :star:.

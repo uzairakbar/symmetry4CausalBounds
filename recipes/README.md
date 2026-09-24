@@ -26,8 +26,11 @@ recipe's name in the path. The sweep recipes differ in `param` and the perf reci
 in `metric`, so their files never meet, but `simulationFig5` and `ivSimulationFig5`
 are both simulation query runs and both write `artifacts/simulation/query/`: the
 second run overwrites the first. Run one, move its `query/` aside, then run the
-other. It is the only collision among the twelve, and `python -m src.aggregate`
-does not see it (it reads `sweep/` and `perf/` only).
+other. It is the only collision among the twelve main-text recipes, and `python -m src.aggregate`
+does not see it (it reads `sweep/` and `perf/`, and of `query/` only the cigarette
+coefficient pkls and do-MNIST's tint sweeps and population pkls). `doMnistFigF1` and
+`doMnistTintFigF2` both write `artifacts/do_mnist/query/`: F2 is F1 plus the tint
+sweeps, so run F2 when the aggregate figure and table are wanted.
 
 ## Old -> new
 
@@ -50,7 +53,8 @@ cigarette files fan in.
 | `mEfficiencyFig14.yaml` | sim, optical, cigarettes | sweep `m` | `m-efficiency_fig10.yaml`, whose three metrics broaden to four; the `m` step of `iv_fig13.yaml` and the two cigarette files |
 | `latencyFig15.yaml` | sim, optical, cigarettes | perf `wall_clock` | the `wall_clock` half of `cigarettes-plasmode_fig12b.yaml`'s perf block; new on sim and optical |
 | `stabilityFig16.yaml` | sim, optical, cigarettes | perf `seed_var`, `feasibility` | the `seed_var` half of the same perf block; new on sim and optical. `feasibility` (the share of backends returning a usable bound) is new everywhere and reads the same backend runs |
-| `doMnistFigF1.yaml` | do-MNIST | query | the shipped `do_mnist:` block: the exemplar bands and the population `run.json` on the copsens backend. Named after the appendix section the paper reserves (F.1, a placeholder) until the figure number exists |
+| `doMnistFigF1.yaml` | do-MNIST | query | the shipped `do_mnist:` block: the exemplar bands and the population `run.json` on the copsens backend, PI+INV centred on the ERM+INV net (`inv_recenter: inv`, `erm_inv_tau` 4e-4) at the one PI-calibrated gamma (0.059352, `target_coverage` 0.995 on split C). Named after the appendix section the paper reserves (F.1, a placeholder) until the figure number exists |
+| `doMnistTintFigF2.yaml` | do-MNIST | query (tint) | F1's block plus `experiment.query.tint` over the ten digits at 8 tints on [0, 1]: the exemplar figure, the population `run.json` and pkls, and one tint sweep per digit in one run. `python -m src.aggregate` then draws `do_mnist_tint.pdf` and `do_mnist_table.tex`. F.2 is a placeholder number |
 
 Read the other way:
 

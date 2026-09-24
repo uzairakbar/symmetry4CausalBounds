@@ -1,0 +1,62 @@
+# do-MNIST tint sweep and results table (App. F.2, a placeholder until the figure
+# number exists): the F1 block (the same gamma, target_coverage and erm_inv_tau)
+# plus `experiment.query.tint` over all ten digits at 8 tints on [0, 1]. One run
+# writes the exemplar figure, the population run.json and pkls (the table's input)
+# and the ten tint sweeps; `python -m src.aggregate` then draws do_mnist_tint.pdf
+# and do_mnist_table.tex. See config.yaml's `do_mnist:` block for what each key means.
+defaults:
+    recalibrate: false
+    pad: false
+    clipy: false
+    mean_match: true
+    n_jobs: -1
+    normalize: false
+hyperparameters:
+    lr: 0.01
+    batch: 256
+    epochs: 1
+    optimizer: adam
+    betas: [0.7, 0.9]
+    onecycle: true
+    loss: mse
+do_mnist:
+    seed: 42
+    n_experiments: 1
+    n_samples: 1_200_000
+    n_pi: 60_000
+    n_queries: 2_000
+    sweep_samples: 10
+    net: domnist-fast
+    n_components: 32
+    calibrate_sigma: true
+    gamma: 0.059352292722969865
+    target_coverage: 0.995
+    epsilon: 0.04
+    erm_inv_tau: 0.0004
+    gamma_z_star: 0.0
+    inv_recenter: 'inv'
+    mix_in: 0.05
+    split_seed: 420
+    split:
+        A: 40_000
+        B: 10_000
+        C: 10_000
+    pop_seed: 44
+    exemplar_seed: 420
+    augmentation: translate > rotation > contrast > saturation > hue
+    augmentation_amounts: null
+    methods:
+        - ATE
+        - ERM
+        - DA+ERM
+        # - ERM+INV  # do-MNIST only; listing it trains the ERM+INV net
+        - PI
+        - DA+PI
+        - DA+PI+IV
+        - PI+INV
+    experiment:
+        query:
+            tint:
+                digit: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                sweep_samples: 8
+                range: [0.0, 1.0]
