@@ -677,16 +677,51 @@ def fit_parts(method: str, inv_recenter: str) -> tuple[str, ...]:
     raise ValueError(f"no fit charge for {method!r}")
 
 
-def _band(values, fmt: str) -> str:
-    """`mean [lo, hi]` of a per-query series: the nan-mean and its bootstrap band."""
+def _band(values, fmt: str) -> tuple[str, str]:
+    """(`mean`, `[lo, hi]`) cells of a per-query series: the nan-mean and its
+    bootstrap band, the band set small for the line under the row."""
     values = np.asarray(values, dtype=float)
     if not np.isfinite(values).any():
-        return "--"
+        return "--", ""
     mean = float(np.nanmean(values))
     draws = np.asarray(bootstrap({"PI": values}, n_samples=TABLE_BOOTSTRAP)["PI"]).ravel()
     tail = (100.0 - TABLE_BAND) / 2
     lo, hi = np.nanpercentile(draws, [tail, 100.0 - tail])
-    return rf"${mean:{fmt}}$ {{\scriptsize$[{lo:{fmt}}, {hi:{fmt}}]$}}"
+    return f"${mean:{fmt}}$", rf"{{\scriptsize$[{lo:{fmt}}, {hi:{fmt}}]$}}"
+
+
+def _calibration(artifacts: str, run: dict) -> list[str]:
+    """The comment lines on where gamma came from. The calibration sentence and
+    the split-C coverage are written only when the `gamma_selection.json` beside
+    the run selected this very gamma on this very split; otherwise a WARNING."""
+    head = f"% gamma = {float(run['gamma']):.6g} for every method"
+    path = f"{artifacts}/do_mnist/select/gamma_selection.json"
+    if not os.path.exists(path):
+        return [f"{head}; no gamma_selection.json beside the run, so its calibration is not checked."]
+    with open(path) as fh:
+        selection = json.load(fh)
+    shared, method = selection.get("shared_gamma"), selection.get("calibrated_on")
+    same_gamma = shared is not None and bool(np.isclose(float(run["gamma"]), float(shared), rtol=1e-9, atol=0.0))
+    same_split = selection.get("split_key") is not None and selection.get("split_key") == run.get("split_key")
+    if not (same_gamma and same_split and method in selection):
+        logger.warning(
+            f"aggregate: the run's gamma {float(run['gamma']):.6g} (split {run.get('split_key')}) is not the "
+            f"selection's shared gamma {shared} (split {selection.get('split_key')}); the table says so."
+        )
+        return [
+            f"{head}; gamma not from the selection beside it (shared_gamma {shared}, split_key "
+            f"{'matches' if same_split else 'differs'})."
+        ]
+    lines = [
+        f"{head}, calibrated on {method} to target_coverage {selection.get('target_coverage')} on split C "
+        f"({selection.get('n_select')} rows)."
+    ]
+    cells = [f"{method} {selection[method]['coverage']:.4f}"]
+    for other, entry in selection.items():
+        if isinstance(entry, dict) and "at_shared_gamma" in entry:
+            cells.append(f"{other} {entry['at_shared_gamma']['coverage']:.4f}")
+    lines.append(f"% split-C coverage at that gamma: {', '.join(cells)}.")
+    return lines
 
 
 def _seconds(run: dict, key: str) -> float:
@@ -718,7 +753,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     methods = [m for m in ALL_METHODS if m in outcomes and np.ndim(outcomes[m]) == 2 and np.shape(outcomes[m])[1] == 2]
     omega = float(run["rho"]) * float(run["tr_S_over_k"]) if "rho" in run and "tr_S_over_k" in run else float("nan")
 
-    rows, charges = [], []
+    rows, charges, solved = [], [], []
     for m in methods:
         bounds = np.asarray(outcomes[m], dtype=float)
         lo, hi = bounds[:, 0], bounds[:, 1]
@@ -731,11 +766,13 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         fit = sum(_seconds(run, k) for k in parts)
         solve = float(run.get(f"wall_clock_{m}", float("nan")))
         charges.append(f"{m}: " + " + ".join(parts))
+        solved.append(f"{m} {int((~empty).sum())}/{len(empty)}")
+        (coverage, coverage_band), (mean_width, width_band) = _band(covered, ".3f"), _band(width, ".3f")
         rows.append(
             [
                 TEX_MAPPER.get(m, m),
-                _band(covered, ".3f"),
-                _band(width, ".3f"),
+                coverage,
+                mean_width,
                 f"${omega:.3f}$" if "DA+" in m and np.isfinite(omega) else "--",
                 f"${float(run.get(f'worst_error_{m}', float('nan'))):.4f}$",
                 f"${fit:.2f}$",
@@ -743,6 +780,8 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
                 f"${fit + solve:.2f}$",
             ]
         )
+        # the bands on a line of their own under the row, so the table keeps to a page
+        rows.append(["", coverage_band, width_band, "", "", "", "", ""])
 
     status = run.get("status_PI+INV")
     feasible = (
@@ -757,14 +796,16 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     lines = [
         f"% do-MNIST results on the evaluation population: {run.get('n_queries')} MNIST-test draws at pop_seed "
         f"{run.get('pop_seed')}, never in A/B/C.",
-        f"% gamma = {float(run['gamma']):.6g} for every method, calibrated on PI to target_coverage "
-        f"{run.get('target_coverage')} on split C; epsilon {run.get('epsilon')}; inv_recenter {recenter}; "
-        f"erm_inv_tau {run.get('erm_inv_tau')}.",
-        f"% coverage and width: mean with a {TABLE_BAND:g}% bootstrap band over the queries ({TABLE_BOOTSTRAP} "
-        "resamples); NaN bounds count as not covered.",
+        *_calibration(artifacts, run),
+        f"% epsilon {run.get('epsilon')}; inv_recenter {recenter}; erm_inv_tau {run.get('erm_inv_tau')}.",
+        f"% coverage and width: mean, and under it a {TABLE_BAND:g}% bootstrap band over the queries "
+        f"({TABLE_BOOTSTRAP} resamples). Coverage counts a query without a bound (NaN) as not covered; width, "
+        "worst error and the band of width are over the solved queries only.",
+        f"% solved queries: {', '.join(solved)}.",
         "% Omega-hat = rho-hat tr(S)/k from the prescreen on the mixed B rows (Prop. 2's linear diagnostic of the "
         f"DA, not the latent ball's own ratio iv_rho {run.get('iv_rho', float('nan')):.4f}).",
-        "% latency (s) = the one-time fit (s) + the mean per-query solve; the fit charges every part a method "
+        "% solve (ms) is the mean per query; lat. (s) = the one-time fit (s) + that mean solve; the fit charges "
+        "every part a method "
         "needs before its first solve, a shared net in full to each row:",
         *[f"%   {charge}" for charge in charges],
         f"% solves at n_jobs {run.get('toggle_n_jobs')} on {run.get('cpu_count')} cores; the CopSens fits cap "
@@ -775,17 +816,10 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         f"{run.get('inv_budget', float('nan')):.4g}, feasible share {feasible:.3f}.",
         f"% point estimators, population RMSE to h_*: {rmse}.",
     ]
-    selection = f"{artifacts}/do_mnist/select/gamma_selection.json"
-    if os.path.exists(selection):
-        with open(selection) as fh:
-            chosen = json.load(fh)
-        cells = [f"PI {chosen['PI']['coverage']:.4f}"] if "PI" in chosen else []
-        shared = chosen.get("DA+PI", {}).get("at_shared_gamma")
-        if shared:
-            cells.append(f"DA+PI {shared['coverage']:.4f}")
-        lines.append(f"% split-C coverage at the shared gamma: {', '.join(cells)}.")
-    head = ["", "coverage", "width", r"$\hat{\Omega}$", "worst error", "fit (s)", "solve (ms/query)", "latency (s)"]
+    head = ["", "coverage", "width", r"$\hat{\Omega}$", "worst err.", "fit (s)", "solve (ms)", "lat. (s)"]
     lines += [
+        # small type and narrow gaps, so the eight columns keep to an article text width
+        r"{\small\setlength{\tabcolsep}{3pt}",
         r"\begin{tabular}{l" + "r" * (len(head) - 1) + "}",
         r"\toprule",
         " & ".join(head) + r" \\",
@@ -793,6 +827,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         *[" & ".join(row) + r" \\" for row in rows],
         r"\bottomrule",
         r"\end{tabular}",
+        r"}",
     ]
     tex = "\n".join(lines) + "\n"
     if out is not None:

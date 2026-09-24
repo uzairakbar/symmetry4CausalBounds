@@ -24,6 +24,11 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       by the query count), n_jobs and the BLAS cap in the comment lines, and the
       tex compiles under `pdflatex` when it is on PATH ([SKIP] otherwise);
       `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
+(vi)  the table's gamma provenance: with no selection beside the run it claims no
+      calibration; with a selection of another gamma, or of the same gamma on
+      another split, it says "gamma not from the selection beside it" and prints no
+      split-C line; with the matching one it names the selection's
+      `calibrated_on` method and its split-C coverage.
 
   uv run python scripts/a79_domnist_tint.py
 """
@@ -264,6 +269,7 @@ def _tree(root, digits=(7, 0, 3), n=6):
         "worst_error_DA+PI": 0.64,
         "worst_error_PI+INV": 0.0225,
         "rmse_ERM": 0.1,
+        "split_key": "k",
         "tint": {"digits": sorted(digits), "grid": grid.tolist()},
     }
     with open(os.path.join(folder, "run.json"), "w") as fh:
@@ -312,7 +318,9 @@ def leg_v(scratch):
 
     root = os.path.join(scratch, "tree")
     tex = domnist_table(root)
-    body = tex.split("\\midrule\n")[1].split("\\bottomrule")[0].strip().splitlines()
+    lines = tex.split("\\midrule\n")[1].split("\\bottomrule")[0].strip("\n").splitlines()
+    body = [row for row in lines if not row.startswith(" & ")]
+    check("(v) each row has its band line under it", len(lines) == 2 * len(body))
     check("(v) one row per interval method", len(body) == 3, str(len(body)))
     from src.experiments.utils.constants import TEX_MAPPER
 
@@ -353,6 +361,43 @@ def leg_v(scratch):
     check("(v) aggregate.main on do_mnist/query alone writes the figure and the table", all(written))
 
 
+def leg_vi(scratch):
+    print("(vi) the table's gamma provenance")
+    from src.aggregate import domnist_table
+
+    root = os.path.join(scratch, "tree")
+    select = os.path.join(root, "do_mnist", "select")
+    os.makedirs(select, exist_ok=True)
+    path = os.path.join(select, "gamma_selection.json")
+    if os.path.exists(path):
+        os.remove(path)
+    tex = domnist_table(root)
+    check("(vi) no selection: no calibration claimed", "calibrated on" not in tex and "not checked" in tex)
+
+    def write(**overrides):
+        selection = {
+            "shared_gamma": 0.05,
+            "calibrated_on": "DA+PI",
+            "split_key": "k",
+            "target_coverage": 0.995,
+            "n_select": 5000,
+            "DA+PI": {"coverage": 0.9952},
+            "PI": {"coverage": 0.9990, "at_shared_gamma": {"coverage": 0.9991}},
+        }
+        with open(path, "w") as fh:
+            json.dump({**selection, **overrides}, fh)
+        return domnist_table(root)
+
+    for why, overrides in (("another gamma", {"shared_gamma": 0.12188}), ("another split", {"split_key": "x"})):
+        tex = write(**overrides)
+        check(f"(vi) {why}: flagged", "gamma not from the selection beside it" in tex)
+        check(f"(vi) {why}: no calibration claim, no split-C line", "calibrated on" not in tex and "split-C" not in tex)
+    tex = write()
+    check("(vi) the matching selection: the calibration names calibrated_on", "calibrated on DA+PI" in tex)
+    check("(vi) the matching selection: split-C coverage of both", "DA+PI 0.9952, PI 0.9991" in tex)
+    os.remove(path)
+
+
 def main():
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -364,6 +409,7 @@ def main():
         leg_iii(sem, sem_test, scratch)
         leg_iv(scratch)
         leg_v(scratch)
+        leg_vi(scratch)
     print(f"\nA79 {'PASS' if not FAIL else 'FAIL'}")
     for name in FAIL:
         print(f"  FAILED: {name}")

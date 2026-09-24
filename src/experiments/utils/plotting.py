@@ -385,7 +385,7 @@ def mark_failed(ax, x_values: NDArray, y_results: dict[str, NDArray], height: fl
                 np.full(int(missing.sum()), height),
                 transform=ax.get_xaxis_transform(),
                 marker="x",
-                s=18,
+                s=30,
                 linewidths=1.2,
                 color=colors[COLOR_MAP[method_name]],
                 clip_on=False,
