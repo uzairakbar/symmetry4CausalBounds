@@ -25,6 +25,12 @@ against closed forms, against each other, and against finite differences. Legs:
          every query; `query_diagnostics` is one column in [0, 1].
   (x)    the intersections: max of lowers, min of uppers, the worse status; the IV
          intersection instruments its DA branch on T.
+  (xi)   `sigma_model`: None is bit-identical to the centre's own sigma-hat^2 (and
+         to passing the centre net itself); a given net sets sigma2_ to its own
+         mean mu(1 - mu) (gaussian: residual variance) on the observed rows, so
+         INV's radius is PI's on that net, RecentredInv's too (read on X, not GX);
+         the centre and the latent fit do not move; an unfitted net raises; the
+         intersections hand their branches None.
 
     uv run python scripts/a75_copsens.py [--only LEG]
 """
@@ -531,6 +537,54 @@ def leg_x():
         )
 
 
+def leg_xi():
+    Q = fixture("probit")[1][:6]
+    for link in ("probit", "gaussian"):
+        _, X, y, GX, Z, om = fixture(link)
+        other = SkOutcome(link).fit(GX, y)
+        yf = y.ravel()
+        own = om.predict_mean(X)
+        want = float(np.var(yf - own)) if link == "gaussian" else float(np.mean(own * (1 - own)))
+        none = CopSensPI(gamma=0.25, **kw(link, om)).fit(X, y)
+        check(f"(xi) {link}: sigma_model None is the centre's sigma-hat^2", none.sigma2_ == want)
+        same = CopSensPI(gamma=0.25, **kw(link, om, sigma_model=om)).fit(X, y)
+        check(
+            f"(xi) {link}: sigma_model = the centre is bit-identical",
+            same.sigma2_ == none.sigma2_ and np.array_equal(same.predict(Q), none.predict(Q), equal_nan=True),
+        )
+        mu = other.predict_mean(X)
+        given = float(np.var(yf - mu)) if link == "gaussian" else float(np.mean(mu * (1 - mu)))
+        inv = InvarianceConstrainedCopSens(gamma=0.25, epsilon=1.0, **kw(link, om, sigma_model=other))
+        inv.fit(X, y, GX=GX)
+        check(f"(xi) {link}: INV's sigma2_ is the sigma model's", inv.sigma2_ == given, f"{inv.sigma2_:.6g}")
+        pi = CopSensPI(gamma=0.25, **kw(link, other)).fit(X, y)
+        check(f"(xi) {link}: INV's radius is PI's on the sigma model", inv._radius(0.25) == pi._radius(0.25))
+        base = InvarianceConstrainedCopSens(gamma=0.25, epsilon=1.0, **kw(link, om)).fit(X, y, GX=GX)
+        check(
+            f"(xi) {link}: the centre and the latent fit do not move",
+            np.array_equal(inv.mu_, base.mu_)
+            and np.array_equal(inv.anchors_, base.anchors_)
+            and np.array_equal(inv.cmuGX_, base.cmuGX_),
+        )
+        rec = RecentredInvCopSens(gamma=0.25, epsilon=1.0, **kw(link, other, sigma_model=om)).fit(X, y, GX=GX)
+        check(f"(xi) {link}: RecentredInv reads the sigma model on X", rec.sigma2_ == none.sigma2_)
+    _, X, y, GX, Z, om = fixture("probit")
+    om_gx = SkOutcome("probit").fit(GX, y)
+    try:
+        CopSensPI(gamma=0.25, **kw("probit", om_gx, sigma_model=SkOutcome("probit"))).fit(X, y)
+        raised = False
+    except ValueError:
+        raised = True
+    check("(xi) an unfitted sigma model raises", raised)
+    nets = {"X": om, "GX": om_gx}
+    both = IntersectedIVCopSens(gamma=0.25, epsilon_iv=1.0, outcome_models=nets, **ikw("probit"))
+    both.fit(X, y, GX=GX, G=Z)
+    check(
+        "(xi) the intersection branches carry sigma_model None",
+        both.baseline.sigma_model is None and both.augmented.sigma_model is None,
+    )
+
+
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -549,6 +603,7 @@ if __name__ == "__main__":
         ("viii", leg_viii),
         ("ix", leg_ix),
         ("x", leg_x),
+        ("xi", leg_xi),
     ]
     if args.only:
         legs = [(tag, leg) for tag, leg in legs if tag.lower() == args.only.lower()]

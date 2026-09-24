@@ -34,6 +34,10 @@ acceptance test, the floor solve and both budgets. Four things differ by design:
      fitted latent model, never on the budget, and a gamma grid re-solves it once
      per point instead of once per predict.
 
+`sigma_model` (default None, the centre's own net) lets a ball borrow sigma-hat^2
+from another prefit net, read on the observed rows: the do-MNIST PI+INV takes the
+ERM's, so its radius is PI's whatever its centre.
+
 `recalibrate` and `rho` reach the radius through `BoundedSA.budget`; `mean_match`
 is accepted for the uniform signature and does nothing (the latent ball has no
 mean-matched slice); `pad` and `clipy` are `BoundedSA._finalize`'s.
@@ -268,6 +272,7 @@ class CopSensPI(BoundedSA):
         n_anchors_c=48,
         calibrate_sigma=True,
         outcome_model=None,
+        sigma_model=None,
         mu_clip=None,
         jax_grad=True,
         seed=0,
@@ -283,6 +288,11 @@ class CopSensPI(BoundedSA):
         # rows (probit) or the residual variance (gaussian); False solves raw budgets
         self.calibrate_sigma = calibrate_sigma
         self.outcome_model = outcome_model
+        # sigma_model: a PREFIT net that sets sigma-hat^2 in place of the centre net,
+        # read on the observed rows (`_sigma_rows`). None keeps the centre's own. The
+        # do-MNIST PI+INV passes the ERM, so its radius is PI's whatever its centre
+        # (Prop. 3 and Cor. 1 take sigma from the ERM)
+        self.sigma_model = sigma_model
         # mu_clip: (lo, hi) the observational law can actually occupy. Outside it the
         # probit bounds CONTRACT to nothing (a fixed latent shift moves Phi by ~0
         # once mu saturates), so a confident ERM gets a vacuously narrow interval.
@@ -341,8 +351,9 @@ class CopSensPI(BoundedSA):
 
         self.mu_ = self._mu(X)
         yf = np.asarray(y, dtype=float).ravel()
+        mu_sigma = self.mu_ if self.sigma_model is None else self._sigma_mu(X, **kwargs)
         self.sigma2_ = (
-            float(np.var(yf - self.mu_)) if self.link_name == "gaussian" else float(np.mean(self.mu_ * (1 - self.mu_)))
+            float(np.var(yf - mu_sigma)) if self.link_name == "gaussian" else float(np.mean(mu_sigma * (1 - mu_sigma)))
         )
 
         # anchors FIRST, constraint rows SECOND, off the same generator
@@ -358,10 +369,25 @@ class CopSensPI(BoundedSA):
     def _precompute(self, X, y, **kwargs):
         """Constrained variants build their constraint sample here."""
 
-    def _mu(self, X):
-        """Observational mean, clipped to the attainable range if one was given."""
-        mu = np.asarray(self.outcome_.predict_mean(X)).ravel()
+    def _mu(self, X, model=None):
+        """Observational mean of `model` (the centre net when None), clipped to the
+        attainable range if one was given."""
+        model = self.outcome_ if model is None else model
+        mu = np.asarray(model.predict_mean(X)).ravel()
         return np.clip(mu, *self.mu_clip) if self.mu_clip else mu
+
+    def _sigma_rows(self, X, **kwargs):
+        """The observed rows sigma-hat^2 is read on: the fit rows here."""
+        return X
+
+    def _sigma_mu(self, X, **kwargs):
+        """The sigma model's clipped mean on `_sigma_rows`. It must be prefit: the
+        radius has to come from the same net as the ball it borrows."""
+        model = self.sigma_model
+        model = model() if callable(model) else model
+        if not getattr(model, "prefit_", False):
+            raise ValueError(f"{type(self).__name__}: sigma_model must be a prefit net")
+        return self._mu(self._sigma_rows(X, **kwargs), model)
 
     # -------------------------------------------------------------- geometry
 
@@ -655,6 +681,10 @@ class RecentredInvCopSens(InvarianceConstrainedCopSens):
         GX = np.asarray(GX).reshape(len(GX), -1)
         return super()._fit(GX, y, GX=X, **kwargs)
 
+    def _sigma_rows(self, X, GX=None, **kwargs):
+        """The fit rows are the augmented ones here; the observed X rides as `GX`."""
+        return X if GX is None else np.asarray(GX).reshape(len(X), -1)
+
 
 class IVConstrainedCopSens(CopSensPI):
     """CopSens + leaky-IV constraint: Var(E[y - h(X) | Z]) <= t_abs, with t_abs the
@@ -783,6 +813,7 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
             n_anchors=self.n_anchors,
             n_anchors_c=self.n_anchors_c,
             calibrate_sigma=self.calibrate_sigma,
+            sigma_model=None,  # each branch keeps its own net's sigma-hat
             mu_clip=self.mu_clip,
             jax_grad=self.jax_grad,
             seed=self.seed,
