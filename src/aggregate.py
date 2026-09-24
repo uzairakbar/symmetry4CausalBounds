@@ -78,6 +78,7 @@ from src.experiments.utils.plotting import (
     _line_style,
     _mark_frame,
     _pad,
+    draw_da_density,
     mark_failed,
     normalize_sweep,
 )
@@ -116,11 +117,13 @@ ELASTICITY_Y_PAD: float = 0.05  # of the row's span
 TINT_WIDTHS: tuple[float, float, float] = (0.14, 1.0, 0.14)
 TINT_ROW_HEIGHT: float = 1.1
 TINT_DENSITY_HEIGHT: float = 1.5
-TINT_LEGEND_HEIGHT: float = 1.1
 TINT_WIDTH: float = 2 * PANEL_WIDTH
 TINT_YLIM: tuple[float, float] = (-0.05, 1.05)
-TINT_DENSITY_COLORS: tuple[int, int] = (0, 3)
 TINT_TITLE: str = r"$h({\bm{x}})$"
+# the digit images drawn at this fraction of their cell, and the point estimators
+# the stack leaves out (the bands and the target are what it compares)
+TINT_IMAGE_SCALE: float = 2 / 3
+TINT_OMIT: tuple[str, ...] = ("ERM", "DA+ERM")
 # the do-MNIST table: the bootstrap band's level (%) and resample count
 TABLE_BAND: float = 95.0
 TABLE_BOOTSTRAP: int = 1000
@@ -218,6 +221,26 @@ def _legend(fig, handles: dict):
     one column (member 0 on top, member 1 below), and the singletons after them in
     PAIR_ORDER order, two to a column. Returns the legend, or None with nothing
     drawn."""
+    entries = _legend_entries(handles)
+    if entries is None:
+        return None
+    artists, labels, ncol = entries
+    return fig.legend(
+        artists,
+        labels,
+        loc="upper center",
+        ncol=ncol,
+        bbox_to_anchor=(0.5, 1.0),
+        fontsize=FS_TICK,
+        frameon=True,
+        edgecolor="black",
+        fancybox=False,
+    )
+
+
+def _legend_entries(handles: dict):
+    """`_legend`'s entries without the legend: (artists, labels, ncol) in the
+    repo's order after the render fold, or None with nothing drawn."""
     if not handles:
         return None
     spelled = {k: spelled_method(handles[k][1]) for k in handles}
@@ -268,17 +291,7 @@ def _legend(fig, handles: dict):
         logger.warning(
             f"aggregate: legend groups over two entries {crowded}; the legend may split a group across columns."
         )
-    return fig.legend(
-        [handles[k][0] for k in keys],
-        [labels[k] for k in keys],
-        loc="upper center",
-        ncol=ncol,
-        bbox_to_anchor=(0.5, 1.0),
-        fontsize=FS_TICK,
-        frameon=True,
-        edgecolor="black",
-        fancybox=False,
-    )
+    return [handles[k][0] for k in keys], [labels[k] for k in keys], ncol
 
 
 def _label_rows(axes_rows, labels) -> None:
@@ -565,6 +578,13 @@ def _tint_image(ax, image) -> None:
     white; full resolution, no axes."""
     rgb = np.clip(np.transpose(np.asarray(image), (1, 2, 0)), 0.0, 1.0)
     ax.imshow(np.dstack([rgb, np.clip(rgb.sum(-1), 0.0, 1.0)]), interpolation="nearest")
+    # drawn at TINT_IMAGE_SCALE of the cell: the view widens about the image centre
+    height, width = rgb.shape[:2]
+    for size, limits, flip in ((width, ax.set_xlim, False), (height, ax.set_ylim, True)):
+        half = size / (2 * TINT_IMAGE_SCALE)
+        centre = (size - 1) / 2
+        low, high = centre - half, centre + half
+        limits((high, low) if flip else (low, high))
     ax.axis("off")
 
 
@@ -579,12 +599,11 @@ def tint_stack(artifacts: str, out: str | None = None):
     folder = _tint_folder(artifacts)
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
-    colors = sns.color_palette("deep")
     density_path = f"{folder}/tint_density.pkl"
     has_density = os.path.exists(density_path)
     rows = len(digits) + int(has_density)
     heights = [TINT_ROW_HEIGHT] * len(digits) + ([TINT_DENSITY_HEIGHT] if has_density else [])
-    fig = plt.figure(figsize=(TINT_WIDTH, sum(heights) + TINT_LEGEND_HEIGHT))
+    fig = plt.figure(figsize=(TINT_WIDTH, sum(heights)))
     grid = GridSpec(rows, 3, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=0.04)
 
     handles, grids, shared, bounds_axes = {}, {}, None, []
@@ -593,7 +612,7 @@ def tint_stack(artifacts: str, out: str | None = None):
         grids[digit] = x
         ax = fig.add_subplot(grid[r, 1], sharex=shared)
         shared = shared or ax
-        outcomes = load(f"{folder}/tint_{digit}_outcomes.pkl")
+        outcomes = {k: v for k, v in load(f"{folder}/tint_{digit}_outcomes.pkl").items() if k not in TINT_OMIT}
         drawn, _, _ = _draw_bands(ax, x, outcomes)
         mark_failed(ax, x, outcomes)
         for name, handle in drawn.items():
@@ -614,39 +633,34 @@ def tint_stack(artifacts: str, out: str | None = None):
     if has_density:
         density = load(density_path)
         bottom = fig.add_subplot(grid[-1, 1], sharex=shared)
-        # pre-DA filled, post-DA an outline over it: two fills would blend to one hue
-        before, after = (colors[i] for i in TINT_DENSITY_COLORS)
-        pre = bottom.hist(np.asarray(density["before"]), bins=50, density=True, alpha=0.45, color=before)[2]
-        post = bottom.hist(np.asarray(density["after"]), bins=50, density=True, histtype="step", lw=1.5, color=after)[2]
-        bars = [pre[0], post[0]]
+        # the query panel's density row, as the simulation and optical figures draw it
+        draw_da_density(bottom, np.asarray(density["before"]), np.asarray(density["after"]))
         bottom.set_ylabel("density", fontsize=FS_TICK)
         bottom.tick_params(labelsize=FS_TICK - 4)
-        side = fig.add_subplot(grid[-1, 2])
-        side.axis("off")
-        side.legend(
-            bars,
-            ["pre-DA", "post-DA"],
-            loc="lower left",
-            bbox_to_anchor=(0.0, 0.0),
-            fontsize=FS_TICK - 5,
-            handlelength=1.0,
-            frameon=True,
-            edgecolor="black",
-            fancybox=False,
-        )
     bottom.tick_params(labelbottom=True)
     bottom.set_xlabel(ANNOTATE_SWEEP_PLOT["tint"]["xlabel"], fontsize=FS_LABEL)
     x = grids[digits[0]]
     shared.set_xlim(float(x.min()), float(x.max()))
     _label_major_ticks_only(*bounds_axes, bottom)
 
-    legend = _legend(fig, handles)
-    top = 0.97
-    if legend is not None:
-        fig.canvas.draw()
-        box = legend.get_window_extent().transformed(fig.transFigure.inverted())
-        top = max(0.5, box.y0 - LEGEND_GAP)
-    fig.subplots_adjust(left=0.02, right=0.98, top=top - 0.02, bottom=0.6 / fig.get_figheight())
+    # the one legend, the methods', in the bottom-right cell beside the histogram
+    entries = _legend_entries(handles)
+    if entries is not None:
+        side = fig.add_subplot(grid[-1, 2])
+        side.axis("off")
+        side.legend(
+            entries[0],
+            entries[1],
+            loc="lower left",
+            bbox_to_anchor=(0.0, 0.0),
+            ncol=1,
+            fontsize=FS_TICK - 5,
+            handlelength=1.2,
+            frameon=True,
+            edgecolor="black",
+            fancybox=False,
+        )
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.95, bottom=0.6 / fig.get_figheight())
     path = None if out is None else f"{out}/do_mnist_tint.{PLOT_FORMAT}"
     if path is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)

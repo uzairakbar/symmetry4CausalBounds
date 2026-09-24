@@ -16,8 +16,10 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       rows' tints before and after DA, bimodal at 0.1 and 0.9.
 (iv)  `tint_stack` on a synthetic tree written out of order (7, 0, 3): the rows
       read 0, 3, 7 from the top, a missing digit is absent, the left image is the
-      blue endpoint and the right the red one, the title is $h({\bm{x}})$ and the
-      x-label `tint`; a failed tint gets its cross on the x-axis.
+      blue endpoint and the right the red one, each drawn at 2/3 of its cell, the
+      title is $h({\bm{x}})$ and the x-label `tint`; ERM and DA+ERM are not drawn;
+      the one legend is the methods' in the bottom-right cell; the histogram is
+      the query panel's (`draw_da_density`); a failed tint gets its cross.
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
       centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
@@ -306,6 +308,21 @@ def leg_iv(scratch):
     check("(iv) the title is h(x) on the top row", bands[0].get_title() == r"$h({\bm{x}})$")
     bottom = min(fig.axes, key=lambda ax: ax.get_position().y0 if ax.axison else 9)
     check("(iv) the x-label tint sits under the histogram", bottom.get_xlabel() == "tint" and bottom.patches)
+    labels = {line.get_label() for ax in bands for line in ax.get_lines()}
+    check("(iv) ERM and DA+ERM are not drawn", not labels & {TEX_MAPPER["ERM"], TEX_MAPPER["DA+ERM"]})
+    legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + list(fig.legends)
+    check("(iv) one legend", len(legends) == 1, str(len(legends)))
+    entries = [t.get_text() for t in legends[0].get_texts()] if legends else []
+    check("(iv) it is the methods' legend", TEX_MAPPER["PI"] in entries and "pre-DA" not in entries, str(entries))
+    cell = legends[0].axes if legends else None
+    corner = cell is not None and cell.get_position().x0 >= bands[0].get_position().x1 and cell.get_position().y0 < 0.2
+    check("(iv) the legend sits in the bottom-right cell", corner)
+    span = abs(np.diff(left[0].get_xlim())[0])
+    check("(iv) the images are drawn at 2/3 of their cell", np.isclose(span, 28 * 1.5), f"{span:.2f}")
+    from src.experiments.utils.plotting import DENSITY_HIST
+
+    alphas = {round(p.get_alpha(), 3) for p in bottom.patches}
+    check("(iv) the histogram uses the query panel's style", alphas == {DENSITY_HIST["alpha"]}, str(alphas))
     crosses = [c for ax in bands for c in ax.collections if getattr(c, "get_offsets", None) and len(c.get_offsets())]
     check("(iv) each row marks its failed tint", len(crosses) >= 3)
     plt.close(fig)

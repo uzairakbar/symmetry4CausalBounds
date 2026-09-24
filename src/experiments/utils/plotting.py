@@ -301,6 +301,17 @@ def _get_method_color(method_name: str) -> str:
     return palette[color_index]
 
 
+#: the query figures' before / after-DA density histograms
+DENSITY_HIST: dict = {"bins": 50, "density": True, "alpha": 0.45}
+
+
+def draw_da_density(ax, before, after) -> None:
+    """The density row of the query panel: the observed draw and the DA measure,
+    one histogram each, in the ERM and the DA+ERM hue."""
+    ax.hist(before, color=_get_method_color("ERM"), **DENSITY_HIST)
+    ax.hist(after, color=_get_method_color("DA+ERM"), **DENSITY_HIST)
+
+
 def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
     """Apply bold formatting to our methods in labels."""
     if not hilight_ours:
@@ -823,8 +834,6 @@ def create_panel_plot(
         constrained_layout=True,
     )
 
-    orig_color = _get_method_color("ERM")
-    aug_color = _get_method_color("DA+ERM")
     legend_handles = {}
 
     # Define a small epsilon to prevent log(0) errors on fills
@@ -911,8 +920,7 @@ def create_panel_plot(
         hist_key = "pc1" if col_idx == 0 else ("pc2" if col_idx == 2 else None)
         if hist_key and hist_key in histograms:
             orig_proj, aug_proj = histograms[hist_key]
-            ax_hist.hist(orig_proj, bins=50, density=True, alpha=0.45, color=orig_color)
-            ax_hist.hist(aug_proj, bins=50, density=True, alpha=0.45, color=aug_color)
+            draw_da_density(ax_hist, orig_proj, aug_proj)
             if col_idx == 0:
                 ax_hist.set_ylabel("density", fontsize=FS_LABEL)
         else:
