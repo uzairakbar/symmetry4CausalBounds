@@ -114,15 +114,25 @@ ELASTICITY_Y_PAD: float = 0.05  # of the row's span
 # the do-MNIST tint stack: the image | bounds | image width ratios, the height per
 # digit row and of the histogram row, the legend strip, the bounds' y frame (the
 # digit sweep's), and the before / after-DA colours (`deep` blue and red)
-TINT_WIDTHS: tuple[float, float, float] = (0.14, 1.0, 0.14)
 TINT_ROW_HEIGHT: float = 1.1
 TINT_DENSITY_HEIGHT: float = 1.5
 TINT_WIDTH: float = 2 * PANEL_WIDTH
 TINT_YLIM: tuple[float, float] = (-0.05, 1.05)
 TINT_TITLE: str = r"$h({\bm{x}})$"
-# the digit images drawn at this fraction of their cell, and the point estimators
-# the stack leaves out (the bands and the target are what it compares)
+# columns: blue image | the y tick labels | bounds | red image. Each image keeps
+# TINT_IMAGE_SCALE of the width share it had in the former three-column grid (ratios
+# 0.14 : 1 : 0.14 at wspace 0.04); the images are square and width-bound, so their
+# height follows. The bounds take the rest
 TINT_IMAGE_SCALE: float = 2 / 3
+TINT_TICK_PAD: float = 0.06
+TINT_WSPACE: float = 0.03
+_TINT_FORMER: float = 0.14 / (1 + 2 * 0.14) * 3 / (3 + 2 * 0.04)
+_TINT_SHARE: float = TINT_IMAGE_SCALE * _TINT_FORMER
+# a GridSpec cell's share of the row is ratio / sum(ratios) * n / (n + (n - 1) wspace)
+_TINT_CELLS: float = 4 / (4 + 3 * TINT_WSPACE)
+_TINT_IMAGE: float = _TINT_SHARE * (1 + TINT_TICK_PAD) / (_TINT_CELLS - 2 * _TINT_SHARE)
+TINT_WIDTHS: tuple[float, float, float, float] = (_TINT_IMAGE, TINT_TICK_PAD, 1.0, _TINT_IMAGE)
+# the point estimators the stack leaves out (the bands and the target are what it compares)
 TINT_OMIT: tuple[str, ...] = ("ERM", "DA+ERM")
 # the do-MNIST table: the bootstrap band's level (%) and resample count
 TABLE_BAND: float = 95.0
@@ -578,13 +588,7 @@ def _tint_image(ax, image) -> None:
     white; full resolution, no axes."""
     rgb = np.clip(np.transpose(np.asarray(image), (1, 2, 0)), 0.0, 1.0)
     ax.imshow(np.dstack([rgb, np.clip(rgb.sum(-1), 0.0, 1.0)]), interpolation="nearest")
-    # drawn at TINT_IMAGE_SCALE of the cell: the view widens about the image centre
-    height, width = rgb.shape[:2]
-    for size, limits, flip in ((width, ax.set_xlim, False), (height, ax.set_ylim, True)):
-        half = size / (2 * TINT_IMAGE_SCALE)
-        centre = (size - 1) / 2
-        low, high = centre - half, centre + half
-        limits((high, low) if flip else (low, high))
+    ax.set_aspect("equal")
     ax.axis("off")
 
 
@@ -604,13 +608,15 @@ def tint_stack(artifacts: str, out: str | None = None):
     rows = len(digits) + int(has_density)
     heights = [TINT_ROW_HEIGHT] * len(digits) + ([TINT_DENSITY_HEIGHT] if has_density else [])
     fig = plt.figure(figsize=(TINT_WIDTH, sum(heights)))
-    grid = GridSpec(rows, 3, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=0.04)
+    grid = GridSpec(
+        rows, 4, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=TINT_WSPACE
+    )
 
     handles, grids, shared, bounds_axes = {}, {}, None, []
     for r, digit in enumerate(digits):
         x = np.asarray(load(f"{folder}/tint_{digit}_values.pkl"), dtype=float)
         grids[digit] = x
-        ax = fig.add_subplot(grid[r, 1], sharex=shared)
+        ax = fig.add_subplot(grid[r, 2], sharex=shared)
         shared = shared or ax
         outcomes = {k: v for k, v in load(f"{folder}/tint_{digit}_outcomes.pkl").items() if k not in TINT_OMIT}
         drawn, _, _ = _draw_bands(ax, x, outcomes)
@@ -625,14 +631,14 @@ def tint_stack(artifacts: str, out: str | None = None):
         if os.path.exists(images):
             blue, red = load(images)
             _tint_image(fig.add_subplot(grid[r, 0]), blue)
-            _tint_image(fig.add_subplot(grid[r, 2]), red)
+            _tint_image(fig.add_subplot(grid[r, 3]), red)
     bounds_axes[0].set_title(TINT_TITLE, fontsize=FS_LABEL)
     _tint_provenance(artifacts, digits, grids)
 
     bottom = bounds_axes[-1]
     if has_density:
         density = load(density_path)
-        bottom = fig.add_subplot(grid[-1, 1], sharex=shared)
+        bottom = fig.add_subplot(grid[-1, 2], sharex=shared)
         # the query panel's density row, as the simulation and optical figures draw it
         draw_da_density(bottom, np.asarray(density["before"]), np.asarray(density["after"]))
         bottom.set_ylabel("density", fontsize=FS_TICK)
@@ -646,7 +652,7 @@ def tint_stack(artifacts: str, out: str | None = None):
     # the one legend, the methods', in the bottom-right cell beside the histogram
     entries = _legend_entries(handles)
     if entries is not None:
-        side = fig.add_subplot(grid[-1, 2])
+        side = fig.add_subplot(grid[-1, 3])
         side.axis("off")
         side.legend(
             entries[0],

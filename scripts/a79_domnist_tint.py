@@ -16,7 +16,7 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       rows' tints before and after DA, bimodal at 0.1 and 0.9.
 (iv)  `tint_stack` on a synthetic tree written out of order (7, 0, 3): the rows
       read 0, 3, 7 from the top, a missing digit is absent, the left image is the
-      blue endpoint and the right the red one, each drawn at 2/3 of its cell, the
+      blue endpoint and the right the red one, each at 2/3 of its former size (narrower image columns), the
       title is $h({\bm{x}})$ and the x-label `tint`; ERM and DA+ERM are not drawn;
       the one legend is the methods' in the bottom-right cell; the histogram is
       the query panel's (`draw_da_density`); a failed tint gets its cross.
@@ -298,8 +298,13 @@ def leg_iv(scratch):
     check("(iv) the rows read 0, 3, 7 from the top", order == [0, 3, 7], str(order))
     check("(iv) a missing digit is absent (three rows)", len(bands) == 3)
     images = [ax for ax in fig.axes if ax.images]
-    left = [ax for ax in images if ax.get_position().x0 < bands[0].get_position().x0]
-    right = [ax for ax in images if ax.get_position().x0 > bands[0].get_position().x1]
+
+    def centre(ax):
+        box = ax.get_position()
+        return (box.x0 + box.x1) / 2
+
+    left = [ax for ax in images if centre(ax) < bands[0].get_position().x0]
+    right = [ax for ax in images if centre(ax) > bands[0].get_position().x1]
     blue = all(ax.images[0].get_array()[..., 2].sum() > ax.images[0].get_array()[..., 0].sum() for ax in left)
     red = all(ax.images[0].get_array()[..., 0].sum() > ax.images[0].get_array()[..., 2].sum() for ax in right)
     check("(iv) three blue images on the left, three red on the right", len(left) == len(right) == 3 and blue and red)
@@ -317,8 +322,19 @@ def leg_iv(scratch):
     cell = legends[0].axes if legends else None
     corner = cell is not None and cell.get_position().x0 >= bands[0].get_position().x1 and cell.get_position().y0 < 0.2
     check("(iv) the legend sits in the bottom-right cell", corner)
-    span = abs(np.diff(left[0].get_xlim())[0])
-    check("(iv) the images are drawn at 2/3 of their cell", np.isclose(span, 28 * 1.5), f"{span:.2f}")
+    from src.aggregate import TINT_WIDTHS, TINT_WSPACE
+
+    share = TINT_WIDTHS[0] / sum(TINT_WIDTHS) * 4 / (4 + 3 * TINT_WSPACE)
+    check(
+        "(iv) the image columns hold 2/3 of their former 0.14-ratio share",
+        np.isclose(share, 2 / 3 * 0.14 / 1.28 * 3 / 3.08),
+    )
+    full = right[0].get_position().x1 - left[0].get_position().x0
+    check("(iv) the tick labels have their own column", left[0].get_position().x1 < bands[0].get_position().x0)
+    drawn = left[0].get_position().width / full
+    check(
+        "(iv) the drawn image takes that share of the row", abs(drawn / share - 1) < 0.05, f"{drawn:.4f} vs {share:.4f}"
+    )
     from src.experiments.utils.plotting import DENSITY_HIST
 
     alphas = {round(p.get_alpha(), 3) for p in bottom.patches}
