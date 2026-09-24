@@ -159,6 +159,17 @@ def leg_iv():
         and kw["al_updates_per_epoch"] == DOMNIST_CONFIG.erm_inv_updates_per_epoch
         and kw["al_mu_max"] == DOMNIST_CONFIG.erm_inv_mu_max,
     )
+    import inspect
+
+    defaults = inspect.signature(InvariantGradientDescentERM._fit).parameters
+    check(
+        "(iv) the class defaults are the run's AL constants",
+        defaults["al_tau"].default == DOMNIST_CONFIG.erm_inv_tau
+        and defaults["al_mu0"].default == DOMNIST_CONFIG.erm_inv_mu0
+        and defaults["al_growth"].default == DOMNIST_CONFIG.erm_inv_growth
+        and defaults["al_updates_per_epoch"].default == DOMNIST_CONFIG.erm_inv_updates_per_epoch
+        and defaults["al_mu_max"].default == DOMNIST_CONFIG.erm_inv_mu_max,
+    )
     expected = TRAIN_KW["epochs"] if DOMNIST_CONFIG.erm_inv_epochs is None else DOMNIST_CONFIG.erm_inv_epochs
     check("(iv) the epoch count is erm_inv_epochs, else the pair's", kw["epochs"] == expected)
     check("(iv) an explicit epoch count wins", erm_inv_fit_kwargs(TRAIN_KW, 4e-4, epochs=2)["epochs"] == 2)

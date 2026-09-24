@@ -179,13 +179,16 @@ class DoMNISTConfig:
     # the block key of the same name (4e-4 = 0.02^2 in epsilon units; eps^2 =
     # 0.0016). The rest is the augmented Lagrangian's plumbing: the initial
     # penalty, its growth factor and cap, the multiplier updates per epoch, and the
-    # epoch count (None = the block's `hyperparameters.epochs`)
+    # epoch count (None = the block's `hyperparameters.epochs`). The penalty starts
+    # small so the net learns the digit before the invariance penalty tightens: at
+    # mu0 = 1 the stiff quadratic held the near-constant initial net in place.
+    # `InvariantGradientDescentERM`'s own defaults match these
     erm_inv_tau: float = 4e-4
-    erm_inv_mu0: float = 1.0
-    erm_inv_growth: float = 4.0
+    erm_inv_mu0: float = 1e-4
+    erm_inv_growth: float = 2.0
     erm_inv_updates_per_epoch: int = 20
     erm_inv_mu_max: float = 1e4
-    erm_inv_epochs: int | None = None
+    erm_inv_epochs: int | None = 2
     # the shift-operator spectrum cut of the prescreen (`diagnostics.shift_operators`)
     spectrum_keep: float = 0.999
     test_fraction: float = 0.1
