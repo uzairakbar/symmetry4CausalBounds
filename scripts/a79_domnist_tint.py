@@ -20,8 +20,9 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       title is $h({\bm{x}})$ and the x-label `tint`; ERM and DA+ERM are not drawn;
       the one legend is the methods' in the bottom-right cell; the histogram is
       the query panel's (`draw_da_density`); a failed tint gets its cross; the
-      y ticks read 0 and 1, a white dashed line at 0.5 over the fills, PI+INV's
-      band lowest; the title and the x-label
+      y ticks read 0 and 1; each interval method is two solid lines, no fill,
+      PI+INV's lowest, the legend all line handles, a light-grey dashed line at
+      0.5 behind them; the title and the x-label
       are the density label's size.
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
@@ -48,6 +49,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
+import matplotlib
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -321,28 +323,42 @@ def leg_iv(scratch):
     check(
         "(iv) the bounds' y ticks are 0 and 1, labelled without decimals", ticks and all(t == ["0", "1"] for t in texts)
     )
-    mid = [
-        ln
-        for ax in bands
-        for ln in ax.get_lines()
-        if list(ln.get_ydata()) == [0.5, 0.5] and 1 < ln.get_zorder() < 2 and ln.get_linestyle() == "--"
-    ]
-    white = all(ln.get_color() == "white" for ln in mid)
-    check("(iv) a white dashed line at 0.5 over the fills, under the lines", len(mid) == len(bands) and white)
     import seaborn as sns
     from matplotlib.collections import PolyCollection
 
     from src.experiments.utils.constants import COLOR_MAP
 
-    grey = np.asarray(sns.color_palette("deep")[COLOR_MAP["PI+INV"]])
-
-    def lowest_is_pi_inv(ax):
-        fills = [c for c in ax.collections if isinstance(c, PolyCollection) and len(c.get_facecolor())]
-        low = min(fills, key=lambda c: c.get_zorder())
-        others = [c.get_zorder() for c in fills if c is not low]
-        return np.allclose(low.get_facecolor()[0][:3], grey) and all(z > low.get_zorder() for z in others)
-
-    check("(iv) PI+INV's band is the lowest", all(lowest_is_pi_inv(ax) for ax in bands))
+    palette = sns.color_palette("deep")
+    fills = [c for ax in bands for c in ax.collections if isinstance(c, PolyCollection)]
+    check("(iv) no filled bands", not fills, str(len(fills)))
+    for name in ("PI", "PI+INV"):
+        hue = np.asarray(palette[COLOR_MAP[name]])
+        rows = [
+            [ln for ln in ax.get_lines() if np.allclose(matplotlib.colors.to_rgb(ln.get_color()), hue)] for ax in bands
+        ]
+        solid = all(len(r) == 2 and all(ln.get_linestyle() == "-" for ln in r) for r in rows)
+        same = all(len({ln.get_linewidth() for ln in r}) == 1 for r in rows)
+        check(f"(iv) {name}: two solid bound lines of one width per row", solid and same)
+    under = all(
+        max(
+            ln.get_zorder()
+            for ln in ax.get_lines()
+            if np.allclose(matplotlib.colors.to_rgb(ln.get_color()), palette[7])
+        )
+        < min(
+            ln.get_zorder()
+            for ln in ax.get_lines()
+            if np.allclose(matplotlib.colors.to_rgb(ln.get_color()), palette[0])
+        )
+        for ax in bands
+    )
+    check("(iv) PI+INV's lines sit under the other methods'", under)
+    mid = [ln for ax in bands for ln in ax.get_lines() if list(ln.get_ydata()) == [0.5, 0.5]]
+    behind = all(
+        ln.get_linestyle() == "--" and ln.get_color() == "0.8" and ln.get_zorder() < 2 and ln.get_linewidth() < 1
+        for ln in mid
+    )
+    check("(iv) a thin light-grey dashed line at 0.5 behind the bounds", len(mid) == len(bands) and behind)
     sizes = {bands[0].title.get_fontsize(), bottom.xaxis.label.get_fontsize(), bottom.yaxis.label.get_fontsize()}
     check("(iv) the title, the x-label and the density label share one size", len(sizes) == 1, str(sizes))
     labels = {line.get_label() for ax in bands for line in ax.get_lines()}
@@ -351,6 +367,10 @@ def leg_iv(scratch):
     check("(iv) one legend", len(legends) == 1, str(len(legends)))
     entries = [t.get_text() for t in legends[0].get_texts()] if legends else []
     check("(iv) it is the methods' legend", TEX_MAPPER["PI"] in entries and "pre-DA" not in entries, str(entries))
+    from matplotlib.lines import Line2D
+
+    kinds = {type(h) for h in (legends[0].legend_handles if legends else [])}
+    check("(iv) every legend handle is a line", kinds == {Line2D}, str(kinds))
     cell = legends[0].axes if legends else None
     corner = cell is not None and cell.get_position().x0 >= bands[0].get_position().x1 and cell.get_position().y0 < 0.2
     check("(iv) the legend sits in the bottom-right cell", corner)

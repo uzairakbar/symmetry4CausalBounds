@@ -135,11 +135,11 @@ TINT_WIDTHS: tuple[float, float, float, float] = (_TINT_IMAGE, TINT_TICK_PAD, 1.
 # the bounds' y ticks and their mid reference line, and the gap (figure fraction)
 # between a blue image and the tick labels, and between a panel and its red image
 TINT_YTICKS: tuple[float, float] = (0.0, 1.0)
-# the 0.5 line: white and dashed ABOVE the band fills (zorder 1), below the band
-# edges and the point lines (zorder 2), so it reads across the bands
-TINT_MIDLINE: dict = {"y": 0.5, "color": "white", "linestyle": "--", "linewidth": 0.6, "zorder": 1.5}
+# the 0.5 line: thin, light grey and dashed, behind the bound lines
+TINT_MIDLINE: dict = {"y": 0.5, "color": "0.8", "linestyle": "--", "linewidth": 0.6, "zorder": 1}
 TINT_LABEL_GAP: float = 0.003
-# drawn first and lowest, so the other bands read on top of it
+# each interval method is its two bounds as solid lines, no fill; TINT_UNDER lowest
+TINT_BOUND_WIDTH: float = 1.4
 TINT_UNDER: str = "PI+INV"
 # the point estimators the stack leaves out (the bands and the target are what it compares)
 TINT_OMIT: tuple[str, ...] = ("ERM", "DA+ERM")
@@ -601,6 +601,30 @@ def _tint_image(ax, image) -> None:
     ax.axis("off")
 
 
+def _tint_bounds(ax, x, outcomes: dict) -> dict:
+    """The stack's own rendering: each interval method's lower and upper bound as
+    two solid lines in its hue at one width (TINT_UNDER below the rest), the point
+    estimates as the query figures draw them. Returns {method: legend handle}."""
+    palette = sns.color_palette("deep")
+    points = {name: p for name, p in outcomes.items() if np.ndim(p) != 3}
+    drawn = dict(_draw_bands(ax, x, points)[0]) if points else {}
+    for name, prediction in outcomes.items():
+        if name in points:
+            continue
+        prediction = np.asarray(prediction, dtype=float)
+        style = dict(
+            color=palette[COLOR_MAP[name]],
+            linestyle="-",
+            linewidth=TINT_BOUND_WIDTH,
+            zorder=2.0 if name == TINT_UNDER else 2.1,
+        )
+        lower = ax.plot(x, prediction[:, :, 0].mean(axis=1), label=TEX_MAPPER.get(name, name), **style)[0]
+        ax.plot(x, prediction[:, :, 1].mean(axis=1), **style)
+        drawn[name] = lower
+    # in `outcomes` order, keyed like `_draw_bands`
+    return {name: drawn[name] for name in outcomes if name in drawn}
+
+
 def _clear_tick_labels(fig, bounds_axes, image_axes) -> None:
     """Set the blue images' ink `TINT_LABEL_GAP` left of the bounds' y tick labels
     and the red images the same gap right of their panel, each image keeping its size."""
@@ -653,9 +677,7 @@ def tint_stack(artifacts: str, out: str | None = None):
         shared = shared or ax
         outcomes = {k: v for k, v in load(f"{folder}/tint_{digit}_outcomes.pkl").items() if k not in TINT_OMIT}
         outcomes = dict(sorted(outcomes.items(), key=lambda item: item[0] != TINT_UNDER))
-        drawn, _, _ = _draw_bands(ax, x, outcomes)
-        if isinstance(drawn.get(TINT_UNDER), tuple):
-            drawn[TINT_UNDER][0].set_zorder(0.5)
+        drawn = _tint_bounds(ax, x, outcomes)
         mark_failed(ax, x, outcomes)
         for name, handle in drawn.items():
             handles.setdefault(parse_method(name), (handle, name))
