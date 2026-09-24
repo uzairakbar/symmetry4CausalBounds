@@ -22,12 +22,19 @@ cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
 the reference marks of each panel, one legend inside the top-right panel, pinned
-upper left.
+upper left. From the do-MNIST tint sweep pkls, the stacked tint figure
+(`do_mnist_tint.pdf`): one row per digit, 0 at the top, the bounds along the tint
+grid in the middle with the digit's blue-tint image on the left and its red-tint
+image on the right (full resolution, white background), titled $h({\bm{x}})$, the
+x-axis `tint` shared down to the bottom row, the tint histogram of the B rows
+before (blue) and after (red) DA, its legend at the bottom right.
 """
 
 import argparse
 import glob
+import json
 import os
+import re
 from collections import Counter
 
 import matplotlib.pyplot as plt
@@ -98,6 +105,17 @@ ELASTICITY_AXES: tuple[str, ...] = ("gamma", "budget")
 ELASTICITY_LEGEND_PANEL: tuple[int, int] = (0, 1)
 ELASTICITY_LEGEND_LOC: str = "upper left"
 ELASTICITY_Y_PAD: float = 0.05  # of the row's span
+# the do-MNIST tint stack: the image | bounds | image width ratios, the height per
+# digit row and of the histogram row, the legend strip, the bounds' y frame (the
+# digit sweep's), and the before / after-DA colours (`deep` blue and red)
+TINT_WIDTHS: tuple[float, float, float] = (0.14, 1.0, 0.14)
+TINT_ROW_HEIGHT: float = 1.1
+TINT_DENSITY_HEIGHT: float = 1.5
+TINT_LEGEND_HEIGHT: float = 1.1
+TINT_WIDTH: float = 2 * PANEL_WIDTH
+TINT_YLIM: tuple[float, float] = (-0.05, 1.05)
+TINT_DENSITY_COLORS: tuple[int, int] = (0, 3)
+TINT_TITLE: str = r"$h({\bm{x}})$"
 
 
 # ------------------------------------------------------------------ discovery
@@ -136,6 +154,24 @@ def _has_elasticities(artifacts: str) -> bool:
         for c, _ in ELASTICITY_ROWS
         for a in ELASTICITY_AXES
     )
+
+
+def _tint_folder(artifacts: str) -> str:
+    return f"{artifacts}/do_mnist/{SUBDIR_QUERY}"
+
+
+def tint_digits(artifacts: str) -> list[int]:
+    """The digits with a tint sweep (`tint_{d}_outcomes.pkl`), ascending."""
+    found = []
+    for path in glob.glob(f"{_tint_folder(artifacts)}/tint_*_outcomes.pkl"):
+        match = re.fullmatch(r"tint_(\d)_outcomes\.pkl", os.path.basename(path))
+        if match:
+            found.append(int(match.group(1)))
+    return sorted(found)
+
+
+def _has_tint(artifacts: str) -> bool:
+    return bool(tint_digits(artifacts))
 
 
 def _has_perf(artifacts: str, dataset: str, metric: str) -> bool:
@@ -488,6 +524,120 @@ def elasticity_grid(artifacts: str, out: str | None = None):
     return fig
 
 
+def _tint_provenance(artifacts: str, digits: list[int], grids: dict[int, np.ndarray]) -> None:
+    """Warn when the stacked sweeps do not all come from the run whose `run.json`
+    sits beside them: a digit it did not sweep, or a grid it did not use."""
+    path = f"{_tint_folder(artifacts)}/run.json"
+    if not os.path.exists(path):
+        logger.warning(f"aggregate: no run.json beside the tint sweeps under {_tint_folder(artifacts)}.")
+        return
+    with open(path) as fh:
+        tint = json.load(fh).get("tint")
+    if not tint:
+        logger.warning("aggregate: the run.json beside the tint sweeps records no tint sweep; they may be stale.")
+        return
+    stale = [d for d in digits if d not in tint["digits"]]
+    if stale:
+        logger.warning(f"aggregate: tint sweeps {stale} are not in run.json's digits {tint['digits']}; stale pkls?")
+    grid = np.asarray(tint["grid"], dtype=float)
+    moved = [d for d, x in grids.items() if x.shape != grid.shape or not np.allclose(x, grid)]
+    if moved:
+        logger.warning(f"aggregate: tint sweeps {moved} use another grid than run.json's; stale pkls?")
+
+
+def _tint_image(ax, image) -> None:
+    """The exemplar thumbnail rule: RGB with the ink as alpha, so the background is
+    white; full resolution, no axes."""
+    rgb = np.clip(np.transpose(np.asarray(image), (1, 2, 0)), 0.0, 1.0)
+    ax.imshow(np.dstack([rgb, np.clip(rgb.sum(-1), 0.0, 1.0)]), interpolation="nearest")
+    ax.axis("off")
+
+
+def tint_stack(artifacts: str, out: str | None = None):
+    """The do-MNIST tint sweeps stacked, one row per digit (0 at the top); saved
+    under `out` when given. Returns the figure, or None with no sweep."""
+    from matplotlib.gridspec import GridSpec
+
+    digits = tint_digits(artifacts)
+    if not digits:
+        return None
+    folder = _tint_folder(artifacts)
+    plt.rcParams.update(RC_PARAMS)
+    sns.set_palette("deep")
+    colors = sns.color_palette("deep")
+    density_path = f"{folder}/tint_density.pkl"
+    has_density = os.path.exists(density_path)
+    rows = len(digits) + int(has_density)
+    heights = [TINT_ROW_HEIGHT] * len(digits) + ([TINT_DENSITY_HEIGHT] if has_density else [])
+    fig = plt.figure(figsize=(TINT_WIDTH, sum(heights) + TINT_LEGEND_HEIGHT))
+    grid = GridSpec(rows, 3, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=0.04)
+
+    handles, grids, shared, bounds_axes = {}, {}, None, []
+    for r, digit in enumerate(digits):
+        x = np.asarray(load(f"{folder}/tint_{digit}_values.pkl"), dtype=float)
+        grids[digit] = x
+        ax = fig.add_subplot(grid[r, 1], sharex=shared)
+        shared = shared or ax
+        drawn, _, _ = _draw_bands(ax, x, load(f"{folder}/tint_{digit}_outcomes.pkl"))
+        for name, handle in drawn.items():
+            handles.setdefault(parse_method(name), (handle, name))
+        ax.set_ylim(*TINT_YLIM)
+        ax.set_yticks([0.0, 0.5, 1.0])
+        ax.tick_params(labelsize=FS_TICK - 4, labelbottom=False)
+        bounds_axes.append(ax)
+        images = f"{folder}/tint_{digit}_images.pkl"
+        if os.path.exists(images):
+            blue, red = load(images)
+            _tint_image(fig.add_subplot(grid[r, 0]), blue)
+            _tint_image(fig.add_subplot(grid[r, 2]), red)
+    bounds_axes[0].set_title(TINT_TITLE, fontsize=FS_LABEL)
+    _tint_provenance(artifacts, digits, grids)
+
+    bottom = bounds_axes[-1]
+    if has_density:
+        density = load(density_path)
+        bottom = fig.add_subplot(grid[-1, 1], sharex=shared)
+        bars = []
+        for key, color in zip(("before", "after"), TINT_DENSITY_COLORS, strict=True):
+            bars.append(
+                bottom.hist(np.asarray(density[key]), bins=50, density=True, alpha=0.45, color=colors[color])[2][0]
+            )
+        bottom.set_ylabel("density", fontsize=FS_TICK)
+        bottom.tick_params(labelsize=FS_TICK - 4)
+        side = fig.add_subplot(grid[-1, 2])
+        side.axis("off")
+        side.legend(
+            bars,
+            ["pre-DA", "post-DA"],
+            loc="lower left",
+            bbox_to_anchor=(0.0, 0.0),
+            fontsize=FS_TICK - 5,
+            handlelength=1.0,
+            frameon=True,
+            edgecolor="black",
+            fancybox=False,
+        )
+    bottom.tick_params(labelbottom=True)
+    bottom.set_xlabel(ANNOTATE_SWEEP_PLOT["tint"]["xlabel"], fontsize=FS_LABEL)
+    x = grids[digits[0]]
+    shared.set_xlim(float(x.min()), float(x.max()))
+    _label_major_ticks_only(*bounds_axes, bottom)
+
+    legend = _legend(fig, handles)
+    top = 0.97
+    if legend is not None:
+        fig.canvas.draw()
+        box = legend.get_window_extent().transformed(fig.transFigure.inverted())
+        top = max(0.5, box.y0 - LEGEND_GAP)
+    fig.subplots_adjust(left=0.02, right=0.98, top=top - 0.02, bottom=0.6 / fig.get_figheight())
+    path = None if out is None else f"{out}/do_mnist_tint.{PLOT_FORMAT}"
+    if path is not None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fig.savefig(path, format=PLOT_FORMAT, dpi=PLOT_DPI, bbox_inches="tight")
+        logger.info(f"aggregate: wrote {path}")
+    return fig
+
+
 # ------------------------------------------------------------------ cli
 
 
@@ -500,7 +650,7 @@ def main(argv=None) -> None:
     out = os.path.abspath(args.out) if args.out else f"{artifacts}/aggregate"
 
     datasets = columns(artifacts)
-    if not datasets and not _has_elasticities(artifacts):
+    if not datasets and not _has_elasticities(artifacts) and not _has_tint(artifacts):
         logger.warning(f"aggregate: nothing to draw under {artifacts}.")
         return
     for param in sweep_params(artifacts, datasets):
@@ -512,6 +662,8 @@ def main(argv=None) -> None:
             plt.close(perf_grid(stem, ran, datasets, artifacts, out))
     if _has_elasticities(artifacts):
         plt.close(elasticity_grid(artifacts, out))
+    if _has_tint(artifacts):
+        plt.close(tint_stack(artifacts, out))
 
 
 if __name__ == "__main__":
