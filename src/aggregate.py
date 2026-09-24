@@ -840,6 +840,20 @@ def _seconds(run: dict, key: str) -> float:
     return float(value) if value is not None and np.isfinite(value) else 0.0
 
 
+def _omega_line(run: dict) -> str:
+    """The table's comment on Omega-hat: which rho it multiplies. A run.json from
+    before the nets' rho has no `rho_linear`, and its `rho` IS the linear one."""
+    rho, trace = float(run.get("rho", float("nan"))), float(run.get("tr_S_over_k", float("nan")))
+    head = f"% Omega-hat = rho-hat tr(S)/k on the mixed B rows (Prop. 2), tr(S)/k {trace:.4f} from the linear shift "
+    if "rho_linear" not in run:
+        return head + f"operators and rho-hat {rho:.4f} the pixel-logistic ratio (a run before the nets' rho)."
+    return head + (
+        f"operators and rho-hat {rho:.4f} = DA+ERM's / ERM's held-out squared error on those rows (the paper's "
+        f"best-achievable errors, via the nets); the pixel-logistic rho_linear {float(run['rho_linear']):.4f} is "
+        "kept for provenance only."
+    )
+
+
 def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     """The do-MNIST results table on the evaluation population, written to
     `out/do_mnist_table.tex` when given; returns the tex, or None without the pkls.
@@ -847,10 +861,11 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     One row per interval method in `ALL_METHODS` order. Columns: coverage of h_*
     (NaN bounds count as not covered, as in `run.json`) and mean width, each with a
     bootstrap band over the queries; Omega-hat = rho-hat tr(S)/k from the prescreen,
-    on the DA+ rows; worst error (E+, the mean over queries of the larger squared
-    bound error); the one-time fit in seconds (every part in `fit_parts`); the mean
-    per-query solve in ms (the population predict at the run's `n_jobs`); and the
-    latency, the fit plus the mean per-query solve, in seconds.
+    on the DA+ rows, with rho-hat the nets' ratio (`diagnostics.net_noise`); worst
+    error (E+, the mean over queries of the larger squared bound error); the one-time
+    fit in seconds (every part in `fit_parts`); the mean per-query solve in ms (the
+    population predict at the run's `n_jobs`); and the latency, the fit plus the mean
+    per-query solve, in seconds.
     """
     if not _has_domnist_table(artifacts):
         return None
@@ -913,8 +928,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         f"({TABLE_BOOTSTRAP} resamples). Coverage counts a query without a bound (NaN) as not covered; width, "
         "worst error and the band of width are over the solved queries only.",
         f"% solved queries: {', '.join(solved)}.",
-        "% Omega-hat = rho-hat tr(S)/k from the prescreen on the mixed B rows (Prop. 2's linear diagnostic of the "
-        f"DA, not the latent ball's own ratio iv_rho {run.get('iv_rho', float('nan')):.4f}).",
+        _omega_line(run),
         "% solve (ms) is the mean per query; lat. (s) = the one-time fit (s) + that mean solve; the fit charges "
         "every part a method "
         "needs before its first solve, a shared net in full to each row:",

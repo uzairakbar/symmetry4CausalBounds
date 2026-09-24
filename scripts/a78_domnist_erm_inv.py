@@ -44,6 +44,17 @@ GPU leg (`--nets`, two more 60k replicates, about two minutes):
         reproduces their sha1s, they differ from the flat ones, and the B arrays
         equal the flat replicate's (the head changes the nets and nothing else).
 
+Static leg (the prescreen's rho, seconds):
+
+  (viii) `prescreen(nets=...)` sets `rho` (and `sigma2`, `sigma2_tilde`) to
+        `net_noise`: the GX net's squared error on GX over the X net's on X, the
+        ratio `_net_rho` (the runner's `fit_rho`) returns; the pixel-logistic ratio
+        stays as `rho_linear`; `contracts_calibrated` and `da_inert` read the nets'
+        rho; without nets `rho` is the linear one.
+
+GPU leg, with (v): the replicate's `rho` is `_net_rho` on its B rows, its
+`rho_linear` is kept, and both are finite.
+
     uv run python scripts/a78_domnist_erm_inv.py            # static legs
     uv run python scripts/a78_domnist_erm_inv.py --nets     # + the GPU leg
 """
@@ -61,6 +72,7 @@ from loguru import logger  # noqa: E402
 from src.experiments.configs import DOMNIST_CONFIG, MethodRegistry, resolve_dataset_block  # noqa: E402
 from src.experiments.do_mnist import (  # noqa: E402
     DoMNISTOrchestrator,
+    _net_rho,
     draw_replicate,
     erm_inv_fit_kwargs,
     log_nesting,
@@ -299,6 +311,10 @@ def leg_v():
     )
     for key in ("train_seconds_X", "train_seconds_GX", "train_seconds_INV", "erm_inv_al_trace", "erm_inv_al_tau"):
         check(f"(v) the diagnostics carry {key}", key in d)
+    net_rho = _net_rho(with_inv.nets, with_inv.X, with_inv.GX, with_inv.y)
+    check("(v) the replicate's rho is the nets' ratio on its B rows", d["rho"] == net_rho, f"{d['rho']} vs {net_rho}")
+    check("(v) rho_linear is kept", np.isfinite(d["rho_linear"]) and d["rho_linear"] != d["rho"])
+    print(f"  rho: nets {d['rho']:.5f} linear {d['rho_linear']:.5f}")
 
     # PI+INV's radius on the replicate's nets: the ERM's sigma-hat under every centre
     lo_hi = DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else (0.0, 1.0)
@@ -395,6 +411,48 @@ def leg_vii(replicate, flat):
     )
 
 
+class _Net:
+    """A prefit stub: predict_mean is a fixed map of the rows."""
+
+    prefit_ = True
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def predict_mean(self, X):
+        return self.fn(np.asarray(X))
+
+
+def leg_viii():
+    print("(viii) the prescreen's rho")
+    from src.experiments.utils.diagnostics import net_noise, prescreen
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(400, 6)).astype(np.float32)
+    GX = (X + rng.normal(scale=1.5, size=X.shape)).astype(np.float32)
+    y = (rng.random(400) < 1 / (1 + np.exp(-X[:, 0]))).astype(float)
+    nets = {"X": _Net(lambda A: 1 / (1 + np.exp(-A[:, 0]))), "GX": _Net(lambda A: 1 / (1 + np.exp(-0.5 * A[:, 0])))}
+    s2 = float(np.mean((y - nets["X"].predict_mean(X)) ** 2))
+    s2t = float(np.mean((y - nets["GX"].predict_mean(GX)) ** 2))
+    with_nets = prescreen(X, y, GX, keep=1.0, nets=nets)
+    linear = prescreen(X, y, GX, keep=1.0)
+    check("(viii) rho is the GX net's squared error over the X net's", with_nets["rho"] == s2t / s2)
+    check("(viii) sigma2 and sigma2_tilde are the nets'", (with_nets["sigma2"], with_nets["sigma2_tilde"]) == (s2, s2t))
+    check("(viii) it is the runner's _net_rho", with_nets["rho"] == _net_rho(nets, X, GX, y))
+    check("(viii) net_noise agrees", net_noise(nets, X, GX, y)["rho"] == with_nets["rho"])
+    check(
+        "(viii) rho_linear is the pixel-logistic ratio, kept either way",
+        with_nets["rho_linear"] == linear["rho_linear"] == linear["rho"] != with_nets["rho"],
+    )
+    rho, trace = with_nets["rho"], with_nets["tr_S_over_k"]
+    check(
+        "(viii) contracts_calibrated and da_inert read the nets' rho",
+        with_nets["contracts_calibrated"] == (trace <= 1.0 / rho) and with_nets["da_inert"] == (abs(rho - 1.0) < 1e-3),
+    )
+    same = {"X": nets["X"], "GX": _Net(lambda A: nets["X"].predict_mean(X))}
+    check("(viii) da_inert when the two errors agree", prescreen(X, y, GX, keep=1.0, nets=same)["da_inert"])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--nets", action="store_true", help="add the GPU replicate legs (60k draws)")
@@ -406,6 +464,7 @@ def main():
     leg_iii()
     leg_iv()
     leg_vi()
+    leg_viii()
     if args.nets:
         leg_vii(*leg_v())
     print(f"\nA78 {'PASS' if not FAIL else 'FAIL'}")

@@ -46,7 +46,7 @@ from src.experiments.configs import ANNOTATE_SWEEP_PLOT, DOMNIST_CONFIG, MethodR
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import save
 from src.experiments.utils.constants import SUBDIR_QUERY
-from src.experiments.utils.diagnostics import erm_report, prescreen, probe
+from src.experiments.utils.diagnostics import erm_report, net_noise, prescreen, probe
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
 from src.experiments.utils.plotting import create_digit_sweep_plot, create_query_sweep_plot
 from src.methods.regression import GradientDescentERM, InvariantGradientDescentERM
@@ -133,18 +133,16 @@ def e_inv(net, X, GX) -> float:
 
 
 def _net_rho(nets, X, GX, y) -> float:
-    """sigma~^2/sigma^2 on the prefit pair: the GX net's MSE on GX over the X net's
-    MSE on X, both against y on the SAME rows. NaN-free by construction unless the
-    X net fits y exactly, in which case rho is left at 1."""
+    """sigma~^2/sigma^2 on the prefit pair (`diagnostics.net_noise`): the GX net's
+    MSE on GX over the X net's MSE on X, both against y on the SAME rows. NaN-free by
+    construction unless the X net fits y exactly, in which case rho is left at 1.
+    The prescreen's `rho` is the same number on the replicate's B rows."""
     if nets is None:
         return 1.0
-    y = np.asarray(y).ravel().astype(float)
-    mse_x = float(np.mean((y - np.asarray(nets["X"].predict_mean(X)).ravel()) ** 2))
-    mse_gx = float(np.mean((y - np.asarray(nets["GX"].predict_mean(GX)).ravel()) ** 2))
-    if not mse_x > 0.0 or not np.isfinite(mse_gx):
+    noise = net_noise(nets, X, GX, y)
+    if not noise["rho_ok"]:
         logger.warning("do-mnist: rho on the prefit nets not computable; falling back to 1.")
-        return 1.0
-    return mse_gx / mse_x
+    return noise["rho"]
 
 
 def log_vacuous(bounds: dict[str, np.ndarray]):
@@ -294,7 +292,8 @@ def draw_replicate(
     4. the ERM report on the held-out probe;
     5. the PI rows from B at `seed + 1`, augmented, and a mixed COPY at `[seed, 2]`
        for the DA+ family; the pairs stay unmixed;
-    6. the prescreen (rho and the shift-operator spectrum) on the mixed B rows.
+    6. the prescreen (rho off the ERM and DA+ERM nets, the linear rho_linear and
+       the shift-operator spectrum) on the mixed B rows.
 
     The DA+ERM fit reseeds torch (CPU and CUDA) at its start, so everything from
     it on is bit-identical with or without the ERM+INV fit. `inv_fits`, when
@@ -385,10 +384,12 @@ def draw_replicate(
             f"ERM+INV {diagnostics['E_inv_B_INV']:.4g} (tau {diagnostics.get('erm_inv_al_tau', float('nan')):g}); "
             f"ERM+INV sha1 {diagnostics['erm_inv_state_sha1']}"
         )
-    diagnostics.update(prescreen(Xb, yb, GXb_da, link=DOMNIST_CONFIG.link, keep=DOMNIST_CONFIG.spectrum_keep))
+    diagnostics.update(
+        prescreen(Xb, yb, GXb_da, link=DOMNIST_CONFIG.link, keep=DOMNIST_CONFIG.spectrum_keep, nets=nets)
+    )
     logger.info(
-        f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} tr(S)/k={diagnostics['tr_S_over_k']:.4f} "
-        f"contracts={diagnostics['contracts']}"
+        f"do-mnist seed {seed}: rho={diagnostics['rho']:.4f} (nets; linear {diagnostics['rho_linear']:.4f}) "
+        f"tr(S)/k={diagnostics['tr_S_over_k']:.4f} contracts={diagnostics['contracts']}"
     )
     return DoMNISTData(
         X=Xb,

@@ -28,7 +28,9 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
       centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
       by the query count), n_jobs and the BLAS cap in the comment lines, one load
-      line per method with load records (none for an older run.json), and the
+      line per method with load records (none for an older run.json), Omega-hat
+      the run's `rho` (the nets') times tr(S)/k with a comment naming that rho and
+      `rho_linear` (an older run.json's `rho` read as the linear one), and the
       tex compiles under `pdflatex` when it is on PATH ([SKIP] otherwise);
       `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
 (vi)  the table's gamma provenance: with no selection beside the run it claims no
@@ -257,6 +259,7 @@ def _tree(root, digits=(7, 0, 3), n=6):
         "n_queries": q,
         "pop_seed": 44,
         "rho": 1.5,
+        "rho_linear": 1.2,
         "tr_S_over_k": 0.5,
         "iv_rho": 1.1,
         "toggle_n_jobs": -1,
@@ -439,6 +442,13 @@ def leg_v(scratch):
     check("(v) PI+INV (inv): INV net + both DA passes + fit + floor (10.25 s)", inv[5] == "$10.25$", inv[5])
     check("(v) PI+INV covers nothing (0.000)", inv[1].startswith("$0.000$"))
     check("(v) Omega-hat on DA+PI only", body[2].split(" & ")[3] == "$0.750$" and pi[3] == "--")
+    check("(v) Omega-hat is the nets' rho times tr(S)/k, not rho_linear's (0.600)", "$0.600$" not in tex)
+    omega_line = next((line for line in tex.splitlines() if line.startswith("% Omega-hat")), "")
+    check(
+        "(v) the Omega-hat comment names the nets' rho and keeps rho_linear",
+        "rho-hat 1.5000 = DA+ERM's / ERM's held-out squared error" in omega_line and "rho_linear 1.2000" in omega_line,
+        omega_line,
+    )
     check("(v) the centre follows inv_recenter", fit_parts("PI+INV", "off")[0] == "train_seconds_X")
     check("(v) n_jobs and the BLAS cap in the comments", "n_jobs -1 on 32 cores" in tex and "BLAS at 8" in tex)
     check("(v) the load header in the comments", "% 1-min load average, before -> after each timed phase" in tex)
@@ -451,6 +461,12 @@ def leg_v(scratch):
     with open(path, "w") as fh:
         json.dump({k: v for k, v in run.items() if "load_" not in k}, fh)
     check("(v) an older run.json without loads: no load lines", "load average" not in domnist_table(root))
+    with open(path, "w") as fh:
+        json.dump({k: v for k, v in run.items() if k != "rho_linear"}, fh)
+    check(
+        "(v) an older run.json without rho_linear: its rho reads as the linear one",
+        "rho-hat 1.5000 the pixel-logistic ratio (a run before the nets' rho)" in domnist_table(root),
+    )
     with open(path, "w") as fh:
         json.dump(run, fh)
     if shutil.which("pdflatex"):

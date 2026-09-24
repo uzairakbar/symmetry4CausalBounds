@@ -4,8 +4,9 @@ report against the analytic target, and the ERM probe report.
 These keep the do-MNIST run json's own definitions, which differ from the sweep
 metrics of the linear datasets on purpose:
 
-- `prescreen`'s `rho` is the ratio of two logistic-regression MMSEs on the pixels,
-  not `metrics.rho_hat`'s OLS ratio;
+- `prescreen`'s `rho` is the ratio of the prefit nets' held-out squared errors
+  (`net_noise`), not `metrics.rho_hat`'s OLS ratio; the pixel-logistic ratio it
+  replaced is kept as `rho_linear`;
 - `shift_operators`' `tr_S_over_k` CARRIES the mean-shift term tr(M*M) and is NOT
   `metrics.trace_S_over_k`, which centres both designs. The do-MNIST json has to
   reproduce the mixin's 0.6321 and the omega axis of the other datasets must not
@@ -24,9 +25,9 @@ def _flat(A) -> NDArray:
 
 
 def mmse(X: NDArray, y: NDArray, link: str = "probit") -> float:
-    """sigma^2 = min_h R_erm(h) on the pixels. Non-gaussian links all use the logistic
-    fit: rho is a RATIO of two such fits, so the link only has to be consistent across
-    the pair."""
+    """The best LINEAR predictor's error on the pixels, the provenance `rho_linear`.
+    Non-gaussian links all use the logistic fit: `rho_linear` is a RATIO of two such
+    fits, so the link only has to be consistent across the pair."""
     from sklearn.linear_model import LinearRegression, LogisticRegression
 
     X, y = _flat(X), np.asarray(y).ravel()
@@ -73,16 +74,54 @@ def shift_operators(X: NDArray, GX: NDArray, keep: float = 0.999) -> dict[str, f
     }
 
 
-def prescreen(X: NDArray, y: NDArray, GX: NDArray, link: str = "probit", keep: float = 0.999) -> dict[str, float]:
+def net_noise(nets, X: NDArray, GX: NDArray, y: NDArray) -> dict[str, float]:
+    """sigma^2, sigma~^2 and rho = sigma~^2 / sigma^2 off the prefit nets.
+
+    The paper's sigma^2 := min_h R_erm(h) and sigma~^2 := min_h R_erm~(h) are the
+    best-achievable squared errors before and after DA (Prop. 1, Lem. 1, Prop. 3).
+    The estimate:
+      - sigma^2 is the ERM net's mean squared error against y on the observed B rows
+        X, and sigma~^2 the DA+ERM net's on the same rows' augmentation GX, the mixed
+        measure it was trained on (and DA+PI's);
+      - squared error against y, the risk the paper minimises and the nets' own
+        loss, NOT mean mu(1 - mu): that is E[Var(Y|X)] only for a calibrated net,
+        and its miscalibration differs between the two nets;
+      - the B rows are held out from the nets' A draw, so each is an honest
+        estimate of that net's risk, which sits above the minimum by the net's
+        excess risk only; the pixel-linear fit (`mmse`) sits far above it once
+        the DA moves the pixels, which is why it overstates rho;
+      - mu unclipped: the clip is a device of the PI ball, not of the risk.
+    rho falls back to 1 when the X net fits y exactly or the GX error is not finite.
+    """
+    y = np.asarray(y).ravel().astype(float)
+    s2 = float(np.mean((y - np.asarray(nets["X"].predict_mean(X)).ravel()) ** 2))
+    s2t = float(np.mean((y - np.asarray(nets["GX"].predict_mean(GX)).ravel()) ** 2))
+    ok = s2 > 0.0 and np.isfinite(s2t)
+    return {"sigma2": s2, "sigma2_tilde": s2t, "rho": s2t / s2 if ok else 1.0, "rho_ok": bool(ok)}
+
+
+def prescreen(
+    X: NDArray, y: NDArray, GX: NDArray, link: str = "probit", keep: float = 0.999, nets=None
+) -> dict[str, float]:
     """Selection criterion: tr(S)/k <= 1 (Prop. 2 with an absolute budget).
 
     The radius is absolute, so rho does not enter the sufficient condition for
-    sharpening; it is recorded for bookkeeping only.
+    sharpening; it enters Omega-hat = rho tr(S)/k and the calibrated criterion.
+    `rho` (with `sigma2`, `sigma2_tilde`) is `net_noise` on the prefit `nets` when
+    given, else the pixel-logistic ratio; that ratio is always kept as
+    `rho_linear` (`sigma2_linear`, `sigma2_tilde_linear`).
     """
     X, GX = _flat(X), _flat(GX)
     s2, s2t = mmse(X, y, link), mmse(GX, y, link)
-    rho = s2t / max(s2, 1e-12)
-    out: dict[str, float] = {"sigma2": s2, "sigma2_tilde": s2t, "rho": rho}
+    rho_linear = s2t / max(s2, 1e-12)
+    out: dict[str, float] = {"sigma2_linear": s2, "sigma2_tilde_linear": s2t, "rho_linear": rho_linear}
+    if nets is None:
+        out.update(sigma2=s2, sigma2_tilde=s2t, rho=rho_linear)
+    else:
+        noise = net_noise(nets, X, GX, y)
+        noise.pop("rho_ok")
+        out.update(noise)
+    rho = out["rho"]
     out.update(shift_operators(X, GX, keep=keep))
     out["contracts"] = bool(out["tr_S_over_k"] <= 1.0)  # selection criterion
     out["slack"] = float(1.0 - out["tr_S_over_k"])  # bigger => sharper
