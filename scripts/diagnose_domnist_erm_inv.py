@@ -239,6 +239,7 @@ def diagnose(block: dict, hyperparameters: dict, plot: bool = True) -> dict:
         split=orchestrator.split,
         split_seed=int(orchestrator.split_seed),
         split_key=data.split_key,
+        net=orchestrator.net,
         mix_in=float(orchestrator.mix_in),
         augmentation=orchestrator.augmentation,
         al=dict(

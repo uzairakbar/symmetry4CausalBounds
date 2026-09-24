@@ -111,6 +111,7 @@ def select_gamma(block: dict, hyperparameters: dict, n_select: int, target: floa
         split=orchestrator.split,
         split_seed=int(orchestrator.split_seed),
         split_key=runner.data_.split_key,
+        net=orchestrator.net,
         n_select=int(n_select),
         target_coverage=float(target),
         gamma_lo=lo,

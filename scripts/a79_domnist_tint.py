@@ -32,9 +32,10 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
 (vi)  the table's gamma provenance: with no selection beside the run it claims no
       calibration; with a selection of another gamma, or of the same gamma on
-      another split, it says "gamma not from the selection beside it" and prints no
-      split-C line; with the matching one it names the selection's
-      `calibrated_on` method and its split-C coverage.
+      another split or with other nets, it says "gamma not from the selection
+      beside it" and prints no split-C line; with the matching one it names the
+      selection's `calibrated_on` method and its split-C coverage; a run.json
+      without a `net` key reads as the flat nets.
 
   uv run python scripts/a79_domnist_tint.py
 """
@@ -486,13 +487,19 @@ def leg_vi(scratch):
             json.dump({**selection, **overrides}, fh)
         return domnist_table(root)
 
-    for why, overrides in (("another gamma", {"shared_gamma": 0.12188}), ("another split", {"split_key": "x"})):
+    others = (
+        ("another gamma", {"shared_gamma": 0.12188}),
+        ("another split", {"split_key": "x"}),
+        ("other nets", {"net": "domnist-pool"}),
+    )
+    for why, overrides in others:
         tex = write(**overrides)
         check(f"(vi) {why}: flagged", "gamma not from the selection beside it" in tex)
         check(f"(vi) {why}: no calibration claim, no split-C line", "calibrated on" not in tex and "split-C" not in tex)
     tex = write()
     check("(vi) the matching selection: the calibration names calibrated_on", "calibrated on DA+PI" in tex)
     check("(vi) the matching selection: split-C coverage of both", "DA+PI 0.9952, PI 0.9991" in tex)
+    check("(vi) a run without a net key reads as the flat nets", "nets domnist-fast" in tex)
     os.remove(path)
 
 

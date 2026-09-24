@@ -1045,6 +1045,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             split=self.split,
             split_seed=int(self.split_seed),
             split_key=runner.data_.split_key,
+            net=self.net,
             pop_seed=int(self.pop_seed),
             exemplar_seed=int(self.exemplar_seed),
             digits=digits,

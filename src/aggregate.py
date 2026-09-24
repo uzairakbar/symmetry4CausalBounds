@@ -772,11 +772,17 @@ def _band(values, fmt: str) -> tuple[str, str]:
     return f"${mean:{fmt}}$", rf"{{\scriptsize$[{lo:{fmt}}, {hi:{fmt}}]$}}"
 
 
+#: the do-MNIST net of records written before `net` was recorded
+FLAT_NET = "domnist-fast"
+
+
 def _calibration(artifacts: str, run: dict) -> list[str]:
     """The comment lines on where gamma came from. The calibration sentence and
     the split-C coverage are written only when the `gamma_selection.json` beside
-    the run selected this very gamma on this very split; otherwise a WARNING."""
-    head = f"% gamma = {float(run['gamma']):.6g} for every method"
+    the run selected this very gamma on this very split with the same nets;
+    otherwise a WARNING."""
+    net = run.get("net", FLAT_NET)
+    head = f"% gamma = {float(run['gamma']):.6g} for every method, nets {net}"
     path = f"{artifacts}/do_mnist/select/gamma_selection.json"
     if not os.path.exists(path):
         return [f"{head}; no gamma_selection.json beside the run, so its calibration is not checked."]
@@ -785,14 +791,16 @@ def _calibration(artifacts: str, run: dict) -> list[str]:
     shared, method = selection.get("shared_gamma"), selection.get("calibrated_on")
     same_gamma = shared is not None and bool(np.isclose(float(run["gamma"]), float(shared), rtol=1e-9, atol=0.0))
     same_split = selection.get("split_key") is not None and selection.get("split_key") == run.get("split_key")
-    if not (same_gamma and same_split and method in selection):
+    same_net = selection.get("net", FLAT_NET) == net
+    if not (same_gamma and same_split and same_net and method in selection):
         logger.warning(
-            f"aggregate: the run's gamma {float(run['gamma']):.6g} (split {run.get('split_key')}) is not the "
-            f"selection's shared gamma {shared} (split {selection.get('split_key')}); the table says so."
+            f"aggregate: the run's gamma {float(run['gamma']):.6g} (split {run.get('split_key')}, nets {net}) is "
+            f"not the selection's shared gamma {shared} (split {selection.get('split_key')}, nets "
+            f"{selection.get('net', FLAT_NET)}); the table says so."
         )
         return [
             f"{head}; gamma not from the selection beside it (shared_gamma {shared}, split_key "
-            f"{'matches' if same_split else 'differs'})."
+            f"{'matches' if same_split else 'differs'}, nets {'match' if same_net else 'differ'})."
         ]
     lines = [
         f"{head}, calibrated on {method} to target_coverage {selection.get('target_coverage')} on split C "
