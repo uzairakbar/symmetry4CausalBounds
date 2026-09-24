@@ -20,7 +20,8 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       title is $h({\bm{x}})$ and the x-label `tint`; ERM and DA+ERM are not drawn;
       the one legend is the methods' in the bottom-right cell; the histogram is
       the query panel's (`draw_da_density`); a failed tint gets its cross; the
-      y ticks read 0 and 1 over a light line at 0.5; the title and the x-label
+      y ticks read 0 and 1, a white dashed line at 0.5 over the fills, PI+INV's
+      band lowest; the title and the x-label
       are the density label's size.
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
@@ -320,8 +321,28 @@ def leg_iv(scratch):
     check(
         "(iv) the bounds' y ticks are 0 and 1, labelled without decimals", ticks and all(t == ["0", "1"] for t in texts)
     )
-    mid = [ln for ax in bands for ln in ax.get_lines() if list(ln.get_ydata()) == [0.5, 0.5] and ln.get_zorder() < 1]
-    check("(iv) a light line at 0.5 behind the bands in every row", len(mid) == len(bands))
+    mid = [
+        ln
+        for ax in bands
+        for ln in ax.get_lines()
+        if list(ln.get_ydata()) == [0.5, 0.5] and 1 < ln.get_zorder() < 2 and ln.get_linestyle() == "--"
+    ]
+    white = all(ln.get_color() == "white" for ln in mid)
+    check("(iv) a white dashed line at 0.5 over the fills, under the lines", len(mid) == len(bands) and white)
+    import seaborn as sns
+    from matplotlib.collections import PolyCollection
+
+    from src.experiments.utils.constants import COLOR_MAP
+
+    grey = np.asarray(sns.color_palette("deep")[COLOR_MAP["PI+INV"]])
+
+    def lowest_is_pi_inv(ax):
+        fills = [c for c in ax.collections if isinstance(c, PolyCollection) and len(c.get_facecolor())]
+        low = min(fills, key=lambda c: c.get_zorder())
+        others = [c.get_zorder() for c in fills if c is not low]
+        return np.allclose(low.get_facecolor()[0][:3], grey) and all(z > low.get_zorder() for z in others)
+
+    check("(iv) PI+INV's band is the lowest", all(lowest_is_pi_inv(ax) for ax in bands))
     sizes = {bands[0].title.get_fontsize(), bottom.xaxis.label.get_fontsize(), bottom.yaxis.label.get_fontsize()}
     check("(iv) the title, the x-label and the density label share one size", len(sizes) == 1, str(sizes))
     labels = {line.get_label() for ax in bands for line in ax.get_lines()}
@@ -341,7 +362,20 @@ def leg_iv(scratch):
         np.isclose(share, 2 / 3 * 0.14 / 1.28 * 3 / 3.08),
     )
     full = fig.subplotpars.right - fig.subplotpars.left
-    check("(iv) the tick labels have their own column", left[0].get_position().x1 < bands[0].get_position().x0)
+    fig.canvas.draw()
+    to_figure = fig.transFigure.inverted()
+    label_left = min(
+        to_figure.transform((t.get_window_extent().x0, 0))[0]
+        for ax in bands
+        for t in ax.get_yticklabels()
+        if t.get_text()
+    )
+    clear = []
+    for ax in left:
+        box, alpha = ax.get_position(), ax.images[0].get_array()[..., 3]
+        cols = np.flatnonzero(alpha.max(axis=0) > 0.1)
+        clear.append(box.x0 + (cols[-1] + 1) / alpha.shape[1] * box.width < label_left)
+    check("(iv) the blue ink stops short of the y tick labels", all(clear))
     drawn = left[0].get_position().width / full
     check(
         "(iv) the drawn image takes that share of the row", abs(drawn / share - 1) < 0.05, f"{drawn:.4f} vs {share:.4f}"

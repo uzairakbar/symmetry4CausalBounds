@@ -135,8 +135,12 @@ TINT_WIDTHS: tuple[float, float, float, float] = (_TINT_IMAGE, TINT_TICK_PAD, 1.
 # the bounds' y ticks and their mid reference line, and the gap (figure fraction)
 # between a blue image and the tick labels, and between a panel and its red image
 TINT_YTICKS: tuple[float, float] = (0.0, 1.0)
-TINT_MIDLINE: dict = {"y": 0.5, "color": "0.85", "linewidth": 0.6, "zorder": 0}
-TINT_LABEL_GAP: float = 0.008
+# the 0.5 line: white and dashed ABOVE the band fills (zorder 1), below the band
+# edges and the point lines (zorder 2), so it reads across the bands
+TINT_MIDLINE: dict = {"y": 0.5, "color": "white", "linestyle": "--", "linewidth": 0.6, "zorder": 1.5}
+TINT_LABEL_GAP: float = 0.003
+# drawn first and lowest, so the other bands read on top of it
+TINT_UNDER: str = "PI+INV"
 # the point estimators the stack leaves out (the bands and the target are what it compares)
 TINT_OMIT: tuple[str, ...] = ("ERM", "DA+ERM")
 # the do-MNIST table: the bootstrap band's level (%) and resample count
@@ -648,7 +652,10 @@ def tint_stack(artifacts: str, out: str | None = None):
         ax = fig.add_subplot(grid[r, 2], sharex=shared)
         shared = shared or ax
         outcomes = {k: v for k, v in load(f"{folder}/tint_{digit}_outcomes.pkl").items() if k not in TINT_OMIT}
+        outcomes = dict(sorted(outcomes.items(), key=lambda item: item[0] != TINT_UNDER))
         drawn, _, _ = _draw_bands(ax, x, outcomes)
+        if isinstance(drawn.get(TINT_UNDER), tuple):
+            drawn[TINT_UNDER][0].set_zorder(0.5)
         mark_failed(ax, x, outcomes)
         for name, handle in drawn.items():
             handles.setdefault(parse_method(name), (handle, name))
