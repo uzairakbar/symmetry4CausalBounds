@@ -156,6 +156,9 @@ class DoMNISTConfig:
     n_constraint_iv: int = 384
     jax_grad: bool = True
     mu_clip: bool = True
+    # BLAS threads of each CopSens fit (the factor analysis). The full pool of a
+    # loaded 32-core node oversubscribes: the X fit took 26 s at 32 threads, 1 s at 8
+    blas_threads: int | None = 8
     # the exemplar tints on the query axis, alternating red/blue down the digits
     exemplar_colors: Literal["alternating", "random"] = "alternating"
     # the tint sweep's image per digit: `test` draws it from MNIST test (an image no
@@ -844,6 +847,7 @@ def _copsens_builders(
         # mu_y outside the attainable range is impossible under the SEM
         mu_clip=DOMNIST_CONFIG.attainable if DOMNIST_CONFIG.mu_clip else None,
         jax_grad=DOMNIST_CONFIG.jax_grad,
+        blas_threads=DOMNIST_CONFIG.blas_threads,
         recalibrate=recalibrate,
         clipy=clipy,
         n_jobs=n_jobs,

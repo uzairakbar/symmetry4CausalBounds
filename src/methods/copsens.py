@@ -39,6 +39,7 @@ is accepted for the uniform signature and does nothing (the latent ball has no
 mean-matched slice); `pad` and `clipy` are `BoundedSA._finalize`'s.
 """
 
+import contextlib
 import copy
 
 import cvxpy as cp
@@ -47,6 +48,7 @@ from loguru import logger
 from scipy.optimize import NonlinearConstraint, minimize
 from scipy.stats import norm
 from sklearn.decomposition import FactorAnalysis
+from threadpoolctl import threadpool_limits
 
 from src.methods.sensitivity_models import BoundedSA, IntersectionMixin, SolveStatus
 
@@ -269,6 +271,7 @@ class CopSensPI(BoundedSA):
         mu_clip=None,
         jax_grad=True,
         seed=0,
+        blas_threads=None,
     ):
         if link not in LINKS:
             raise ValueError(f"unknown link {link!r}; accepted: {sorted(LINKS)}")
@@ -286,6 +289,9 @@ class CopSensPI(BoundedSA):
         self.mu_clip = mu_clip
         self.jax_grad = jax_grad
         self.seed = seed
+        # a cap on the BLAS threads of the fit (the factor analysis); None leaves the
+        # pool alone. On a loaded many-core node the full pool oversubscribes
+        self.blas_threads = blas_threads
         self._ctx = None
         self._kernels = None
         self._floor_cache = {}
@@ -306,6 +312,15 @@ class CopSensPI(BoundedSA):
     # ------------------------------------------------------------------- fit
 
     def _fit(self, X, y, **kwargs):
+        cap = (
+            threadpool_limits(int(self.blas_threads), user_api="blas")
+            if self.blas_threads is not None
+            else contextlib.nullcontext()
+        )
+        with cap:
+            return self._fit_model(X, y, **kwargs)
+
+    def _fit_model(self, X, y, **kwargs):
         self.rng_ = np.random.default_rng(self.seed)
         self.link_ = LINKS[self.link_name]
 
@@ -771,6 +786,7 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
             mu_clip=self.mu_clip,
             jax_grad=self.jax_grad,
             seed=self.seed,
+            blas_threads=self.blas_threads,
             outcome_model=self.outcome_models[key],
         )
 
