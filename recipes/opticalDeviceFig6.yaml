@@ -2,7 +2,6 @@ defaults:
     recalibrate: true
     pad: true
     clipy: false
-    mean_match: true
     normalize: true
     n_jobs: -1
 optical_device:
