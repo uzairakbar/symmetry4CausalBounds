@@ -79,7 +79,6 @@ from src.experiments.configs import (  # noqa: E402
 from src.experiments.generic_runner import ExpansionStrategy  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.utils.constants import IV_MODE_METHODS, REAL_Z_METHODS  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
 from src.oracle import eps_iv_star, eps_iv_z_star  # noqa: E402
@@ -219,10 +218,13 @@ def leg_ii():
     runner.build_models(0, 0, data)
     star = float(runner.get_oracle(0).eps_iv_star)
     # any class carrying the OBSERVED instrument's constraint declares gamma_z: the
-    # (Z)-only spellings, plus the bare IV_MODE_METHODS defaults, whose mode is (T,Z)
-    # and so carries Z beside T. The recipe decides which of them run, so the gate
-    # takes the first it lists rather than pinning PI+IV
-    z_constrained = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
+    # non-DA +IV intervals and the (Z)-only spellings, plus the bare IV-mode defaults,
+    # whose mode is (T,Z) and so carries Z beside T (a semantic set of seven, spelled
+    # out). The recipe decides which of them run, so the gate takes the first it
+    # lists rather than pinning PI+IV
+    z_constrained = frozenset(
+        {"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)", "DA+ERM+IV", "DA+PI+IV", "PI&DA+PI+IV"}
+    )
     witness = next((name for name in runner.methods if name in z_constrained), None)
     check("(ii) the block lists a +IV class carrying gamma_z", witness is not None, f"{sorted(runner.methods)}")
     if witness is None:

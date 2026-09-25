@@ -64,7 +64,8 @@ sys.path.insert(0, REPO)
 from src.experiments.cigarettes import DIM_IDS, RAY_ID, CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import QUERY_GAMMA, resolve_dataset_block  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.utils.constants import ARTIFACTS_DIRECTORY, SUBDIR_QUERY, TEX_MAPPER  # noqa: E402
+from src.experiments.utils.constants import ARTIFACTS_DIRECTORY, SUBDIR_QUERY  # noqa: E402
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.sem.cigarettes import V, null_basis  # noqa: E402
 
 GRID_POINTS = 32
@@ -369,7 +370,7 @@ def leg_v(orch, runner):
         check("(v) the cosine row", gap < CELL_TOL, f"{values}")
 
     trims = trim("dim_cpi_outcomes")
-    row = row_named(rows, TEX_MAPPER["PI+INV"])
+    row = row_named(rows, method_label("PI+INV", orch.has_z))
     printed = None if row is None else re.search(r"\(([0-9.]+)\)\s*$", cells(row)[-1])
     check(
         "(v) PI+INV's log-CPI width ratio matches the figure's trim",

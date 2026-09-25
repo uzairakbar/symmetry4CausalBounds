@@ -38,13 +38,14 @@ non-empty, no tolerance constant. Legs:
   (vii)  `perf.set_backend` reaches the class: a pin on a built CONIC_FITS model
          changes `.backend`. Catches the silent one -- a missing isinstance arm
          leaves every backend reporting the same numbers.
-  (viii) style: no point estimate is in REAL_Z_METHODS (it would be inert, and it
-         breaks a66's conjunction) and every REAL_Z_METHODS name draws with
-         INSTRUMENT_Z_STYLE. FAILED before SS6 on `DA+IV(Z)`, which was in both.
+  (viii) style: every point estimate is dashed and every interval solid, with and
+         without a real Z (the ERMs are point estimates whatever their instrument;
+         a real Z shows in the label, never in the line). FAILED before SS6 on
+         `DA+IV(Z)`, which was drawn both ways.
   (ix)   hue on literals and the label pooling: the three mode spellings share one
-         label and nothing else does. `COLOR_MAP["DA+ERM+IV(Z)"] == 3` is the
-         load-bearing one -- without the `_z`/`_family` remap the aliasing loop
-         leaves it green.
+         label with and without a real Z, and nothing else does under one.
+         DA+ERM+IV(Z) on deep 3 (red) is the load-bearing one -- a (Z) spelling
+         aliased onto its green base would draw a red method green.
   (x)    the rank-revealing basis, the ONLY leg that guards it. Two assertions run
          against the CLASS: its fit on a duplicated instrument column must stay
          ERM-optimal over the TRUE kernel of the rank cut, and must equal the fit
@@ -54,11 +55,14 @@ non-empty, no tolerance constant. Legs:
          script's own basis copy and pass under that mutation, so they are labelled
          as such. Legs (i) and (ii) both PASS against a plain QR too, so without
          this leg the requirement ships unguarded.
-  (xi)   the legend key: six handles draw five rows -- erm, erm+iv, erm~, erm~+iv,
-         erm~+iv~ on hues 0, 0, 3, 3, 2, the two green mode spellings pooled onto one
-         and the five labels pairwise distinct. Catches the render fold not
-         happening (six rows) and a missing TEX_MAPPER entry, which collapses the set
-         to four or three.
+  (xi)   the legend key: in one column with a real Z six handles draw five rows --
+         erm, erm+iv, erm~, erm~+iv, erm~+iv~ on hues 0, 0, 3, 3, 2, the two green
+         mode spellings pooled onto one and the five labels pairwise distinct; in a
+         merged grid (ERM and DA+ERM from a null-Z column, ERM+IV, DA+ERM+IV(Z) and
+         DA+ERM+IV(T,Z) from a Z column) three rows, erm+iv, erm~+iv, erm~+iv~.
+         Catches the render fold not happening (six rows), a label aliased onto
+         another, which collapses the set to four or three, and a merge that keeps a
+         null-Z column's own entries.
 
 Usage:
     MPLBACKEND=Agg python scripts/a69_erm_iv.py [--only LEG]
@@ -80,20 +84,27 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import to_rgb  # noqa: E402
 
 import src.experiments.perf as perf  # noqa: E402
-import src.experiments.utils.plotting as plotting  # noqa: E402
 from src.aggregate import _legend  # noqa: E402
-from src.experiments.configs import EPS_TOL, MethodRegistry  # noqa: E402
+from src.experiments.configs import ALL_METHODS, DOMNIST_ONLY_METHODS, EPS_TOL, MethodRegistry  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
-    ALPHA_MAP,
-    COLOR_MAP,
-    INSTRUMENT_Z_STYLE,
-    POINT_ESTIMATES,
-    REAL_Z_METHODS,
-    TEX_MAPPER,
+    DEEP_HEX,
+    DEEP_INDEX,
+    IV_MODE_METHODS,
+    IV_MODES,
+    PARTIAL_IDENTIFICATION_STYLE,
+    POINT_ESTIMATE_STYLE,
+    alpha,
+    hue,
+    is_interval,
+    is_point_estimate,
+    line_style,
     method_style,
+    resolve,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.methods.regression import (  # noqa: E402
     LeastSquaresClosedForm,
     MomentConstrainedLeastSquares,
@@ -300,33 +311,52 @@ def leg_vii():
 
 
 def leg_viii():
-    print("(viii) the style channel: point estimates stay out of REAL_Z_METHODS")
-    overlap = REAL_Z_METHODS & set(POINT_ESTIMATES)
-    # `_line_style` reads POINT_ESTIMATES FIRST, so an entry in both is inert, and
-    # a66:125 asserts the conjunction `in REAL_Z_METHODS and style is the Z one`.
-    # This FAILED before SS6: `DA+IV(Z)` was in both tables
-    check("(viii) no point estimate is in REAL_Z_METHODS", not overlap, f"{sorted(overlap)}")
-    for name in sorted(REAL_Z_METHODS):
-        check(f"(viii) {name} draws with INSTRUMENT_Z_STYLE", plotting._line_style(name) == INSTRUMENT_Z_STYLE)
+    print("(viii) the style channel: point estimates dashed, intervals solid")
+    names = [
+        spelling
+        for base in ALL_METHODS + DOMNIST_ONLY_METHODS
+        for spelling in ([base] + [f"{base}({m})" for m in IV_MODES] if base in IV_MODE_METHODS else [base])
+    ]
+    # a point estimate drawn like an interval's edge, or the reverse, reads as the
+    # other kind. This FAILED before SS6: `DA+IV(Z)` was drawn both ways
+    wrong = [
+        (n, hz)
+        for n in names
+        for hz in (True, False)
+        if line_style(n, hz) != (POINT_ESTIMATE_STYLE if is_point_estimate(n) else PARTIAL_IDENTIFICATION_STYLE)
+    ]
+    check("(viii) every point estimate dashed, every interval solid, with or without a Z", not wrong, f"{wrong}")
+    solid = [n for n in names if is_interval(n) and resolve(n, True).side.iv_set == frozenset("Z")]
+    check(
+        "(viii) the four real-Z interval members are solid too",
+        len(solid) == 4 and all(line_style(n, True) == PARTIAL_IDENTIFICATION_STYLE for n in solid),
+        f"{solid}",
+    )
 
 
 def leg_ix():
     print("(ix) hue on literals, labels pooled on the mode spellings alone")
-    # literals, not `== COLOR_MAP["DA+ERM"]`: the comparison form passes for the
-    # wrong reason if the family's own hue is ever edited
+    # literals, not a comparison with DA+ERM's hue: the comparison form passes for
+    # the wrong reason if the family's own hue is ever edited
     for name, want in (("ERM+IV", 0), ("DA+ERM+IV", 2), ("DA+ERM+IV(T)", 2), ("DA+ERM+IV(T,Z)", 2)):
-        check(f"(ix) COLOR_MAP[{name!r}] == {want}", COLOR_MAP.get(name) == want, f"{COLOR_MAP.get(name)!r}")
-    # the load-bearing one: without the `_z`/`_family` remap the aliasing loop
-    # leaves the (Z) spelling on the green base and a red method is drawn green
-    got = COLOR_MAP.get("DA+ERM+IV(Z)")
-    check("(ix) COLOR_MAP['DA+ERM+IV(Z)'] == 3", got == 3, f"{got!r}")
+        got = DEEP_INDEX[hue(name, True)]
+        check(f"(ix) {name} is deep {want}", got == want, f"{got!r}")
+    # the load-bearing one: a (Z) spelling aliased onto its green base would draw a
+    # red method green
+    got = DEEP_INDEX[hue("DA+ERM+IV(Z)", True)]
+    check("(ix) DA+ERM+IV(Z) is deep 3", got == 3, f"{got!r}")
     for name in ("ERM+IV", "DA+ERM+IV", "DA+ERM+IV(Z)", "DA+ERM+IV(T)", "DA+ERM+IV(T,Z)"):
-        check(f"(ix) ALPHA_MAP[{name!r}] is solid", ALPHA_MAP.get(name) == 1.0, f"{ALPHA_MAP.get(name)!r}")
-    pooled = TEX_MAPPER["DA+ERM+IV"] == TEX_MAPPER["DA+ERM+IV(T)"] == TEX_MAPPER["DA+ERM+IV(T,Z)"]
-    check("(ix) the three mode spellings share one label", pooled)
+        check(f"(ix) {name} is solid (alpha 1)", alpha(name, True) == 1.0, f"{alpha(name, True)!r}")
+    for has_z in (True, False):
+        pooled = (
+            method_label("DA+ERM+IV", has_z)
+            == method_label("DA+ERM+IV(T)", has_z)
+            == method_label("DA+ERM+IV(T,Z)", has_z)
+        )
+        check(f"(ix) the three mode spellings share one label, has_z {has_z}", pooled)
     # the first, second and last pairs share a hue, an alpha and a dash, so the
-    # label is the ONLY thing keeping them apart in the legend -- ATE against
-    # DA+ERM is red 3, solid alpha, point-estimate dash on both sides
+    # label is the ONLY thing keeping them apart in the legend -- ERM+IV against
+    # ERM is blue, solid alpha, point-estimate dash on both sides
     for a, b in (
         ("ERM+IV", "ERM"),
         ("DA+ERM+IV(Z)", "DA+ERM"),
@@ -334,7 +364,7 @@ def leg_ix():
         ("DA+ERM+IV", "DA+ERM"),
         ("ATE", "DA+ERM"),
     ):
-        check(f"(ix) TEX_MAPPER[{a!r}] differs from TEX_MAPPER[{b!r}]", TEX_MAPPER[a] != TEX_MAPPER[b])
+        check(f"(ix) with a Z, {a} is labelled apart from {b}", method_label(a, True) != method_label(b, True))
 
 
 def leg_x():
@@ -389,34 +419,49 @@ def leg_x():
     check("(x) the duplicate column changes nothing to 1e-9 relative", gap < 1e-9, f"{gap:.2e}")
 
 
-def leg_xi():
-    print("(xi) the legend pools the mode spellings and nothing else")
-    names = ["ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV(T)", "DA+ERM+IV(T,Z)"]
+def drawn_rows(columns, merged):
+    """(labels, colours, handle count) of `_legend` over [(names, has_z)] columns,
+    each name styled as `_metric_grid` styles it."""
     fig = plt.figure()
     ax = fig.add_subplot(111)
     handles = {}
-    for name in names:
-        # one column with a real Z, as the aggregate keys it: by render
-        style = method_style(name, True)
-        (line,) = ax.plot([0, 1], [0, 1], color=plotting._get_method_color(name), linestyle=style.linestyle)
-        handles.setdefault(style.signature, (line, style, name))
+    for names, has_z in columns:
+        for name in names:
+            style = method_style(name, has_z, merged=merged)
+            (line,) = ax.plot([0, 1], [0, 1], color=style.colour, linestyle=style.linestyle)
+            handles.setdefault(style.signature, (line, style, name))
     legend = _legend(fig, handles)
     texts = [text.get_text() for text in legend.get_texts()]
-    colours = [handle.get_color() for handle in legend.legend_handles]
+    colours = [to_rgb(handle.get_color()) for handle in legend.legend_handles]
     plt.close(fig)
+    return texts, colours, sum(len(names) for names, _ in columns)
+
+
+def leg_xi():
+    print("(xi) the legend pools the mode spellings and nothing else")
+    names = ["ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV(T)", "DA+ERM+IV(T,Z)"]
+    texts, colours, n = drawn_rows([(names, True)], merged=False)
     # six handles, five rows: `_legend` folds entries that render as the same pixels,
-    # which is the ONE pooling SS6.4 asks for. A missing TEX_MAPPER line collapses the
-    # set further -- to four with the (Z) label aliased, to three under a blanket alias
-    entries = {(text, colour) for text, colour in zip(texts, colours, strict=True)}
-    check("(xi) six handles draw five legend rows", len(texts) == 5, f"{len(texts)} of {len(handles)} handles")
+    # which is the ONE pooling SS6.4 asks for. A label aliased onto another collapses
+    # the set further -- to four with the (Z) label aliased, to three under a blanket alias
+    entries = set(zip(texts, colours, strict=True))
+    check("(xi) six handles draw five legend rows", len(texts) == 5, f"{len(texts)} of {n} handles")
     check("(xi) five distinct (label, hue) legend entries", len(entries) == 5, f"{len(entries)}")
-    want = [TEX_MAPPER[n] for n in ("ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV")]
+    rows = ("ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV")
+    want = [method_label(name, True) for name in rows]
     check("(xi) the rows are erm, erm+iv, erm~, erm~+iv, erm~+iv~ in that order", texts == want, f"{texts}")
-    hues = [plotting._get_method_color(n) for n in ("ERM", "ERM+IV", "DA+ERM", "DA+ERM+IV(Z)", "DA+ERM+IV")]
-    check("(xi) their hues are 0, 0, 3, 3, 2", colours == hues, f"{colours}")
-    green = {text for text, colour in entries if colour == plotting._get_method_color("DA+ERM+IV")}
+    hues = [DEEP_INDEX[hue(name, True)] for name in rows]
+    deep = [to_rgb(DEEP_HEX[name]) for name in ("blue", "blue", "red", "red", "green")]
+    check("(xi) their hues are 0, 0, 3, 3, 2", hues == [0, 0, 3, 3, 2] and colours == deep, f"{hues}")
+    green = {text for text, colour in entries if colour == to_rgb(DEEP_HEX["green"])}
     check("(xi) the (T) and (T,Z) spellings share the one green entry", len(green) == 1, f"{len(green)}")
     check("(xi) the five labels are pairwise distinct", len({text for text, _ in entries}) == 5, f"{len(set(texts))}")
+
+    # a merged grid: the null-Z column's ERM and DA+ERM draw as their Z counterparts
+    null, with_z = ["ERM", "DA+ERM"], ["ERM+IV", "DA+ERM+IV(Z)", "DA+ERM+IV(T,Z)"]
+    texts, _, _ = drawn_rows([(null, False), (with_z, True)], merged=True)
+    want = [method_label(name, True) for name in with_z]
+    check("(xi) merged: three rows erm+iv, erm~+iv, erm~+iv~", texts == want, f"{texts}")
 
 
 if __name__ == "__main__":

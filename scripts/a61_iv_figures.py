@@ -122,12 +122,12 @@ from src.experiments.utils.constants import (  # noqa: E402
     NORMALIZE_BASELINES,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
-    TEX_MAPPER,
     iv_mode,
     parse_method,
     plot_keys_for,
     validate_plot_keys,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot, normalize_sweep  # noqa: E402
@@ -727,7 +727,9 @@ def leg_vi(reference):
     )
     label = plt.gca().get_ylabel()
     check(
-        "(vi) the y-label carries the baseline's name", label == rf"average interval width / {TEX_MAPPER['PI']}", label
+        "(vi) the y-label carries the baseline's name",
+        label == rf"average interval width / {method_label('PI', False)}",
+        label,
     )
     plt.close("all")
 

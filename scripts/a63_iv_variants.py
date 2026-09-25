@@ -26,8 +26,10 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         block, any suffix on the do_mnist block raises; an unquoted `(T,Z)` in a
         YAML flow list raises with the quoting hint and the quoted form resolves;
         `IV_MODE_METHODS` is the derived set, every stored spelling has its display
-        entries (`(T,Z)` equal to the bare, `(Z)` on the same hue), `DA+ERM+IV(Z)` is
-        a point estimate, `build_methods` returns the requested spellings in order.
+        style with and without a real Z (`(T,Z)` equal to the bare, `(Z)` on its
+        family's hue, and without a Z `DA+PI+IV(Z)` and `PI&DA+PI+IV(Z)` draw as
+        DA+PI and PI&DA+PI), `DA+ERM+IV(Z)` is a point estimate, `build_methods`
+        returns the requested spellings in order.
         Catches: a parser accepting a suffix on a non-DA method, a duplicate check
         keyed on the spelling (it would let R2's case through), a missing display
         entry (a KeyError at plot time), a registry that reorders. Misses: what a
@@ -63,11 +65,13 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         line is drawn to 1.3 (the frame clips it); the same figure un-normalised,
         a normalised worst-error figure with no baseline among the methods, and an
         approx-error figure under the toggle are not clamped; on a sweep drawn
-        with `DA+PI+IV(Z)` beside `DA+PI+IV` the `(Z)` line carries the
-        `INSTRUMENT_Z_STYLE` dash pattern and the base line is solid. Catches: the
-        hook above `_rescale` (the pad survives), keyed on the toggle rather than
-        on a baseline (the no-baseline and approx-error cases clamp), a dropped
-        `set_yscale` (the log config survives), the `(Z)` sibling drawn solid.
+        with `DA+PI+IV(Z)` beside `DA+PI+IV`, with a real Z, the `(Z)` line is
+        solid in DA+PI's deep red under its own label and the base line solid
+        green; without one the `(Z)` line is DA+PI's, solid red under its label,
+        and the legend keeps 2 entries. Catches: the hook above `_rescale` (the
+        pad survives), keyed on the toggle rather than on a baseline (the
+        no-baseline and approx-error cases clamp), a dropped `set_yscale` (the log
+        config survives), the `(Z)` sibling drawn in its base's hue or dashed.
         Misses: a hook after the tick helpers, which leaves the limits right and
         the minor labels re-blanked.
   (v)   both recipes resolve with `DA+PI+IV` and `DA+PI+IV(Z)` and no stored
@@ -110,6 +114,7 @@ import numpy as np
 import seaborn as sns
 import yaml
 from loguru import logger
+from matplotlib.colors import to_rgb
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -131,24 +136,24 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
-    ALPHA_MAP,
     ARTIFACTS_DIRECTORY,
     CLAMP_YLIM,
-    COLOR_MAP,
-    INSTRUMENT_Z_STYLE,
+    DEEP_INDEX,
     IV_MODE_METHODS,
     NORMALIZED_SWEEP_SUFFIXES,
     PLOT_CONFIGS,
-    POINT_ESTIMATES,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
-    TEX_MAPPER,
+    hue,
+    is_point_estimate,
     iv_mode,
+    method_style,
     parse_method,
     plot_keys_for,
     spelled_method,
     validate_plot_keys,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES, rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot, normalize_sweep  # noqa: E402
@@ -536,21 +541,29 @@ def leg_i():
     derived = {m for m in ALL_METHODS if "DA+" in m and m.endswith("+IV")}
     check("(i) IV_MODE_METHODS is the derived set", set(IV_MODE_METHODS) == derived, f"{IV_MODE_METHODS}")
     for name in SPELLED:
-        present = name in TEX_MAPPER and name in COLOR_MAP and name in ALPHA_MAP
-        check(f"(i) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP", present)
+        styled = []
+        for has_z in (True, False):
+            try:
+                method_style(name, has_z)
+                styled.append(has_z)
+            except ValueError:
+                pass
+        check(f"(i) {name} has a style with and without a real Z", styled == [True, False], f"{styled}")
     for base in IV_MODE_METHODS:
         tz, z = f"{base}(T,Z)", f"{base}(Z)"
-        same = (
-            TEX_MAPPER[tz] == TEX_MAPPER[base] and COLOR_MAP[tz] == COLOR_MAP[base] and ALPHA_MAP[tz] == ALPHA_MAP[base]
-        )
-        check(f"(i) {tz} copies {base}'s display entries", same)
+        for has_z in (True, False):
+            same = method_style(tz, has_z) == method_style(base, has_z)
+            check(f"(i) {tz} draws as {base}, has_z {has_z}", same)
         # a real Z on the DA family: the family's hue, DA+PI's, PI&DA+PI's, DA+ERM's
         family = {"DA+PI+IV": "DA+PI", "PI&DA+PI+IV": "PI&DA+PI", "DA+ERM+IV": "DA+ERM"}[base]
         check(
-            f"(i) {z} shares {family}'s hue and differs from {base} in TeX",
-            COLOR_MAP[z] == COLOR_MAP[family] and TEX_MAPPER[z] != TEX_MAPPER[base],
+            f"(i) {z} shares {family}'s hue and, with a Z, differs from {base} in TeX",
+            hue(z, True) == hue(family, True) == hue(z, False) and method_label(z, True) != method_label(base, True),
         )
-    check("(i) DA+ERM+IV(Z) is a point estimate", "DA+ERM+IV(Z)" in POINT_ESTIMATES)
+    # without a Z the (Z) constraint is inert: the method IS its no-IV family (ii)
+    for z, family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI")):
+        check(f"(i) without a Z, {z} draws as {family}", method_style(z, False) == method_style(family, False))
+    check("(i) DA+ERM+IV(Z) is a point estimate", is_point_estimate("DA+ERM+IV(Z)"))
     order = ["PI&DA+PI+IV(Z)", "PI", "DA+PI+IV(T,Z)", "DA+PI+IV", "DA+ERM+IV(Z)", "ATE"]
     built = MethodRegistry.build_methods(
         order, gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=2**-8, **TOGGLES
@@ -741,7 +754,7 @@ def leg_iv():
         scale == "asinh" and limits != CLAMP_YLIM,
         f"{scale} {limits}",
     )
-    # the (Z) sibling is told apart by its dash pattern, in the base's hue
+    # the (Z) sibling is told apart by its hue and label; every interval is solid
     plt.close("all")
     with captured():
         create_sweep_plot(
@@ -753,24 +766,46 @@ def leg_iv():
             has_z=True,
         )
     drawn = {line.get_label(): line for line in plt.gca().get_lines()}
-    base, sibling = drawn.get(TEX_MAPPER["DA+PI+IV"]), drawn.get(TEX_MAPPER["DA+PI+IV(Z)"])
+    base, sibling = drawn.get(method_label("DA+PI+IV", True)), drawn.get(method_label("DA+PI+IV(Z)", True))
     check("(iv) a sweep draws DA+PI+IV and DA+PI+IV(Z) as two lines", base is not None and sibling is not None)
     if base is not None and sibling is not None:
-        pattern = getattr(sibling, "_unscaled_dash_pattern", None)
-        check(
-            "(iv) the (Z) line carries INSTRUMENT_Z_STYLE",
-            sibling.get_linestyle() != "-" and pattern == INSTRUMENT_Z_STYLE,
-            f"{sibling.get_linestyle()} {pattern}",
-        )
+        check("(iv) the (Z) line is solid", sibling.get_linestyle() == "-", sibling.get_linestyle())
         check("(iv) the base line is solid", base.get_linestyle() == "-", base.get_linestyle())
         # the (Z) sibling is PI+IV on the DA'd data: DA+PI's hue, not DA+PI+IV's
-        palette = sns.color_palette()
+        deep = sns.color_palette("deep")
         check(
             "(iv) the (Z) line in DA+PI's hue, the base in DA+PI+IV's",
-            tuple(sibling.get_color()) == tuple(palette[COLOR_MAP["DA+PI"]])
-            and tuple(base.get_color()) == tuple(palette[COLOR_MAP["DA+PI+IV"]]),
+            to_rgb(sibling.get_color()) == tuple(deep[DEEP_INDEX[hue("DA+PI", True)]])
+            and to_rgb(base.get_color()) == tuple(deep[DEEP_INDEX[hue("DA+PI+IV", True)]]),
             f"{base.get_color()} {sibling.get_color()}",
         )
+    plt.close("all")
+    # without a Z the (Z) sibling IS DA+PI: solid, red, DA+PI's label, and the two
+    # methods still read as two legend entries (they are two rows)
+    with captured():
+        create_sweep_plot(
+            x,
+            {"DA+PI+IV": y["PI"], "DA+PI+IV(Z)": y["DA+PI"]},
+            xlabel="x",
+            fname="gamma_width",
+            savefig=False,
+            has_z=False,
+        )
+    drawn = {line.get_label(): line for line in plt.gca().get_lines()}
+    sibling = drawn.get(method_label("DA+PI", False))
+    legend = plt.gca().get_legend()
+    check("(iv) without a Z, the (Z) line reads DA+PI's label", sibling is not None, f"{sorted(drawn)}")
+    if sibling is not None:
+        check(
+            "(iv) without a Z, the (Z) line is solid and red",
+            sibling.get_linestyle() == "-" and to_rgb(sibling.get_color()) == tuple(deep[DEEP_INDEX["red"]]),
+            f"{sibling.get_linestyle()} {sibling.get_color()}",
+        )
+    check(
+        "(iv) without a Z, the legend has 2 entries",
+        legend is not None and len(legend.get_texts()) == 2,
+        f"{None if legend is None else len(legend.get_texts())}",
+    )
     plt.close("all")
 
 
@@ -836,7 +871,8 @@ def leg_v():
     with open(os.path.join(folder, SUBDIR_QUERY, "coefficients.tex")) as handle:
         table = handle.read()
     if carries_z["cigarettes"]:
-        check("(v) T1 carries the (Z) row under its TeX label", f"{TEX_MAPPER['DA+PI+IV(Z)']} & " in table)
+        has_z = bool(reduced_block("cigarettes").get("iv"))
+        check("(v) T1 carries the (Z) row under its TeX label", f"{method_label('DA+PI+IV(Z)', has_z)} & " in table)
     outcomes = load(folder, SUBDIR_QUERY, "beta_pn_gamma_outcomes.pkl")
     want_f1 = expected(recipe("cigarettes")["methods"], "(v) F1")
     check(

@@ -2,23 +2,24 @@
 on the headline pair, and the 2 x 2 elasticity grid of `src/aggregate.py`.
 
 refactor9 is on top of refactor8. The hue is the family and a real Z on top of it
-changes the line style only (`REAL_Z_METHODS`); a (T) spelling is its base in hue,
-line and label; the query figures draw both band edges in the method's line style
-(`_draw_bands`) so two bands of one hue read apart; the price coefficients are
+shows only in the label (`constants.label`); a (T) spelling is its base in hue, line
+and label; the query figures draw both band edges of every interval solid
+(`_draw_bands`, `constants.line_style`); the price coefficients are
 labelled theta_{state price} and theta_{neighbour price} (`COEFFICIENT_LABELS`);
 `HEADLINE_METHODS` carries DA+PI+IV(Z); `elasticity_grid` tiles the four headline
 figures with y shared per row, x per column, the legend inside the top-right panel
 pinned upper left. Legs:
 
-  (i)   the convention: PI and PI+IV one hue, DA+PI and DA+PI+IV(Z) one hue,
-        PI+INV and PI+INV+IV one hue, DA+PI+IV and DA+PI+IV(T) one hue AND one
-        label AND one line; the real-Z names dash-dotted, their families solid.
-        Catches: any of the maps moved back.
+  (i)   the convention with a real Z: PI and PI+IV one hue, DA+PI and
+        DA+PI+IV(Z) one hue, PI+INV and PI+INV+IV one hue, DA+PI+IV and
+        DA+PI+IV(T) one hue AND one label AND one line; every interval solid,
+        the real-Z names and their families alike, with and without a Z.
+        Catches: any of the rules moved back.
   (ii)  the labels: both COEFFICIENT_LABELS carry \\theta and neither carries
         \\beta or p_n; T1's benchmark column is labelled with the neighbour-price
         theta. Catches: the old notation on a figure or the table.
   (iii) `_draw_bands` on a synthetic pair: one fill and two edge lines per
-        interval method, the edges in `_line_style`'s pattern, a (patch, line)
+        interval method, the edges in `line_style`'s pattern, a (patch, line)
         legend handle; `_mark_frame` keeps a log frame positive with a mark far
         above the grid. Catches: the edges dropped, the F2 blank frame back.
   (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): the
@@ -73,22 +74,23 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from src import aggregate  # noqa: E402
 from src.experiments.cigarettes import HEADLINE_COEFFICIENTS, HEADLINE_METHODS  # noqa: E402
-from src.experiments.configs import parse_experiment_plan, resolve_dataset_block  # noqa: E402
+from src.experiments.configs import ALL_METHODS, parse_experiment_plan, resolve_dataset_block  # noqa: E402
 from src.experiments.utils import plotting, set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
-    ALPHA_MAP,
     ARTIFACTS_DIRECTORY,
     COEFFICIENT_LABELS,
-    COLOR_MAP,
-    INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
+    IV_MODES,
     PARTIAL_IDENTIFICATION_STYLE,
-    REAL_Z_METHODS,
     SUBDIR_QUERY,
-    TEX_MAPPER,
+    alpha,
+    hue,
+    is_interval,
     iv_mode,
+    line_style,
     parse_method,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
 
 FAIL = []
@@ -102,10 +104,13 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-# a band the gamma_z axis moves carries the OBSERVED instrument's constraint: the
-# (Z)-only spellings, plus the bare `IV_MODE_METHODS` defaults, whose mode is (T,Z)
-# and so carries Z beside T. A membership test, not a substring one
-Z_CONSTRAINED: frozenset[str] = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
+# the seven spellings whose band carries the OBSERVED instrument's constraint: the
+# non-DA +IV intervals and the (Z)-only spellings, plus the bare `IV_MODE_METHODS`
+# defaults, whose mode is (T,Z) and so carries Z beside T. A semantic set, spelled
+# out: `iv_set` would add ERM+IV and PI&DA+PI+IV(T), which these legs do not test
+Z_CONSTRAINED: frozenset[str] = frozenset(
+    {"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)", "DA+ERM+IV", "DA+PI+IV", "PI&DA+PI+IV"}
+)
 
 
 def widens(width):
@@ -169,19 +174,25 @@ def leg_d(reference):
 def leg_i():
     print("(i) the family colour convention")
     for a, b in (("PI", "PI+IV"), ("DA+PI", "DA+PI+IV(Z)"), ("PI+INV", "PI+INV+IV"), ("DA+PI+IV", "DA+PI+IV(T)")):
-        check(f"(i) {a} and {b} share a hue", COLOR_MAP[a] == COLOR_MAP[b], f"{COLOR_MAP[a]} vs {COLOR_MAP[b]}")
-    check("(i) DA+PI+IV(Z) takes DA+PI's alpha", ALPHA_MAP["DA+PI+IV(Z)"] == ALPHA_MAP["DA+PI"])
-    check("(i) PI+IV and DA+PI+IV(Z) differ in hue (blue vs red)", COLOR_MAP["PI+IV"] != COLOR_MAP["DA+PI+IV(Z)"])
-    check("(i) DA+PI+IV(T) is labelled as DA+PI+IV", TEX_MAPPER["DA+PI+IV(T)"] == TEX_MAPPER["DA+PI+IV"])
-    check("(i) PI&DA+PI+IV(T) is labelled as PI&DA+PI+IV", TEX_MAPPER["PI&DA+PI+IV(T)"] == TEX_MAPPER["PI&DA+PI+IV"])
-    check("(i) DA+PI+IV(Z) keeps its own label", TEX_MAPPER["DA+PI+IV(Z)"] != TEX_MAPPER["DA+PI+IV"])
+        check(f"(i) {a} and {b} share a hue", hue(a, True) == hue(b, True), f"{hue(a, True)} vs {hue(b, True)}")
+    check("(i) DA+PI+IV(Z) takes DA+PI's alpha", alpha("DA+PI+IV(Z)", True) == alpha("DA+PI", True))
+    check("(i) PI+IV and DA+PI+IV(Z) differ in hue (blue vs red)", hue("PI+IV", True) != hue("DA+PI+IV(Z)", True))
+    check(
+        "(i) DA+PI+IV(T) is labelled as DA+PI+IV", method_label("DA+PI+IV(T)", True) == method_label("DA+PI+IV", True)
+    )
+    check(
+        "(i) PI&DA+PI+IV(T) is labelled as PI&DA+PI+IV",
+        method_label("PI&DA+PI+IV(T)", True) == method_label("PI&DA+PI+IV", True),
+    )
+    check("(i) DA+PI+IV(Z) keeps its own label", method_label("DA+PI+IV(Z)", True) != method_label("DA+PI+IV", True))
     for name in ("PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)"):
-        check(
-            f"(i) {name} is a real-Z name, dash-dotted",
-            name in REAL_Z_METHODS and plotting._line_style(name) == INSTRUMENT_Z_STYLE,
-        )
+        check(f"(i) {name}, a real-Z name, is solid", line_style(name, True) == PARTIAL_IDENTIFICATION_STYLE)
     for name in ("PI", "PI+INV", "DA+PI", "DA+PI+IV", "DA+PI+IV(T)", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(T)"):
-        check(f"(i) {name} is solid", plotting._line_style(name) == PARTIAL_IDENTIFICATION_STYLE)
+        check(f"(i) {name} is solid", line_style(name, True) == PARTIAL_IDENTIFICATION_STYLE)
+    # and without a Z: every interval name is solid
+    names = [n for n in ALL_METHODS if is_interval(n)] + [f"{b}({m})" for b in IV_MODE_METHODS for m in IV_MODES]
+    solid = [n for n in names if is_interval(n) and line_style(n, False) != PARTIAL_IDENTIFICATION_STYLE]
+    check("(i) without a Z every interval name is solid", not solid, f"{solid}")
 
 
 def leg_ii():
@@ -208,11 +219,9 @@ def leg_iii():
     check(
         "(iii) the handles are (patch, line) pairs", all(isinstance(h, tuple) and len(h) == 2 for h in handles.values())
     )
-    iv_edges = [
-        line for line in lines if line.get_color() == handles["PI+IV"][1].get_color() and line is not handles["PI"][1]
-    ]
-    pattern = getattr(handles["PI+IV"][1], "_unscaled_dash_pattern", None)
-    check("(iii) PI+IV's edges carry INSTRUMENT_Z_STYLE", pattern == INSTRUMENT_Z_STYLE, f"{pattern}")
+    check(
+        "(iii) PI+IV's edges are solid", handles["PI+IV"][1].get_linestyle() == "-", handles["PI+IV"][1].get_linestyle()
+    )
     check("(iii) PI's edges are solid", handles["PI"][1].get_linestyle() == "-", handles["PI"][1].get_linestyle())
     check("(iii) the drawn range is the union of the bands", lo == -1.0 and hi == 1.0, f"{lo} {hi}")
     check("(iii) PI and PI+IV share a colour on the axes", len({line.get_color() for line in lines}) == 1)
@@ -222,7 +231,6 @@ def leg_iii():
         "(iii) a log frame with a far mark stays positive and covers the mark",
         x_lo > 0 and x_hi >= 0.5579 and marks == [0.5579],
     )
-    del iv_edges
 
 
 def leg_iv():
@@ -296,7 +304,7 @@ def leg_iv():
     # moves widens along it -- monotonically AND strictly end to end, so a band that
     # never moves, or that is NaN at all but one radius, does not pass
     # "the gamma_z axis moves it" = it carries the OBSERVED instrument's constraint:
-    # REAL_Z_METHODS (the (Z)-only spellings) plus the bare defaults, whose mode is
+    # Z_CONSTRAINED (the Z-only spellings) plus the bare defaults, whose mode is
     # (T,Z) and so carries Z beside T. NOT a substring test -- `PI+INV` passes one
     swept = tuple(name for name in outcomes if name in Z_CONSTRAINED)
     check(
@@ -358,6 +366,10 @@ def leg_v(artifacts):
         for name in os.listdir(src):
             if name.startswith("beta_p_"):
                 shutil.copy(os.path.join(src, name), dst)
+        # the run's labels.json beside its pkls, as the aggregate reads it
+        labels = os.path.join(artifacts, "cigarettes", "labels.json")
+        if os.path.exists(labels):
+            shutil.copy(labels, os.path.join(tmp, "cigarettes"))
         fig = aggregate.elasticity_grid(tmp, None)
         axes = np.array(fig.axes).reshape(2, 2)
         check(

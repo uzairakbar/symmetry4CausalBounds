@@ -82,7 +82,7 @@ from src.experiments.generic_runner import SPECTRUM_KEEP  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.utils.constants import TEX_MAPPER  # noqa: E402
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import rho_hat, trace_S_over_k  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 
@@ -260,7 +260,7 @@ def run_one(experiment, recalibrate):
         has_z=False,
     )
     ax2 = plt.gcf().axes[0]
-    lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
+    lines = [ln for ln in ax2.lines if ln.get_label() == method_label("DA+PI", False)]
     order = np.argsort(x, kind="stable")
 
     # (iii) the sort is on the plotted x under both toggles: sorted line, y
@@ -268,7 +268,7 @@ def run_one(experiment, recalibrate):
     # drawn from the same reordered array); the tr(S)/k axis is monotone.
     # First on the production render itself: a sort on the other product
     # would double the drawn line back under the plotted label.
-    prod = [ln for ln in ax.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
+    prod = [ln for ln in ax.lines if ln.get_label() == method_label("DA+PI", False)]
     prod_x = np.asarray(prod[0].get_xdata(), dtype=float) if len(prod) == 1 else None
     prod_band = band_edges(ax, to_rgb(prod[0].get_color())) if len(prod) == 1 else None
     prod_ok = (

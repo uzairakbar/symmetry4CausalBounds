@@ -119,7 +119,7 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import PanelBuilder, fit_model, set_seed  # noqa: E402
-from src.experiments.utils.constants import TEX_MAPPER  # noqa: E402
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 
@@ -1246,7 +1246,7 @@ def leg_7(orch, record, root):
     ax = plt.gcf().axes[0]
     order = np.argsort(np.asarray(x, dtype=float), kind="stable")
     for name in ("DA+PI", "PI&DA+PI"):
-        lines = [ln for ln in ax.lines if ln.get_label() == TEX_MAPPER[name]]
+        lines = [ln for ln in ax.lines if ln.get_label() == method_label(name, False)]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             want = np.nanmean(ci[name]["interval_width"], axis=1)[order]

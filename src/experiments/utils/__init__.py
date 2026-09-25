@@ -14,9 +14,14 @@ from .plotting import *
 __all__ = [
     # Constants
     "RC_PARAMS",
-    "TEX_MAPPER",
-    "COLOR_MAP",
-    "ALPHA_MAP",
+    "label",
+    "colour",
+    "alpha",
+    "line_style",
+    "legend_order",
+    "method_style",
+    "resolve",
+    "parse_method",
     "FS_TICK",
     "FS_LABEL",
     "PLOT_DPI",

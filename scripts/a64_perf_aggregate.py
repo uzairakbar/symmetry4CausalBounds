@@ -14,15 +14,16 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          spells a mode or plans perf, bare names dispatch as before, `_draw_series`
          moves no number and figures are not hashed. Catches: a bare name parsed
          as the T mode (every DA+PI+IV pkl moves). Misses: everything below.
-  (i)    the grammar and the display tables: the four `(T)` spellings parse as
+  (i)    the grammar and the display style: the four `(T)` spellings parse as
          (base, "T"), four malformed or misplaced suffixes are rejected naming the
          entry, `IV_MODES` is the three modes, a `(T)` block resolves under an empty
          set and beside the bare and `(Z)` entries, a duplicate `(T)` pair and a
-         `(T)` on do_mnist raise, every `base(T)` has its display entries on the
-         base's hue, `DA+ERM+IV(T)` is a point estimate, the T style is neither solid,
-         the Z pattern nor the point-estimate dash, the registry keeps the order.
-         Catches: a parser without the mode, a missing display entry (a KeyError at
-         plot time), the T sibling drawn like the Z one. Misses: what (T) computes.
+         `(T)` on do_mnist raise, every `base(T)` has the base's hue and label with
+         and without a real Z, `DA+ERM+IV(T)` is a point estimate, under a real Z
+         the (T) and (Z) spellings are solid like their base, the registry keeps
+         the order. Catches: a parser without the mode, a (T) spelling drawn apart
+         from its base, an interval drawn dashed.
+         Misses: what (T) computes.
   (ii)   dispatch on fitted attributes, a63-ii's construction (the cigarette design,
          the seed-42 DA draw, a 1-column Z, two distinct IV budgets, `rho = rho_hat`):
          the (T) instrument is G alone (width `G.shape[1]` against +1 on bare), its
@@ -60,8 +61,9 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          a subprocess writes exactly the four pdfs (a grid per param, one per
          `PERF_FIGURES` entry); in-process the grid has the titles, the blank cells,
          one shared y on `CLAMP_YLIM`, the axis pkl's x-label, the legend in the
-         repo's order in one row, the render fold (bare beside `(T,Z)` is one entry,
-         and so is `(T)` beside bare), the three y-labels without " / "; the stacked
+         repo's order in one row, the render fold (with a real Z on both columns,
+         bare beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
+         y-labels without " / "; the stacked
          perf grid has stability over feasible rate, the sim column blank, no marker
          line, the feasibility row alone on `CLAMP_YLIM`; ten perf methods draw five
          columns of two, with no WARNING, clear of the titles; the x-label at 0.5 on
@@ -75,9 +77,11 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
   (vii)  the utility on the shipped artifacts (`--shipped DIR`): exit 0, exactly the
          pdfs the tree calls for (a grid per sweep param, one per `PERF_FIGURES`
          entry with a metric some dataset ran, the elasticity grid when the cigarette query pkls are there),
-         the tree's mtimes unchanged; in-process under `captured()` no WARNING and
-         the epsilon legend's 10 folded entries in two rows, five columns of two
-         with green DA+PI+IV over pink PI&DA+PI+IV last. The wanted list is
+         the tree's mtimes unchanged; in-process under `captured()` no WARNING but
+         one missing `labels.json` per shipped dataset (the tree predates the
+         file); the same pkls linked beside a `labels.json` per dataset (a real Z
+         on the simulation and cigarettes) draw the merged epsilon legend, the six
+         Z labels in one row, with no labels.json WARNING. The wanted list is
          re-derived from the SAME four predicates `main` uses (`sweep_params`,
          `PERF_FIGURES`, `_has_perf`, `_has_elasticities`), so it catches `main`
          misusing one; a defect INSIDE one of them is invisible here. Catches: a
@@ -98,17 +102,19 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
   (ix)   the legend by entry count, read back off the rendered text extents
          rather than off `ncol`: up to LEGEND_FLAT_MAX entries one row of n in the
          repo's order, more LEGEND_ROWS rows of ceil(n / 2) columns. The target
-         table: the two live no-Z blocks pooled (6 entries, one row, no dash-dot),
-         all three shipped datasets (12 keys folded to 10, five columns of two, the
-         fifth green DA+PI+IV over pink PI&DA+PI+IV), cigarettes alone (one row of
+         table: the two live no-Z blocks pooled (6 entries, one row, all solid),
+         all three shipped datasets merged (the null-Z columns as their Z
+         counterparts: the six Z entries in one row), the same 12 keys inside one
+         Z column (folded to 10, five columns of two, the fifth green DA+PI+IV over
+         pink PI&DA+PI+IV), cigarettes alone (one row of
          6), two paired groups (one row of 4), nine singletons (columns
          [2,2,2,2,1]), 11 entries (6 columns and one WARNING). On the two-row
          shapes the entry order has every paired group ahead of every singleton,
-         each part in PAIR_ORDER order, and every pair in one column with member 0
+         each part in legend order, and every pair in one column with member 0
          on top; `perf_grid` draws the same five columns. Catches: the render fold
          dropped (12 entries), `ncol` left on the group count (a 4-entry legend in
          2 columns), the size-first sort dropped (a pair split across columns),
-         the member rule keyed on REAL_Z_METHODS (groups 6 and 9 collide), a group
+         the member rule keyed on the Z-only spellings (groups 6 and 9 collide), a group
          of three or a widened grid without a word. Misses: the hues, which leg (i)
          pins.
 
@@ -163,22 +169,20 @@ from src.experiments.configs import (  # noqa: E402
 from src.experiments.do_mnist import DoMNISTOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
-    ALPHA_MAP,
     ARTIFACTS_DIRECTORY,
     CLAMP_YLIM,
-    COLOR_MAP,
-    INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
     IV_MODES,
     PARTIAL_IDENTIFICATION_STYLE,
-    POINT_ESTIMATES,
     RC_PARAMS,
     SUBDIR_PERF,
     SUBDIR_SWEEP,
-    TEX_MAPPER,
+    is_point_estimate,
+    line_style,
     method_style,
     parse_method,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
@@ -589,17 +593,20 @@ def leg_i():
     check("(i) DA+PI+IV(T) on the do_mnist block raises naming it", "'DA+PI+IV(T)'" in message, message or "no error")
     for base in IV_MODE_METHODS:
         name = f"{base}(T)"
-        present = name in TEX_MAPPER and name in COLOR_MAP and name in ALPHA_MAP
-        check(
-            f"(i) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP on {base}'s hue",
-            present and COLOR_MAP[name] == COLOR_MAP[base],
-        )
-        check(f"(i) {name} is labelled as {base}", present and TEX_MAPPER[name] == TEX_MAPPER[base])
-    check("(i) DA+ERM+IV(T) is a point estimate", "DA+ERM+IV(T)" in POINT_ESTIMATES)
+        for has_z in (True, False):
+            check(
+                f"(i) {name} on {base}'s hue, has_z {has_z}",
+                method_style(name, has_z).colour == method_style(base, has_z).colour,
+            )
+            check(
+                f"(i) {name} is labelled as {base}, has_z {has_z}",
+                method_label(name, has_z) == method_label(base, has_z),
+            )
+    check("(i) DA+ERM+IV(T) is a point estimate", is_point_estimate("DA+ERM+IV(T)"))
     check(
-        "(i) _line_style draws a (T) name as its base, a (Z) name with INSTRUMENT_Z_STYLE",
-        plotting._line_style("DA+PI+IV(T)") == plotting._line_style("DA+PI+IV") == PARTIAL_IDENTIFICATION_STYLE
-        and plotting._line_style("DA+PI+IV(Z)") == INSTRUMENT_Z_STYLE,
+        "(i) line_style draws the (T) and (Z) names solid, as their base, under a real Z",
+        line_style("DA+PI+IV(T)", True) == line_style("DA+PI+IV", True) == PARTIAL_IDENTIFICATION_STYLE
+        and line_style("DA+PI+IV(Z)", True) == PARTIAL_IDENTIFICATION_STYLE,
     )
     order = ["PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)", "DA+ERM+IV(T)"]
     built = MethodRegistry.build_methods(
@@ -860,14 +867,15 @@ def synthetic_tree(
     cig_drop=("coverage",),
     sim_gamma=True,
     perf_methods=("PI", "PI+INV"),
+    sim_has_z=False,
     cig_has_z=False,
 ):
     """simulation gamma (unless `sim_gamma` is off) and omega, cigarettes gamma without
     the `cig_drop` metrics and no omega, cigarettes perf on `perf_methods`; no optical.
-    Each dataset's `labels.json` as its run writes it: no Z on the simulation, and on
-    the cigarettes `cig_has_z` (true where its methods carry a real Z)."""
+    Each dataset's `labels.json` as its run writes it, `sim_has_z` and `cig_has_z`
+    (true where the column's methods carry a real Z)."""
     rng = np.random.default_rng(1)
-    for dataset, has_z in (("simulation", False), ("cigarettes", cig_has_z)):
+    for dataset, has_z in (("simulation", sim_has_z), ("cigarettes", cig_has_z)):
         os.makedirs(f"{root}/{dataset}", exist_ok=True)
         with open(f"{root}/{dataset}/labels.json", "w") as fh:
             json.dump({"has_z": has_z, "methods": []}, fh)
@@ -966,7 +974,8 @@ def leg_vi():
     texts = [t.get_text() for t in legend.get_texts()]
     check(
         "(vi) legend: PI, DA+PI, DA+PI+IV(T), PI&DA+PI+IV(T) in the repo's order, one row",
-        texts == [TEX_MAPPER[n] for n in ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")] and legend_rows(legend) == 1,
+        texts == [method_label(n, False) for n in ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")]
+        and legend_rows(legend) == 1,
         f"{len(texts)} entries, {legend_rows(legend)} row(s)",
     )
     plt.close(fig)
@@ -983,25 +992,34 @@ def leg_vi():
     check("(vi) the measured omega axis is drawn sorted", np.all(np.diff(line.get_xdata()) > 0), f"{line.get_xdata()}")
     plt.close(fig)
 
+    # both columns with a real Z: the mode spellings of one label are one entry
     fold = synthetic_tree(
-        tempfile.mkdtemp(prefix="fold_", dir=TMPROOT), sim_inter="PI&DA+PI+IV(T,Z)", cig_inter="PI&DA+PI+IV"
+        tempfile.mkdtemp(prefix="fold_", dir=TMPROOT),
+        sim_inter="PI&DA+PI+IV(T,Z)",
+        cig_inter="PI&DA+PI+IV",
+        sim_has_z=True,
+        cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(fold), fold)
     texts = [t.get_text() for t in fig.legends[0].get_texts()]
     check(
         "(vi) PI&DA+PI+IV(T,Z) beside PI&DA+PI+IV is one legend entry, labelled as the bare name",
-        texts == [TEX_MAPPER[n] for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
+        texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
         f"{len(texts)} entries",
     )
     plt.close(fig)
     two = synthetic_tree(
-        tempfile.mkdtemp(prefix="two_", dir=TMPROOT), sim_inter="PI&DA+PI+IV(T)", cig_inter="PI&DA+PI+IV"
+        tempfile.mkdtemp(prefix="two_", dir=TMPROOT),
+        sim_inter="PI&DA+PI+IV(T)",
+        cig_inter="PI&DA+PI+IV",
+        sim_has_z=True,
+        cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(two), two)
     texts = [t.get_text() for t in fig.legends[0].get_texts()]
     check(
         "(vi) PI&DA+PI+IV(T) beside PI&DA+PI+IV is one entry too: they render alike",
-        texts == [TEX_MAPPER[n] for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
+        texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
         f"{len(texts)} entries",
     )
     plt.close(fig)
@@ -1122,7 +1140,7 @@ def leg_vi():
             tuple(t.get_text() for t in fig.legends[0].get_texts()),
             [t.get_text() for t in fig.texts],
         )
-        want = (n, on, titles, ylabels, tuple(TEX_MAPPER[name] for name in names), [xlabels[xname]])
+        want = (n, on, titles, ylabels, tuple(method_label(name, False) for name in names), [xlabels[xname]])
         check(
             f"(vi) sweep_grid on {tree} {param} is branch 21's: axes, cells, titles, labels, legend, x-label",
             got == want and abs(fig.texts[0].get_position()[0] - x) < 1e-6,
@@ -1424,17 +1442,18 @@ def leg_ix():
         has_z=False,
     )
     check(
-        "(ix) (i) no observed Z: nothing is drawn dash-dot",
-        all(style != INSTRUMENT_Z_STYLE for style in styles),
+        "(ix) (i) no observed Z: every entry is drawn solid",
+        all(style == "-" for style in styles),
         f"{styles}",
     )
     # (ii) all three shipped datasets, the cigarette Z column beside the null-Z ones:
     # merged, the 12 pooled keys fold to the six Z entries in one row
-    shape_check("(ii) all three datasets", SHAPE_ALL, TABLE_ALL, null=SHAPE_NO_Z)
+    styles = shape_check("(ii) all three datasets", SHAPE_ALL, TABLE_ALL, null=SHAPE_NO_Z)
+    check("(ix) (ii) merged: every entry is drawn solid", all(style == "-" for style in styles), f"{styles}")
     # (ii') the same 12 keys inside one column with a real Z fold to 10, five columns of two
     shape_check("(ii') one Z column", SHAPE_ALL, TABLE_ONE_Z)
-    # (iii) one dataset alone -- cigarettes: six entries, one flat row, dash-dot on
-    # the four real-Z entries
+    # (iii) one dataset alone -- cigarettes: six entries, one flat row, the four
+    # real-Z entries solid like the rest
     shape_check(
         "(iii) cigarettes alone",
         SHAPE_CIG,

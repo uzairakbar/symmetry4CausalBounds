@@ -208,132 +208,6 @@ def iv_mode(name: str) -> str:
     return parse_method(name)[1]
 
 
-# method display names
-TEX_MAPPER: dict[str, str] = {
-    # targets
-    "Data": r"$\mathrm{data}$",
-    "ATE": r"$\operatorname{ate}$",
-    # estimators
-    "ERM": rf"${ERM}$",
-    "DA+ERM": rf"${DA_ERM}$",
-    # the do-MNIST ERM trained to invariance on the DA pairs (augmented Lagrangian)
-    "ERM+INV": rf"${ERM}+{INV}$",
-    # instrumental variable. The tilde on the iv is the T-as-IV distinction, as on
-    # the interval side: ERM+IV and DA+ERM+IV(Z) read the observed Z alone
-    "ERM+IV": rf"${ERM}+{IV}$",
-    "DA+ERM+IV": rf"${DA_ERM}+\widetilde{{{IV}}}$",
-    "PI+IV": rf"${PI}+{IV}$",
-    "PI+INV+IV": rf"${PI}+{INV}+{IV}$",
-    # sensitivity models
-    "PI": rf"${PI}$",
-    "PI+INV": rf"${PI}+{INV}$",
-    "DA+PI": rf"$\widetilde{{{PI}}}$",
-    "DA+PI+IV": rf"$\widetilde{{{PI}}}+\widetilde{{{IV}}}$",
-    # combinations
-    "PI&DA+PI": rf"${PI}\cap\widetilde{{{PI}}}$",
-    "PI&DA+PI+IV": rf"${PI}\cap(\widetilde{{{PI}}}+\widetilde{{{IV}}})$",
-}
-
-# Color mapping for methods. The hue is the FAMILY (baseline, DA, INV, T-as-IV,
-# intersection); a real Z on top of a family keeps the hue and changes the line
-# style (REAL_Z_METHODS below), so PI and PI+IV are one blue, DA+PI and
-# DA+PI+IV(Z) one red, PI+INV and PI+INV+IV one grey. DA+PI+IV and DA+PI+IV(T)
-# are the same family whether or not Z is empty, one green, one line, one label.
-COLOR_MAP: dict[str, int] = {
-    "ATE": 3,
-    "ERM": 0,
-    "DA+ERM": 3,
-    "ERM+IV": 0,  # the blue family, ERM plus the observed Z
-    "ERM+INV": 7,  # the INV family's grey
-    "DA+ERM+IV": 2,
-    "PI+INV": 7,
-    "PI": 0,
-    "PI+IV": 0,
-    "PI+INV+IV": 7,
-    "DA+PI": 3,
-    "DA+PI+IV": 2,
-    "PI&DA+PI": 4,
-    "PI&DA+PI+IV": 6,
-}
-
-# Alpha (transparency) mapping for methods
-ALPHA_MAP: dict[str, float] = {
-    # Point identification methods (solid)
-    "ATE": 1.0,
-    "ERM": 1.0,
-    "DA+ERM": 1.0,
-    "ERM+IV": 1.0,
-    "DA+ERM+IV": 1.0,
-    "ERM+INV": 1.0,
-    # Partial identification methods (transparent)
-    "PI+INV": 0.8,
-    "PI": 0.2,
-    "PI+IV": 0.2,
-    "PI+INV+IV": 0.8,
-    "DA+PI": 0.2,
-    "DA+PI+IV": 0.4,
-    "PI&DA+PI": 0.4,
-    "PI&DA+PI+IV": 0.4,
-}
-
-# the spelled modes: `(T,Z)` is the bare entry under another name, `(Z)` and
-# `(T)` keep the hue and alpha and show the mode on the instrument
-for _base in IV_MODE_METHODS:
-    TEX_MAPPER[f"{_base}(T,Z)"] = TEX_MAPPER[_base]
-    for _table in (COLOR_MAP, ALPHA_MAP):
-        for _mode in IV_MODES:
-            _table[f"{_base}({_mode})"] = _table[_base]
-TEX_MAPPER.update(
-    {
-        "DA+PI+IV(Z)": rf"$\widetilde{{{PI}}}+{IV}$",
-        "PI&DA+PI+IV(Z)": rf"${PI}\cap(\widetilde{{{PI}}}+{IV})$",
-        "DA+ERM+IV(Z)": rf"${DA_ERM}+{IV}$",
-    }
-)
-# the (Z) spellings are the DA family plus an observed Z: DA+PI's hue and alpha,
-# told apart by the line style; the (T) spellings ARE the base whenever the
-# instrument set is empty, same label, same hue, same line
-for _z, _family in (("DA+PI+IV(Z)", "DA+PI"), ("PI&DA+PI+IV(Z)", "PI&DA+PI"), ("DA+ERM+IV(Z)", "DA+ERM")):
-    COLOR_MAP[_z], ALPHA_MAP[_z] = COLOR_MAP[_family], ALPHA_MAP[_family]
-for _base in IV_MODE_METHODS:
-    TEX_MAPPER[f"{_base}(T)"] = TEX_MAPPER[_base]
-# a real Z on top of a family: the family's hue, this line style. Point
-# estimates stay out of it: `_line_style` reads POINT_ESTIMATES first, so an
-# entry here would be inert and would break a66's conjunction
-REAL_Z_METHODS: frozenset[str] = frozenset({"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)"})
-# legend layout, keyed on the STORED spelling (`spelled_method`): one group is one
-# legend column, member 0 on top and member 1 below, so a family and the same family
-# plus an observed Z stack in one hue. The three mode spellings of a T-as-IV method
-# share a (group, member) on purpose -- they render as the same pixels and `_legend`
-# folds them to a single entry, which is why those groups have one member only. NOT
-# derivable from REAL_Z_METHODS: the (T,Z) spellings are outside it, so keying the
-# member on membership would collide groups 6 and 9.
-PAIR_ORDER: dict[str, tuple[int, int]] = {
-    "ATE": (0, 0),
-    "PI+INV": (1, 0),
-    "PI+INV+IV": (1, 1),
-    "PI": (2, 0),
-    "PI+IV": (2, 1),
-    "ERM": (3, 0),
-    "ERM+IV": (3, 1),
-    "DA+PI": (4, 0),
-    "DA+PI+IV(Z)": (4, 1),
-    "DA+ERM": (5, 0),
-    "DA+ERM+IV(Z)": (5, 1),
-    "DA+PI+IV": (6, 0),
-    "DA+PI+IV(T)": (6, 0),
-    "DA+PI+IV(T,Z)": (6, 0),
-    "DA+ERM+IV": (7, 0),
-    "DA+ERM+IV(T)": (7, 0),
-    "DA+ERM+IV(T,Z)": (7, 0),
-    "PI&DA+PI": (8, 0),
-    "PI&DA+PI+IV(Z)": (8, 1),
-    "PI&DA+PI+IV": (9, 0),
-    "PI&DA+PI+IV(T)": (9, 0),
-    "PI&DA+PI+IV(T,Z)": (9, 0),
-    # do-MNIST only; a new last group, so no existing legend moves
-    "ERM+INV": (10, 0),
-}
 # the coefficient labels of the cigarette price elasticities, paper notation
 # h_*(x) = theta_*' x on the four log treatments
 COEFFICIENT_LABELS: dict[str, str] = {
@@ -341,21 +215,9 @@ COEFFICIENT_LABELS: dict[str, str] = {
     "pn": r"$\theta_{\mathrm{neighbour\,price}}$",
 }
 
-# Visual style configuration
-POINT_ESTIMATES: list[str] = [
-    "ATE",
-    "ERM",
-    "DA+ERM",
-    "ERM+IV",
-    "DA+ERM+IV",
-    "DA+ERM+IV(Z)",
-    "DA+ERM+IV(T)",
-    "DA+ERM+IV(T,Z)",
-    "ERM+INV",
-]
+# Visual style configuration (`line_style`): a point estimate dashed, every interval
+# solid; a real Z on top of a family shows in the label, never in the line
 POINT_ESTIMATE_STYLE: str | tuple[int, tuple[int, int]] = (0, (5, 1))
-# REAL_Z_METHODS on the lines and band edges: the family's hue, this dash-dot pattern
-INSTRUMENT_Z_STYLE: tuple[int, tuple[int, int, int, int]] = (0, (3, 1, 1, 1))
 PARTIAL_IDENTIFICATION_STYLE: str | tuple[int, tuple[int, int]] = "-"
 
 
@@ -496,12 +358,9 @@ def _z_member(resolved: Resolved) -> bool:
 
 
 def line_style(method: str, has_z: bool):
-    """Dashed on a point estimate, dash-dot on an interval constrained by a real
-    Z alone, solid on every other interval."""
-    resolved = resolve(method, has_z)
-    if _point(resolved):
-        return POINT_ESTIMATE_STYLE
-    return INSTRUMENT_Z_STYLE if _z_member(resolved) else PARTIAL_IDENTIFICATION_STYLE
+    """Dashed on a point estimate (ATE and the ERMs), solid on every interval, with
+    or without a real Z."""
+    return POINT_ESTIMATE_STYLE if _point(resolve(method, has_z)) else PARTIAL_IDENTIFICATION_STYLE
 
 
 # the legend's groups, one column each, by (solver, da, inv, T instrumented,

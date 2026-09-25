@@ -28,12 +28,12 @@ apart from (vi). Legs:
          intersection's purple or pink off its DA side); the six hex literals
          equal seaborn deep at their indices and `colour` equals
          `sns.color_palette("deep")[i]` as floats; pink leans magenta; the alpha
-         per hue; with a Z, `line_style` and `legend_order` equal frozen literals
-         of the pre-change `_line_style` and `PAIR_ORDER`; without one every
-         interval is solid and every method is member 0 of its group. Catches: a
-         hue rule out of order, a palette index drifting, a `_FAMILIES` row swap, a
-         null-Z method drawn dash-dot. Misses: whether the plotting code reads
-         these functions -- (iv), (v), (ix).
+         per hue; every point estimate dashed and every interval solid, with and
+         without a real Z; with a Z `legend_order` equals a frozen literal of the
+         pre-change `PAIR_ORDER`, without one every method is member 0 of its
+         group. Catches: a hue rule out of order, a palette index drifting, a
+         `_FAMILIES` row swap, an interval drawn with any dash. Misses: whether
+         the plotting code reads these functions -- (iv), (v), (ix).
   (iv)   uniqueness: (a) within one experiment `label` is injective on the label
          rows, over every recipe block, the digest blocks, the default lists and
          exhaustively at each has_z; (b) across experiments one label is one
@@ -69,7 +69,20 @@ apart from (vi). Legs:
   (vii)  do-MNIST's PI+INV reads `pi+inv` whatever the `inv_recenter`, in `label`
          and in the `domnist_table` row under off, on and inv. Catches: a label
          that follows the centring. Misses: the table's other rows (a79 (v)).
-  (viii) completeness greps (a later tier).
+  (viii) completeness: `src/` is clean of the removed tables (TEX_MAPPER,
+         COLOR_MAP, ALPHA_MAP, REAL_Z_METHODS, PAIR_ORDER, POINT_ESTIMATES,
+         INSTRUMENT_Z_STYLE) and helpers (`_get_method_color`, `_line_style`),
+         of `\widetilde` and `\operatorname` outside constants.py and of a
+         palette indexed by hand; no dict literal in plotting.py, aggregate.py,
+         panels.py or cigarettes.py has two or more method-name keys (a display
+         table under another name); no displayed string (the
+         xlabel/ylabel/title/label keywords, the
+         set_xlabel/set_ylabel/set_title/legend arguments and the rows
+         `_write_coefficients` and `domnist_table` append; `%` lines skipped)
+         types a method name; every drawing call in `src/` and `scripts/` passes
+         `has_z=`. Each scan is shown to fire on a probe. Catches: a site
+         reading a table or typing a label, a forgotten `has_z`. Misses: a name
+         built at run time from pieces.
   (ix)   the column titles: on a validityFig9-shaped tree (the simulation with a
          real Z, optical and cigarettes without) through `sweep_grid` and
          `perf_grid`, the titles read "simulation", "optical device" and
@@ -135,7 +148,6 @@ from src.experiments.utils.constants import (  # noqa: E402
     DEEP_INDEX,
     ERM,
     FS_LABEL,
-    INSTRUMENT_Z_STYLE,
     INV,
     IV,
     IV_MODE_METHODS,
@@ -165,6 +177,9 @@ from src.experiments.utils.constants import (  # noqa: E402
 
 FAIL = []
 SKIPPED = []
+# the synthetic trees and runs, each removed when its leg ends
+SCRATCH = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
+TREES = []
 # every spelling the config accepts: the bare names, and each IV-mode base under its three modes
 SPELLINGS = [
     spelling
@@ -309,13 +324,6 @@ for _suffix in ("", "(T,Z)", "(T)"):
 # the pre-change band alpha of an interval, by hue (ALPHA_MAP); a point estimate is 1.0
 ALPHAS = {"blue": 0.2, "red": 0.2, "grey": 0.8, "green": 0.4, "purple": 0.4, "pink": 0.4}
 POINTS = {"ATE", "ERM", "ERM+IV", "DA+ERM", "ERM+INV"} | {f"DA+ERM+IV{s}" for s in MODE_SET}
-# the pre-change `_line_style` of every spelling, frozen: dashed on a point estimate,
-# dash-dot on REAL_Z_METHODS, solid otherwise
-DASH_DOT = {"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)"}
-LINE_STYLES = {
-    m: POINT_ESTIMATE_STYLE if m in POINTS else INSTRUMENT_Z_STYLE if m in DASH_DOT else PARTIAL_IDENTIFICATION_STYLE
-    for m in SPELLINGS
-}
 # the pre-change PAIR_ORDER, frozen: (legend group, member) of every spelling with a real Z
 LEGEND_ORDER = {
     "ATE": (0, 0),
@@ -451,12 +459,10 @@ def leg_iii():
         want_alpha = 1.0 if name in POINTS else ALPHAS[want]
         check(f"(iii) {name} ({has_z}) alpha {want_alpha}", alpha(name, has_z) == want_alpha)
         style = line_style(name, has_z)
-        if has_z:
-            check(f"(iii) {name} with Z keeps its line style", style == LINE_STYLES[name], f"{style}")
-        elif name in POINTS:
-            check(f"(iii) {name} without Z is dashed", style == POINT_ESTIMATE_STYLE, f"{style}")
+        if name in POINTS:
+            check(f"(iii) {name} ({has_z}) is dashed", style == POINT_ESTIMATE_STYLE, f"{style}")
         else:
-            check(f"(iii) {name} without Z is solid", style == PARTIAL_IDENTIFICATION_STYLE, f"{style}")
+            check(f"(iii) {name} ({has_z}) is solid", style == PARTIAL_IDENTIFICATION_STYLE, f"{style}")
     check("(iii) ATE is black", colour("ATE", True) == colour("ATE", False) == "black")
     check("(iii) the legend-order table covers every spelling", set(LEGEND_ORDER) == set(SPELLINGS))
     for name, has_z in LEGAL:
@@ -644,13 +650,19 @@ def line_render(line):
     return tuple(matplotlib.colors.to_rgba(line.get_color())), getattr(line, "_unscaled_dash_pattern", None)
 
 
+def scratch_tree(prefix):
+    """A fresh directory under SCRATCH, removed when the leg ends (`__main__`)."""
+    os.makedirs(SCRATCH, exist_ok=True)
+    path = tempfile.mkdtemp(prefix=prefix, dir=SCRATCH)
+    TREES.append(path)
+    return path
+
+
 def grid_merge():
     """The merge through `sweep_grid` on synthetic trees under ~/scratch."""
-    base = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
-    os.makedirs(base, exist_ok=True)
 
     def tree():
-        return tempfile.mkdtemp(prefix="grid_", dir=base)
+        return scratch_tree("grid_")
 
     root = tree()
     write_column(root, "simulation", ["PI+IV"], True)
@@ -757,9 +769,150 @@ def leg_vii():
             check(f"(vii) the domnist_table PI+INV row under inv_recenter {recenter}", want in names, f"{names}")
 
 
+# the static display tables and helpers every figure used to read, gone for the functions
+REMOVED = ("TEX_MAPPER", "COLOR_MAP", "ALPHA_MAP", "REAL_Z_METHODS", "PAIR_ORDER", "POINT_ESTIMATES")
+REMOVED += ("INSTRUMENT_Z_STYLE",)  # every interval is solid: no real-Z line style
+REMOVED_HELPERS = ("_get_method_color", "_line_style")
+# the calls that draw a method: each must say whether its experiment has a real Z
+DRAWING = ("create_sweep_plot", "create_query_sweep_plot", "create_panel_plot", "create_digit_sweep_plot")
+DRAWING += ("create_coverage_plot", "_draw_bands", "_draw_series", "mark_failed", "PanelBuilder")
+# where a string is DISPLAYED: these keywords, these methods' arguments, and the rows
+# the two table writers append
+DISPLAY_KEYWORDS = ("xlabel", "ylabel", "title", "label")
+DISPLAY_METHODS = ("set_xlabel", "set_ylabel", "set_title", "legend", "supxlabel", "supylabel", "suptitle")
+TABLE_WRITERS = ("_write_coefficients", "domnist_table")
+# the drawing modules, where a dict keyed by method names would be a display table again
+DRAWING_MODULES = ("src/experiments/utils/plotting.py", "src/aggregate.py", "src/experiments/utils/panels.py")
+DRAWING_MODULES += ("src/experiments/cigarettes.py",)
+
+
+def method_tables(tree):
+    """(line, keys) of every dict literal with two or more keys that are method names."""
+    import ast
+
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            keys = [k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+            named = [k for k in keys if is_method(k)]
+            if len(named) >= 2:
+                out.append((node.lineno, named))
+    return out
+
+
+def read(path):
+    with open(path) as fh:
+        return fh.read()
+
+
+def python_files(*roots):
+    return sorted(p for root in roots for p in glob.glob(os.path.join(REPO, root, "**", "*.py"), recursive=True))
+
+
+def strings_of(node):
+    """The literal text of a str constant or an f-string's constant parts."""
+    import ast
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.JoinedStr):
+        return [part.value for part in node.values if isinstance(part, ast.Constant)]
+    return [text for child in ast.iter_child_nodes(node) for text in strings_of(child)]
+
+
+def displayed(tree):
+    """(line, text) of every string the code displays (DISPLAY_* and TABLE_WRITERS)."""
+    import ast
+
+    out = []
+    writers = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in TABLE_WRITERS]
+    rows = {
+        id(call)
+        for writer in writers
+        for call in ast.walk(writer)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "append"
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        parts = [kw.value for kw in node.keywords if kw.arg in DISPLAY_KEYWORDS]
+        if isinstance(node.func, ast.Attribute) and node.func.attr in DISPLAY_METHODS or id(node) in rows:
+            parts += list(node.args)
+        out += [(node.lineno, text) for part in parts for text in strings_of(part)]
+    return out
+
+
 def leg_viii():
-    print("(viii) completeness")
-    skip("(viii)", "the completeness greps land with the commit that drops the static tables")
+    print("(viii) completeness: every site reads through constants")
+    import ast
+    import re
+
+    sources = {path: read(path) for path in python_files("src")}
+    for name in REMOVED + REMOVED_HELPERS:
+        hits = [
+            f"{os.path.relpath(p, REPO)}:{i}"
+            for p, text in sources.items()
+            for i, line in enumerate(text.splitlines(), 1)
+            if re.search(rf"\b{name}\b", line)
+        ]
+        check(f"(viii) {name} is gone from src/", not hits, f"{hits[:3]}")
+    owner = os.path.join(REPO, "src", "experiments", "utils", "constants.py")
+    tex = [
+        f"{os.path.relpath(p, REPO)}:{i}"
+        for p, text in sources.items()
+        if p != owner
+        for i, line in enumerate(text.splitlines(), 1)
+        if "\\widetilde" in line or "\\operatorname" in line
+    ]
+    check("(viii) no \\widetilde or \\operatorname outside constants.py", not tex, f"{tex[:3]}")
+    indexed = [
+        f"{os.path.relpath(p, REPO)}:{i}"
+        for p, text in sources.items()
+        for i, line in enumerate(text.splitlines(), 1)
+        if re.search(r"color_palette\([^)]*\)\s*\[", line.split("#")[0])
+    ]
+    check("(viii) no palette indexed by hand in src/", not indexed, f"{indexed[:3]}")
+
+    # a method name typed into a displayed string would bypass `label`
+    names = sorted({m for m in SPELLINGS} | {"DA+PI+IV(Z)"}, key=len, reverse=True)
+    pattern = re.compile(r"(?<![\w\\+&])(" + "|".join(re.escape(n) for n in names) + r")(?![\w+&(])")
+    plain, calls = [], []
+    for path, text in sources.items():
+        tree = ast.parse(text)
+        for line, string in displayed(tree):
+            if not string.lstrip().startswith("%") and pattern.search(string):
+                plain.append(f"{os.path.relpath(path, REPO)}:{line} {string!r}")
+    for path in python_files("src", "scripts"):
+        tree = ast.parse(read(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+            if func in DRAWING and not any(kw.arg == "has_z" for kw in node.keywords):
+                calls.append(f"{os.path.relpath(path, REPO)}:{node.lineno} {func}")
+    check("(viii) no plain-text method name in a displayed string of src/", not plain, f"{plain[:3]}")
+    tables = [
+        f"{module}:{line} {keys}"
+        for module in DRAWING_MODULES
+        for line, keys in method_tables(ast.parse(read(os.path.join(REPO, module))))
+    ]
+    check("(viii) no dict keyed by method names in the drawing modules", not tables, f"{tables[:3]}")
+    check("(viii) every drawing call in src/ and scripts/ passes has_z", not calls, f"{calls[:5]}")
+    # the scans can fail
+    probe = ast.parse('ax.set_ylabel("width / PI width")\nplot(x, label=f"{n} DA+PI")\ncreate_sweep_plot(x, y)')
+    found = [s for _, s in displayed(probe) if pattern.search(s)]
+    check("(viii) mutation: a typed name in a y-label and a label= is found", len(found) == 2, f"{found}")
+    renamed = ast.parse(
+        '_HUES = {"ERM": 0, "DA+ERM": 3}\nMETHOD_NAMES = {"PI": "p", "PI+IV": "q"}\nx = {"a": 1, "PI": 2}'
+    )
+    found = method_tables(renamed)
+    check("(viii) mutation: two renamed method tables are found, a one-name dict is not", len(found) == 2, f"{found}")
+    missing = [
+        n for n in ast.walk(probe) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "create_sweep_plot"
+    ]
+    check(
+        "(viii) mutation: a drawing call without has_z is found", not any(k.arg == "has_z" for k in missing[0].keywords)
+    )
 
 
 def write_perf(root, dataset, methods, has_z):
@@ -796,8 +949,6 @@ def titles(fig):
 
 def leg_ix():
     print("(ix) the column titles")
-    base = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
-    os.makedirs(base, exist_ok=True)
     suffix = NULL_Z_TITLE_SUFFIX
     check(
         "(ix) the null-Z suffix is (Z = varnothing) on the title's line, at 3/4 of the title's size",
@@ -818,7 +969,7 @@ def leg_ix():
         "optical_device": (validity["optical_device"][0], False),
         "cigarettes": (validity["optical_device"][0], False),
     }
-    merged = tempfile.mkdtemp(prefix="titles_", dir=base)
+    merged = scratch_tree("titles_")
     for dataset, (methods, has_z) in shape.items():
         write_column(merged, dataset, methods, has_z)
         write_perf(merged, dataset, methods, has_z)
@@ -850,7 +1001,7 @@ def leg_ix():
             skip(f"(ix) {kind} pdf", "no latex on PATH")
         plt.close(fig)
 
-    null = tempfile.mkdtemp(prefix="titles_null_", dir=base)
+    null = scratch_tree("titles_null_")
     for dataset in ("simulation", "optical_device"):
         write_column(null, dataset, ["PI", "DA+PI"], False)
         write_perf(null, dataset, ["PI", "DA+PI"], False)
@@ -860,7 +1011,7 @@ def leg_ix():
         )
         plt.close(fig)
 
-    blank = tempfile.mkdtemp(prefix="titles_blank_", dir=base)
+    blank = scratch_tree("titles_blank_")
     write_column(blank, "simulation", ["PI+IV"], True, param="omega")  # a Z column blank on gamma
     write_column(blank, "optical_device", ["PI"], False)
     fig = grids(blank)["sweep_grid"]
@@ -900,6 +1051,10 @@ if __name__ == "__main__":
             leg()
         except Exception as error:  # a raise is a FAIL line, and the later legs still report
             check(f"({tag}) ran without raising", False, f"{type(error).__name__}: {error}")
+        finally:
+            for path in TREES:
+                shutil.rmtree(path, ignore_errors=True)
+            TREES.clear()
     skipped = f" ({len(SKIPPED)} SKIPPED: {'; '.join(SKIPPED)})" if SKIPPED else ""
     if not FAIL:
         print(f"A80 PASS{skipped}")

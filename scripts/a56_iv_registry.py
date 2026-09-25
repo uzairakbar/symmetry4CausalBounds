@@ -44,13 +44,14 @@ Legs:
         COPSENS_METHODS is the pinned ten (the nine plus the do-MNIST-only
         ERM+INV). Catches: a builder missing or out of sync, a name added to the
         do-MNIST backend. Misses: what a builder builds; that is (vi) and a57.
-  (v)   every ALL_METHODS name and the nine stored mode spellings (`base(Z)`, `base(T)`,
-        `base(T,Z)` on the DA+ IV methods) have a TEX_MAPPER, COLOR_MAP and
-        ALPHA_MAP entry, the new TeX strings compose from the building blocks,
-        ERM+IV and DA+ERM+IV(Z) are point estimates and PI+INV+IV takes the one
-        unused hue.
-        Catches: a name that would KeyError at plot time. Misses: how the figure
-        looks.
+  (v)   every ALL_METHODS name and the nine stored mode spellings (`base(Z)`,
+        `base(T)`, `base(T,Z)` on the DA+ IV methods) have a style with and without
+        a real Z (`method_style`); with one, the ERM+IV and PI+INV+IV labels compose
+        from the building blocks, without one PI+INV+IV reads pi+inv; ERM+IV takes
+        ERM's blue (deep 0) and DA+ERM+IV green (2), PI+INV+IV PI+INV's hue and PI+IV
+        PI's, the alphas are unchanged; ERM+IV and the DA+ERM+IV spellings are point
+        estimates and PI+INV+IV is not. Catches: a name that would raise at plot
+        time. Misses: how the figure looks.
   (vi)  every `+IV` builder fits with a 1-column Z without raising, reads the
         instrument (`_has_iv`) and predicts finite bounds; `ERM+IV` requested under an
         empty set is a config error naming both `ERM+IV` and `iv`, and an omitted
@@ -100,18 +101,20 @@ from src.experiments.configs import (  # noqa: E402
     resolve_dataset_block,
 )
 from src.experiments.utils.constants import (  # noqa: E402
-    ALPHA_MAP,
-    COLOR_MAP,
+    DEEP_INDEX,
     ERM,
     INV,
     IV,
     IV_MODE_METHODS,
     IV_MODES,
     PI,
-    POINT_ESTIMATES,
-    TEX_MAPPER,
+    alpha,
+    hue,
+    is_point_estimate,
+    method_style,
     parse_method,
 )
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.sem.cigarettes import CigaretteSEM, V, build_design  # noqa: E402
 
 PLAN_METHODS = (
@@ -448,31 +451,37 @@ def leg_iv():
 
 
 def leg_v():
-    print("(v) every method and every stored mode spelling has its display entries")
+    print("(v) every method and every stored mode spelling has its display style")
     spelled = [f"{base}({mode})" for base in IV_MODE_METHODS for mode in IV_MODES]
     for name in ALL_METHODS + tuple(spelled):
-        present = name in TEX_MAPPER and name in COLOR_MAP and name in ALPHA_MAP
-        check(f"(v) {name} in TEX_MAPPER, COLOR_MAP, ALPHA_MAP", present)
-    check("(v) DA+ERM+IV(Z) is a point estimate", "DA+ERM+IV(Z)" in POINT_ESTIMATES)
-    check("(v) DA+ERM+IV(T) is a point estimate", "DA+ERM+IV(T)" in POINT_ESTIMATES)
-    check("(v) ERM+IV tex composes ERM and IV", TEX_MAPPER.get("ERM+IV") == rf"${ERM}+{IV}$", TEX_MAPPER.get("ERM+IV"))
-    check("(v) PI+INV+IV tex composes PI, INV, IV", TEX_MAPPER.get("PI+INV+IV") == rf"${PI}+{INV}+{IV}$")
+        styled = []
+        for has_z in (True, False):
+            try:
+                method_style(name, has_z)
+                styled.append(has_z)
+            except ValueError:
+                pass
+        check(f"(v) {name} has a style with and without a real Z", styled == [True, False], f"{styled}")
+    for name in ("DA+ERM+IV(Z)", "DA+ERM+IV(T)", "DA+ERM+IV(T,Z)", "ERM+IV"):
+        check(f"(v) {name} is a point estimate", is_point_estimate(name))
+    check("(v) PI+INV+IV is not a point estimate", not is_point_estimate("PI+INV+IV"))
+    got = method_label("ERM+IV", True)
+    check("(v) ERM+IV tex composes ERM and IV", got == rf"${ERM}+{IV}$", got)
+    check("(v) PI+INV+IV tex composes PI, INV, IV", method_label("PI+INV+IV", True) == rf"${PI}+{INV}+{IV}$")
+    check("(v) without a Z, PI+INV+IV reads pi+inv", method_label("PI+INV+IV", False) == rf"${PI}+{INV}$")
     check(
         "(v) ERM+IV takes ERM's blue 0, DA+ERM+IV green 2",
-        COLOR_MAP.get("ERM+IV") == 0 and COLOR_MAP.get("DA+ERM+IV") == 2,
+        DEEP_INDEX[hue("ERM+IV", True)] == 0 and DEEP_INDEX[hue("DA+ERM+IV", True)] == 2,
     )
-    hue = COLOR_MAP.get("PI+INV+IV")
     check(
         "(v) PI+INV+IV shares PI+INV's hue, PI+IV shares PI's",
-        hue == COLOR_MAP["PI+INV"] and COLOR_MAP["PI+IV"] == COLOR_MAP["PI"],
-        repr(hue),
+        hue("PI+INV+IV", True) == hue("PI+INV", True) and hue("PI+IV", True) == hue("PI", True),
+        hue("PI+INV+IV", True),
     )
     check(
         "(v) alphas: ERM+IV solid, PI+INV+IV as PI+INV",
-        ALPHA_MAP.get("ERM+IV") == 1.0 and ALPHA_MAP.get("PI+INV+IV") == 0.8,
+        alpha("ERM+IV", True) == 1.0 and alpha("PI+INV+IV", True) == 0.8,
     )
-    point = "ERM+IV" in POINT_ESTIMATES and "PI+INV+IV" not in POINT_ESTIMATES
-    check("(v) ERM+IV is a point estimate, PI+INV+IV is not", point)
 
 
 def leg_vi(seed):

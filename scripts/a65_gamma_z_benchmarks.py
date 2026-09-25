@@ -83,8 +83,6 @@ from src.experiments.configs import GAMMA_Z_DEFAULT, parse_experiment_plan, reso
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
-    IV_MODE_METHODS,
-    REAL_Z_METHODS,
     SUBDIR_QUERY,
     iv_mode,
     parse_method,
@@ -113,10 +111,13 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
-# a band the gamma_z axis moves carries the OBSERVED instrument's constraint: the
-# (Z)-only spellings, plus the bare `IV_MODE_METHODS` defaults, whose mode is (T,Z)
-# and so carries Z beside T. A membership test, not a substring one
-Z_CONSTRAINED: frozenset[str] = REAL_Z_METHODS | frozenset(IV_MODE_METHODS)
+# the seven spellings whose band carries the OBSERVED instrument's constraint: the
+# non-DA +IV intervals and the (Z)-only spellings, plus the bare `IV_MODE_METHODS`
+# defaults, whose mode is (T,Z) and so carries Z beside T. A semantic set, spelled
+# out: `iv_set` would add ERM+IV and PI&DA+PI+IV(T), which these legs do not test
+Z_CONSTRAINED: frozenset[str] = frozenset(
+    {"PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "PI&DA+PI+IV(Z)", "DA+ERM+IV", "DA+PI+IV", "PI&DA+PI+IV"}
+)
 
 
 def widens(width):
@@ -384,7 +385,7 @@ def leg_iv():
     # moves widens along it -- monotonically AND strictly end to end, so a band that
     # never moves, or that is NaN at all but one radius, does not pass
     # "the gamma_z axis moves it" = it carries the OBSERVED instrument's constraint:
-    # REAL_Z_METHODS (the (Z)-only spellings) plus the bare defaults, whose mode is
+    # Z_CONSTRAINED (the Z-only spellings) plus the bare defaults, whose mode is
     # (T,Z) and so carries Z beside T. NOT a substring test -- `PI+INV` passes one
     swept = tuple(name for name in pn_budget if name in Z_CONSTRAINED)
     check(

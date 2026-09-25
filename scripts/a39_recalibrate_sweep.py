@@ -66,7 +66,7 @@ from src.experiments.generic_runner import STRATEGIES, GenericParamSweep, Recali
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.experiments.utils.constants import TEX_MAPPER  # noqa: E402
+from src.experiments.utils.constants import label as method_label  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.plotting import create_sweep_plot  # noqa: E402
 from src.methods.sensitivity_models import recalibrated_gamma  # noqa: E402
@@ -329,7 +329,7 @@ def leg_iv(orch, x, results, experiment):
         has_z=False,
     )
     ax2 = plt.gcf().axes[0]
-    lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]
+    lines = [ln for ln in ax2.lines if ln.get_label() == method_label("DA+PI", False)]
     order = np.argsort(x, kind="stable")
     w = results["DA+PI"]["interval_width"]
     xd = np.asarray(lines[0].get_xdata(), dtype=float) if len(lines) == 1 else None

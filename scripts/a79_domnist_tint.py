@@ -23,14 +23,17 @@ MNIST loads, no nets, CPU; about a minute, most of it LaTeX).
       y ticks read 0 and 1; each interval method is two solid lines, no fill,
       PI+INV's lowest, the legend all line handles, a light-grey dashed line at
       0.5 behind them; the title and the x-label
-      are the density label's size.
+      are the density label's size; every label and hue is `method_style`'s with
+      no Z; with the tree's `labels.json` deleted the stack warns once and draws
+      the same figure (a tree from before the file reads as null Z).
 (v)   `domnist_table` on the same tree: one row per interval method in
       ALL_METHODS order, the point estimators absent, `fit_parts` charging the
       centre by `inv_recenter`, latency = fit + mean per-query solve (not divided
       by the query count), n_jobs and the BLAS cap in the comment lines, one load
       line per method with load records (none for an older run.json), Omega-hat
       the run's `rho` (the nets') times tr(S)/k with a comment naming that rho and
-      `rho_linear` (an older run.json's `rho` read as the linear one), and the
+      `rho_linear` (an older run.json's `rho` read as the linear one), the PI+INV
+      row reading pi+inv under `inv_recenter` off, on and inv, and the
       tex compiles under `pdflatex` when it is on PATH ([SKIP] otherwise);
       `aggregate.main` on a tree holding only `do_mnist/query/` writes both files.
 (vi)  the table's gamma provenance: with no selection beside the run it claims no
@@ -291,7 +294,22 @@ def _tree(root, digits=(7, 0, 3), n=6):
     }
     with open(os.path.join(folder, "run.json"), "w") as fh:
         json.dump(run, fh)
+    # the labels.json every run writes beside its pkls: do-MNIST never has a Z
+    with open(os.path.join(root, "do_mnist", "labels.json"), "w") as fh:
+        json.dump({"has_z": False, "methods": ["ATE", "ERM", "PI", "PI+INV", "DA+PI"]}, fh)
     return run
+
+
+def rendered(fig):
+    """(legend entries, every line's (label, colour, dash)) of a figure, sorted."""
+    entries = [t.get_text() for legend in fig.legends for t in legend.get_texts()]
+    entries += [t.get_text() for ax in fig.axes if ax.get_legend() for t in ax.get_legend().get_texts()]
+    lines = sorted(
+        (ln.get_label(), matplotlib.colors.to_rgb(ln.get_color()), str(ln.get_linestyle()))
+        for ax in fig.axes
+        for ln in ax.get_lines()
+    )
+    return entries, lines
 
 
 def leg_iv(scratch):
@@ -299,16 +317,16 @@ def leg_iv(scratch):
     import matplotlib.pyplot as plt
 
     from src.aggregate import tint_stack
-    from src.experiments.utils.constants import TEX_MAPPER
+    from src.experiments.utils.constants import label as method_label
 
     root = os.path.join(scratch, "tree")
     _tree(root)
     fig = tint_stack(root)
-    bands = [ax for ax in fig.axes if any(line.get_label() == TEX_MAPPER["ATE"] for line in ax.get_lines())]
+    ate = method_label("ATE", False)
+    bands = [ax for ax in fig.axes if any(line.get_label() == ate for line in ax.get_lines())]
     bands.sort(key=lambda ax: -ax.get_position().y0)
     order = [
-        round(float(next(ln for ln in ax.get_lines() if ln.get_label() == TEX_MAPPER["ATE"]).get_ydata()[0]) * 10)
-        for ax in bands
+        round(float(next(ln for ln in ax.get_lines() if ln.get_label() == ate).get_ydata()[0]) * 10) for ax in bands
     ]
     check("(iv) the rows read 0, 3, 7 from the top", order == [0, 3, 7], str(order))
     check("(iv) a missing digit is absent (three rows)", len(bands) == 3)
@@ -336,13 +354,13 @@ def leg_iv(scratch):
     import seaborn as sns
     from matplotlib.collections import PolyCollection
 
-    from src.experiments.utils.constants import COLOR_MAP
+    from src.experiments.utils.constants import colour
 
     palette = sns.color_palette("deep")
     fills = [c for ax in bands for c in ax.collections if isinstance(c, PolyCollection)]
     check("(iv) no filled bands", not fills, str(len(fills)))
     for name in ("PI", "PI+INV"):
-        hue = np.asarray(palette[COLOR_MAP[name]])
+        hue = np.asarray(colour(name, False))
         rows = [
             [ln for ln in ax.get_lines() if np.allclose(matplotlib.colors.to_rgb(ln.get_color()), hue)] for ax in bands
         ]
@@ -372,11 +390,13 @@ def leg_iv(scratch):
     sizes = {bands[0].title.get_fontsize(), bottom.xaxis.label.get_fontsize(), bottom.yaxis.label.get_fontsize()}
     check("(iv) the title, the x-label and the density label share one size", len(sizes) == 1, str(sizes))
     labels = {line.get_label() for ax in bands for line in ax.get_lines()}
-    check("(iv) ERM and DA+ERM are not drawn", not labels & {TEX_MAPPER["ERM"], TEX_MAPPER["DA+ERM"]})
+    check("(iv) ERM and DA+ERM are not drawn", not labels & {method_label("ERM", False), method_label("DA+ERM", False)})
     legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + list(fig.legends)
     check("(iv) one legend", len(legends) == 1, str(len(legends)))
     entries = [t.get_text() for t in legends[0].get_texts()] if legends else []
-    check("(iv) it is the methods' legend", TEX_MAPPER["PI"] in entries and "pre-DA" not in entries, str(entries))
+    check(
+        "(iv) it is the methods' legend", method_label("PI", False) in entries and "pre-DA" not in entries, str(entries)
+    )
     from matplotlib.lines import Line2D
 
     kinds = {type(h) for h in (legends[0].legend_handles if legends else [])}
@@ -416,7 +436,21 @@ def leg_iv(scratch):
     check("(iv) the histogram uses the query panel's style", alphas == {DENSITY_HIST["alpha"]}, str(alphas))
     crosses = [c for ax in bands for c in ax.collections if getattr(c, "get_offsets", None) and len(c.get_offsets())]
     check("(iv) each row marks its failed tint", len(crosses) >= 3)
+    before = rendered(fig)
     plt.close(fig)
+    # a tree from before labels.json: one WARNING, read as null Z, the same figure
+    os.remove(os.path.join(root, "do_mnist", "labels.json"))
+    lines = []
+    handle = logger.add(lambda message: lines.append(message.record["message"]), level="WARNING")
+    try:
+        fig = tint_stack(root)
+    finally:
+        logger.remove(handle)
+    missing = [line for line in lines if "no labels.json" in line]
+    check("(iv) without labels.json: one WARNING naming it", len(missing) == 1, str(lines))
+    check("(iv) without labels.json: the same figure", rendered(fig) == before)
+    plt.close(fig)
+    _tree(root)
 
 
 def leg_v(scratch):
@@ -430,11 +464,29 @@ def leg_v(scratch):
     body = [row for row in lines if not row.startswith(" & ")]
     check("(v) each row has its band line under it", len(lines) == 2 * len(body))
     check("(v) one row per interval method", len(body) == 3, str(len(body)))
-    from src.experiments.utils.constants import TEX_MAPPER
+    from src.experiments.utils.constants import INV, PI
+    from src.experiments.utils.constants import label as method_label
 
     names = [row.split(" & ")[0] for row in body]
-    check("(v) ALL_METHODS order: PI+INV, PI, DA+PI", names == [TEX_MAPPER[m] for m in ("PI+INV", "PI", "DA+PI")])
-    check("(v) the point estimators are absent", TEX_MAPPER["ERM"] not in names)
+    check(
+        "(v) ALL_METHODS order: PI+INV, PI, DA+PI", names == [method_label(m, False) for m in ("PI+INV", "PI", "DA+PI")]
+    )
+    check("(v) the point estimators are absent", method_label("ERM", False) not in names)
+    # PI+INV reads pi+inv whatever the centring
+    path = os.path.join(_tint_folder(root), "run.json")
+    with open(path) as fh:
+        shipped = json.load(fh)
+    for recenter in ("off", "on", "inv"):
+        with open(path, "w") as fh:
+            json.dump({**shipped, "inv_recenter": recenter}, fh)
+        rows = domnist_table(root).split("\\midrule\n")[1].splitlines()
+        check(
+            f"(v) the PI+INV row reads pi+inv under inv_recenter {recenter}",
+            rows[0].split(" & ")[0] == method_label("PI+INV", False) == "$" + PI + "+" + INV + "$",
+            rows[0].split(" & ")[0],
+        )
+    with open(path, "w") as fh:
+        json.dump(shipped, fh)
     pi = body[1].split(" & ")
     check("(v) PI: fit = X net + fit (3.00 s)", pi[5] == "$3.00$", pi[5])
     check("(v) PI: solve 500.00 ms per query", pi[6] == "$500.00$", pi[6])

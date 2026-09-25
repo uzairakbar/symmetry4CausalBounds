@@ -15,30 +15,23 @@ from numpy.typing import NDArray
 from .constants import (
     _STYLE_KEYS,
     CLAMP_YLIM,
-    COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
     DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
-    INSTRUMENT_Z_STYLE,
     NORMALIZE_BASELINES,
     NORMALIZED_SWEEP_SUFFIXES,
     PAGE_WIDTH,
     PANEL_CONFIGS,
-    PARTIAL_IDENTIFICATION_STYLE,
     PLOT_CONFIGS,
     PLOT_DPI,
     PLOT_FORMAT,
-    POINT_ESTIMATE_STYLE,
-    POINT_ESTIMATES,
     RC_PARAMS,
-    REAL_Z_METHODS,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
     colour,
     is_interval,
     method_style,
-    spelled_method,
 )
 from .constants import label as method_label
 from .data_operations import bootstrap, save
@@ -296,13 +289,6 @@ def _at_least_two_major_ticks(*axes, skip_x=()):
     _label_major_ticks_only(*axes)
 
 
-def _get_method_color(method_name: str) -> str:
-    """Get color for a method from the color palette."""
-    palette = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4", "C5"])
-    color_index = COLOR_MAP.get(method_name, 0) % len(palette)
-    return palette[color_index]
-
-
 #: the query figures' before / after-DA density histograms
 DENSITY_HIST: dict = {"bins": 50, "density": True, "alpha": 0.45}
 
@@ -346,17 +332,6 @@ def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
         highlighted.append(label)
 
     return highlighted
-
-
-def _line_style(method_name: str):
-    """Point estimates dashed, a family with a real Z on top (REAL_Z_METHODS)
-    dash-dotted in the family's hue, everything else solid; a (T) or (T,Z)
-    spelling draws as its base."""
-    if method_name in POINT_ESTIMATES:
-        return POINT_ESTIMATE_STYLE
-    if spelled_method(method_name) in REAL_Z_METHODS:
-        return INSTRUMENT_Z_STYLE
-    return PARTIAL_IDENTIFICATION_STYLE
 
 
 def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False):
