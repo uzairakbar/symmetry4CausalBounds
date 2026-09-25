@@ -70,7 +70,17 @@ apart from (vi). Legs:
          and in the `domnist_table` row under off, on and inv. Catches: a label
          that follows the centring. Misses: the table's other rows (a79 (v)).
   (viii) completeness greps (a later tier).
-  (ix)   the null-Z column titles and the cigarettes title (a later tier).
+  (ix)   the column titles: on a validityFig9-shaped tree (the simulation with a
+         real Z, optical and cigarettes without) through `sweep_grid` and
+         `perf_grid`, each null-Z column's title carries `NULL_Z_TITLE_SUFFIX`, the
+         `$(Z = \varnothing)$` line, and the simulation's does not; the titles are
+         inside the figure and pairwise disjoint and the legend clears them; the
+         merged figure saves to PDF under usetex ([SKIP] without latex); amssymb
+         is in the preamble. An all-null tree and a tree whose only Z dataset is a
+         blank column carry no suffix. Catches: the suffix on a Z column or an
+         unmerged grid, a suffix that collides with its neighbour or the legend, a
+         preamble without `\varnothing`. Misses: the single-dataset figures, which
+         carry no dataset title.
 
 A leg, or a part of one, that needs code from a later commit prints [SKIP] and is
 counted in the summary line.
@@ -85,8 +95,10 @@ import glob
 import json
 import os
 import pickle
+import shutil
 import sys
 import tempfile
+from itertools import pairwise
 
 import yaml
 from loguru import logger
@@ -115,17 +127,22 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.utils.constants import (  # noqa: E402
     DA_ERM,
+    DATASET_TITLES,
     DEEP_HEX,
     DEEP_INDEX,
     ERM,
+    FS_LABEL,
     INSTRUMENT_Z_STYLE,
     INV,
     IV,
     IV_MODE_METHODS,
     IV_MODES,
+    NULL_Z_TITLE_SUFFIX,
     PARTIAL_IDENTIFICATION_STYLE,
     PI,
     POINT_ESTIMATE_STYLE,
+    RC_PARAMS,
+    SUBDIR_PERF,
     SUBDIR_SWEEP,
     Side,
     alpha,
@@ -742,9 +759,98 @@ def leg_viii():
     skip("(viii)", "the completeness greps land with the commit that drops the static tables")
 
 
+def write_perf(root, dataset, methods, has_z):
+    """One dataset's wall-clock perf pkls and its `labels.json`."""
+    folder = os.path.join(root, dataset, SUBDIR_PERF)
+    os.makedirs(folder, exist_ok=True)
+    grid = PARAM_SPECS["epsilon"].grid_fn(dataset, 4)
+    results = {m: (i + 1) * np.cumsum(np.ones(len(grid)))[:, None] for i, m in enumerate(methods)}
+    for stem, obj in (("epsilon_values", grid), ("epsilon_wall_clock_results", results)):
+        with open(os.path.join(folder, f"{stem}.pkl"), "wb") as fh:
+            pickle.dump(obj, fh)
+    with open(os.path.join(root, dataset, "labels.json"), "w") as fh:
+        json.dump({"has_z": has_z, "methods": list(methods)}, fh)
+
+
+def grids(root):
+    """{kind: figure} of `sweep_grid` on gamma and `perf_grid` on the wall clock over
+    the tree's columns, each where the tree carries its pkls."""
+    from src import aggregate
+
+    datasets, out = aggregate.columns(root), {}
+    if any(os.path.exists(os.path.join(root, d, SUBDIR_SWEEP, "gamma_results.pkl")) for d in datasets):
+        out["sweep_grid"] = aggregate.sweep_grid("gamma", datasets, root)
+    if any(aggregate._has_perf(root, d, "wall_clock") for d in datasets):
+        out["perf_grid"] = aggregate.perf_grid("wall_clock", ("wall_clock",), datasets, root)
+    return out
+
+
+def titles(fig):
+    """{dataset title without the null-Z suffix: full title} of the grid's top row."""
+    top = [ax.get_title() for ax in fig.axes if ax.get_title()]
+    return {title.replace(NULL_Z_TITLE_SUFFIX, ""): title for title in top}
+
+
 def leg_ix():
     print("(ix) the column titles")
-    skip("(ix)", "the null-Z title suffix and the cigarettes title land in their own commits")
+    base = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
+    os.makedirs(base, exist_ok=True)
+    suffix = NULL_Z_TITLE_SUFFIX
+    check(
+        "(ix) the null-Z suffix is (Z = varnothing) on the title's line, at 3/4 of the title's size",
+        suffix == r" {\fontsize{18}{18}\selectfont $(Z = \varnothing)$}" and FS_LABEL == 24,
+        suffix,
+    )
+    check("(ix) amssymb is in the TeX preamble", "amssymb" in RC_PARAMS["text.latex.preamble"])
+    validity = recipes()["validityFig9"]
+    merged = tempfile.mkdtemp(prefix="titles_", dir=base)
+    for dataset, (methods, has_z) in validity.items():
+        write_column(merged, dataset, methods, has_z)
+        write_perf(merged, dataset, methods, has_z)
+    for kind, fig in grids(merged).items():
+        got = titles(fig)
+        want = {DATASET_TITLES[d]: DATASET_TITLES[d] + ("" if validity[d][1] else suffix) for d in validity}
+        check(f"(ix) {kind}, merged: every null-Z column title carries the suffix", got == want, f"{got}")
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        boxes = [ax.title.get_window_extent(renderer) for ax in fig.axes if ax.get_title()]
+        inside = all(fig.bbox.x0 <= b.x0 and b.x1 <= fig.bbox.x1 and b.y1 <= fig.bbox.y1 for b in boxes)
+        disjoint = all(a.x1 <= b.x0 for a, b in pairwise(sorted(boxes, key=lambda box: box.x0)))
+        check(
+            f"(ix) {kind}, merged: the titles are inside the figure and pairwise disjoint",
+            inside and disjoint,
+            f"{boxes}",
+        )
+        legend = fig.legends[0].get_window_extent(renderer)
+        check(f"(ix) {kind}, merged: the legend clears every title", all(legend.y0 >= b.y1 for b in boxes), f"{legend}")
+        if shutil.which("latex"):
+            path = os.path.join(merged, f"{kind}.pdf")
+            fig.savefig(path, format="pdf")
+            check(f"(ix) {kind}, merged: saves to PDF under usetex", os.path.getsize(path) > 0)
+        else:
+            skip(f"(ix) {kind} pdf", "no latex on PATH")
+        plt.close(fig)
+
+    null = tempfile.mkdtemp(prefix="titles_null_", dir=base)
+    for dataset in ("simulation", "optical_device"):
+        write_column(null, dataset, ["PI", "DA+PI"], False)
+        write_perf(null, dataset, ["PI", "DA+PI"], False)
+    for kind, fig in grids(null).items():
+        check(
+            f"(ix) {kind}, all null Z: no suffix", not any(suffix in t for t in titles(fig).values()), f"{titles(fig)}"
+        )
+        plt.close(fig)
+
+    blank = tempfile.mkdtemp(prefix="titles_blank_", dir=base)
+    write_column(blank, "simulation", ["PI+IV"], True, param="omega")  # a Z column blank on gamma
+    write_column(blank, "optical_device", ["PI"], False)
+    fig = grids(blank)["sweep_grid"]
+    check(
+        "(ix) a Z dataset present only as a blank column: no suffix",
+        not any(suffix in t for t in titles(fig).values()),
+        f"{titles(fig)}",
+    )
+    plt.close(fig)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,7 @@ from src.experiments.utils.constants import (
     FS_LABEL,
     FS_TICK,
     IV_MODES,
+    NULL_Z_TITLE_SUFFIX,
     PLOT_DPI,
     PLOT_FORMAT,
     RC_PARAMS,
@@ -386,7 +387,7 @@ def _metric_grid(
     `path` when given. `hz` is each column's `has_z`: when a column that draws has a
     real Z, the grid is merged and every null-Z column draws each method as its Z
     counterpart (`constants.method_style`), so each cross-dataset pair is one
-    legend entry."""
+    legend entry, and each null-Z column title gets `NULL_Z_TITLE_SUFFIX`."""
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
     fig, axes = plt.subplots(
@@ -405,7 +406,10 @@ def _metric_grid(
     merged = any(hz[d] for d in drawing)
     handles, xlabel = {}, None
     for c, dataset in enumerate(datasets):
-        axes[0, c].set_title(DATASET_TITLES[dataset], fontsize=FS_LABEL)
+        # a merged grid marks each column without a Z, blank or not: its entries in
+        # the shared legend read the Z labels
+        suffix = NULL_Z_TITLE_SUFFIX if merged and not hz[dataset] else ""
+        axes[0, c].set_title(DATASET_TITLES[dataset] + suffix, fontsize=FS_LABEL)
         labelled = False
         for r, (metric, _) in enumerate(rows):
             ax, cell = axes[r, c], cells[dataset, metric]

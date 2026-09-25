@@ -29,13 +29,19 @@ DATASET_TITLES: dict[str, str] = {
     "cigarettes": "cigarettes",
     "do_mnist": "do-MNIST",
 }
+# after a null-Z column's title in an aggregate grid that also has a Z column: there
+# its legend entries read the Z counterparts' labels (`method_style(merged=True)`),
+# and this says the column had no Z. On the title's line, at 3/4 of its size so the
+# dataset name stays the title; `\varnothing` is amssymb's
+_SUFFIX_SIZE: float = 0.75 * FS_LABEL
+NULL_Z_TITLE_SUFFIX: str = rf" {{\fontsize{{{_SUFFIX_SIZE:g}}}{{{_SUFFIX_SIZE:g}}}\selectfont $(Z = \varnothing)$}}"
 
 # Plotting style
 RC_PARAMS: dict[str, str | int | bool] = {
     "text.usetex": True,
     "font.family": "serif",
     "font.serif": ["Computer Modern"],
-    "text.latex.preamble": r"\usepackage{amsmath}\usepackage{bm}",
+    "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{bm}",
     "axes.facecolor": "white",
     "axes.edgecolor": "black",
     "axes.linewidth": 2,
