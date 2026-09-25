@@ -767,10 +767,20 @@ class ExperimentOrchestrator(ABC):
         """Build methods for this experiment."""
         return self.registry.build_methods(self.kwargs["methods"])
 
+    @property
+    def has_z(self) -> bool:
+        """Whether the experiment has a real Z (a non-empty `iv`): every label, hue
+        and line style is a function of (method, has_z). No Z here; the simulation
+        and cigarette orchestrators override it on their `iv`."""
+        return False
+
     def run(self, plan):
         """Run the experiment types the `experiment:` block asked for."""
         if getattr(plan, "tint", None) is not None:
             raise ValueError(f"experiment.query.tint is a do-MNIST sweep; {self.name} has none.")
+        # beside query/, sweep/ and perf/: the aggregate reads `has_z` off it per
+        # column; `methods` is informational, the stored spellings
+        save({"has_z": self.has_z, "methods": list(self.kwargs["methods"])}, "labels", self.name, "json")
         if plan.query:
             self._run_query_sweep()
         if plan.sweep:

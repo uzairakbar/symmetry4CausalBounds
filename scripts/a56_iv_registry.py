@@ -52,17 +52,17 @@ Legs:
         Catches: a name that would KeyError at plot time. Misses: how the figure
         looks.
   (vi)  every `+IV` builder fits with a 1-column Z without raising, reads the
-        instrument (`_has_iv`) and predicts finite bounds; `ERM+IV` requested under
-        an empty set is a config error naming both `ERM+IV` and `iv`, and an omitted
-        `methods` falls back to ALL_METHODS without `ERM+IV` unless there is an
-        instrument set (a default is not a request); the four IV classes built
+        instrument (`_has_iv`) and predicts finite bounds; `ERM+IV` requested under an
+        empty set is a config error naming both `ERM+IV` and `iv`, and an omitted
+        `methods` falls back to ALL_METHODS without the non-DA `+IV` methods
+        (`ERM+IV`; `PI+IV` and `PI+INV+IV` are PI and PI+INV without a Z) unless there
+        is an instrument set (a default is not a request); the four IV classes built
         with `gamma_z` 2^-8 carry it, and their bounds follow SS2.6 (the joint
-        0.069877 on the non-DA classes at s = 1, the joint at its own s on a DA
-        class, r_Z 0.0625 on the intersection's baseline branch). Catches: `PI+IV`
-        built from `common` (no `epsilon_iv`, so the class raises on the first
-        real Z), a silent ERM on no instrument, a fallback that trips its own
-        error, `gamma_z` not forwarded by the registry. Misses: the numbers the
-        fits produce (a57).
+        0.069877 on the non-DA classes at s = 1, the joint at its own s on a DA class,
+        r_Z 0.0625 on the intersection's baseline branch). Catches: `PI+IV` built from
+        `common` (no `epsilon_iv`, so the class raises on the first real Z), a silent
+        ERM on no instrument, a fallback that trips its own error, `gamma_z` not
+        forwarded by the registry. Misses: the numbers the fits produce (a57).
 
     MPLBACKEND=Agg python scripts/a56_iv_registry.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -592,12 +592,13 @@ def leg_vi(seed):
     ok = rejection("cigarettes", methods=["PI", "ERM+IV"], iv=["tax_s"]) is None
     ok = ok and rejection("simulation", methods=["PI", "ERM+IV"], iv=4) is None
     check("(vi) ERM+IV with a real instrument set resolves", ok)
-    # an omitted `methods` is a default, not a request: it carries ERM+IV only with an instrument set
+    # an omitted `methods` is a default, not a request: it carries the non-DA +IV methods only with an
+    # instrument set, since without one PI+IV and PI+INV+IV are PI and PI+INV (a57 (i), (ii))
     without = resolve_dataset_block("cigarettes", base_block("cigarettes"))["methods"]
     with_iv = resolve_dataset_block("cigarettes", {**base_block("cigarettes"), "iv": ["tax_s"]})["methods"]
     check(
-        "(vi) omitted methods, no instrument: ALL_METHODS minus ERM+IV",
-        without == [m for m in ALL_METHODS if m != "ERM+IV"],
+        "(vi) omitted methods, no instrument: ALL_METHODS minus ERM+IV, PI+IV and PI+INV+IV",
+        without == [m for m in ALL_METHODS if m not in ("ERM+IV", "PI+IV", "PI+INV+IV")],
     )
     check("(vi) omitted methods, an instrument set: all of ALL_METHODS", with_iv == list(ALL_METHODS))
 

@@ -374,6 +374,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
 
         super().__init__(EXPERIMENT_NAME, CigaretteRegistry(), **kwargs)
 
+    @property
+    def has_z(self) -> bool:
+        """A real Z iff the instrument set names a column (a non-empty `iv`)."""
+        return bool(self.iv_columns)
+
     # ---------------------------------------------------------------- factories
 
     def _sem_factory(self, bootstrap: bool = False):

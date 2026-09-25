@@ -13,7 +13,9 @@ from loguru import logger
 from src.experiments.utils.constants import (
     _STYLE_KEYS,
     IV_MODE_METHODS,
+    NON_DA_IV_METHODS,
     parse_method,
+    shared_labels,
     spelled_method,
     validate_plot_keys,
 )
@@ -1384,9 +1386,12 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"config.{name}.treatment_dim must be a positive int; got {dim!r}.")
     # the instrument set decides whether the observed-Z point estimate can run at
     # all, so the fallback method list omits `ERM+IV` without one; listing it by
-    # hand is the error below
+    # hand is the error below. PI+IV and PI+INV+IV go too: without a Z they ARE PI
+    # and PI+INV (a57 (i), (ii)), the same bound at twice the compute
     has_instruments = _check_instruments(name, block)
-    block.setdefault("methods", [method for method in ALL_METHODS if method != "ERM+IV" or has_instruments])
+    block.setdefault(
+        "methods", [method for method in ALL_METHODS if method not in NON_DA_IV_METHODS or has_instruments]
+    )
     # every entry parsed (`parse_method`): a stale method name (e.g. an old
     # underscore spelling) or a malformed mode suffix must be a config error
     # here, not silently filtered out of the run by the registry. Stored as
@@ -1423,5 +1428,13 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
                 f"config.{name}.methods lists {two_stage!r} but the instrument set is empty "
                 f"(iv = {block.get('iv', 'absent')!r}); drop {two_stage!r} or set `iv:`."
             )
+    # two entries on one label are either the same estimator (a Z-only constraint
+    # without a Z, e.g. PI and PI+IV) or two mode spellings of one label row (e.g.
+    # DA+PI+IV and DA+PI+IV(T)): legal, and the figures draw one legend entry
+    for first, second, _ in shared_labels(block["methods"], has_instruments):
+        logger.warning(
+            f"config.{name}.methods: {first!r} and {second!r} share one label under "
+            f"iv = {block.get('iv', 'absent')!r}; one legend entry."
+        )
 
     return block

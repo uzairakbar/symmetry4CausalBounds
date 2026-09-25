@@ -38,9 +38,11 @@ apart from (vi). Legs:
          rows, over every recipe block, the digest blocks, the default lists and
          exhaustively at each has_z; (b) across experiments one label is one
          (colour, alpha, dash). A mutation of each, patched into the module, proves
-         it can fail. Catches: two rows on one label, one label drawn two ways.
-         Misses: a figure that draws a label without `method_style` -- the
-         completeness greps in (viii).
+         it can fail. Two methods on one label in one block (PI and PI+IV at
+         `iv: 0`, the (T) and bare spellings) resolve with one WARNING and no
+         raise. Catches: two rows on one label, one label drawn two ways, a config
+         that raises on a legal collision. Misses: a figure that draws a label
+         without `method_style` -- the completeness greps in (viii).
   (v)    the aggregate merge: the `z_counterpart` pairs whose render differs are
          exactly the seven cross-dataset pairs (SEVEN), the two (T) -> (T,Z)
          extras render identically, a null-Z column in a merged grid draws each
@@ -49,7 +51,15 @@ apart from (vi). Legs:
          to 6 legend entries. Catches: a pair missing from `z_counterpart`, a
          recipe whose null-Z column has no Z twin, a merge that leaves two legend
          entries per pair. Misses: the aggregate's reading of `labels.json`.
-  (vi)   the writer of `artifacts/<dataset>/labels.json` (a later tier).
+  (vi)   the writer: one query panel per dataset through the production path
+         (`resolve_dataset_block`, the orchestrator, `.run`) in a temp cwd under
+         ~/scratch, simulation `iv: 2` and optical, tiny samples, `im-ci` 0:
+         `artifacts/<dataset>/labels.json` holds `{has_z, methods}` with the
+         orchestrator's `has_z` (true on the simulation, false on optical) beside
+         `query/`. `--skip-run` keeps the property check and skips the run.
+         Catches: an orchestrator without the property, a run type that writes no
+         `labels.json`, a `has_z` not the orchestrator's. Misses: the
+         cigarettes and do-MNIST runs (their `has_z` is the property alone).
   (vii)  do-MNIST's PI+INV reads `pi+inv` whatever the `inv_recenter`, in `label`
          and in the `domnist_table` row under off, on and inv. Catches: a label
          that follows the centring. Misses: the table's other rows (a79 (v)).
@@ -64,6 +74,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import glob
 import json
 import os
@@ -143,6 +154,17 @@ def skip(tag, reason):
     """A leg that cannot run here: printed and counted in the summary, never a silent PASS."""
     print(f"  [SKIP] {tag} {reason}")
     SKIPPED.append(f"{tag} {reason}")
+
+
+@contextlib.contextmanager
+def captured():
+    """The loguru messages at WARNING and above emitted inside the block."""
+    lines = []
+    handle = logger.add(lambda message: lines.append(message.record["message"]), level="WARNING")
+    try:
+        yield lines
+    finally:
+        logger.remove(handle)
 
 
 def base_block(name):
@@ -472,7 +494,15 @@ def leg_iv():
         constants.label = original
     check("(iv) (a) mutation: PI+INV labelled as PI fires", fired)
     check("(iv) (a) one row, one label: PI and PI+IV without Z", not label_collisions(["PI", "PI+IV"], False))
-    skip("(iv) config warning", "the collision warning lands with the labels.json commit")
+    for methods, iv, want in ((["PI", "PI+IV"], 0, 1), (["PI", "PI+IV"], 2, 0), (["DA+PI+IV", "DA+PI+IV(T)"], 0, 1)):
+        with captured() as lines:
+            resolved = rejection("simulation", methods=methods, iv=iv) is None
+        shared = [line for line in lines if "one legend entry" in line]
+        check(
+            f"(iv) {methods} at iv = {iv} resolves with {want} shared-label WARNING",
+            resolved and len(shared) == want,
+            f"{lines}",
+        )
     skip("(iv) create_sweep_plot", "one legend entry for PI and PI+IV without Z lands with the plotting commit")
 
 
@@ -521,9 +551,66 @@ def leg_v():
     skip("(v) sweep_grid", "the synthetic merged tree through sweep_grid lands with the aggregate commit")
 
 
+# the production path at a toy scale: one query panel per dataset, a real Z on the simulation only
+WRITER_TOGGLES = dict(recalibrate=True, pad=True, clipy=False, mean_match=True, n_jobs=-1, **{"im-ci": 0})
+WRITER_BLOCKS = {
+    "simulation": dict(
+        seed=42,
+        n_samples=256,
+        kernel_dim=0,
+        treatment_dim=8,
+        iv=2,
+        methods=["PI", "PI+IV", "DA+PI+IV(Z)"],
+        augmentation="translate",
+    ),
+    "optical_device": dict(
+        seed=42, n_samples=256, methods=["PI", "DA+PI", "DA+PI+IV(T)"], augmentation="rotation > hflip"
+    ),
+}
+
+
 def leg_vi(skip_run):
     print("(vi) the labels.json writer")
-    skip("(vi)", "the writer lands with the labels.json commit")
+    import shutil
+
+    from munch import munchify
+
+    from src.experiments.configs import parse_experiment_plan
+    from src.experiments.utils import set_seed
+    from src.main import ORCHESTRATORS
+
+    missing = [name for name, cls in ORCHESTRATORS.items() if not isinstance(getattr(cls, "has_z", None), property)]
+    check("(vi) every orchestrator carries a has_z property", not missing, f"{missing}")
+    if skip_run:
+        skip("(vi) run", "--skip-run")
+        return
+    root = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
+    os.makedirs(root, exist_ok=True)
+    cwd = os.getcwd()
+    scratch = tempfile.mkdtemp(prefix="writer_", dir=root)
+    # data paths are relative: the run sees the repo's data/ from its own cwd
+    os.symlink(os.path.join(REPO, "data"), os.path.join(scratch, "data"))
+    os.chdir(scratch)
+    try:
+        for name, block in WRITER_BLOCKS.items():
+            block = {**WRITER_TOGGLES, **block, "n_experiments": 1, "sweep_samples": 4}
+            plan = parse_experiment_plan({"query": True})
+            block = resolve_dataset_block(name, block)
+            set_seed(block["seed"])
+            orchestrator = ORCHESTRATORS[name](**block, hyperparameters=munchify({}))
+            orchestrator.run(plan)
+            with open(os.path.join("artifacts", name, "labels.json")) as fh:
+                written = json.load(fh)
+            want = {"has_z": name == "simulation", "methods": block["methods"]}
+            check(f"(vi) {name}: labels.json holds has_z and the methods", written == want, f"{written}")
+            check(f"(vi) {name}: has_z is the orchestrator's", written["has_z"] is orchestrator.has_z)
+            check(
+                f"(vi) {name}: labels.json sits beside query/, outside the hashed folders",
+                os.path.isdir(os.path.join("artifacts", name, "query")),
+            )
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def leg_vii():

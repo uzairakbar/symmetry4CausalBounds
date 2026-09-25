@@ -56,6 +56,11 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
         super().__init__(EXPERIMENT_NAME, SimulationRegistry(), **kwargs)
 
+    @property
+    def has_z(self) -> bool:
+        """A real Z iff the SEM generates one (`iv > 0`)."""
+        return self.iv_dim > 0
+
     def _sem_factory(self):
         """Factory for creating SEM instances."""
         return SEM(treatment_dimension=self.treatment_dim, gamma=SIMULATION_CONFIG.gamma_true, iv_dim=self.iv_dim)
