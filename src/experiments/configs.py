@@ -411,7 +411,7 @@ SPECTRUM_KEEP: float = 0.999
 # value, which is the right edge. `gamma` keeps this; the robustness sweep has its
 # own, centred on 1 (below)
 def _RATIO_GRID(dataset, n):
-    return np.geomspace(2**-6, 2**0, num=n)
+    return np.geomspace(2**-6, 2**1, num=n)
 
 
 # how far either side of the oracle budget the ROBUSTNESS grid runs, in octaves.
