@@ -14,7 +14,6 @@ from numpy.typing import NDArray
 
 from .constants import (
     _STYLE_KEYS,
-    ALPHA_MAP,
     CLAMP_YLIM,
     COLOR_MAP,
     DEFAULT_HILIGHT_OURS,
@@ -36,9 +35,12 @@ from .constants import (
     REAL_Z_METHODS,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
-    TEX_MAPPER,
+    colour,
+    is_interval,
+    method_style,
     spelled_method,
 )
+from .constants import label as method_label
 from .data_operations import bootstrap, save
 
 PlotScale = Literal["linear", "log", "symlog", "asinh"]
@@ -307,9 +309,26 @@ DENSITY_HIST: dict = {"bins": 50, "density": True, "alpha": 0.45}
 
 def draw_da_density(ax, before, after) -> None:
     """The density row of the query panel: the observed draw and the DA measure,
-    one histogram each, in the ERM and the DA+ERM hue."""
-    ax.hist(before, color=_get_method_color("ERM"), **DENSITY_HIST)
-    ax.hist(after, color=_get_method_color("DA+ERM"), **DENSITY_HIST)
+    one histogram each, in the ERM and the DA+ERM hue (seaborn deep blue and red,
+    whatever the current colour cycle)."""
+    ax.hist(before, color=colour("ERM", False), **DENSITY_HIST)
+    ax.hist(after, color=colour("DA+ERM", False), **DENSITY_HIST)
+
+
+def fold_by_signature(entries) -> tuple[list, list[str]]:
+    """(handles, labels) of legend `entries`, each (handle, MethodStyle), in the
+    caller's order, keeping the first of every render signature
+    (`constants.method_style`): two methods that draw as the same pixels -- the mode
+    spellings of one label, a Z-only method and its no-IV twin without a real Z --
+    read as one entry."""
+    seen, handles, labels = set(), [], []
+    for handle, style in entries:
+        if style.signature in seen:
+            continue
+        seen.add(style.signature)
+        handles.append(handle)
+        labels.append(style.label)
+    return handles, labels
 
 
 def _apply_tex_highlighting(labels: list[str], hilight_ours: bool) -> list[str]:
@@ -340,36 +359,38 @@ def _line_style(method_name: str):
     return PARTIAL_IDENTIFICATION_STYLE
 
 
-def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray]):
+def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False):
     """One band per interval method on `ax` (the fill at its alpha, both edges
-    in its line style, the family's hue) and one line per point estimate.
+    in its line style, the family's hue) and one line per point estimate, each
+    as `method_style(name, has_z, merged=merged)` draws it.
     Returns {method: legend handle} in drawing order and the nan-aware (min,
     max) of what was drawn; an interval-against-a-budget figure carries NaN
     cells where a solve was INFEASIBLE."""
-    colors = sns.color_palette()
     handles, lo, hi = {}, float("inf"), float("-inf")
     for method_name, predictions in y_results.items():
-        color = colors[COLOR_MAP[method_name]]
-        label = TEX_MAPPER.get(method_name, method_name)
-        if "PI" in method_name:
+        style = method_style(method_name, has_z, merged=merged)
+        if is_interval(method_name):
             lower = predictions[:, :, 0].mean(axis=1)
             upper = predictions[:, :, 1].mean(axis=1)
-            style = _line_style(method_name)
-            patch = ax.fill_between(
-                x_values, lower, upper, color=color, alpha=ALPHA_MAP.get(method_name, 0.2), linewidth=0
-            )
-            edge = ax.plot(x_values, lower, color=color, linestyle=style, linewidth=BAND_EDGE_WIDTH, label=label)[0]
-            ax.plot(x_values, upper, color=color, linestyle=style, linewidth=BAND_EDGE_WIDTH)
+            patch = ax.fill_between(x_values, lower, upper, color=style.colour, alpha=style.alpha, linewidth=0)
+            edge = ax.plot(
+                x_values,
+                lower,
+                color=style.colour,
+                linestyle=style.linestyle,
+                linewidth=BAND_EDGE_WIDTH,
+                label=style.label,
+            )[0]
+            ax.plot(x_values, upper, color=style.colour, linestyle=style.linestyle, linewidth=BAND_EDGE_WIDTH)
             handles[method_name] = (patch, edge)
         else:
             lower = upper = predictions.mean(axis=1)
-            linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
             handles[method_name] = ax.plot(
                 x_values,
                 lower,
-                color="black" if method_name == "ATE" else color,
-                label=label,
-                linestyle=linestyle,
+                color=style.colour,
+                label=style.label,
+                linestyle=style.linestyle,
                 linewidth=2,
                 solid_capstyle="round",
             )[0]
@@ -377,12 +398,13 @@ def _draw_bands(ax, x_values: NDArray, y_results: dict[str, NDArray]):
     return handles, lo, hi
 
 
-def mark_failed(ax, x_values: NDArray, y_results: dict[str, NDArray], height: float = 0.04) -> int:
+def mark_failed(
+    ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False, height: float = 0.04
+) -> int:
     """A small cross on the x-axis, in the method's hue, at every x where an
     interval method returned no bound (NaN: a failed or infeasible solve), so a
     gap in a band reads as a missing solve rather than as a jump. Returns the
     number of crosses drawn."""
-    colors = sns.color_palette()
     x_values = np.asarray(x_values, dtype=float)
     drawn = 0
     for method_name, predictions in y_results.items():
@@ -398,7 +420,7 @@ def mark_failed(ax, x_values: NDArray, y_results: dict[str, NDArray], height: fl
                 marker="x",
                 s=30,
                 linewidths=1.2,
-                color=colors[COLOR_MAP[method_name]],
+                color=method_style(method_name, has_z, merged=merged).colour,
                 clip_on=False,
                 zorder=5,
             )
@@ -425,13 +447,12 @@ def _mark_frame(x_values: NDArray, vlines, xscale: str) -> tuple[float, float, l
     return x_lo, x_hi, marks
 
 
-def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray]):
+def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False):
     """One mean line and one 2.5 / 97.5 band per method on `ax`, in the method's
-    hue and line style; a method with no finite mean is skipped. Returns the
-    line handles keyed by method in drawing order and the mean series, which
-    alone decide the limits (the band is contextual and clips against the
-    frame)."""
-    colors = sns.color_palette()
+    hue and line style (`method_style(name, has_z, merged=merged)`); a method with
+    no finite mean is skipped. Returns the line handles keyed by method in drawing
+    order and the mean series, which alone decide the limits (the band is
+    contextual and clips against the frame)."""
     handles, means = {}, []
     for method_name, errors in y_results.items():
         # sanitize: float64, Infs to NaNs, then the mean over what is finite
@@ -446,13 +467,12 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray]):
             continue
         means.append(mean_error)
 
-        color = colors[COLOR_MAP[method_name]]
-        label = TEX_MAPPER.get(method_name, method_name)
+        style = method_style(method_name, has_z, merged=merged)
         handles[method_name] = ax.plot(
-            x_values, mean_error, color=color, label=label, linestyle=_line_style(method_name)
+            x_values, mean_error, color=style.colour, label=style.label, linestyle=style.linestyle
         )[0]
         if not np.all(np.isnan(low)) and not np.all(np.isnan(high)):
-            ax.fill_between(x_values, low, high, color=color, alpha=0.2)
+            ax.fill_between(x_values, low, high, color=style.colour, alpha=0.2)
 
     return handles, means
 
@@ -521,10 +541,15 @@ def create_sweep_plot(
     normalize: bool = DEFAULT_NORMALIZE_SWEEP,
     clip_y: bool = True,
     promote_y: bool = True,
+    *,
+    has_z: bool,
 ):
     """
     Create a parameter sweep plot showing method performance across parameter values.
     Aggressively robust to NaN/Inf values.
+
+    `has_z` is whether the experiment has a real Z: every label, hue and dash
+    follows `constants.method_style(name, has_z)`.
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold).
@@ -580,7 +605,7 @@ def create_sweep_plot(
         if cfg.get("normalize", normalize):
             y_results, baseline = normalize_sweep(y_results, fname)
             if baseline is not None:
-                ylabel = rf"{ylabel} / {TEX_MAPPER[baseline]}"
+                ylabel = rf"{ylabel} / {method_label(baseline, has_z)}"
 
         legend_items = [item for item in (legend_items or []) if item in y_results]
 
@@ -589,10 +614,7 @@ def create_sweep_plot(
         fig = plt.figure()
 
         # one line and band per method; the mean lines alone decide the limits
-        handles, all_means = _draw_series(plt.gca(), x_values, y_results)
-        plot_handles = list(handles.values())
-        all_labels = [TEX_MAPPER.get(name, name) for name in handles]
-        legend_items = [TEX_MAPPER.get(item, item) if item in handles else item for item in legend_items]
+        handles, all_means = _draw_series(plt.gca(), x_values, y_results, has_z=has_z)
 
         # Formatting
         style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)
@@ -639,21 +661,12 @@ def create_sweep_plot(
 
         # Legend
         hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
-        if not hide_legend and plot_handles:
-            # Reconstruct legend based on what actually plotted
-            final_handles = []
-            final_labels = []
-
-            # Use requested order if possible
-            targets = legend_items if legend_items else all_labels
-
-            for target_lbl in targets:
-                if target_lbl in all_labels:
-                    idx = all_labels.index(target_lbl)
-                    if idx < len(plot_handles):
-                        final_handles.append(plot_handles[idx])
-                        final_labels.append(target_lbl)
-
+        if not hide_legend and handles:
+            # what actually plotted, in the requested order if any, one entry per render
+            targets = [name for name in (legend_items or handles) if name in handles]
+            final_handles, final_labels = fold_by_signature(
+                (handles[name], method_style(name, has_z)) for name in targets
+            )
             final_labels = _apply_tex_highlighting(final_labels, hilight_ours)
 
             plt.legend(
@@ -702,6 +715,8 @@ def create_query_sweep_plot(
     vlines: tuple[float, ...] = (),
     legend_width: float | None = None,
     mark_missing: bool = False,
+    *,
+    has_z: bool,
 ):
     """
     Create a query sweep plot showing predictions across treatment values.
@@ -737,6 +752,7 @@ def create_query_sweep_plot(
             does, with the figure widened so the axes keep their size.
         mark_missing: a cross on the x-axis where an interval method has no bound
             (`mark_failed`).
+        has_z: whether the experiment has a real Z (`constants.method_style`).
     """
     legend_items = [item for item in (legend_items or []) if item in y_results]
     cfg = _plot_config(experiment, "query")
@@ -747,10 +763,7 @@ def create_query_sweep_plot(
     sns.set_palette("deep")
     fig = plt.figure()
 
-    drawn, min_mean, max_mean = _draw_bands(plt.gca(), x_values, y_results)
-    all_labels = [TEX_MAPPER.get(name, name) for name in drawn]
-    plot_handles = list(drawn.values())
-    legend_items = [TEX_MAPPER.get(item, item) for item in legend_items if item in drawn]
+    drawn, min_mean, max_mean = _draw_bands(plt.gca(), x_values, y_results, has_z=has_z)
 
     # Formatting
     _apply_style(plt.gca(), style, xlabel, ylabel)
@@ -765,13 +778,13 @@ def create_query_sweep_plot(
     for x in marks:
         plt.axvline(x, color="0.4", linestyle=":", linewidth=1.0, zorder=0)
     if mark_missing:
-        mark_failed(plt.gca(), x_values, y_results)
+        mark_failed(plt.gca(), x_values, y_results, has_z=has_z)
 
     # Legend
     hide_legend, legend_loc = _legend_choice(style, hide_legend, legend_loc)
     if not hide_legend:
-        labels = legend_items if legend_items else all_labels
-        handles = [plot_handles[all_labels.index(item)] for item in labels]
+        targets = [name for name in (legend_items or drawn) if name in drawn]
+        handles, labels = fold_by_signature((drawn[name], method_style(name, has_z)) for name in targets)
         labels = _apply_tex_highlighting(labels, hilight_ours)
 
         if legend_width is None:
@@ -813,7 +826,11 @@ def create_panel_plot(
     column_data: list[tuple[dict[str, NDArray], NDArray, NDArray]],
     histograms: dict[str, tuple[NDArray, NDArray]],
     legend_ncols: int = 2,
+    *,
+    has_z: bool,
 ):
+    """The query panel: worst error, width, the DA density and the predictions, over
+    three query directions; every method as `constants.method_style(name, has_z)`."""
     plt.rcParams.update(RC_PARAMS)
 
     column_titles = [
@@ -846,7 +863,7 @@ def create_panel_plot(
         # === ROW 3: Predictions ===
         ax_pred = axes[3, col_idx]
         for method_name, predictions in results_dict.items():
-            label = TEX_MAPPER.get(method_name, method_name)
+            style = method_style(method_name, has_z)
             if predictions.ndim == 3:
                 lower = predictions[:, :, 0].mean(axis=1)
                 upper = predictions[:, :, 1].mean(axis=1)
@@ -855,20 +872,19 @@ def create_panel_plot(
                 y_mean = predictions.mean(axis=1)
                 lower = upper = None
 
-            if "PI" in method_name:
-                alpha = ALPHA_MAP.get(method_name, 0.2)
-                handle = ax_pred.fill_between(
-                    x_grid, lower, upper, alpha=alpha, color=_get_method_color(method_name), zorder=-1
-                )
+            if is_interval(method_name):
+                handle = ax_pred.fill_between(x_grid, lower, upper, alpha=style.alpha, color=style.colour, zorder=-1)
             else:
-                linestyle = POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE
-                line_color = "black" if method_name == "ATE" else _get_method_color(method_name)
-                zorder = 1 if method_name == "ATE" else 0
+                # the target (black) on top of the estimates
                 handle = ax_pred.plot(
-                    x_grid, y_mean, linestyle=linestyle, linewidth=2, color=line_color, zorder=zorder
+                    x_grid,
+                    y_mean,
+                    linestyle=style.linestyle,
+                    linewidth=2,
+                    color=style.colour,
+                    zorder=1 if style.colour == "black" else 0,
                 )[0]
-            if label not in legend_handles:
-                legend_handles[label] = handle
+            legend_handles.setdefault(method_name, handle)
 
         ax_pred.set_xlabel(x_labels[col_idx], fontsize=FS_LABEL)
         if col_idx == 0:
@@ -882,13 +898,13 @@ def create_panel_plot(
         baseline = LOG_EPS if row_cfg.get("scale") in ["log", "asinh", "symlog"] else 0
 
         for method_name, predictions in results_dict.items():
-            if "PI" in method_name:
+            if is_interval(method_name):
                 width = (predictions[:, :, 1] - predictions[:, :, 0]).mean(axis=1)
                 if baseline > 0:
                     width = np.maximum(width, baseline)
-                color = _get_method_color(method_name)
-                ax_width.fill_between(x_grid, baseline, width, alpha=ALPHA_MAP.get(method_name, 0.2), color=color)
-                ax_width.plot(x_grid, width, linewidth=0.5, color=color)
+                style = method_style(method_name, has_z)
+                ax_width.fill_between(x_grid, baseline, width, alpha=style.alpha, color=style.colour)
+                ax_width.plot(x_grid, width, linewidth=0.5, color=style.colour)
 
         if col_idx == 0:
             ax_width.set_ylabel("width", fontsize=FS_LABEL)
@@ -901,14 +917,14 @@ def create_panel_plot(
         gt_for_broadcast = ground_truth[:, None] if ground_truth.ndim == 1 else ground_truth
 
         for method_name, predictions in results_dict.items():
-            if "PI" in method_name:
+            if is_interval(method_name):
                 lower, upper = predictions[:, :, 0], predictions[:, :, 1]
                 worst_err = np.maximum((lower - gt_for_broadcast) ** 2, (upper - gt_for_broadcast) ** 2).max(axis=1)
                 if baseline > 0:
                     worst_err = np.maximum(worst_err, baseline)
-                color = _get_method_color(method_name)
-                ax_worst.fill_between(x_grid, baseline, worst_err, alpha=ALPHA_MAP.get(method_name, 0.2), color=color)
-                ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=color)
+                style = method_style(method_name, has_z)
+                ax_worst.fill_between(x_grid, baseline, worst_err, alpha=style.alpha, color=style.colour)
+                ax_worst.plot(x_grid, worst_err, linewidth=0.5, color=style.colour)
 
         if col_idx == 0:
             ax_worst.set_ylabel(r"$E^+_{\bm{x}}$", fontsize=FS_LABEL)
@@ -943,11 +959,12 @@ def create_panel_plot(
     # === Legend ===
     ax_legend = axes[2, 1]
     ax_legend.axis("off")
-    label_order = [TEX_MAPPER.get(n, n) for n in results_dict]
-    handles = [legend_handles[label] for label in label_order if label in legend_handles]
+    handles, labels = fold_by_signature(
+        (legend_handles[name], method_style(name, has_z)) for name in results_dict if name in legend_handles
+    )
     ax_legend.legend(
         handles=handles,
-        labels=label_order,
+        labels=labels,
         loc="center",
         ncol=legend_ncols,
         fontsize=FS_TICK + 2,
@@ -974,6 +991,8 @@ def create_digit_sweep_plot(
     savefig: bool = True,
     format: str = PLOT_FORMAT,
     hilight_ours: bool = DEFAULT_HILIGHT_OURS,
+    *,
+    has_z: bool,
 ):
     """
     Query sweep over frozen digit exemplars, with the images under the axis.
@@ -996,20 +1015,19 @@ def create_digit_sweep_plot(
         savefig: whether to save the figure
         format: file format
         hilight_ours: whether to bold our methods in the legend
+        has_z: whether the experiment has a real Z (`constants.method_style`)
     """
     from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
-    colors = sns.color_palette()
 
     x = np.arange(len(labels), dtype=float)
     fig, ax = plt.subplots(figsize=(PAGE_WIDTH, 3.2))
-    handles, all_labels = [], []
+    entries = []
 
     for method_name, predictions in y_results.items():
-        label = TEX_MAPPER.get(method_name, method_name)
-        color = colors[COLOR_MAP[method_name]]
+        style = method_style(method_name, has_z)
 
         if predictions.ndim == 3:  # interval estimate
             lower = predictions[:, :, 0].mean(axis=1)
@@ -1017,28 +1035,21 @@ def create_digit_sweep_plot(
             # An all-NaN method is INFEASIBLE everywhere and draws nothing, so its
             # legend entry is the only trace of it. Flagging that in the label
             # overflows the legend column; the caller logs it instead.
-            handle = ax.fill_between(
-                x,
-                lower,
-                upper,
-                color=color,
-                alpha=ALPHA_MAP.get(method_name, 0.2),
-                zorder=-1,
-            )
+            handle = ax.fill_between(x, lower, upper, color=style.colour, alpha=style.alpha, zorder=-1)
         else:  # point estimate
             mean_prediction = predictions.mean(axis=1)
             handle = ax.plot(
                 x,
                 mean_prediction,
-                color="black" if method_name == "ATE" else color,
-                linestyle=(POINT_ESTIMATE_STYLE if method_name in POINT_ESTIMATES else PARTIAL_IDENTIFICATION_STYLE),
+                color=style.colour,
+                linestyle=style.linestyle,
                 linewidth=2,
                 solid_capstyle="round",
-                zorder=1 if method_name == "ATE" else 0,
+                zorder=1 if style.colour == "black" else 0,
             )[0]
 
-        handles.append(handle)
-        all_labels.append(label)
+        entries.append((handle, style))
+    handles, all_labels = fold_by_signature(entries)
 
     ax.set_ylabel(ylabel, fontsize=FS_LABEL)
     ax.set_ylim(*ylim)
@@ -1116,6 +1127,8 @@ def create_coverage_plot(
     experiment: str = "do_mnist",
     fname: str = "coverage",
     subdir: str = "select",
+    *,
+    has_z: bool,
 ):
     """Population coverage and mean width against gamma, the figure of the do-MNIST
     gamma selection (`scripts/select_domnist_gamma.py`).
@@ -1127,17 +1140,17 @@ def create_coverage_plot(
         marks: vertical lines, e.g. {'DA+PI gamma': 0.085}
         ref_width: horizontal reference on the width panel (2|bias|, the optimal width)
         targets: coverage targets drawn as horizontal lines
+        has_z: whether the experiment has a real Z (`constants.method_style`)
     """
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
-    colors = sns.color_palette()
     fig, axes = plt.subplots(1, 2, figsize=(PAGE_WIDTH, 2.9))
     g = np.asarray(gammas, dtype=float)
     styles = {"C": "-", "train": "-", "test": (0, (4, 1.5))}
 
     for method, splits in sweep.items():
-        color = colors[COLOR_MAP.get(method, 0)]
-        label = TEX_MAPPER.get(method, method)
+        style = method_style(method, has_z)
+        color, label = style.colour, style.label
         for split, curves in splits.items():
             linestyle = styles.get(split, "-")
             axes[0].plot(

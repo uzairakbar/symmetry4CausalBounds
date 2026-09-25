@@ -379,7 +379,7 @@ def leg_v(orch, runner):
 
     design = runner.sem.design
     b_r = runner.sem.solution.ravel()
-    results, _ = _coefficient_bounds(runner)
+    results, _ = _coefficient_bounds(runner, orch.has_z)
     inside = True
     for bounds in results.values():
         if bounds.ndim != 3:
@@ -389,11 +389,12 @@ def leg_v(orch, runner):
     check("(v) every interval contains b_r", inside, f"b_r {np.round(design.sigma * b_r, 3)}")
 
 
-def _coefficient_bounds(runner):
-    """The fitted methods' intervals at the four coefficient queries."""
+def _coefficient_bounds(runner, has_z):
+    """The fitted methods' intervals at the four coefficient queries; `has_z` the
+    orchestrator's."""
     from src.experiments.utils import PanelBuilder
 
-    panel = PanelBuilder(runner, "cigarettes", False)
+    panel = PanelBuilder(runner, "cigarettes", False, has_z=has_z)
     panel._fit_all_models()
     return panel.predict(np.eye(runner.X.shape[1]))
 

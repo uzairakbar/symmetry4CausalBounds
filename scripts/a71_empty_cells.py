@@ -168,7 +168,7 @@ def leg_3():
     x = np.array([0.25, 0.5, 1.0])
     fig, ax = plt.subplots()
     try:
-        handles, _ = plotting._draw_series(ax, x, {"PI+INV": y})
+        handles, _ = plotting._draw_series(ax, x, {"PI+INV": y}, has_z=False)
         line = handles.get("PI+INV")
         check("(3) the method is drawn", line is not None)
         if line is not None:

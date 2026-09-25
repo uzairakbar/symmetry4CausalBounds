@@ -148,6 +148,7 @@ def render():
                 yscale=yscale,
                 experiment=DIAG_EXPERIMENT,
                 fname=f"{name}_{yscale}",
+                has_z=False,
             )
         print(f"  {name:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
 
@@ -179,6 +180,7 @@ def render():
             bootstrapped=(metric == "seed_var"),
             clip_y=False,
             promote_y=False,
+            has_z=False,
         )
         print(f"  {'perf ' + metric:<16} {'ok' if len(_errors) == before else 'ERRORS'}")
     print()

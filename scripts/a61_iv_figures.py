@@ -294,7 +294,7 @@ def panel_models(orch):
     Keyed by the headline methods the recipe lists, exactly as `cigarettes.py` keys
     the figure."""
     runner = orch.get_query_runner_cls()(methods=orch.methods, **{**orch._get_clean_kwargs(), "n_experiments": 1})
-    panel = PanelBuilder(runner, "cigarettes", False)
+    panel = PanelBuilder(runner, "cigarettes", False, has_z=orch.has_z)
     panel._fit_all_models()
     fitted = fold_keys(panel.fitted_models)
     return runner, {name: fitted[name] for name in headline_listed(fitted)}
@@ -723,6 +723,7 @@ def leg_vi(reference):
         fname="gamma_width",
         savefig=False,
         normalize=True,
+        has_z=False,
     )
     label = plt.gca().get_ylabel()
     check(

@@ -1241,6 +1241,7 @@ def leg_7(orch, record, root):
         fname="n_width",
         savefig=False,
         bootstrapped=False,
+        has_z=False,
     )
     ax = plt.gcf().axes[0]
     order = np.argsort(np.asarray(x, dtype=float), kind="stable")

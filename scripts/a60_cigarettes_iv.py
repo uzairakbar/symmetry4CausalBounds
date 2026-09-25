@@ -450,7 +450,7 @@ def leg_v():
         "(v) the query runner reads declared_iv True and a 3-column Z",
         query.declared_iv is True and query.Z.shape[1] == 3,
     )
-    panel = PanelBuilder(query, "cigarettes", False)
+    panel = PanelBuilder(query, "cigarettes", False, has_z=orch.has_z)
     panel._fit_all_models()
     fitted = fold_keys(panel.fitted_models)
     plain_iv = listed(("PI+IV", "PI+INV+IV", "DA+PI+IV"), block_methods, fitted, "(v) the query panel's +IV models")

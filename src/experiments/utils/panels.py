@@ -11,7 +11,7 @@ from src.experiments.utils.plotting import create_panel_plot
 class PanelBuilder:
     """Builds 4x3 panel plots for experiments."""
 
-    def __init__(self, runner, experiment_name: str, use_augmented_geometry: bool = True):
+    def __init__(self, runner, experiment_name: str, use_augmented_geometry: bool = True, *, has_z: bool):
         """
         Initialize panel builder.
 
@@ -23,6 +23,7 @@ class PanelBuilder:
         self.runner = runner
         self.experiment_name = experiment_name
         self.use_augmented = use_augmented_geometry
+        self.has_z = has_z  # whether the experiment has a real Z (`constants.method_style`)
         self.fitted_models = {}  # Cache fitted models
         self.radial_results = None  # Cache radial sweep results
 
@@ -71,7 +72,7 @@ class PanelBuilder:
         ]
 
         # Generate panel plot
-        create_panel_plot(self.experiment_name, column_data, histogram_data)
+        create_panel_plot(self.experiment_name, column_data, histogram_data, has_z=self.has_z)
 
     def get_radial_results(self):
         """Return cached radial sweep results."""

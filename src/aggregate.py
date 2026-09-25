@@ -48,26 +48,23 @@ from loguru import logger
 
 from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
 from src.experiments.utils.constants import (
-    ALPHA_MAP,
     CLAMP_YLIM,
     COEFFICIENT_LABELS,
-    COLOR_MAP,
     DATASET_ORDER,
     DATASET_TITLES,
     FS_LABEL,
     FS_TICK,
     IV_MODES,
-    PAIR_ORDER,
     PLOT_DPI,
     PLOT_FORMAT,
     RC_PARAMS,
     SUBDIR_PERF,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
-    TEX_MAPPER,
+    method_style,
     parse_method,
-    spelled_method,
 )
+from src.experiments.utils.constants import label as method_label
 from src.experiments.utils.data_operations import bootstrap, load
 from src.experiments.utils.plotting import (
     X_MARGIN,
@@ -75,10 +72,10 @@ from src.experiments.utils.plotting import (
     _draw_bands,
     _draw_series,
     _label_major_ticks_only,
-    _line_style,
     _mark_frame,
     _pad,
     draw_da_density,
+    fold_by_signature,
     mark_failed,
     normalize_sweep,
 )
@@ -216,6 +213,24 @@ def _has_perf(artifacts: str, dataset: str, metric: str) -> bool:
     return os.path.exists(f"{folder}/epsilon_values.pkl") and os.path.exists(f"{folder}/epsilon_{metric}_results.pkl")
 
 
+def column_has_z(artifacts: str, dataset: str) -> bool:
+    """Whether the run behind a column had a real Z: `has_z` of the `labels.json`
+    every run writes beside its pkls. A missing or unreadable file (a tree from
+    before the file, a torn write) is drawn as null Z, with a warning."""
+    path = f"{artifacts}/{dataset}/labels.json"
+    try:
+        with open(path) as fh:
+            value = json.load(fh)["has_z"]
+        if isinstance(value, bool):
+            return value
+        logger.warning(f"aggregate: {path} has a non-bool has_z {value!r}; its column is drawn as null Z.")
+    except FileNotFoundError:
+        logger.warning(f"aggregate: no labels.json under {artifacts}/{dataset}; its column is drawn as null Z.")
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        logger.warning(f"aggregate: unreadable {path} ({error}); its column is drawn as null Z.")
+    return False
+
+
 # ------------------------------------------------------------------ drawing
 
 
@@ -231,15 +246,15 @@ def _frame(ax, x, xscale: str, vlines) -> None:
 
 
 def _legend(fig, handles: dict):
-    """One legend for the figure, laid out by entry count. Two collapses first:
-    `parse_method` already keys a bare name and its `(T,Z)` spelling alike, and
-    entries that would render as the same pixels (label, hue, alpha, dash) fold to
-    one, which is what blends a T-as-IV method's three mode spellings. Then n
-    entries up to LEGEND_FLAT_MAX are one row of n in the repo's order; more are
-    LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns, paired groups first, each in
-    one column (member 0 on top, member 1 below), and the singletons after them in
-    PAIR_ORDER order, two to a column. Returns the legend, or None with nothing
-    drawn."""
+    """One legend for the figure, laid out by entry count. `handles` is
+    {signature: (artist, MethodStyle, name)}: entries that render as the same
+    pixels (label, hue, alpha, dash) are one entry, which is what blends a T-as-IV
+    method's three mode spellings and, in a merged grid, a null-Z method with its Z
+    counterpart. Then n entries up to LEGEND_FLAT_MAX are one row of n in the
+    repo's order; more are LEGEND_ROWS rows of ceil(n / LEGEND_ROWS) columns, paired
+    groups first, each in one column (member 0 on top, member 1 below), and the
+    singletons after them in legend order, two to a column. Returns the legend, or
+    None with nothing drawn."""
     entries = _legend_entries(handles)
     if entries is None:
         return None
@@ -259,34 +274,25 @@ def _legend(fig, handles: dict):
 
 def _legend_entries(handles: dict):
     """`_legend`'s entries without the legend: (artists, labels, ncol) in the
-    repo's order after the render fold, or None with nothing drawn."""
+    repo's order after the render fold, or None with nothing drawn. `handles` is
+    {key: (artist, MethodStyle, name)}."""
     if not handles:
         return None
-    spelled = {k: spelled_method(handles[k][1]) for k in handles}
-    labels = {k: TEX_MAPPER.get(spelled[k], handles[k][1]) for k in handles}
 
     def pair(k):
-        # a name no table knows lands past the end, deterministically, rather than
-        # raising here
-        return PAIR_ORDER.get(spelled[k], (len(PAIR_ORDER), 0))
+        return handles[k][1].order
 
     def order(k):
+        base, mode = parse_method(handles[k][2])
         return (
             pair(k),
-            ALL_METHODS.index(k[0]) if k[0] in ALL_METHODS else len(ALL_METHODS),
-            IV_MODES.index(k[1]),
+            ALL_METHODS.index(base) if base in ALL_METHODS else len(ALL_METHODS),
+            IV_MODES.index(mode),
         )
 
-    # the render signature carries NO base term: two entries merge iff a reader
-    # cannot tell them apart. `.get(s, s)` keeps a stale name distinct instead of
-    # collapsing every unknown onto one sentinel
-    keys, seen = [], set()
-    for k in sorted(handles, key=order):
-        s = spelled[k]
-        signature = (labels[k], COLOR_MAP.get(s, s), ALPHA_MAP.get(s, s), _line_style(s))
-        if signature not in seen:
-            seen.add(signature)
-            keys.append(k)
+    # the fold keeps the first key of every render signature, in legend order
+    keys, _ = fold_by_signature((k, handles[k][1]) for k in sorted(handles, key=order))
+
     sizes = Counter(pair(k)[0] for k in keys)
     n = len(keys)
     ncol = n
@@ -303,14 +309,14 @@ def _legend_entries(handles: dict):
                 f"past LEGEND_GRID_COLS {LEGEND_GRID_COLS}; the legend widens."
             )
     # a pair per column needs every group of size <= 2. A group of three sorts as a
-    # singleton and the guarantee goes quietly; unreachable with today's PAIR_ORDER,
+    # singleton and the guarantee goes quietly; unreachable with today's legend order,
     # so say it, do not raise -- a wrapped legend is still readable
     crowded = sorted(g for g, size in sizes.items() if size > 2)
     if crowded:
         logger.warning(
             f"aggregate: legend groups over two entries {crowded}; the legend may split a group across columns."
         )
-    return [handles[k][0] for k in keys], [labels[k] for k in keys], ncol
+    return [handles[k][0] for k in keys], [handles[k][1].label for k in keys], ncol
 
 
 def _label_rows(axes_rows, labels) -> None:
@@ -370,13 +376,17 @@ def _metric_grid(
     height: float,
     where: str,
     path: str | None,
+    hz: dict[str, bool],
 ):
     """The [rows] x [datasets] grid: `rows` is [(metric, row label)], `load_cell(dataset,
     metric)` gives (x, {method: y}, x-label) or None for a blank cell (an empty dict
     blanks the cell but still offers its x-label), x shared within a column, y as
     `sharey` says, each row on `row_yscale(metric)` and, when `row_ylim(metric)` is not
     None, framed there. Titles on the first row, one x-label, one legend; saved at
-    `path` when given."""
+    `path` when given. `hz` is each column's `has_z`: when a column that draws has a
+    real Z, the grid is merged and every null-Z column draws each method as its Z
+    counterpart (`constants.method_style`), so each cross-dataset pair is one
+    legend entry."""
     plt.rcParams.update(RC_PARAMS)
     sns.set_palette("deep")
     fig, axes = plt.subplots(
@@ -387,12 +397,18 @@ def _metric_grid(
         sharey=sharey,
         squeeze=False,
     )
+    # every cell read once, in drawing order; a column draws when a cell of it has a
+    # series, and only a drawing column's Z merges the grid (a Z dataset present as
+    # a blank column for this parameter must not relabel the others)
+    cells = {(dataset, metric): load_cell(dataset, metric) for dataset in datasets for metric, _ in rows}
+    drawing = [d for d in datasets if any(cells[d, m] is not None and cells[d, m][1] for m, _ in rows)]
+    merged = any(hz[d] for d in drawing)
     handles, xlabel = {}, None
     for c, dataset in enumerate(datasets):
         axes[0, c].set_title(DATASET_TITLES[dataset], fontsize=FS_LABEL)
         labelled = False
         for r, (metric, _) in enumerate(rows):
-            ax, cell = axes[r, c], load_cell(dataset, metric)
+            ax, cell = axes[r, c], cells[dataset, metric]
             if cell is None:
                 ax.axis("off")
                 continue
@@ -403,9 +419,11 @@ def _metric_grid(
             if not y:
                 ax.axis("off")
                 continue
-            drawn, _ = _draw_series(ax, x, y)
+            drawn, _ = _draw_series(ax, x, y, has_z=hz[dataset], merged=merged)
             for name, handle in drawn.items():
-                handles.setdefault(parse_method(name), (handle, name))
+                # keyed by render: one method drawn two ways in two columns keeps both
+                style = method_style(name, hz[dataset], merged=merged)
+                handles.setdefault(style.signature, (handle, style, name))
             _frame(ax, x, xscale, vlines)
             ax.set_yscale(row_yscale(metric))
             ylim = row_ylim(metric)
@@ -416,8 +434,14 @@ def _metric_grid(
     return _finish(fig, axes, xlabel or xlabel_default, legend, path)
 
 
-def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None):
-    """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given."""
+def _columns_has_z(artifacts: str, datasets: list[str], hz: dict[str, bool] | None) -> dict[str, bool]:
+    """`hz` when the caller read it (`main`, once per column), else each column's."""
+    return hz if hz is not None else {d: column_has_z(artifacts, d) for d in datasets}
+
+
+def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None, hz=None):
+    """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given.
+    `hz` is {dataset: has_z}, read from each column's `labels.json` when None."""
     spec = PARAM_SPECS[param]
     loaded = {}
 
@@ -469,12 +493,14 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
         height=GRID_HEIGHT,
         where=param,
         path=None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}",
+        hz=_columns_has_z(artifacts, datasets, hz),
     )
 
 
-def perf_grid(stem: str, metrics, datasets: list[str], artifacts: str, out: str | None = None):
+def perf_grid(stem: str, metrics, datasets: list[str], artifacts: str, out: str | None = None, hz=None):
     """The [metrics] x [datasets] grid of the perf sweeps against epsilon, a y shared
-    within each row, the rates on `CLAMP_YLIM`; saved as `epsilon_{stem}` under `out`."""
+    within each row, the rates on `CLAMP_YLIM`; saved as `epsilon_{stem}` under `out`.
+    `hz` as `sweep_grid`'s."""
     pspec = PARAM_SPECS["epsilon"]
 
     def load_cell(dataset, metric):
@@ -505,6 +531,7 @@ def perf_grid(stem: str, metrics, datasets: list[str], artifacts: str, out: str 
         height=PERF_ROW_HEIGHT * len(metrics),
         where="perf",
         path=None if out is None else f"{out}/epsilon_{stem}.{PLOT_FORMAT}",
+        hz=_columns_has_z(artifacts, datasets, hz),
     )
 
 
@@ -521,6 +548,7 @@ def elasticity_grid(artifacts: str, out: str | None = None):
         sharey="row",
         squeeze=False,
     )
+    has_z = column_has_z(artifacts, "cigarettes")
     handles = {}
     for r, (coefficient, _) in enumerate(ELASTICITY_ROWS):
         lo, hi = float("inf"), float("-inf")
@@ -531,7 +559,7 @@ def elasticity_grid(artifacts: str, out: str | None = None):
                 ax.axis("off")
                 continue
             x = np.asarray(load(f"{stem}_values.pkl"), dtype=float)
-            drawn, panel_lo, panel_hi = _draw_bands(ax, x, load(f"{stem}_outcomes.pkl"))
+            drawn, panel_lo, panel_hi = _draw_bands(ax, x, load(f"{stem}_outcomes.pkl"), has_z=has_z)
             for name, handle in drawn.items():
                 handles.setdefault(name, handle)
             lo, hi = min(lo, panel_lo), max(hi, panel_hi)
@@ -551,8 +579,7 @@ def elasticity_grid(artifacts: str, out: str | None = None):
     legend_ax = axes[ELASTICITY_LEGEND_PANEL]
     if handles and legend_ax.axison:
         legend_ax.legend(
-            list(handles.values()),
-            [TEX_MAPPER.get(name, name) for name in handles],
+            *fold_by_signature((handle, method_style(name, has_z)) for name, handle in handles.items()),
             loc=ELASTICITY_LEGEND_LOC,
             fontsize=FS_TICK,
             frameon=True,
@@ -601,24 +628,23 @@ def _tint_image(ax, image) -> None:
     ax.axis("off")
 
 
-def _tint_bounds(ax, x, outcomes: dict) -> dict:
+def _tint_bounds(ax, x, outcomes: dict, *, has_z: bool) -> dict:
     """The stack's own rendering: each interval method's lower and upper bound as
     two solid lines in its hue at one width (TINT_UNDER below the rest), the point
     estimates as the query figures draw them. Returns {method: legend handle}."""
-    palette = sns.color_palette("deep")
     points = {name: p for name, p in outcomes.items() if np.ndim(p) != 3}
-    drawn = dict(_draw_bands(ax, x, points)[0]) if points else {}
+    drawn = dict(_draw_bands(ax, x, points, has_z=has_z)[0]) if points else {}
     for name, prediction in outcomes.items():
         if name in points:
             continue
         prediction = np.asarray(prediction, dtype=float)
         style = dict(
-            color=palette[COLOR_MAP[name]],
+            color=method_style(name, has_z).colour,
             linestyle="-",
             linewidth=TINT_BOUND_WIDTH,
             zorder=2.0 if name == TINT_UNDER else 2.1,
         )
-        lower = ax.plot(x, prediction[:, :, 0].mean(axis=1), label=TEX_MAPPER.get(name, name), **style)[0]
+        lower = ax.plot(x, prediction[:, :, 0].mean(axis=1), label=method_label(name, has_z), **style)[0]
         ax.plot(x, prediction[:, :, 1].mean(axis=1), **style)
         drawn[name] = lower
     # in `outcomes` order, keyed like `_draw_bands`
@@ -669,6 +695,7 @@ def tint_stack(artifacts: str, out: str | None = None):
         rows, 4, figure=fig, width_ratios=TINT_WIDTHS, height_ratios=heights, hspace=0.12, wspace=TINT_WSPACE
     )
 
+    has_z = column_has_z(artifacts, "do_mnist")
     handles, grids, shared, bounds_axes, image_axes = {}, {}, None, [], []
     for r, digit in enumerate(digits):
         x = np.asarray(load(f"{folder}/tint_{digit}_values.pkl"), dtype=float)
@@ -677,10 +704,11 @@ def tint_stack(artifacts: str, out: str | None = None):
         shared = shared or ax
         outcomes = {k: v for k, v in load(f"{folder}/tint_{digit}_outcomes.pkl").items() if k not in TINT_OMIT}
         outcomes = dict(sorted(outcomes.items(), key=lambda item: item[0] != TINT_UNDER))
-        drawn = _tint_bounds(ax, x, outcomes)
-        mark_failed(ax, x, outcomes)
+        drawn = _tint_bounds(ax, x, outcomes, has_z=has_z)
+        mark_failed(ax, x, outcomes, has_z=has_z)
         for name, handle in drawn.items():
-            handles.setdefault(parse_method(name), (handle, name))
+            style = method_style(name, has_z)
+            handles.setdefault(style.signature, (handle, style, name))
         ax.set_ylim(*TINT_YLIM)
         ax.set_yticks(TINT_YTICKS, [f"{t:g}" for t in TINT_YTICKS])
         ax.axhline(**TINT_MIDLINE)
@@ -877,6 +905,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     target = np.asarray(load(f"{folder}/population_values.pkl"), dtype=float).ravel()
     outcomes = load(f"{folder}/population_outcomes.pkl")
     recenter = run.get("inv_recenter", "off")
+    has_z = column_has_z(artifacts, "do_mnist")
     methods = [m for m in ALL_METHODS if m in outcomes and np.ndim(outcomes[m]) == 2 and np.shape(outcomes[m])[1] == 2]
     omega = float(run["rho"]) * float(run["tr_S_over_k"]) if "rho" in run and "tr_S_over_k" in run else float("nan")
 
@@ -898,7 +927,7 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
         (coverage, coverage_band), (mean_width, width_band) = _band(covered, ".3f"), _band(width, ".3f")
         rows.append(
             [
-                TEX_MAPPER.get(m, m),
+                method_label(m, has_z),
                 coverage,
                 mean_width,
                 f"${omega:.3f}$" if "DA+" in m and np.isfinite(omega) else "--",
@@ -988,13 +1017,15 @@ def main(argv=None) -> None:
     if not datasets and not drawn:
         logger.warning(f"aggregate: nothing to draw under {artifacts}.")
         return
+    # each column's has_z, read (and warned about) once
+    hz = {d: column_has_z(artifacts, d) for d in datasets}
     for param in sweep_params(artifacts, datasets):
-        plt.close(sweep_grid(param, datasets, artifacts, out))
+        plt.close(sweep_grid(param, datasets, artifacts, out, hz=hz))
     for stem, metrics in PERF_FIGURES:
         # the rows some dataset ran; a figure none of whose metrics ran is not drawn
         ran = [m for m in metrics if any(_has_perf(artifacts, d, m) for d in datasets)]
         if ran:
-            plt.close(perf_grid(stem, ran, datasets, artifacts, out))
+            plt.close(perf_grid(stem, ran, datasets, artifacts, out, hz=hz))
     if _has_elasticities(artifacts):
         plt.close(elasticity_grid(artifacts, out))
     if _has_tint(artifacts):

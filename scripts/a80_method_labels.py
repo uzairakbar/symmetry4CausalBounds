@@ -40,7 +40,8 @@ apart from (vi). Legs:
          (colour, alpha, dash). A mutation of each, patched into the module, proves
          it can fail. Two methods on one label in one block (PI and PI+IV at
          `iv: 0`, the (T) and bare spellings) resolve with one WARNING and no
-         raise. Catches: two rows on one label, one label drawn two ways, a config
+         raise, and `create_sweep_plot` draws PI and PI+IV as one legend entry
+         without a Z and two with one. Catches: two rows on one label, one label drawn two ways, a config
          that raises on a legal collision. Misses: a figure that draws a label
          without `method_style` -- the completeness greps in (viii).
   (v)    the aggregate merge: the `z_counterpart` pairs whose render differs are
@@ -48,9 +49,14 @@ apart from (vi). Legs:
          extras render identically, a null-Z column in a merged grid draws each
          method as its Z counterpart, every multi-column recipe pairs each null-Z
          method with a method of every Z column, and validityFig9's columns fold
-         to 6 legend entries. Catches: a pair missing from `z_counterpart`, a
-         recipe whose null-Z column has no Z twin, a merge that leaves two legend
-         entries per pair. Misses: the aggregate's reading of `labels.json`.
+         to 6 legend entries. Through `sweep_grid` on synthetic trees: a Z column
+         with PI+IV beside a null-Z column with PI draws one entry, pi+iv, in one
+         colour and dash; validityFig9's method sets give 6 entries; all-null
+         columns do not merge, nor does a Z dataset present only as a blank column;
+         a missing and a truncated `labels.json` each warn once and read as null Z.
+         Catches: a pair missing from `z_counterpart`, a recipe whose null-Z column
+         has no Z twin, a merge that leaves two legend entries per pair, a merge
+         keyed on a column that draws nothing. Misses: the perf grid (a64 (vi)).
   (vi)   the writer: one query panel per dataset through the production path
          (`resolve_dataset_block`, the orchestrator, `.run`) in a temp cwd under
          ~/scratch, simulation `iv: 2` and optical, tiny samples, `im-ci` 0:
@@ -78,6 +84,7 @@ import contextlib
 import glob
 import json
 import os
+import pickle
 import sys
 import tempfile
 
@@ -92,13 +99,17 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 import digest_leg  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 import seaborn as sns  # noqa: E402
 from matplotlib.colors import to_hex  # noqa: E402
 
 import src.experiments.utils.constants as constants  # noqa: E402
+from src.experiments.base import METRIC_FIELDS  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     ALL_METHODS,
     DOMNIST_ONLY_METHODS,
+    PARAM_SPECS,
     _check_instruments,
     resolve_dataset_block,
 )
@@ -115,6 +126,7 @@ from src.experiments.utils.constants import (  # noqa: E402
     PARTIAL_IDENTIFICATION_STYLE,
     PI,
     POINT_ESTIMATE_STYLE,
+    SUBDIR_SWEEP,
     Side,
     alpha,
     colour,
@@ -503,7 +515,17 @@ def leg_iv():
             resolved and len(shared) == want,
             f"{lines}",
         )
-    skip("(iv) create_sweep_plot", "one legend entry for PI and PI+IV without Z lands with the plotting commit")
+    from src.experiments.utils.plotting import create_sweep_plot
+
+    x = np.array([1.0, 2.0, 3.0])
+    y = {"PI": np.full((3, 2), 1.0), "PI+IV": np.full((3, 2), 0.5)}
+    for has_z, want in ((False, [label("PI", False)]), (True, [label("PI", True), label("PI+IV", True)])):
+        plt.close("all")
+        create_sweep_plot(x, y, xlabel="x", savefig=False, bootstrapped=False, has_z=has_z)
+        legend = plt.gca().get_legend()
+        texts = [t.get_text() for t in legend.get_texts()] if legend is not None else []
+        check(f"(iv) create_sweep_plot of PI and PI+IV, has_z {has_z}: legend {len(want)}", texts == want, f"{texts}")
+    plt.close("all")
 
 
 def leg_v():
@@ -548,7 +570,7 @@ def leg_v():
     merged = any(hz for _, hz in validity.values())
     entries = {method_style(m, hz, merged=merged).signature for methods, hz in validity.values() for m in methods}
     check("(v) validityFig9's three columns fold to 6 legend entries", len(entries) == 6, f"{len(entries)}")
-    skip("(v) sweep_grid", "the synthetic merged tree through sweep_grid lands with the aggregate commit")
+    grid_merge()
 
 
 # the production path at a toy scale: one query panel per dataset, a real Z on the simulation only
@@ -567,6 +589,88 @@ WRITER_BLOCKS = {
         seed=42, n_samples=256, methods=["PI", "DA+PI", "DA+PI+IV(T)"], augmentation="rotation > hflip"
     ),
 }
+
+
+def write_column(root, dataset, methods, has_z, param="gamma", labels=True):
+    """One dataset's sweep pkls on a 4-step grid (every metric, two experiments) and,
+    unless `labels` is off, its `labels.json`; `labels` a str is written verbatim."""
+    rng = np.random.default_rng(len(methods))
+    folder = os.path.join(root, dataset, SUBDIR_SWEEP)
+    os.makedirs(folder, exist_ok=True)
+    grid = PARAM_SPECS[param].grid_fn(dataset, 4)
+    record = {m: {key: 0.2 + 0.6 * rng.random((len(grid), 2)) for key in METRIC_FIELDS} for m in methods}
+    for stem, obj in ((f"{param}_values", grid), (f"{param}_results", record)):
+        with open(os.path.join(folder, f"{stem}.pkl"), "wb") as fh:
+            pickle.dump(obj, fh)
+    if labels is True:
+        with open(os.path.join(root, dataset, "labels.json"), "w") as fh:
+            json.dump({"has_z": has_z, "methods": list(methods)}, fh)
+    elif isinstance(labels, str):
+        with open(os.path.join(root, dataset, "labels.json"), "w") as fh:
+            fh.write(labels)
+
+
+def grid_legend(root, param="gamma"):
+    """(legend texts, the figure, warnings) of `sweep_grid` over the tree's columns."""
+    from src import aggregate
+
+    with captured() as lines:
+        fig = aggregate.sweep_grid(param, aggregate.columns(root), root)
+    texts = [t.get_text() for t in fig.legends[0].get_texts()] if fig.legends else []
+    return texts, fig, lines
+
+
+def line_render(line):
+    return tuple(matplotlib.colors.to_rgba(line.get_color())), getattr(line, "_unscaled_dash_pattern", None)
+
+
+def grid_merge():
+    """The merge through `sweep_grid` on synthetic trees under ~/scratch."""
+    base = os.path.expanduser("~/scratch/tmp/impl_labels/a80")
+    os.makedirs(base, exist_ok=True)
+
+    def tree():
+        return tempfile.mkdtemp(prefix="grid_", dir=base)
+
+    root = tree()
+    write_column(root, "simulation", ["PI+IV"], True)
+    write_column(root, "optical_device", ["PI"], False)
+    texts, fig, _ = grid_legend(root)
+    check("(v) sim Z PI+IV beside optical null-Z PI: one entry pi+iv", texts == [label("PI+IV", True)], f"{texts}")
+    renders = {line_render(ax.get_lines()[0]) for ax in fig.axes if ax.axison and ax.get_lines()}
+    check("(v) both columns draw it in one colour and one dash", len(renders) == 1, f"{renders}")
+    plt.close(fig)
+
+    root = tree()
+    for dataset, (methods, has_z) in recipes()["validityFig9"].items():
+        write_column(root, dataset, methods, has_z)
+    texts, fig, _ = grid_legend(root)
+    check("(v) validityFig9's columns through sweep_grid: 6 entries", len(texts) == 6, f"{len(texts)}")
+    plt.close(fig)
+
+    root = tree()
+    write_column(root, "simulation", ["DA+PI"], False)
+    write_column(root, "optical_device", ["DA+PI"], False)
+    texts, fig, _ = grid_legend(root)
+    check("(v) all columns null Z: no merge", texts == [label("DA+PI", False)], f"{texts}")
+    plt.close(fig)
+
+    root = tree()
+    write_column(root, "simulation", ["PI+IV"], True, param="omega")  # a Z column blank on gamma
+    write_column(root, "optical_device", ["PI"], False)
+    texts, fig, _ = grid_legend(root)
+    check("(v) a Z dataset present only as a blank column: no merge", texts == [label("PI", False)], f"{texts}")
+    plt.close(fig)
+
+    for why, labels in (("missing", False), ("truncated", '{"has_')):
+        root = tree()
+        write_column(root, "simulation", ["DA+PI"], True, labels=labels)
+        write_column(root, "optical_device", ["DA+PI"], False)
+        texts, fig, lines = grid_legend(root)
+        warned = [line for line in lines if "labels.json" in line and "null Z" in line]
+        check(f"(v) a {why} labels.json warns once", len(warned) == 1, f"{lines}")
+        check(f"(v) a {why} labels.json counts as null Z", texts == [label("DA+PI", False)], f"{texts}")
+        plt.close(fig)
 
 
 def leg_vi(skip_run):

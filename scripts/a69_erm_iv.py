@@ -92,7 +92,7 @@ from src.experiments.utils.constants import (  # noqa: E402
     POINT_ESTIMATES,
     REAL_Z_METHODS,
     TEX_MAPPER,
-    parse_method,
+    method_style,
 )
 from src.methods.regression import (  # noqa: E402
     LeastSquaresClosedForm,
@@ -396,8 +396,10 @@ def leg_xi():
     ax = fig.add_subplot(111)
     handles = {}
     for name in names:
-        (line,) = ax.plot([0, 1], [0, 1], color=plotting._get_method_color(name), linestyle=plotting._line_style(name))
-        handles.setdefault(parse_method(name), (line, name))
+        # one column with a real Z, as the aggregate keys it: by render
+        style = method_style(name, True)
+        (line,) = ax.plot([0, 1], [0, 1], color=plotting._get_method_color(name), linestyle=style.linestyle)
+        handles.setdefault(style.signature, (line, style, name))
     legend = _legend(fig, handles)
     texts = [text.get_text() for text in legend.get_texts()]
     colours = [handle.get_color() for handle in legend.legend_handles]

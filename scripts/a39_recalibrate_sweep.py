@@ -326,6 +326,7 @@ def leg_iv(orch, x, results, experiment):
         fname="recalibrate_width",
         savefig=False,
         bootstrapped=False,
+        has_z=False,
     )
     ax2 = plt.gcf().axes[0]
     lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]

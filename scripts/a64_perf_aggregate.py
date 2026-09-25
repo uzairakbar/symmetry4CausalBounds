@@ -123,6 +123,7 @@ beyond `inspect.getsource`.
 import argparse
 import contextlib
 import inspect
+import json
 import math
 import os
 import pickle
@@ -169,15 +170,14 @@ from src.experiments.utils.constants import (  # noqa: E402
     INSTRUMENT_Z_STYLE,
     IV_MODE_METHODS,
     IV_MODES,
-    PAIR_ORDER,
     PARTIAL_IDENTIFICATION_STYLE,
     POINT_ESTIMATES,
     RC_PARAMS,
     SUBDIR_PERF,
     SUBDIR_SWEEP,
     TEX_MAPPER,
+    method_style,
     parse_method,
-    spelled_method,
 )
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
@@ -210,9 +210,12 @@ TEN = [
 SHAPE_NO_Z = ("PI+INV", "PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI", "PI&DA+PI+IV(T)")
 SHAPE_CIG = ("PI+INV+IV", "PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(Z)", "PI&DA+PI+IV(T,Z)")
 SHAPE_ALL = SHAPE_CIG + SHAPE_NO_Z
-# SHAPE_ALL's target: five columns of two, the four paired families first and green
-# DA+PI+IV over pink PI&DA+PI+IV last (DERIVED from PAIR_ORDER and COLOR_MAP)
-TABLE_ALL = [
+# SHAPE_ALL's target when the cigarette Z column and the null-Z columns share a grid:
+# merged, every null-Z method is drawn as its Z counterpart, one flat row of six
+TABLE_ALL = [[name] for name in SHAPE_CIG]
+# SHAPE_ALL's target inside ONE column with a real Z: five columns of two, the four
+# paired families first and green DA+PI+IV over pink PI&DA+PI+IV last
+TABLE_ONE_Z = [
     ["PI+INV", "PI+INV+IV"],
     ["PI", "PI+IV"],
     ["DA+PI", "DA+PI+IV(Z)"],
@@ -478,16 +481,25 @@ def legend_columns(fig, legend):
     return [[label for _, label in sorted(columns[x], key=lambda pair: -pair[0])] for x in sorted(columns)]
 
 
-def drawn_legend(names):
-    """`_legend` over one handle per name, as (columns, ncol, rows, dash patterns).
-    RC_PARAMS as the aggregate sets it: the TeX labels need usetex to lay out."""
+def shape_style(name, has_z=True, null=()):
+    """The style `_metric_grid` gives `name`: from a column with (`has_z`) or without
+    a real Z, the names in `null` from a null-Z column, merged when both kinds meet."""
+    merged = bool(null) and has_z
+    return method_style(name, False if name in null else has_z, merged=merged)
+
+
+def drawn_legend(names, has_z=True, null=()):
+    """`_legend` over one handle per name, as (columns, ncol, rows, dash patterns),
+    each name styled as `shape_style` says. RC_PARAMS as the aggregate sets it: the
+    TeX labels need usetex to lay out."""
     plt.rcParams.update(RC_PARAMS)
     fig = plt.figure()
     ax = fig.add_subplot(111)
     handles = {}
     for name in names:
-        (line,) = ax.plot([0, 1], [0, 1], color=plotting._get_method_color(name), linestyle=plotting._line_style(name))
-        handles.setdefault(parse_method(name), (line, name))
+        style = shape_style(name, has_z, null)
+        (line,) = ax.plot([0, 1], [0, 1], color=style.colour, linestyle=style.linestyle)
+        handles.setdefault(style.signature, (line, style, name))
     legend = aggregate._legend(fig, handles)
     columns = legend_columns(fig, legend)
     ncol = getattr(legend, "_ncols", None) or getattr(legend, "_ncol", 1)
@@ -815,6 +827,7 @@ def leg_v():
             bootstrapped=False,
             savefig=False,
             **kwargs,
+            has_z=False,
         )
         ax = plt.gca()
         return ax, tuple(float(v) for v in ax.get_ylim())
@@ -847,10 +860,17 @@ def synthetic_tree(
     cig_drop=("coverage",),
     sim_gamma=True,
     perf_methods=("PI", "PI+INV"),
+    cig_has_z=False,
 ):
     """simulation gamma (unless `sim_gamma` is off) and omega, cigarettes gamma without
-    the `cig_drop` metrics and no omega, cigarettes perf on `perf_methods`; no optical."""
+    the `cig_drop` metrics and no omega, cigarettes perf on `perf_methods`; no optical.
+    Each dataset's `labels.json` as its run writes it: no Z on the simulation, and on
+    the cigarettes `cig_has_z` (true where its methods carry a real Z)."""
     rng = np.random.default_rng(1)
+    for dataset, has_z in (("simulation", False), ("cigarettes", cig_has_z)):
+        os.makedirs(f"{root}/{dataset}", exist_ok=True)
+        with open(f"{root}/{dataset}/labels.json", "w") as fh:
+            json.dump({"has_z": has_z, "methods": []}, fh)
     x = PARAM_SPECS["gamma"].grid_fn("simulation", 4)
 
     def record(names, drop=()):
@@ -1063,7 +1083,7 @@ def leg_vi():
         plt.close(fig)
 
     # a legend that wraps must not sit on the column titles: ten methods, two rows
-    ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF))
+    ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF), cig_has_z=True)
     with captured() as lines:
         drawn = (
             ("perf grid", aggregate.perf_grid("wall_clock", ("wall_clock",), aggregate.columns(ten), ten)),
@@ -1152,26 +1172,48 @@ def leg_vii(shipped):
     second = tempfile.mkdtemp(prefix="shipped2_", dir=TMPROOT)
     with captured() as lines:
         aggregate.main(["--artifacts", shipped, "--out", second])
-    check("(vii) in-process: no WARNING", not lines, f"{lines[:3]}")
+    # the shipped tree predates labels.json: each column warns once and draws as null Z
+    missing = [line for line in lines if "no labels.json under" in line]
+    check(
+        "(vii) in-process: no WARNING but the missing labels.json",
+        len(missing) == len(lines),
+        f"{[line for line in lines if line not in missing]}",
+    )
+    check(
+        "(vii) in-process: each shipped dataset's missing labels.json is named",
+        all(any(f"/{d};" in line for line in missing) for d in datasets),
+        f"{missing}",
+    )
     plt.close("all")
+    # the same pkls with the labels.json their runs write today (a real Z on the
+    # simulation and cigarettes, none on optical): a merged grid
+    linked = tempfile.mkdtemp(prefix="shipped_labels_", dir=TMPROOT)
+    for d in datasets:
+        os.makedirs(f"{linked}/{d}")
+        for child in os.listdir(f"{shipped}/{d}"):
+            os.symlink(f"{shipped}/{d}/{child}", f"{linked}/{d}/{child}")
+        with open(f"{linked}/{d}/labels.json", "w") as fh:
+            json.dump({"has_z": d in ("simulation", "cigarettes"), "methods": []}, fh)
     if "epsilon" in params:
-        fig = aggregate.sweep_grid("epsilon", datasets, shipped)
+        with captured() as lines:
+            fig = aggregate.sweep_grid("epsilon", datasets, linked)
+        check(
+            "(vii) with labels.json: no labels.json WARNING", not [x for x in lines if "labels.json" in x], f"{lines}"
+        )
         legend = fig.legends[0]
         n, rows = len(legend.get_texts()), legend_rows(legend)
-        drawn = legend_columns(fig, legend)
+        texts = [t.get_text() for t in legend.get_texts()]
         print(f"      RECORDED epsilon grid legend: {n} entries in {rows} row(s); columns {datasets}")
+        check("(vii) the merged epsilon grid's legend is 6 entries in one row", n == 6 and rows == 1, f"{n} in {rows}")
         check(
-            "(vii) the epsilon grid's legend folds to 10 entries in two rows", n == 10 and rows == 2, f"{n} in {rows}"
-        )
-        check(
-            "(vii) five columns of two, green DA+PI+IV over pink PI&DA+PI+IV last",
-            [len(column) for column in drawn] == [2] * 5
-            and drawn[-1] == [TEX_MAPPER["DA+PI+IV"], TEX_MAPPER["PI&DA+PI+IV"]],
-            f"{drawn}",
+            "(vii) its entries are the cigarette spellings' Z labels, in legend order",
+            texts == [method_style(name, True).label for name in SHAPE_CIG],
+            f"{texts}",
         )
         plt.close(fig)
     shutil.rmtree(out, ignore_errors=True)
     shutil.rmtree(second, ignore_errors=True)
+    shutil.rmtree(linked, ignore_errors=True)
 
 
 def leg_viii():
@@ -1322,12 +1364,12 @@ def leg_viii():
     print("      RECORDED D(eps) at r = 1: " + ", ".join(f"{k} {np.nanmean(v[-1]):.2e}" for k, v in seed.items()))
 
 
-def shape_check(tag, names, want_columns):
+def shape_check(tag, names, want_columns, has_z=True, null=()):
     """One legend shape: the columns as drawn against the target table, then the
     layout rule's invariants on the ENTRY order (matplotlib's fill makes the rendered
     column sizes non-increasing whatever the sort does, so only the order can
     falsify it)."""
-    columns, ncol, rows, ordered_texts, styles = drawn_legend(names)
+    columns, ncol, rows, ordered_texts, styles = drawn_legend(names, has_z, null)
     want_rows = max(len(c) for c in want_columns)
     n = sum(len(c) for c in columns)
     check(
@@ -1335,11 +1377,11 @@ def shape_check(tag, names, want_columns):
         n == sum(len(c) for c in want_columns) and ncol == len(want_columns) and rows == want_rows,
         f"{n} entries, ncol {ncol}, {rows} row(s)",
     )
-    want = [[TEX_MAPPER[spelled_method(name)] for name in column] for column in want_columns]
+    want = [[shape_style(name, has_z, null).label for name in column] for column in want_columns]
     check(f"(ix) {tag}: the columns are the target table", columns == want, f"{columns}")
-    # the (group, member) of each drawn label: the render fold keeps one spelling per
-    # label, and the mode spellings it folds share their (group, member)
-    slot = {TEX_MAPPER[spelled_method(name)]: PAIR_ORDER[spelled_method(name)] for name in names}
+    # the (group, member) of each drawn label: the render fold keeps one entry per
+    # label, and the entries it folds share their (group, member)
+    slot = {shape_style(name, has_z, null).label: shape_style(name, has_z, null).order for name in names}
     sequence = [slot[label][0] for label in ordered_texts]
     if n <= LEGEND_FLAT_MAX:
         check(
@@ -1358,7 +1400,7 @@ def shape_check(tag, names, want_columns):
     singles = [g for g, p in zip(sequence, paired, strict=True) if not p]
     doubles = [g for g, p in zip(sequence, paired, strict=True) if p]
     check(
-        f"(ix) {tag}: paired groups and singletons each in PAIR_ORDER order",
+        f"(ix) {tag}: paired groups and singletons each in legend order",
         singles == sorted(singles) and doubles == sorted(doubles),
         f"paired {doubles}, singletons {singles}",
     )
@@ -1379,14 +1421,18 @@ def leg_ix():
         "(i) no observed Z",
         SHAPE_NO_Z,
         [["PI+INV"], ["PI"], ["DA+PI"], ["DA+PI+IV(T)"], ["PI&DA+PI"], ["PI&DA+PI+IV(T)"]],
+        has_z=False,
     )
     check(
         "(ix) (i) no observed Z: nothing is drawn dash-dot",
         all(style != INSTRUMENT_Z_STYLE for style in styles),
         f"{styles}",
     )
-    # (ii) all three shipped datasets: the 12 pooled keys fold to 10, five columns of two
-    shape_check("(ii) all three datasets", SHAPE_ALL, TABLE_ALL)
+    # (ii) all three shipped datasets, the cigarette Z column beside the null-Z ones:
+    # merged, the 12 pooled keys fold to the six Z entries in one row
+    shape_check("(ii) all three datasets", SHAPE_ALL, TABLE_ALL, null=SHAPE_NO_Z)
+    # (ii') the same 12 keys inside one column with a real Z fold to 10, five columns of two
+    shape_check("(ii') one Z column", SHAPE_ALL, TABLE_ONE_Z)
     # (iii) one dataset alone -- cigarettes: six entries, one flat row, dash-dot on
     # the four real-Z entries
     shape_check(
@@ -1403,11 +1449,12 @@ def leg_ix():
     )
     # (iv) two paired groups: `ncol` is the entry count, one row of 4, no empty slots
     shape_check("(iv) two paired groups", SHAPE_PAIRS, [["PI"], ["PI+IV"], ["DA+PI"], ["DA+PI+IV(Z)"]])
-    # (v) nine singletons: the 7-to-9 case, stacked two to a column in PAIR_ORDER order
+    # (v) nine singletons: the 7-to-9 case, stacked two to a column in legend order
     shape_check(
         "(v) nine singletons",
         SHAPE_WIDE,
         [["ATE", "PI+INV"], ["PI", "ERM"], ["DA+PI", "DA+ERM"], ["DA+PI+IV(T)", "PI&DA+PI"], ["PI&DA+PI+IV(T)"]],
+        has_z=False,
     )
     # past LEGEND_GRID_COLS columns: the grid widens and one WARNING names it
     with captured() as lines:
@@ -1419,17 +1466,21 @@ def leg_ix():
         f"ncol {ncol}, {rows} row(s), warnings {lines}",
     )
     check("(ix) 11 entries: the rendered columns are [2]*5 + [1]", sizes == [2] * 5 + [1], f"{sizes}")
-    # every group of size <= 2 is the rule's precondition. Unreachable with today's
-    # PAIR_ORDER, so the only way to exercise it is to break the table: fold PI+INV
-    # into PI's group and it holds three kept entries
-    patched = dict(aggregate.PAIR_ORDER)
-    patched["PI+INV"] = (2, 0)
-    original, aggregate.PAIR_ORDER = aggregate.PAIR_ORDER, patched
-    try:
-        with captured() as lines:
-            drawn_legend(("PI+INV", "PI", "PI+IV"))
-    finally:
-        aggregate.PAIR_ORDER = original
+    # every group of size <= 2 is the rule's precondition. Unreachable with the legend
+    # order `method_style` gives, so the only way to exercise it is hand-made styles:
+    # PI+INV folded into PI's group, which then holds three kept entries
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    handles = {}
+    for name in ("PI+INV", "PI", "PI+IV"):
+        style = method_style(name, True)
+        if name == "PI+INV":
+            style = style._replace(order=(2, 0))
+        (line,) = ax.plot([0, 1], [0, 1], color=style.colour, linestyle=style.linestyle)
+        handles[style.signature] = (line, style, name)
+    with captured() as lines:
+        aggregate._legend_entries(handles)
+    plt.close(fig)
     check(
         "(ix) a group of three entries warns, rather than breaking the columns quietly",
         len(lines) == 1 and "[2]" in lines[0],
@@ -1437,12 +1488,12 @@ def leg_ix():
     )
 
     # the second consumer: `perf_grid` pools the same way `sweep_grid` does
-    tree = synthetic_tree(tempfile.mkdtemp(prefix="shapes_", dir=TMPROOT), perf_methods=SHAPE_ALL)
+    tree = synthetic_tree(tempfile.mkdtemp(prefix="shapes_", dir=TMPROOT), perf_methods=SHAPE_ALL, cig_has_z=True)
     fig = aggregate.perf_grid("wall_clock", ("wall_clock",), aggregate.columns(tree), tree)
     columns = legend_columns(fig, fig.legends[0])
-    want = [[TEX_MAPPER[spelled_method(name)] for name in column] for column in TABLE_ALL]
+    want = [[method_style(name, True).label for name in column] for column in TABLE_ONE_Z]
     check(
-        "(ix) perf_grid folds the same 12 keys to the same five columns of two",
+        "(ix) perf_grid folds the same 12 keys in one Z column to the same five columns of two",
         columns == want,
         f"{[len(column) for column in columns]}",
     )

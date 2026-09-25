@@ -647,13 +647,14 @@ def _tints_of_rows(X) -> np.ndarray:
     return tint_of(X.reshape(len(X), 3, side, side))
 
 
-def run_tint_sweep(runner, spec: TintSpec, experiment: str = EXPERIMENT_NAME) -> dict[str, Any]:
+def run_tint_sweep(runner, spec: TintSpec, experiment: str = EXPERIMENT_NAME, has_z: bool = False) -> dict[str, Any]:
     """One image per digit rendered at every tint of the grid and scored by every
     fitted model of the query run (no refit). Saves per digit `tint_{d}_values`,
     `tint_{d}_outcomes` (the query results layout, ATE first) and `tint_{d}_images`
     (the full-resolution blue and red endpoints), the figure `tint_{d}_sweep`, and
-    once `tint_density` (the B rows' tints before and after DA). Returns the
-    `run.json` entry."""
+    once `tint_density` (the B rows' tints before and after DA). `has_z` is the
+    run's (`constants.method_style`; do-MNIST has no Z). Returns the `run.json`
+    entry."""
     tints = np.linspace(spec.range[0], spec.range[1], spec.sweep_samples)
     digits = sorted(spec.digits)
     source = DOMNIST_CONFIG.tint_image_source
@@ -692,6 +693,7 @@ def run_tint_sweep(runner, spec: TintSpec, experiment: str = EXPERIMENT_NAME) ->
             legend_width=TINT_LEGEND_WIDTH,
             mark_missing=True,
             **ANNOTATE_SWEEP_PLOT["tint"],
+            has_z=has_z,
         )
 
     # the DA measure the DA+ methods fit on (the mixed GX), against the observed rows
@@ -1047,7 +1049,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         record.update(self._exemplar_summary(results, ate))
         if self.tint_ is not None:
             # after the population: its status split is read right after its own predict
-            record["tint"] = run_tint_sweep(runner, self.tint_, self.name)
+            record["tint"] = run_tint_sweep(runner, self.tint_, self.name, has_z=self.has_z)
         record.update(
             gamma=float(self.gamma),
             epsilon=float(self.epsilon),
@@ -1089,7 +1091,7 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         headline = {k: v for k, v in record.items() if k.startswith(("coverage_", "width_", "rmse_"))}
         logger.info(f"do-mnist population: {headline}")
 
-        create_digit_sweep_plot(runner.exemplar_images_, results, labels=digits, experiment=self.name)
+        create_digit_sweep_plot(runner.exemplar_images_, results, labels=digits, experiment=self.name, has_z=self.has_z)
 
     @staticmethod
     def _exemplar_summary(results, ate) -> dict[str, float]:

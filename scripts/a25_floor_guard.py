@@ -388,7 +388,7 @@ def a25_empty_reads_infeasible():
     check("A25 the fixture has a knob under the floor and one above it", 0 < len(under) < len(grid), f"{under}")
     fig, ax = plt.subplots()
     try:
-        handles, _ = plotting._draw_series(ax, np.asarray(grid, dtype=float), {"DA+PI+IV": widths})
+        handles, _ = plotting._draw_series(ax, np.asarray(grid, dtype=float), {"DA+PI+IV": widths}, has_z=False)
         line = handles.get("DA+PI+IV")
         check("A25 the width line is drawn", line is not None)
         if line is not None:

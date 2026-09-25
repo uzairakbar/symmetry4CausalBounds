@@ -237,13 +237,19 @@ def render_sweep(experiment, param, metric, x, results, save, sweep_dir=None, **
         vlines=PARAM_SPECS[param].vlines,
         savefig=save,
         **kwargs,
+        has_z=False,
     )
     return plt.gcf()
 
 
 def render_query(experiment, x, results, save, **kwargs):
     plotting.create_query_sweep_plot(
-        x, results, **{**ANNOTATE_SWEEP_PLOT["pc12"], **kwargs}, experiment=experiment, savefig=save
+        x,
+        results,
+        **{**ANNOTATE_SWEEP_PLOT["pc12"], **kwargs},
+        experiment=experiment,
+        savefig=save,
+        has_z=False,
     )
     return plt.gcf()
 
@@ -272,6 +278,7 @@ def render_perf(experiment, perf_dir, metric, save):
         clip_y=False,
         promote_y=False,
         savefig=save,
+        has_z=False,
     )
     return plt.gcf()
 
@@ -652,7 +659,7 @@ def row_h():
     plotting.save = lambda fig, *a, **k: captured.append(fig)  # the panel saves unconditionally; keep it in memory
     try:
         before = len(_errors)
-        plotting.create_panel_plot(SYNTHETIC, columns, hists)
+        plotting.create_panel_plot(SYNTHETIC, columns, hists, has_z=False)
     finally:
         plotting.save = original
         del PANEL_CONFIGS[SYNTHETIC]
@@ -672,7 +679,9 @@ def row_h():
     exemplars = rng.random((5, 3, 8, 8))
     digits = {"PI": np.stack([np.full((5, m), 0.2), np.full((5, m), 0.8)], -1), "ERM": np.full((5, m), 0.5)}
     before = len(_errors)
-    plotting.create_digit_sweep_plot(exemplars, digits, labels=[0, 1, 2, 3, 4], experiment=SYNTHETIC, savefig=False)
+    plotting.create_digit_sweep_plot(
+        exemplars, digits, labels=[0, 1, 2, 3, 4], experiment=SYNTHETIC, savefig=False, has_z=False
+    )
     labels, bare, n_log, _ = tick_report(plt.gcf())  # its x ticks are the thumbnails, not counted
     plt.close("all")
     check("(h)", "digit sweep (synthetic)", labels == 0 and len(_errors) == before, f"minor labels {labels}")

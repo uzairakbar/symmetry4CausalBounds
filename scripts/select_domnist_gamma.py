@@ -171,7 +171,14 @@ def select_gamma(block: dict, hyperparameters: dict, n_select: int, target: floa
         bias = DOMNIST_CONFIG.beta * (0.5 - DOMNIST_CONFIG.eta)  # |bias|; 2|b| is the optimal width
         marks = {f"{name} $\\gamma$": record[name]["gamma"] for name in models}
         create_coverage_plot(
-            sweep, grid, marks=marks, ref_width=2 * bias, targets=(target,), experiment=EXPERIMENT_NAME, subdir=SUBDIR
+            sweep,
+            grid,
+            marks=marks,
+            ref_width=2 * bias,
+            targets=(target,),
+            experiment=EXPERIMENT_NAME,
+            subdir=SUBDIR,
+            has_z=False,
         )
     return record
 

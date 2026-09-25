@@ -201,7 +201,7 @@ def leg_iii():
     lower, upper = -np.ones(5), np.ones(5)
     band = np.stack([lower, upper], axis=1)[:, None, :]  # (points, 1, 2)
     fig, ax = plt.subplots()
-    handles, lo, hi = plotting._draw_bands(ax, x, {"PI": band, "PI+IV": 0.5 * band})
+    handles, lo, hi = plotting._draw_bands(ax, x, {"PI": band, "PI+IV": 0.5 * band}, has_z=True)
     lines = ax.get_lines()
     check("(iii) two interval methods draw four edge lines", len(lines) == 4, f"{len(lines)}")
     check("(iii) one fill per method", len(ax.collections) == 2, f"{len(ax.collections)}")

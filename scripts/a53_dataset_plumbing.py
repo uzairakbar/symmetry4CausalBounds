@@ -447,7 +447,7 @@ def leg_vi(tmp):
     try:
         x = np.linspace(0.0, 1.0, 4)
         y = {"PI": np.stack([np.stack([-np.ones(4), np.ones(4)], axis=1)], axis=1)}
-        create_query_sweep_plot(x, y, xlabel=DERIVED_XLABEL, experiment="a53", hide_legend=True)
+        create_query_sweep_plot(x, y, xlabel=DERIVED_XLABEL, experiment="a53", hide_legend=True, has_z=False)
         written = sorted(os.listdir(os.path.join(tmp, "artifacts", "a53", SUBDIR_QUERY)))
     finally:
         os.chdir(here)

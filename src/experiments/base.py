@@ -853,6 +853,7 @@ class ExperimentOrchestrator(ABC):
                     vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
                     # the global toggle of SS10.1; absent from the shipped yaml
                     normalize=self.kwargs.get("normalize", False),
+                    has_z=self.has_z,
                 )
 
     def _run_perf(self, perf_spec):
@@ -899,6 +900,7 @@ class ExperimentOrchestrator(ABC):
                 bootstrapped=(metric in ("seed_var", "feasibility")),
                 clip_y=False,
                 promote_y=False,
+                has_z=self.has_z,
             )
 
     def _run_query_sweep(self):
@@ -911,7 +913,7 @@ class ExperimentOrchestrator(ABC):
 
         if self.build_panel:
             # Optical uses augmented geometry, simulation uses raw
-            panel_builder = PanelBuilder(runner, self.name, "optical" in self.name)
+            panel_builder = PanelBuilder(runner, self.name, "optical" in self.name, has_z=self.has_z)
             panel_builder.build(self.kwargs["sweep_samples"])
             # Radial sweep plot reuses the panel's cached results
             results = panel_builder.get_radial_results()
@@ -928,4 +930,4 @@ class ExperimentOrchestrator(ABC):
         save(angles, "treatment_values", self.name, "pkl", subdir=SUBDIR_QUERY)
         save(results, "outcome_values", self.name, "pkl", subdir=SUBDIR_QUERY)
 
-        create_query_sweep_plot(angles, results, **ANNOTATE_SWEEP_PLOT["pc12"], experiment=self.name)
+        create_query_sweep_plot(angles, results, **ANNOTATE_SWEEP_PLOT["pc12"], experiment=self.name, has_z=self.has_z)

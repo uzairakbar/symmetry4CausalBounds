@@ -353,7 +353,7 @@ def leg_iv():
     block = a60.recipe_block(n_experiments=1, sweep_samples=8, n_jobs=1)
     orch = a60.orchestrator(block)
     query = a60.query_runner(orch)
-    panel = PanelBuilder(query, "cigarettes", False)
+    panel = PanelBuilder(query, "cigarettes", False, has_z=orch.has_z)
     panel._fit_all_models()
     # which methods run is the recipe's, and it spells the default `DA+PI+IV(T,Z)`
     # while the rows below key on the bare name: fold, then take the recorded rows

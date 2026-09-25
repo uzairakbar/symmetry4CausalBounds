@@ -16,7 +16,7 @@ from loguru import logger
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
-from .constants import ARTIFACTS_DIRECTORY, TEX_MAPPER
+from .constants import ARTIFACTS_DIRECTORY, is_method
 
 PlotFormat = Literal["png", "pdf", "ps", "eps", "svg"]
 ExperimentType = Literal["simulation", "optical_device", "do_mnist"]
@@ -99,7 +99,7 @@ def bootstrap(
         return bootstrapped
 
     # Check if top-level keys are method names (single row) or experiment names (nested)
-    is_single_level = set(data.keys()) <= set(TEX_MAPPER.keys())
+    is_single_level = all(is_method(key) for key in data)
 
     if is_single_level:
         return _bootstrap_single_dict(data)

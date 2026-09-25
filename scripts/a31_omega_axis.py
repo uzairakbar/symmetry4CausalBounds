@@ -257,6 +257,7 @@ def run_one(experiment, recalibrate):
         savefig=False,
         bootstrapped=False,
         vlines=PARAM_SPECS["omega"].vlines,
+        has_z=False,
     )
     ax2 = plt.gcf().axes[0]
     lines = [ln for ln in ax2.lines if ln.get_label() == TEX_MAPPER["DA+PI"]]

@@ -455,7 +455,7 @@ def axis_after(x, y, **kwargs):
     """Render with `savefig=False` and return (yscale, ylim, max drawn y, messages)."""
     plt.close("all")
     with captured() as lines:
-        create_sweep_plot(x, y, xlabel="x", savefig=False, **kwargs)
+        create_sweep_plot(x, y, xlabel="x", savefig=False, has_z=False, **kwargs)
     ax = plt.gca()
     drawn = max((max(line.get_ydata()) for line in ax.get_lines() if len(line.get_ydata())), default=np.nan)
     return ax.get_yscale(), tuple(float(v) for v in ax.get_ylim()), drawn, lines
@@ -745,7 +745,12 @@ def leg_iv():
     plt.close("all")
     with captured():
         create_sweep_plot(
-            x, {"DA+PI+IV": y["PI"], "DA+PI+IV(Z)": y["DA+PI"]}, xlabel="x", fname="gamma_width", savefig=False
+            x,
+            {"DA+PI+IV": y["PI"], "DA+PI+IV(Z)": y["DA+PI"]},
+            xlabel="x",
+            fname="gamma_width",
+            savefig=False,
+            has_z=True,
         )
     drawn = {line.get_label(): line for line in plt.gca().get_lines()}
     base, sibling = drawn.get(TEX_MAPPER["DA+PI+IV"]), drawn.get(TEX_MAPPER["DA+PI+IV(Z)"])

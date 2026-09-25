@@ -85,6 +85,7 @@ def leg_ii():
         fname="gamma_width",
         savefig=False,
         vlines=requested,
+        has_z=False,
     )
     ax = plt.gca()
     x_lo, x_hi = ax.get_xlim()

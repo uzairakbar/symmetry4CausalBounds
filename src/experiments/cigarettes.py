@@ -21,7 +21,8 @@ from src.experiments.configs import (
 )
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import PanelBuilder, create_query_sweep_plot, create_sweep_plot, save
-from src.experiments.utils.constants import COEFFICIENT_LABELS, SUBDIR_QUERY, TEX_MAPPER, iv_mode, parse_method
+from src.experiments.utils.constants import COEFFICIENT_LABELS, SUBDIR_QUERY, iv_mode, parse_method
+from src.experiments.utils.constants import label as method_label
 from src.experiments.utils.metrics import sigma_sq_hat
 from src.methods.sensitivity_models import constraint_floor
 from src.oracle import epsilon_star, preserve_rng
@@ -550,7 +551,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         pool and the headline ratios are the panel's, not one resample's.
         """
         runner = self.get_query_runner_cls()(methods=self.methods, **{**self._get_clean_kwargs(), "n_experiments": 1})
-        panel = PanelBuilder(runner, self.name, "optical" in self.name)
+        panel = PanelBuilder(runner, self.name, "optical" in self.name, has_z=self.has_z)
         panel.build(self.kwargs["sweep_samples"])
         self._plot_query_sweep(runner, panel.get_radial_results())
 
@@ -558,7 +559,9 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             results, _ = panel.predict(grid)
             save(x, f"{name}_values", self.name, "pkl", subdir=SUBDIR_QUERY)
             save(results, f"{name}_outcomes", self.name, "pkl", subdir=SUBDIR_QUERY)
-            create_query_sweep_plot(x, results, **ANNOTATE_SWEEP_PLOT[name], fname=name, experiment=self.name)
+            create_query_sweep_plot(
+                x, results, **ANNOTATE_SWEEP_PLOT[name], fname=name, experiment=self.name, has_z=self.has_z
+            )
 
         self._plot_width_ratio(runner, panel)
         self._write_coefficients(runner, panel)
@@ -676,6 +679,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 fname=stem,
                 experiment=self.name,
                 vlines=f1_marks,
+                has_z=self.has_z,
             )
 
             # F2. The x-axis is the DECLARED leakiness budget gamma_z. A DA+
@@ -708,6 +712,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 fname=stem,
                 experiment=self.name,
                 vlines=f2_marks,
+                has_z=self.has_z,
             )
 
     def _write_benchmarks(self):
@@ -807,9 +812,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             fname="ratio_cos",
             subdir=SUBDIR_QUERY,
             xlabel=r"$|\cos({\bm{x}}, {\bm{v}})|$",
-            ylabel=r"width / PI width",
+            ylabel=rf"width / {method_label('PI', self.has_z)} width",
             bootstrapped=False,
             vlines=tuple(marks),
+            has_z=self.has_z,
         )
 
     # ------------------------------------------------------------------ tables
@@ -879,7 +885,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     cells.append(f"$[{low:.3f}, {high:.3f}]${ratio}")
             if name in extra_cells:
                 cells.append(extra_cells[name])
-            lines.append(TEX_MAPPER.get(name, name) + " & " + " & ".join(cells) + r" \\")
+            lines.append(method_label(name, self.has_z) + " & " + " & ".join(cells) + r" \\")
         lines.append(r"\midrule")
         # the target's own name: the anchor set's restricted point under `iv`,
         # the restricted fit against the configured set or the synthetic

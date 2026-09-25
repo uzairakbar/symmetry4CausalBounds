@@ -143,6 +143,7 @@ def render_sweep(dataset, param, seed=0, x=None, y=None):
         fname=f"{param}_width",
         savefig=False,
         vlines=PARAM_SPECS[param].vlines,
+        has_z=False,
     )
     return plt.gca()
 
@@ -195,7 +196,13 @@ def leg_iii():
     before = len(_errors)
     plt.close("all")
     plotting.create_query_sweep_plot(
-        angles, query, xlabel="angle", xscale="log", experiment="simulation", savefig=False
+        angles,
+        query,
+        xlabel="angle",
+        xscale="log",
+        experiment="simulation",
+        savefig=False,
+        has_z=False,
     )
     fig = plt.gcf()
     fewest = min(len(majors_in_view(axis)) for ax in fig.axes for axis in (ax.xaxis, ax.yaxis))
@@ -239,6 +246,7 @@ def leg_iii():
             vlines=PARAM_SPECS["epsilon"].vlines,
             savefig=False,
             **kwargs,
+            has_z=False,
         )
         fig = plt.gcf()
         counts = {i: (len(majors_in_view(ax.xaxis)), len(majors_in_view(ax.yaxis))) for i, ax in enumerate(fig.axes)}
