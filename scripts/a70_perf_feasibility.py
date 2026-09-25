@@ -412,8 +412,8 @@ def leg_5():
     fig = aggregate.perf_grid("seed_var", stems["seed_var"], datasets, root)
     axes = np.array(fig.axes[: 2 * len(datasets)]).reshape(2, len(datasets))
     check(
-        "(5) two rows by two columns, titled simulation, cigarettes",
-        len(fig.axes) == 4 and [ax.get_title() for ax in axes[0]] == ["simulation", "cigarettes"],
+        "(5) two rows by two columns, titled simulation, cigarette demand",
+        len(fig.axes) == 4 and [ax.get_title() for ax in axes[0]] == ["simulation", "cigarette demand"],
         f"{len(fig.axes)} axes, {[ax.get_title() for ax in axes[0]]}",
     )
     labels = [ax.get_ylabel() for ax in axes[:, 0]]

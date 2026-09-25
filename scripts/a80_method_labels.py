@@ -72,15 +72,17 @@ apart from (vi). Legs:
   (viii) completeness greps (a later tier).
   (ix)   the column titles: on a validityFig9-shaped tree (the simulation with a
          real Z, optical and cigarettes without) through `sweep_grid` and
-         `perf_grid`, each null-Z column's title carries `NULL_Z_TITLE_SUFFIX`, the
-         `$(Z = \varnothing)$` line, and the simulation's does not; the titles are
+         `perf_grid`, the titles read "simulation", "optical device" and
+         "cigarette demand", each null-Z one followed on its line by
+         `NULL_Z_TITLE_SUFFIX`, `$(Z = \varnothing)$` at 3/4 size (the
+         cigarettes key stays `cigarettes` in `DATASET_ORDER`); the titles are
          inside the figure and pairwise disjoint and the legend clears them; the
          merged figure saves to PDF under usetex ([SKIP] without latex); amssymb
-         is in the preamble. An all-null tree and a tree whose only Z dataset is a
-         blank column carry no suffix. Catches: the suffix on a Z column or an
-         unmerged grid, a suffix that collides with its neighbour or the legend, a
-         preamble without `\varnothing`. Misses: the single-dataset figures, which
-         carry no dataset title.
+         is in the preamble. An all-null tree and a tree whose only Z dataset is
+         a blank column carry no suffix. Catches: the suffix on a Z column or an
+         unmerged grid, a suffix that collides with its neighbour or the legend,
+         a preamble without `\varnothing`. Misses: the single-dataset figures,
+         which carry no dataset title.
 
 A leg, or a part of one, that needs code from a later commit prints [SKIP] and is
 counted in the summary line.
@@ -127,6 +129,7 @@ from src.experiments.configs import (  # noqa: E402
 )
 from src.experiments.utils.constants import (  # noqa: E402
     DA_ERM,
+    DATASET_ORDER,
     DATASET_TITLES,
     DEEP_HEX,
     DEEP_INDEX,
@@ -802,15 +805,31 @@ def leg_ix():
         suffix,
     )
     check("(ix) amssymb is in the TeX preamble", "amssymb" in RC_PARAMS["text.latex.preamble"])
+    check(
+        "(ix) the cigarettes column is titled cigarette demand; its key stays",
+        DATASET_TITLES["cigarettes"] == "cigarette demand" and "cigarettes" in DATASET_ORDER,
+        f"{DATASET_TITLES['cigarettes']!r}",
+    )
+    # validityFig9's shape: its simulation column with a real Z, and optical and the
+    # cigarettes as null-Z columns running optical's methods
     validity = recipes()["validityFig9"]
+    shape = {
+        "simulation": (validity["simulation"][0], True),
+        "optical_device": (validity["optical_device"][0], False),
+        "cigarettes": (validity["optical_device"][0], False),
+    }
     merged = tempfile.mkdtemp(prefix="titles_", dir=base)
-    for dataset, (methods, has_z) in validity.items():
+    for dataset, (methods, has_z) in shape.items():
         write_column(merged, dataset, methods, has_z)
         write_perf(merged, dataset, methods, has_z)
+    literal = {
+        "simulation": "simulation",
+        "optical device": "optical device {\\fontsize{18}{18}\\selectfont $(Z = \\varnothing)$}",
+        "cigarette demand": "cigarette demand {\\fontsize{18}{18}\\selectfont $(Z = \\varnothing)$}",
+    }
     for kind, fig in grids(merged).items():
         got = titles(fig)
-        want = {DATASET_TITLES[d]: DATASET_TITLES[d] + ("" if validity[d][1] else suffix) for d in validity}
-        check(f"(ix) {kind}, merged: every null-Z column title carries the suffix", got == want, f"{got}")
+        check(f"(ix) {kind}, merged: the null-Z column titles carry the suffix", got == literal, f"{got}")
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         boxes = [ax.title.get_window_extent(renderer) for ax in fig.axes if ax.get_title()]

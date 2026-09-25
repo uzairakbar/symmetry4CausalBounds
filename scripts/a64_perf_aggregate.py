@@ -235,7 +235,7 @@ SWEEP_GRID_R21 = {
     ("root", "gamma"): (
         6,
         (True, False, True, True, True, True),
-        ("simulation", "cigarettes"),
+        ("simulation", "cigarette demand"),
         ("coverage", "", "width", "", "worst error", ""),
         ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"),
         ("gamma", 0.5),
@@ -243,7 +243,7 @@ SWEEP_GRID_R21 = {
     ("root", "omega"): (
         6,
         (True, False, True, False, True, False),
-        ("simulation", "cigarettes"),
+        ("simulation", "cigarette demand"),
         ("coverage", "", "width", "", "worst error", ""),
         ("PI", "DA+PI", "PI&DA+PI+IV(T)"),
         ("omega", 0.5),
@@ -251,7 +251,7 @@ SWEEP_GRID_R21 = {
     ("blank", "gamma"): (
         6,
         (False, True, False, True, False, True),
-        ("simulation", "cigarettes"),
+        ("simulation", "cigarette demand"),
         ("", "coverage", "", "width", "", "worst error"),
         ("PI", "DA+PI+IV(T)"),
         ("gamma", 0.5),
@@ -259,7 +259,7 @@ SWEEP_GRID_R21 = {
     ("three", "gamma"): (
         9,
         (True, True, False, True, True, True, True, True, True),
-        ("simulation", "optical device", "cigarettes"),
+        ("simulation", "optical device", "cigarette demand"),
         ("coverage", "", "", "width", "", "", "worst error", "", ""),
         ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"),
         ("gamma", 0.525930626),
@@ -941,7 +941,7 @@ def leg_vi():
     check("(vi) gamma grid axes (3, 2)", axes.shape == (3, 2), f"{axes.shape}")
     check(
         "(vi) column titles",
-        axes[0, 0].get_title() == "simulation" and axes[0, 1].get_title() == "cigarettes",
+        axes[0, 0].get_title() == "simulation" and axes[0, 1].get_title() == "cigarette demand",
         f"{[a.get_title() for a in axes[0]]}",
     )
     check("(vi) the cigarette coverage cell is off, its width cell on", not axes[0, 1].axison and axes[1, 1].axison)

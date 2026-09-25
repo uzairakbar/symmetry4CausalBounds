@@ -26,7 +26,7 @@ DATASET_ORDER: tuple[str, ...] = ("simulation", "optical_device", "cigarettes", 
 DATASET_TITLES: dict[str, str] = {
     "simulation": "simulation",
     "optical_device": "optical device",
-    "cigarettes": "cigarettes",
+    "cigarettes": "cigarette demand",
     "do_mnist": "do-MNIST",
 }
 # after a null-Z column's title in an aggregate grid that also has a Z column: there
