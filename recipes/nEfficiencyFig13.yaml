@@ -1,20 +1,19 @@
-# global toggles, overridable per experiment
 defaults:
     recalibrate: true
     pad: true
     clipy: false
     mean_match: true
-    im-ci: 95
-    n_jobs: -1
     normalize: true
+    im-ci: 95            # 95% Imbens-Manski CI around every sweep bound
+    n_jobs: -1
 simulation:
     seed: 42
     n_samples: 2_048
+    n_experiments: 8
+    sweep_samples: 32
     kernel_dim: 0
     treatment_dim: 32
     iv: 4
-    n_experiments: 8
-    sweep_samples: 8
     methods:
         - PI+INV+IV
         - PI+IV
@@ -31,7 +30,7 @@ optical_device:
     seed: 42
     n_samples: 1_000
     n_experiments: 8
-    sweep_samples: 8
+    sweep_samples: 32
     methods:
         - PI+INV
         - PI
@@ -53,7 +52,7 @@ cigarettes:
     gamma_z: 0.0177
     n_samples: 2_450
     n_experiments: 8
-    sweep_samples: 8
+    sweep_samples: 32
     da_amplitude: 1.0
     sliver: false
     methods:

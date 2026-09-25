@@ -99,7 +99,7 @@ do_mnist:
                                     # E[(h(X) - h(GX))^2] <= tau, 4e-4 = 0.02^2 in epsilon
                                     # units, inside the eps^2 = 0.0016 ball
     gamma_z_star: 0.0               # true baseline IV budget of Thm. 3.B; 0 = none
-    inv_recenter: 'inv'             # QUOTE it. PI+INV's centre. inv: the ERM+INV net
+    inv_recenter: off               # PI+INV's centre. inv: the ERM+INV net
                                     # (the ERM trained to erm_inv_tau on the DA pairs),
                                     # ball on X, pairs (X, GX). off: the ERM, same ball
                                     # and pairs; its INV floor is 0.0198 > 0.0016, so

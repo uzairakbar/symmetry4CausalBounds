@@ -1,17 +1,11 @@
-# do-MNIST tint sweep and results table (App. F.2, a placeholder until the figure
-# number exists): the F1 block (the same gamma, target_coverage and erm_inv_tau)
-# plus `experiment.query.tint` over all ten digits at 8 tints on [0, 1]. One run
-# writes the exemplar figure, the population run.json and pkls (the table's input)
-# and the ten tint sweeps; `python -m src.aggregate` then draws do_mnist_tint.pdf
-# and do_mnist_table.tex. See config.yaml's `do_mnist:` block for what each key means.
 defaults:
-    recalibrate: false
-    pad: false
+    recalibrate: false              # the latent ball has no rho; gamma is used as is
+    pad: false                      # the symmetry is exact, non-zero epsilon is for wellconditioned optimizaiton
     clipy: false
     mean_match: true
-    n_jobs: -1
     normalize: false
-hyperparameters:
+    n_jobs: -1                      # per-query SLSQP workers; bit-identical to 1
+hyperparameters:                    # the three nets (ERM, DA+ERM, ERM+INV)
     lr: 0.01
     batch: 256
     epochs: 1
@@ -21,20 +15,20 @@ hyperparameters:
     loss: mse
 do_mnist:
     seed: 42
-    n_experiments: 1
     n_samples: 1_200_000
+    n_experiments: 1
+    sweep_samples: 10
     n_pi: 60_000
     n_queries: 2_000
-    sweep_samples: 10
     net: domnist-pool
     n_components: 32
     calibrate_sigma: true
-    gamma: 0.062082436071912536
+    gamma: 0.062082436071912536     # PI's gamma at target_coverage on split C (select_domnist_gamma.py)
     target_coverage: 0.995
     epsilon: 0.04
     erm_inv_tau: 0.0004
     gamma_z_star: 0.0
-    inv_recenter: 'inv'
+    inv_recenter: off               # default copsens behavior
     mix_in: 0.05
     split_seed: 420
     split:
@@ -49,7 +43,6 @@ do_mnist:
         - ATE
         - ERM
         - DA+ERM
-        # - ERM+INV  # do-MNIST only; listing it trains the ERM+INV net
         - PI
         - DA+PI
         - DA+PI+IV

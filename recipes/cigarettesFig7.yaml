@@ -3,8 +3,8 @@ defaults:
     pad: true
     clipy: false
     mean_match: true
-    n_jobs: -1
     normalize: true
+    n_jobs: -1
 cigarettes:
     seed: 42
     target: iv
@@ -14,14 +14,14 @@ cigarettes:
     gamma_z: 0.0177
     n_samples: 2_450
     n_experiments: 8
-    sweep_samples: 8
+    sweep_samples: 32
     da_amplitude: 1.0
     sliver: false
     methods:
-      - PI+INV+IV
-      - PI+IV
-      - DA+PI+IV(Z)
-      - DA+PI+IV(T,Z)
+        - PI+INV+IV
+        - PI+IV
+        - DA+PI+IV(Z)
+        - DA+PI+IV(T,Z)
     augmentation: translate
     experiment:
         query: true

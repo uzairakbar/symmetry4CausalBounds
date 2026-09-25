@@ -1,16 +1,15 @@
-# global toggles, overridable per experiment
 defaults:
     recalibrate: true
     pad: true
     clipy: false
-    mean_match: false
-    n_jobs: -1
+    mean_match: true
     normalize: true
+    n_jobs: -1
 optical_device:
     seed: 42
     n_samples: 1_000
     n_experiments: 8
-    sweep_samples: 8
+    sweep_samples: 32
     methods:
         - ATE
         - ERM

@@ -11,8 +11,8 @@ net, no run; seconds on a CPU).
         an instrument-mode spelling and the old `backend`/`unfrozen_layers`/`link`/
         `solver` keys all raise; `im-ci` is forced to 0.
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
-        the seven methods with PI+INV last and `ERM+INV` commented out, carry the
-        pinned values (`inv_recenter: inv`, PI's selected gamma, `target_coverage`
+        the seven methods with PI+INV last, carry the
+        pinned values (`inv_recenter: off`, PI's selected gamma, `target_coverage`
         0.995, `erm_inv_tau` 4e-4, `net: domnist-pool`), agree on every key, and the smoke script's
         BLOCK mirrors them; the tint recipe F2 is F1's block plus the ten-digit
         tint spec.
@@ -180,7 +180,7 @@ def leg_ii():
         seven = len(methods) == 7 and methods[-1] == "PI+INV"
         check(f"(ii) {name} lists seven methods, PI+INV last", seven, str(methods))
         check(f"(ii) {name} does not list ERM+INV", "ERM+INV" not in methods)
-        check(f"(ii) {name} inv_recenter inv", resolved["inv_recenter"] == "inv")
+        check(f"(ii) {name} inv_recenter off", resolved["inv_recenter"] == "off")
         check(f"(ii) {name} gamma is PI's selected {GAMMA}", resolved["gamma"] == GAMMA)
         check(f"(ii) {name} target_coverage 0.995", resolved["target_coverage"] == 0.995)
         check(f"(ii) {name} erm_inv_tau 4e-4", resolved["erm_inv_tau"] == 4e-4)
@@ -189,10 +189,6 @@ def leg_ii():
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
         check(f"(ii) {name} split 40k/10k/10k", resolved["split"] == {"A": 40_000, "B": 10_000, "C": 10_000})
-    for name in ("config.yaml", os.path.join("recipes", "doMnistFigF1.yaml")):
-        with open(os.path.join(REPO, name)) as fh:
-            listed = re.search(r"^\s*# - ERM\+INV\b", fh.read(), flags=re.M) is not None
-        check(f"(ii) {name} carries ERM+INV commented out", listed)
     shared = set(shipped) & set(block_r) - {"experiment"}
     same = [k for k in shared if shipped[k] == block_r[k]]
     differ = sorted(set(shared) - set(same))
@@ -219,9 +215,11 @@ def leg_ii():
     )
     from smoke_do_mnist import BLOCK
 
+    # resolved, so YAML's bare off (read as False) compares as the "off" it means
+    resolved = resolve_dataset_block("do_mnist", {**shipped, "im-ci": 0})
     for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon", "net"):
         check(
-            f"(ii) the smoke BLOCK mirrors the shipped {key}", BLOCK.get(key) == shipped.get(key), str(BLOCK.get(key))
+            f"(ii) the smoke BLOCK mirrors the shipped {key}", BLOCK.get(key) == resolved.get(key), str(BLOCK.get(key))
         )
 
 
@@ -283,8 +281,8 @@ def leg_iv():
         except NotImplementedError:
             raised = True
         check(f"(iv) the {param} sweep raises NotImplementedError", raised)
-    check("(iv) inv_recenter is read as inv", orchestrator.inv_recenter == "inv")
-    check("(iv) the ERM+INV net trains under the shipped block", orchestrator.train_inv is True)
+    check("(iv) inv_recenter is read as off", orchestrator.inv_recenter == "off")
+    check("(iv) no ERM+INV net trains under the shipped block", orchestrator.train_inv is False)
     check("(iv) the split is the block's", orchestrator.split == {"A": 40_000, "B": 10_000, "C": 10_000})
     check("(iv) DoMNISTSEM has no target net", not hasattr(DoMNISTSEM, "target"))
     with open(os.path.join(REPO, "src", "sem", "do_mnist.py")) as fh:
