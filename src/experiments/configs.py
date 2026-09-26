@@ -1426,10 +1426,16 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         percent = block["m_sweep_n_percent"]
         if isinstance(percent, bool) or not isinstance(percent, int | float) or not 0 < percent <= 100:
             raise ValueError(f"config.{name}.m_sweep_n_percent must be a percentage in (0, 100]; got {percent!r}.")
-        if percent_of(block["n_samples"], percent) < 2:
+    # a requested n or m sweep must draw at least 2 rows at its smallest point
+    sweep = experiment.get("sweep") if isinstance(experiment, dict) else None
+    params = (sweep.get("param") or ()) if isinstance(sweep, dict) else ()
+    params = (params,) if isinstance(params, str) else params
+    smallest = {"n": ("n ladder's", N_PERCENTS[0]), "m": ("m_sweep_n_percent", block.get("m_sweep_n_percent"))}
+    for param, (what, percent) in smallest.items():
+        if param in params and percent is not None and percent_of(block["n_samples"], percent) < 2:
             raise ValueError(
-                f"config.{name}.m_sweep_n_percent = {percent!r} of n_samples = {block['n_samples']!r} "
-                "rounds to fewer than 2 rows."
+                f"config.{name}: the {what} {percent!r} % of n_samples = {block['n_samples']!r} "
+                f"rounds to fewer than 2 rows for the {param} sweep."
             )
     if defaults.treatment_dim is not None:
         block.setdefault("treatment_dim", defaults.treatment_dim)

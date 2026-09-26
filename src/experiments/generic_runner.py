@@ -792,7 +792,7 @@ class SampleSizeStrategy(GenericParamSweep):
     The grid is the percentage ladder N_PERCENTS of `n_samples`, whatever
     `sweep_samples` says; the knob is the row count `percent_of(n_samples, p)`
     (rounded half up) and the x plotted is p itself. Optical and cigarettes: n
-    is the PRE-SPLIT total, so the train set is round(0.9 n), e.g. {56, 112,
+    is the PRE-SPLIT total, so the train set is round(0.9 n), e.g. {57, 112,
     225, 450, 900} of the 1000-row optical pool. Simulation: the train set is
     exactly n, taken from the default draw of `n_samples` train rows.
     """
@@ -896,6 +896,8 @@ class FoldStrategy(GenericParamSweep):
         return {
             "knob": knob,
             "x": self.observed_x(knob),
+            # the REQUESTED rows: cigarettes' `iv` bootstrap draws whole state
+            # histories, so it rounds this up to a multiple of 50 (153 -> 200)
             "n": self.n_samples if self.n_samples_override is None else int(self.n_samples_override),
             "n_samples": int(self.n_samples),
             "m_sweep_n_percent": self.m_sweep_n_percent,

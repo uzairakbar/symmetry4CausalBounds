@@ -121,7 +121,7 @@ def _limits(series: list[NDArray], clip: bool = True) -> tuple[float, float] | N
 
     Point estimates only -- CI bands and SE crosshairs are deliberately excluded and
     left to clip against the frame. `clip=False` is the exact pooled [min, max]:
-    the x grid, whose last point (r = 1, n = 1024, m = 16) the clip used to drop
+    the x grid, whose last point (r = 1, n = 100 %, m = 16) the clip used to drop
     along with the r = 1 reference line (`_rescale` adds the X_MARGIN).
     """
     pooled = _finite(*series)
