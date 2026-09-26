@@ -531,14 +531,16 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 loaded[dataset] = (x[order], order, load(results), found, ticks)
         return loaded[dataset]
 
-    # one x-label per figure: a column whose x means something else (an absolute-n
-    # tree beside a percentage one) is blanked, never drawn under the wrong label
+    # one x-label per figure: the current spec's meaning wins when any column carries
+    # it, else the first column's; a stale column (an absolute-n tree beside a
+    # percentage one) is blanked with a warning, never drawn under the wrong label
     drawn = [d for d in datasets if column(d) is not None]
-    reference = column(drawn[0])[3] if drawn else None
+    labels = [column(d)[3] for d in drawn]
+    reference = spec.xlabel if spec.xlabel in labels else (labels[0] if labels else None)
     for dataset in drawn:
         if column(dataset)[3] != reference:
             logger.warning(
-                f"aggregate: {dataset} {param} x is {column(dataset)[3]!r}, the first column's "
+                f"aggregate: {dataset} {param} x is {column(dataset)[3]!r}, the figure's "
                 f"{reference!r}; {dataset} left blank."
             )
             loaded[dataset] = None

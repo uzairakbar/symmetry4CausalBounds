@@ -213,14 +213,20 @@ class injected:
 
 
 # -------------------------------------------------------------------- renders
-def axis_xlabel(sweep_dir, param):
-    """The label the run drew its measured axis with (`<param>_axis.pkl`), else the spec's."""
+def axis_record(sweep_dir, param):
+    """`<param>_axis.pkl` as a dict, {} without one."""
     path = f"{sweep_dir}/{param}_axis.pkl"
-    if os.path.exists(path):
-        record = load(path)
-        if isinstance(record, dict) and record.get("xlabel"):
-            return record["xlabel"]
-    return PARAM_SPECS[param].xlabel
+    record = load(path) if os.path.exists(path) else None
+    return record if isinstance(record, dict) else {}
+
+
+def axis_xlabel(sweep_dir, param):
+    """The label the run drew its axis with (`<param>_axis.pkl`), else the spec's label
+    for a tree written before the param had one (n: absolute rows, `legacy_xlabel`)."""
+    record = axis_record(sweep_dir, param)
+    if record.get("xlabel"):
+        return record["xlabel"]
+    return PARAM_SPECS[param].legacy_xlabel or PARAM_SPECS[param].xlabel
 
 
 def render_sweep(experiment, param, metric, x, results, save, sweep_dir=None, **kwargs):
@@ -235,6 +241,7 @@ def render_sweep(experiment, param, metric, x, results, save, sweep_dir=None, **
         xscale=PARAM_SPECS[param].xscale,
         yscale=spec.yscale,
         vlines=PARAM_SPECS[param].vlines,
+        xticks=tuple(axis_record(sweep_dir, param).get("xticks", ())) if sweep_dir else (),
         savefig=save,
         **kwargs,
         has_z=False,
