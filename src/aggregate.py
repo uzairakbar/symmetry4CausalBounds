@@ -22,7 +22,8 @@ cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
 the reference marks of each panel, one legend inside the top-right panel, pinned
-upper left. From the do-MNIST tint sweep pkls, the stacked tint figure
+upper left, in the repo's legend order (`_legend_key`: PI+INV+IV, PI+IV, then the
+DA+ methods). From the do-MNIST tint sweep pkls, the stacked tint figure
 (`do_mnist_tint.pdf`): one row per digit, 0 at the top, the bounds along the tint
 grid in the middle with the digit's blue-tint image on the left and its red-tint
 image on the right (full resolution, white background), titled $h({\bm{x}})$, the
@@ -273,6 +274,17 @@ def _legend(fig, handles: dict):
     )
 
 
+def _legend_key(name: str, style) -> tuple:
+    """The repo's legend order: the family slot (`constants.legend_order`, member 0
+    above member 1), then ALL_METHODS, then the IV mode."""
+    base, mode = parse_method(name)
+    return (
+        style.order,
+        ALL_METHODS.index(base) if base in ALL_METHODS else len(ALL_METHODS),
+        IV_MODES.index(mode),
+    )
+
+
 def _legend_entries(handles: dict):
     """`_legend`'s entries without the legend: (artists, labels, ncol) in the
     repo's order after the render fold, or None with nothing drawn. `handles` is
@@ -284,12 +296,7 @@ def _legend_entries(handles: dict):
         return handles[k][1].order
 
     def order(k):
-        base, mode = parse_method(handles[k][2])
-        return (
-            pair(k),
-            ALL_METHODS.index(base) if base in ALL_METHODS else len(ALL_METHODS),
-            IV_MODES.index(mode),
-        )
+        return _legend_key(handles[k][2], handles[k][1])
 
     # the fold keeps the first key of every render signature, in legend order
     keys, _ = fold_by_signature((k, handles[k][1]) for k in sorted(handles, key=order))
@@ -582,8 +589,10 @@ def elasticity_grid(artifacts: str, out: str | None = None):
     _label_rows(axes, [label for _, label in ELASTICITY_ROWS])
     legend_ax = axes[ELASTICITY_LEGEND_PANEL]
     if handles and legend_ax.axison:
+        # in the repo's legend order, not the pkls' method order
+        names = sorted(handles, key=lambda n: _legend_key(n, method_style(n, has_z)))
         legend_ax.legend(
-            *fold_by_signature((handle, method_style(name, has_z)) for name, handle in handles.items()),
+            *fold_by_signature((handles[n], method_style(n, has_z)) for n in names),
             loc=ELASTICITY_LEGEND_LOC,
             fontsize=FS_TICK,
             frameon=True,
