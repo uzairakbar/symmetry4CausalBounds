@@ -361,6 +361,11 @@ class ParamSweepRunner(BaseExperimentRunner):
         """Reference x positions; strategies may add measured thresholds."""
         return self.spec.vlines
 
+    @property
+    def xticks(self) -> tuple[float, ...]:
+        """Labelled major ticks of the plotted x; () = the scale's own locator."""
+        return self.spec.xticks
+
     def axis_record(self) -> dict[str, Any] | None:
         """The factors behind a MEASURED x-axis, in knob order; None for a designed grid."""
         return None
@@ -735,6 +740,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_vlines = {}  # (param) -> measured reference x positions
         self._sweep_axis = {}  # (param) -> factors behind a measured x, or None
         self._sweep_xlabel = {}  # (param) -> the runner's label for the plotted x
+        self._sweep_xticks = {}  # (param) -> the runner's fixed x ticks, or ()
         self._sweep_ci = {}  # (param) -> the runner's `im_ci_record`, or None
 
     @abstractmethod
@@ -812,6 +818,7 @@ class ExperimentOrchestrator(ABC):
         self._sweep_vlines[param] = runner.vlines
         self._sweep_axis[param] = runner.axis_record()
         self._sweep_xlabel[param] = runner.xlabel
+        self._sweep_xticks[param] = runner.xticks
         self._sweep_ci[param] = runner.im_ci_record
         return record
 
@@ -851,6 +858,7 @@ class ExperimentOrchestrator(ABC):
                     xscale=PARAM_SPECS[param].xscale,
                     yscale=metric_spec.yscale,
                     vlines=self._sweep_vlines.get(param, PARAM_SPECS[param].vlines),
+                    xticks=self._sweep_xticks.get(param, ()),
                     # the global toggle of SS10.1; absent from the shipped yaml
                     normalize=self.kwargs.get("normalize", False),
                     has_z=self.has_z,

@@ -18,6 +18,7 @@ from src.experiments.configs import (
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
     SPECTRUM_KEEP,
+    percent_of,
 )
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
@@ -788,22 +789,65 @@ class SampleSizeStrategy(GenericParamSweep):
     Sweep n. The base sample and the test set are drawn ONCE per experiment and
     only the train side is subsampled, so the test set is identical across n.
 
-    Optical: n is the PRE-SPLIT total from the 1000-row pool, so the train set
-    is round(0.9 n) = {115, 230, 461, 900}. Simulation: the train set is exactly
-    n, taken from the (larger) default draw.
+    The grid is the percentage ladder N_PERCENTS of `n_samples`, whatever
+    `sweep_samples` says; the knob is the row count `percent_of(n_samples, p)`
+    (rounded half up) and the x plotted is p itself. Optical and cigarettes: n
+    is the PRE-SPLIT total, so the train set is round(0.9 n), e.g. {56, 112,
+    225, 450, 900} of the 1000-row optical pool. Simulation: the train set is
+    exactly n, taken from the default draw of `n_samples` train rows.
     """
 
     param_key = "n"
+
+    def __init__(self, **kwargs):
+        self._n_train = {}  # (experiment, n) -> train rows used
+        self._percent = {}  # n -> the ladder percentage it was rounded from
+        super().__init__(**kwargs)
+
+    def get_param_range(self) -> np.ndarray:
+        """Row counts, one per ladder percentage; an override is taken as rows."""
+        if self.param_grid_override is not None:
+            return np.asarray(self.param_grid_override)
+        percents = self.spec.grid_fn(self.experiment_name, self.sweep_samples)
+        counts = [percent_of(self.n_samples, p) for p in percents]
+        self._percent.update(zip(counts, (float(p) for p in percents), strict=True))
+        return np.asarray(counts, dtype=int)
+
+    def observed_x(self, param_values: np.ndarray) -> np.ndarray:
+        """n as a percentage of `n_samples`: the ladder value it came from, exactly."""
+        return np.array(
+            [self._percent.get(int(n), 100.0 * float(n) / self.n_samples) for n in param_values], dtype=float
+        )
+
+    def axis_record(self) -> dict[str, Any]:
+        """The rows behind each percentage, and the label and ticks the figure used;
+        its presence is what tells the aggregate the x is a percentage."""
+        knob = np.asarray(self.get_param_range(), dtype=int)
+        n_train = np.array(
+            [[self._n_train.get((j, int(n)), -1) for j in range(self.n_experiments)] for n in knob], dtype=int
+        )
+        return {
+            "knob": knob,
+            "n_samples": int(self.n_samples),
+            "n_train": n_train,
+            "x": self.observed_x(knob),
+            "xlabel": self.xlabel,
+            "xticks": tuple(self.xticks),
+        }
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         n = int(param)
         X_raw, X, y, X_test, estimand, Z = self._base_data(experiment_index)
 
-        # optical n counts pre-split rows; sim n is the train size itself
+        # optical/cigarettes n counts pre-split rows; sim n is the train size itself
         n_train = int(round((1.0 - self.test_fraction) * n)) if self.finite_pool else n
         if n_train > len(X):
             logger.warning(f"n={n} needs {n_train} train rows, only {len(X)} drawn.")
             n_train = len(X)
+        self._n_train[(experiment_index, n)] = n_train
+        if experiment_index == 0:
+            percent = float(self.observed_x([n])[0])
+            logger.info(f"n step {percent:g}% of {self.n_samples}: n {n}, {n_train} train rows")
         X_raw, X, y, Z = X_raw[:n_train], X[:n_train], y[:n_train], Z[:n_train]
 
         GX_raw, G = self.das[experiment_index](X_raw)

@@ -9,7 +9,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from loguru import logger
-from matplotlib.ticker import LogLocator, MaxNLocator, NullFormatter, ScalarFormatter
+from matplotlib.ticker import (
+    FixedLocator,
+    FuncFormatter,
+    LogLocator,
+    MaxNLocator,
+    NullFormatter,
+    NullLocator,
+    ScalarFormatter,
+)
 from numpy.typing import NDArray
 
 from .constants import (
@@ -252,6 +260,18 @@ def _label_major_ticks_only(*axes):
         ax.yaxis.set_minor_formatter(NullFormatter())
 
 
+def fix_x_ticks(ax, ticks) -> None:
+    """Labelled x majors at exactly `ticks` (plain numbers in math mode) and no
+    minors; a no-op for an empty `ticks`. AFTER the last set_xscale, which
+    reinstalls the scale's own locators. The n sweep's percentage ladder: five
+    points a doubling apart that the default log locator does not land on."""
+    if not len(ticks):
+        return
+    ax.xaxis.set_major_locator(FixedLocator([float(t) for t in ticks]))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"${value:g}$"))
+    ax.xaxis.set_minor_locator(NullLocator())
+
+
 def _major_ticks_in_view(axis) -> int:
     lo, hi = sorted(axis.get_view_interval())
     return int(np.sum([(lo <= t <= hi) for t in axis.get_majorticklocs()]))
@@ -262,8 +282,8 @@ def _at_least_two_major_ticks(*axes, skip_x=()):
     Every axis shows at least two labelled major ticks, or the reader cannot
     size the scale.
 
-    A log axis spanning under a decade (the n sweep: 128..1024 on sim,
-    128..1000 on optical) holds at most one decade tick, so the default
+    A log axis spanning under a decade (a pre-ladder n sweep tree: 128..1024 on
+    sim, 128..1000 on optical) holds at most one decade tick, so the default
     LogLocator leaves zero or one major in view. Where fewer than two majors fall
     inside the view interval, a log axis gets a LogLocator on (1, 2, 5) x 10^k
     with plain-number labels (LogFormatterSciNotation labels only one of the (1,
@@ -516,6 +536,7 @@ def create_sweep_plot(
     normalize: bool = DEFAULT_NORMALIZE_SWEEP,
     clip_y: bool = True,
     promote_y: bool = True,
+    xticks: tuple[float, ...] = (),
     *,
     has_z: bool,
 ):
@@ -527,7 +548,7 @@ def create_sweep_plot(
     follows `constants.method_style(name, has_z)`.
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
-    threshold).
+    threshold). `xticks`, when given, are the only labelled x ticks (`fix_x_ticks`).
 
     `clip_y` and `promote_y` are the perf sweeps' knobs: the top-tail clip of the
     y frame and the linear-to-log promotion, both on by default and off on a
@@ -622,6 +643,7 @@ def create_sweep_plot(
                     logger.warning(f"{fname}: {key} ignored, the axis is clamped to {CLAMP_YLIM}.")
             plt.gca().set_yscale("linear")
             plt.gca().set_ylim(*CLAMP_YLIM)
+        fix_x_ticks(plt.gca(), xticks)
         _label_major_ticks_only(plt.gca())
         _at_least_two_major_ticks(plt.gca())
 

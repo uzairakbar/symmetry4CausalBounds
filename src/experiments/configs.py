@@ -278,6 +278,14 @@ DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
 }
 
 
+def percent_of(n_samples: int, percent: float) -> int:
+    """`percent` % of `n_samples` rows, rounded half UP (62.5 -> 63, 153.125 -> 153):
+    deterministic, unlike Python's `round`, which sends halves to the even side.
+    The count means what `n_samples` means for the dataset (sim: train rows drawn;
+    optical and cigarettes: pre-split rows)."""
+    return int(np.floor(int(n_samples) * float(percent) / 100.0 + 0.5))
+
+
 # =============================================================================
 # SWEEP PARAMETER / METRIC SPECS
 # =============================================================================
@@ -447,6 +455,15 @@ OMEGA_XLABEL: dict[bool, str] = {
 }
 
 
+# the n sweep's ladder, in percent of the dataset block's `n_samples` (100% = all
+# of it): EXACTLY these five on every dataset, whatever `sweep_samples` says. One
+# doubling apart, so a log x puts them evenly and the ticks sit on them
+N_PERCENTS: tuple[float, ...] = (6.25, 12.5, 25.0, 50.0, 100.0)
+# math-mode \% renders under usetex and mathtext alike; a bare \% outside $..$
+# prints the backslash under mathtext
+N_PERCENT_XLABEL: str = r"$n$ ($\%$)"
+
+
 @dataclass(frozen=True)
 class ParamSpec:
     """Axis + policy metadata for one sweepable parameter."""
@@ -457,6 +474,10 @@ class ParamSpec:
     vlines: tuple[float, ...] = ()  # reference values annotated on the x-axis
     include_ate: bool = True  # ATE is flat, useless on budget-ratio axes
     data_constant: bool = False  # False => data regenerated every step
+    # labelled major ticks at exactly these x; () = the scale's own locator
+    xticks: tuple[float, ...] = ()
+    # the label of a tree written before this param had an axis pkl; None = `xlabel`
+    legacy_xlabel: str | None = None
 
 
 PARAM_SPECS: dict[str, ParamSpec] = {
@@ -505,21 +526,14 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         vlines=(1.0,),
     ),
     "n": ParamSpec(
-        xlabel=r"$n$",
-        # grid_fn=lambda dataset, n: np.array(
-        #     [128, 256, 512, 1024] if dataset == "simulation" else [128, 256, 512, 1000]  # 1000 = optical pool max
-        # ),
-        # cigarettes: n is the pre-split panel size, a tenth of it up to all 2450
-        grid_fn=lambda dataset, n: (
-            np.linspace(245, 2450, n, dtype=int)
-            if dataset == "cigarettes"
-            else np.linspace(
-                128,
-                1024 if dataset == "simulation" else 1000,
-                n,
-                dtype=int,
-            )
-        ),
+        # x is the percentage of `n_samples`; SampleSizeStrategy turns each into
+        # rows (`percent_of`) and n keeps its per-dataset meaning (sim: train rows;
+        # optical and cigarettes: pre-split rows). `sweep_samples` is ignored.
+        # Pre-ladder trees plot absolute n and carry no n_axis.pkl: `legacy_xlabel`
+        xlabel=N_PERCENT_XLABEL,
+        grid_fn=lambda dataset, n: np.asarray(N_PERCENTS, dtype=float),
+        xticks=N_PERCENTS,
+        legacy_xlabel=r"$n$",
     ),
     "m": ParamSpec(
         xlabel=r"$m$",
