@@ -10,12 +10,14 @@ last two divided by the baseline PI as the sweep figures are under `normalize`),
 columns the datasets in `DATASET_ORDER` that are present, x shared within a column,
 y shared across the grid on `CLAMP_YLIM`, one x-label (under the middle column when
 the column count is odd, else centred), three y-labels without the "/ PI" suffix,
-one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
-`LEGEND_ROWS` rows with a paired family in one column and the singletons stacked
-two to a column. A missing pkl leaves its cells blank.
+one legend inside the top panel of the middle column, pinned lower right, in the
+repo's legend order, `SWEEP_LEGEND_NCOL` columns. A missing pkl leaves its cells
+blank.
 The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
-columns the datasets, x shared within a column, y within a row, the same x-label and
-legend rules. `epsilon_wall_clock.pdf` is the wall-clock row alone;
+columns the datasets, x shared within a column, y within a row, the same x-label
+rule, one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
+`LEGEND_ROWS` rows with a paired family in one column and the singletons stacked
+two to a column. `epsilon_wall_clock.pdf` is the wall-clock row alone;
 `epsilon_seed_var.pdf` stacks the feasible rate (on `CLAMP_YLIM`) under the
 stability. A row is drawn only where some dataset ran its metric. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
@@ -101,6 +103,12 @@ LEGEND_FLAT_MAX: int = 6
 LEGEND_ROWS: int = 2
 LEGEND_GRID_COLS: int = 5
 LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column titles
+# the sweep grids' legend: inside the top panel of the middle column, pinned lower
+# right, in the repo's legend order, SWEEP_LEGEND_NCOL columns at the tick size less
+# SWEEP_LEGEND_SHRINK so ten entries keep to a panel
+SWEEP_LEGEND_LOC: str = "lower right"
+SWEEP_LEGEND_NCOL: int = 2
+SWEEP_LEGEND_SHRINK: int = 4
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
 PERF_ROW_HEIGHT: float = 4.2  # per perf row, the legend and the x-label included
@@ -274,6 +282,28 @@ def _legend(fig, handles: dict):
     )
 
 
+def _panel_legend(ax, handles: dict):
+    """The sweep grids' legend, inside `ax` at SWEEP_LEGEND_LOC: `_legend`'s render
+    fold in the repo's legend order, SWEEP_LEGEND_NCOL columns filled top to bottom.
+    Returns the legend, or None with nothing drawn."""
+    if not handles:
+        return None
+    keys = sorted(handles, key=lambda k: _legend_key(handles[k][2], handles[k][1]))
+    keys, _ = fold_by_signature((k, handles[k][1]) for k in keys)
+    return ax.legend(
+        [handles[k][0] for k in keys],
+        [handles[k][1].label for k in keys],
+        loc=SWEEP_LEGEND_LOC,
+        ncol=SWEEP_LEGEND_NCOL,
+        fontsize=FS_TICK - SWEEP_LEGEND_SHRINK,
+        handlelength=1.2,
+        columnspacing=0.8,
+        frameon=True,
+        edgecolor="black",
+        fancybox=False,
+    )
+
+
 def _legend_key(name: str, style) -> tuple:
     """The repo's legend order: the family slot (`constants.legend_order`, member 0
     above member 1), then ALL_METHODS, then the IV mode."""
@@ -385,13 +415,15 @@ def _metric_grid(
     where: str,
     path: str | None,
     hz: dict[str, bool],
+    legend_panel: bool = False,
 ):
     """The [rows] x [datasets] grid: `rows` is [(metric, row label)], `load_cell(dataset,
     metric)` gives (x, {method: y}, x-label) or None for a blank cell (an empty dict
     blanks the cell but still offers its x-label), x shared within a column, y as
     `sharey` says, each row on `row_yscale(metric)` and, when `row_ylim(metric)` is not
-    None, framed there. Titles on the first row, one x-label, one legend; saved at
-    `path` when given. `hz` is each column's `has_z`: when a column that draws has a
+    None, framed there. Titles on the first row, one x-label, one legend: above the
+    titles, or with `legend_panel` inside the middle column's top panel
+    (`_panel_legend`); saved at `path` when given. `hz` is each column's `has_z`: when a column that draws has a
     real Z, the grid is merged and every null-Z column draws each method as its Z
     counterpart (`constants.method_style`), so each cross-dataset pair is one
     legend entry, and each null-Z column title gets `NULL_Z_TITLE_SUFFIX`."""
@@ -441,6 +473,10 @@ def _metric_grid(
             if ylim is not None:
                 ax.set_ylim(*ylim)
     _label_rows(axes, [label for _, label in rows])
+    if legend_panel:
+        # inside a panel it takes no room above the titles
+        _panel_legend(axes[0, len(datasets) // 2], handles)
+        return _finish(fig, axes, xlabel or xlabel_default, None, path)
     legend = _legend(fig, handles)
     return _finish(fig, axes, xlabel or xlabel_default, legend, path)
 
@@ -505,6 +541,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
         where=param,
         path=None if out is None else f"{out}/{param}_grid.{PLOT_FORMAT}",
         hz=_columns_has_z(artifacts, datasets, hz),
+        legend_panel=True,
     )
 
 
