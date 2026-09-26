@@ -15,7 +15,7 @@ Legs:
         and carries EXACTLY ONE of `query:`, `sweep:` and `perf:`, and the blocks of
         one file agree on which and on its param -- derived per block off the glob,
         so a recipe added tomorrow is covered with no row to write. On top, the
-        named recipes carry `iv: 4` / `iv: [tax_s, y, cpi]` (gamma_z written out),
+        named recipes carry `iv: 2` / `iv: [tax_s, y, cpi]` (gamma_z written out),
         list no `IV` baseline and are the type `RECIPES` says; the shipped
         config.yaml blocks and leg (D)'s own blocks resolve with no `iv` key at all.
         A block declaring `iv` lists a method that READS the observed Z: an `IV_METHODS`
@@ -143,17 +143,19 @@ EXPERIMENT_TYPES = ("query", "sweep", "perf")
 # checked the day it lands. The cigarette experiment is split by target too: the
 # restricted-2sls one reports the query figures, the plasmode carries every sweep
 # and every perf metric.
+# the simulation recipes' instrument width (`iv:`)
+SIM_IV = 2
 RECIPES = (
-    ("simulationFig5", "simulation", 4, "query"),
-    ("ivSimulationFig5", "simulation", 4, "query"),
+    ("simulationFig5", "simulation", SIM_IV, "query"),
+    ("ivSimulationFig5", "simulation", SIM_IV, "query"),
     ("opticalDeviceFig6", "optical_device", None, "query"),
     ("cigarettesFig7", "cigarettes", CIGARETTE_IV, "query"),
-    ("validityFig9", "simulation", 4, "sweep"),
+    ("validityFig9", "simulation", SIM_IV, "sweep"),
     ("validityFig9", "optical_device", None, "sweep"),
     ("validityFig9", "cigarettes", CIGARETTE_IV, "sweep"),
-    ("robustnessFig11", "simulation", 4, "sweep"),
+    ("robustnessFig11", "simulation", SIM_IV, "sweep"),
     ("robustnessFig11", "cigarettes", CIGARETTE_IV, "sweep"),
-    ("latencyFig15", "simulation", 4, "perf"),
+    ("latencyFig15", "simulation", SIM_IV, "perf"),
     ("latencyFig15", "cigarettes", CIGARETTE_IV, "perf"),
     ("stabilityFig16", "optical_device", None, "perf"),
 )
@@ -168,7 +170,7 @@ ERM_IV_BLOCKS = frozenset({("ivSimulationFig5", "simulation")})
 PENDING: tuple[tuple[str, str], ...] = ()
 LEGAL_SETS = ([], ["tax_s"], ["tax_sn"], ["tax_s", "tax_sn"], ["tax_s", "y", "cpi"])
 IV_METHODS = ("ERM+IV", "DA+ERM+IV", "PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV")
-# blocks whose `iv` is read by NO method, by design: `iv: 4` shapes the simulation DGP
+# blocks whose `iv` is read by NO method, by design: `iv: 2` shapes the simulation DGP
 # (the instrument enters X through a rank-m map), so the headline panel shares the
 # sweeps' draw, and its methods are the (T) spellings, which read G alone. Leg (i)
 # inverts the consumer check on these: no method may read Z
