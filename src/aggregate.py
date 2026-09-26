@@ -11,7 +11,8 @@ columns the datasets in `DATASET_ORDER` that are present, x shared within a colu
 y shared across the grid on `CLAMP_YLIM`, one x-label (under the middle column when
 the column count is odd, else centred), three y-labels without the "/ PI" suffix,
 one legend inside the top panel of the middle column, pinned lower right, in the
-repo's legend order, `SWEEP_LEGEND_NCOL` columns. A missing pkl leaves its cells
+repo's legend order, the single intervals in its left column and PI+INV and the
+intersections (`SWEEP_LEGEND_RIGHT`) in its right. A missing pkl leaves its cells
 blank.
 The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
 columns the datasets, x shared within a column, y within a row, the same x-label
@@ -48,6 +49,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from loguru import logger
+from matplotlib.lines import Line2D
 
 from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
 from src.experiments.utils.constants import (
@@ -104,11 +106,12 @@ LEGEND_ROWS: int = 2
 LEGEND_GRID_COLS: int = 5
 LEGEND_GAP: float = 0.01  # figure fraction between the legend and the column titles
 # the sweep grids' legend: inside the top panel of the middle column, pinned lower
-# right, in the repo's legend order, SWEEP_LEGEND_NCOL columns at the tick size less
-# SWEEP_LEGEND_SHRINK so ten entries keep to a panel
+# right, at the tick size less SWEEP_LEGEND_SHRINK so ten entries keep to a panel;
+# two columns, the single intervals on the left and the SWEEP_LEGEND_RIGHT bases
+# (PI+INV and the intersections) on the right, each in the repo's legend order
 SWEEP_LEGEND_LOC: str = "lower right"
-SWEEP_LEGEND_NCOL: int = 2
 SWEEP_LEGEND_SHRINK: int = 4
+SWEEP_LEGEND_RIGHT: tuple[str, ...] = ("PI+INV", "PI+INV+IV", "PI&DA+PI", "PI&DA+PI+IV")
 PANEL_WIDTH: float = 4.0
 GRID_HEIGHT: float = 8.0
 PERF_ROW_HEIGHT: float = 4.2  # per perf row, the legend and the x-label included
@@ -284,17 +287,29 @@ def _legend(fig, handles: dict):
 
 def _panel_legend(ax, handles: dict):
     """The sweep grids' legend, inside `ax` at SWEEP_LEGEND_LOC: `_legend`'s render
-    fold in the repo's legend order, SWEEP_LEGEND_NCOL columns filled top to bottom.
-    Returns the legend, or None with nothing drawn."""
+    fold in the repo's legend order, split into two columns, the single intervals on
+    the left and the SWEEP_LEGEND_RIGHT bases on the right (one column when either
+    side is empty). Returns the legend, or None with nothing drawn."""
     if not handles:
         return None
     keys = sorted(handles, key=lambda k: _legend_key(handles[k][2], handles[k][1]))
     keys, _ = fold_by_signature((k, handles[k][1]) for k in keys)
+    right = [k for k in keys if parse_method(handles[k][2]).base in SWEEP_LEGEND_RIGHT]
+    left = [k for k in keys if k not in right]
+    columns = [side for side in (left, right) if side]
+    depth = max(len(side) for side in columns)
+    # matplotlib fills column-major, so the shorter column is padded with blank
+    # slots to keep each side to its own column
+    blank = Line2D([], [], linestyle="none")
+    artists, labels = [], []
+    for side in columns:
+        artists += [handles[k][0] for k in side] + [blank] * (depth - len(side))
+        labels += [handles[k][1].label for k in side] + [""] * (depth - len(side))
     return ax.legend(
-        [handles[k][0] for k in keys],
-        [handles[k][1].label for k in keys],
+        artists,
+        labels,
         loc=SWEEP_LEGEND_LOC,
-        ncol=SWEEP_LEGEND_NCOL,
+        ncol=len(columns),
         fontsize=FS_TICK - SWEEP_LEGEND_SHRINK,
         handlelength=1.2,
         columnspacing=0.8,

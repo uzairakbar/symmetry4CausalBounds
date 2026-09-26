@@ -504,6 +504,12 @@ def grid_legend(fig):
     return held[0] if len(held) == 1 else None
 
 
+def grid_texts(legend):
+    """The legend's entry labels in entry order, without the blank slots that pad
+    the sweep legend's shorter column."""
+    return [t.get_text() for t in legend.get_texts() if t.get_text()]
+
+
 def drawn_legend(names, has_z=True, null=()):
     """`_legend` over one handle per name, as (columns, ncol, rows, dash patterns),
     each name styled as `shape_style` says. RC_PARAMS as the aggregate sets it: the
@@ -983,7 +989,7 @@ def leg_vi():
         f"{fig.texts[0].get_position()}",
     )
     legend = grid_legend(fig)
-    texts = [t.get_text() for t in legend.get_texts()]
+    texts = grid_texts(legend)
     check(
         "(vi) legend: PI, DA+PI, DA+PI+IV(T), PI&DA+PI+IV(T) in the repo's order, in the middle column's top panel",
         texts == [method_label(n, False) for n in ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")]
@@ -1014,7 +1020,7 @@ def leg_vi():
         cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(fold), fold)
-    texts = [t.get_text() for t in grid_legend(fig).get_texts()]
+    texts = grid_texts(grid_legend(fig))
     check(
         "(vi) PI&DA+PI+IV(T,Z) beside PI&DA+PI+IV is one legend entry, labelled as the bare name",
         texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
@@ -1029,7 +1035,7 @@ def leg_vi():
         cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(two), two)
-    texts = [t.get_text() for t in grid_legend(fig).get_texts()]
+    texts = grid_texts(grid_legend(fig))
     check(
         "(vi) PI&DA+PI+IV(T) beside PI&DA+PI+IV is one entry too: they render alike",
         texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
@@ -1160,7 +1166,7 @@ def leg_vi():
             tuple(ax.axison for ax in fig.axes),
             tuple(ax.get_title() for ax in fig.axes if ax.get_title()),
             tuple(ax.get_ylabel() for ax in fig.axes),
-            tuple(t.get_text() for t in grid_legend(fig).get_texts()),
+            tuple(grid_texts(grid_legend(fig))),
             [t.get_text() for t in fig.texts],
         )
         want = (n, on, titles, ylabels, tuple(method_label(name, False) for name in names), [xlabels[xname]])
@@ -1242,8 +1248,8 @@ def leg_vii(shipped):
             "(vii) with labels.json: no labels.json WARNING", not [x for x in lines if "labels.json" in x], f"{lines}"
         )
         legend = grid_legend(fig)
-        n, rows = len(legend.get_texts()), legend_rows(legend)
-        texts = [t.get_text() for t in legend.get_texts()]
+        texts = grid_texts(legend)
+        n, rows = len(texts), legend_rows(legend)
         print(f"      RECORDED epsilon grid legend: {n} entries in {rows} row(s); columns {datasets}")
         check(
             "(vii) the merged epsilon grid's legend is 6 entries inside a panel",

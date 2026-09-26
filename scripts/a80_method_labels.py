@@ -643,9 +643,9 @@ def grid_legend(root, param="gamma"):
 
     with captured() as lines:
         fig = aggregate.sweep_grid(param, aggregate.columns(root), root)
-    # the sweep grid's one legend sits inside a panel
+    # the sweep grid's one legend sits inside a panel; blank slots pad its shorter column
     held = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
-    texts = [t.get_text() for t in held[0].get_texts()] if len(held) == 1 else []
+    texts = [t.get_text() for t in held[0].get_texts() if t.get_text()] if len(held) == 1 else []
     return texts, fig, lines
 
 
