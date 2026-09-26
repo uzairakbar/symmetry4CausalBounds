@@ -61,12 +61,13 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          a subprocess writes exactly the four pdfs (a grid per param, one per
          `PERF_FIGURES` entry); in-process the grid has the titles, the blank cells,
          one shared y on `CLAMP_YLIM`, the axis pkl's x-label, the legend in the
-         repo's order in one row, the render fold (with a real Z on both columns,
+         repo's order inside the middle column's top panel, the render fold (with a real Z on both columns,
          bare beside `(T,Z)` is one entry, and so is `(T)` beside bare), the three
          y-labels without " / "; the stacked
          perf grid has stability over feasible rate, the sim column blank, no marker
          line, the feasibility row alone on `CLAMP_YLIM`; ten perf methods draw five
-         columns of two, with no WARNING, clear of the titles; the x-label at 0.5 on
+         columns of two, with no WARNING, clear of the titles, and the ten-method
+         sweep legend inside its panel; the x-label at 0.5 on
          two columns and, with optical added, under the middle column of three (the
          sweep grid and both perf grids); and `sweep_grid` after the `_metric_grid`
          refactor matches round 16's branch 21 on four of these trees (axes count,
@@ -81,7 +82,7 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          one missing `labels.json` per shipped dataset (the tree predates the
          file); the same pkls linked beside a `labels.json` per dataset (a real Z
          on the simulation and cigarettes) draw the merged epsilon legend, the six
-         Z labels in one row, with no labels.json WARNING. The wanted list is
+         Z labels inside a panel, with no labels.json WARNING. The wanted list is
          re-derived from the SAME four predicates `main` uses (`sweep_params`,
          `PERF_FIGURES`, `_has_perf`, `_has_elasticities`), so it catches `main`
          misusing one; a defect INSIDE one of them is invisible here. Catches: a
@@ -266,7 +267,9 @@ SWEEP_GRID_R21 = {
         ("simulation", "optical device", "cigarette demand"),
         ("coverage", "", "", "width", "", "", "worst error", "", ""),
         ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"),
-        ("gamma", 0.525930626),
+        # re-recorded when the legend moved inside the middle panel: without the
+        # legend above the titles the layout, so the middle column, shifts
+        ("gamma", 0.529486235),
     ),
 }
 FAIL = []
@@ -490,6 +493,15 @@ def shape_style(name, has_z=True, null=()):
     a real Z, the names in `null` from a null-Z column, merged when both kinds meet."""
     merged = bool(null) and has_z
     return method_style(name, False if name in null else has_z, merged=merged)
+
+
+def grid_legend(fig):
+    """The grid's one legend: the figure's (the perf grids) or the one a panel holds
+    (the sweep grids); None without one."""
+    if fig.legends:
+        return fig.legends[0]
+    held = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
+    return held[0] if len(held) == 1 else None
 
 
 def drawn_legend(names, has_z=True, null=()):
@@ -970,13 +982,14 @@ def leg_vi():
         fig.texts[0].get_position()[0] == 0.5,
         f"{fig.texts[0].get_position()}",
     )
-    legend = fig.legends[0]
+    legend = grid_legend(fig)
     texts = [t.get_text() for t in legend.get_texts()]
     check(
-        "(vi) legend: PI, DA+PI, DA+PI+IV(T), PI&DA+PI+IV(T) in the repo's order, one row",
+        "(vi) legend: PI, DA+PI, DA+PI+IV(T), PI&DA+PI+IV(T) in the repo's order, in the middle column's top panel",
         texts == [method_label(n, False) for n in ("PI", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)")]
-        and legend_rows(legend) == 1,
-        f"{len(texts)} entries, {legend_rows(legend)} row(s)",
+        and legend.axes is axes[0, len(datasets) // 2]
+        and legend._loc == 4,
+        f"{len(texts)} entries, loc {legend._loc}",
     )
     plt.close(fig)
 
@@ -1001,7 +1014,7 @@ def leg_vi():
         cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(fold), fold)
-    texts = [t.get_text() for t in fig.legends[0].get_texts()]
+    texts = [t.get_text() for t in grid_legend(fig).get_texts()]
     check(
         "(vi) PI&DA+PI+IV(T,Z) beside PI&DA+PI+IV is one legend entry, labelled as the bare name",
         texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
@@ -1016,7 +1029,7 @@ def leg_vi():
         cig_has_z=True,
     )
     fig = aggregate.sweep_grid("gamma", aggregate.columns(two), two)
-    texts = [t.get_text() for t in fig.legends[0].get_texts()]
+    texts = [t.get_text() for t in grid_legend(fig).get_texts()]
     check(
         "(vi) PI&DA+PI+IV(T) beside PI&DA+PI+IV is one entry too: they render alike",
         texts == [method_label(n, True) for n in ("PI", "DA+PI", "PI&DA+PI+IV")],
@@ -1100,7 +1113,8 @@ def leg_vi():
         )
         plt.close(fig)
 
-    # a legend that wraps must not sit on the column titles: ten methods, two rows
+    # a legend that wraps must not sit on the column titles (the perf grid's, two rows)
+    # nor spill out of its panel (the sweep grid's): ten methods
     ten = synthetic_tree(tempfile.mkdtemp(prefix="ten_", dir=TMPROOT), perf_methods=tuple(TEN_PERF), cig_has_z=True)
     with captured() as lines:
         drawn = (
@@ -1110,9 +1124,18 @@ def leg_vi():
     check("(vi) ten methods: no WARNING", not lines, f"{lines[:3]}")
     for label, fig in drawn:
         fig.canvas.draw()
-        legend = fig.legends[0]
+        legend = grid_legend(fig)
         box = legend.get_window_extent()
         titles = [ax.title.get_window_extent() for ax in fig.axes if ax.get_title()]
+        if label == "gamma grid":
+            panel = legend.axes.get_window_extent()
+            check(
+                "(vi) ten methods: the gamma grid legend sits inside its panel",
+                panel.x0 <= box.x0 and box.x1 <= panel.x1 and panel.y0 <= box.y0 and box.y1 <= panel.y1,
+                f"legend {box}, panel {panel}",
+            )
+            plt.close(fig)
+            continue
         if label == "perf grid":
             sizes = [len(column) for column in legend_columns(fig, legend)]
             check(
@@ -1137,7 +1160,7 @@ def leg_vi():
             tuple(ax.axison for ax in fig.axes),
             tuple(ax.get_title() for ax in fig.axes if ax.get_title()),
             tuple(ax.get_ylabel() for ax in fig.axes),
-            tuple(t.get_text() for t in fig.legends[0].get_texts()),
+            tuple(t.get_text() for t in grid_legend(fig).get_texts()),
             [t.get_text() for t in fig.texts],
         )
         want = (n, on, titles, ylabels, tuple(method_label(name, False) for name in names), [xlabels[xname]])
@@ -1218,11 +1241,15 @@ def leg_vii(shipped):
         check(
             "(vii) with labels.json: no labels.json WARNING", not [x for x in lines if "labels.json" in x], f"{lines}"
         )
-        legend = fig.legends[0]
+        legend = grid_legend(fig)
         n, rows = len(legend.get_texts()), legend_rows(legend)
         texts = [t.get_text() for t in legend.get_texts()]
         print(f"      RECORDED epsilon grid legend: {n} entries in {rows} row(s); columns {datasets}")
-        check("(vii) the merged epsilon grid's legend is 6 entries in one row", n == 6 and rows == 1, f"{n} in {rows}")
+        check(
+            "(vii) the merged epsilon grid's legend is 6 entries inside a panel",
+            n == 6 and not fig.legends and legend.axes is not None,
+            f"{n} in {rows}",
+        )
         check(
             "(vii) its entries are the cigarette spellings' Z labels, in legend order",
             texts == [method_style(name, True).label for name in SHAPE_CIG],

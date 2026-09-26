@@ -89,7 +89,8 @@ apart from (vi). Legs:
          "cigarette demand", each null-Z one followed on its line by
          `NULL_Z_TITLE_SUFFIX`, `$(Z = \varnothing)$` at 3/4 size (the
          cigarettes key stays `cigarettes` in `DATASET_ORDER`); the titles are
-         inside the figure and pairwise disjoint and the legend clears them; the
+         inside the figure and pairwise disjoint and the perf legend clears them
+         (the sweep legend sits inside one panel); the
          merged figure saves to PDF under usetex ([SKIP] without latex); amssymb
          is in the preamble. An all-null tree and a tree whose only Z dataset is
          a blank column carry no suffix. Catches: the suffix on a Z column or an
@@ -642,7 +643,9 @@ def grid_legend(root, param="gamma"):
 
     with captured() as lines:
         fig = aggregate.sweep_grid(param, aggregate.columns(root), root)
-    texts = [t.get_text() for t in fig.legends[0].get_texts()] if fig.legends else []
+    # the sweep grid's one legend sits inside a panel
+    held = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
+    texts = [t.get_text() for t in held[0].get_texts()] if len(held) == 1 else []
     return texts, fig, lines
 
 
@@ -991,8 +994,17 @@ def leg_ix():
             inside and disjoint,
             f"{boxes}",
         )
-        legend = fig.legends[0].get_window_extent(renderer)
-        check(f"(ix) {kind}, merged: the legend clears every title", all(legend.y0 >= b.y1 for b in boxes), f"{legend}")
+        if kind == "sweep_grid":
+            # inside a panel: it cannot reach a title
+            held = [ax for ax in fig.axes if ax.get_legend() is not None]
+            check(f"(ix) {kind}, merged: the legend sits inside one panel", len(held) == 1, f"{len(held)}")
+        else:
+            legend = fig.legends[0].get_window_extent(renderer)
+            check(
+                f"(ix) {kind}, merged: the legend clears every title",
+                all(legend.y0 >= b.y1 for b in boxes),
+                f"{legend}",
+            )
         if shutil.which("latex"):
             path = os.path.join(merged, f"{kind}.pdf")
             fig.savefig(path, format="pdf")
