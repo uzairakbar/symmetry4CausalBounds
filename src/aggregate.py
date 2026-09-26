@@ -81,6 +81,7 @@ from src.experiments.utils.plotting import (
     _mark_frame,
     _pad,
     draw_da_density,
+    fix_x_ticks,
     fold_by_signature,
     mark_failed,
     normalize_sweep,
@@ -247,10 +248,12 @@ def column_has_z(artifacts: str, dataset: str) -> bool:
 # ------------------------------------------------------------------ drawing
 
 
-def _frame(ax, x, xscale: str, vlines) -> None:
-    """The exact grid plus the sweep figures' margin, and the in-frame reference lines."""
+def _frame(ax, x, xscale: str, vlines, xticks=()) -> None:
+    """The exact grid plus the sweep figures' margin, the in-frame reference lines,
+    and `xticks` as the only labelled x ticks when given (`fix_x_ticks`)."""
     ax.set_xscale(xscale)
     ax.set_xlim(_pad(ax.xaxis, float(x.min()), float(x.max()), frac=X_MARGIN))
+    fix_x_ticks(ax, xticks)
     ax.tick_params(labelsize=FS_TICK)
     x_lo, x_hi = ax.get_xlim()
     for v in vlines:
@@ -433,8 +436,8 @@ def _metric_grid(
     legend_panel: bool = False,
 ):
     """The [rows] x [datasets] grid: `rows` is [(metric, row label)], `load_cell(dataset,
-    metric)` gives (x, {method: y}, x-label) or None for a blank cell (an empty dict
-    blanks the cell but still offers its x-label), x shared within a column, y as
+    metric)` gives (x, {method: y}, x-label[, x ticks]) or None for a blank cell (an
+    empty dict blanks the cell but still offers its x-label), x shared within a column, y as
     `sharey` says, each row on `row_yscale(metric)` and, when `row_ylim(metric)` is not
     None, framed there. Titles on the first row, one x-label, one legend: above the
     titles, or with `legend_panel` inside the middle column's top panel
@@ -470,7 +473,8 @@ def _metric_grid(
             if cell is None:
                 ax.axis("off")
                 continue
-            x, y, found = cell
+            # a fourth element, when given, is the column's fixed x ticks
+            x, y, found, *ticks = cell
             if not labelled:
                 # one x-label per column, the first cell's
                 xlabel, labelled = _xlabel(xlabel, found, f"{dataset} {where}"), True
@@ -482,7 +486,7 @@ def _metric_grid(
                 # keyed by render: one method drawn two ways in two columns keeps both
                 style = method_style(name, hz[dataset], merged=merged)
                 handles.setdefault(style.signature, (handle, style, name))
-            _frame(ax, x, xscale, vlines)
+            _frame(ax, x, xscale, vlines, ticks[0] if ticks else ())
             ax.set_yscale(row_yscale(metric))
             ylim = row_ylim(metric)
             if ylim is not None:
@@ -518,15 +522,31 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 # the one sort of the sweep path (a measured omega axis is not ascending)
                 x = np.asarray(load(values), dtype=float)
                 order = np.argsort(x, kind="stable")
+                # the axis pkl says what x is; a tree written before the param had
+                # one reads the legacy label (n: absolute rows, not the percentage)
                 axis_pkl = f"{folder}/{param}_axis.pkl"
-                found = load(axis_pkl).get("xlabel", spec.xlabel) if os.path.exists(axis_pkl) else spec.xlabel
-                loaded[dataset] = (x[order], order, load(results), found)
+                axis = load(axis_pkl) if os.path.exists(axis_pkl) else None
+                found = axis.get("xlabel", spec.xlabel) if axis else (spec.legacy_xlabel or spec.xlabel)
+                ticks = tuple(axis.get("xticks", ())) if axis else ()
+                loaded[dataset] = (x[order], order, load(results), found, ticks)
         return loaded[dataset]
+
+    # one x-label per figure: a column whose x means something else (an absolute-n
+    # tree beside a percentage one) is blanked, never drawn under the wrong label
+    drawn = [d for d in datasets if column(d) is not None]
+    reference = column(drawn[0])[3] if drawn else None
+    for dataset in drawn:
+        if column(dataset)[3] != reference:
+            logger.warning(
+                f"aggregate: {dataset} {param} x is {column(dataset)[3]!r}, the first column's "
+                f"{reference!r}; {dataset} left blank."
+            )
+            loaded[dataset] = None
 
     def load_cell(dataset, metric):
         if column(dataset) is None:
             return None
-        x, order, record, found = column(dataset)
+        x, order, record, found, ticks = column(dataset)
         mspec = METRIC_SPECS[metric]
         include_ate = spec.include_ate and mspec.include_ate
         y = {
@@ -540,7 +560,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 # the same PI, else PI+IV, division the sweep figure applies under
                 # `normalize`; a rate is drawn as it is
                 y, _ = normalize_sweep(y, f"{param}_{metric}")
-        return x, y, found
+        return x, y, found, ticks
 
     return _metric_grid(
         ROWS,
