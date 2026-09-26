@@ -11,6 +11,7 @@ simulation:
     n_samples: 2_048
     n_experiments: 8
     sweep_samples: 16
+    m_sweep_n_percent: 6.25   # the m sweep draws this % of n_samples
     kernel_dim: 0
     treatment_dim: 64
     iv: 4
@@ -31,6 +32,7 @@ optical_device:
     n_samples: 1_000
     n_experiments: 8
     sweep_samples: 16
+    m_sweep_n_percent: 6.25   # the m sweep draws this % of n_samples
     methods:
         - PI+INV
         - PI
@@ -53,6 +55,7 @@ cigarettes:
     n_samples: 2_450
     n_experiments: 8
     sweep_samples: 16
+    m_sweep_n_percent: 6.25   # the m sweep draws this % of n_samples
     da_amplitude: 2.0
     sliver: false
     methods:
