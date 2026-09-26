@@ -522,7 +522,7 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         ),
     ),
     "m": ParamSpec(
-        xlabel=r"Augmentation Folds ($m$)",
+        xlabel=r"$m$",
         # grid_fn=lambda dataset, n: np.array([1, 2, 4, 8, 16]),
         grid_fn=lambda dataset, n: np.arange(1, n + 1),
     ),
