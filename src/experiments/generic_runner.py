@@ -14,7 +14,6 @@ from sklearn.model_selection import train_test_split
 from src.experiments.base import ExperimentDataContext, ParamSweepRunner, QuerySweepRunner, SweepData
 from src.experiments.configs import (
     EPS_TOL,
-    M_SWEEP_N_PERCENT,
     OMEGA_XLABEL,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
@@ -875,18 +874,20 @@ class FoldStrategy(GenericParamSweep):
     equivalent, and avoids a QR on the m-fold matrix).
 
     The base draw is `m_sweep_n_percent` % of `n_samples` (`percent_of`), in the
-    unit `n_samples` counts; an explicit `n_samples_override` (rows) wins.
+    unit `n_samples` counts; the orchestrators pass the dataset's (6.25 unless
+    the yaml says otherwise). None draws `n_samples` itself; an explicit
+    `n_samples_override` (rows) wins over both.
     """
 
     param_key = "m"
 
-    def __init__(self, n_samples_override: int | None = None, m_sweep_n_percent: float = M_SWEEP_N_PERCENT, **kwargs):
+    def __init__(self, n_samples_override: int | None = None, m_sweep_n_percent: float | None = None, **kwargs):
         # set before the base constructor, which draws the SEMs and DAs
-        self.m_sweep_n_percent = float(m_sweep_n_percent)
-        if n_samples_override is None:
+        self.m_sweep_n_percent = None if m_sweep_n_percent is None else float(m_sweep_n_percent)
+        if n_samples_override is None and self.m_sweep_n_percent is not None:
             n_samples_override = percent_of(kwargs["n_samples"], self.m_sweep_n_percent)
             logger.info(f"m sweep at {self.m_sweep_n_percent:g}% of {kwargs['n_samples']}: n {n_samples_override}")
-        self.n_samples_override = int(n_samples_override)
+        self.n_samples_override = n_samples_override
         super().__init__(**kwargs)
 
     def axis_record(self) -> dict[str, Any]:
@@ -895,7 +896,7 @@ class FoldStrategy(GenericParamSweep):
         return {
             "knob": knob,
             "x": self.observed_x(knob),
-            "n": self.n_samples_override,
+            "n": self.n_samples if self.n_samples_override is None else int(self.n_samples_override),
             "n_samples": int(self.n_samples),
             "m_sweep_n_percent": self.m_sweep_n_percent,
             "xlabel": self.xlabel,

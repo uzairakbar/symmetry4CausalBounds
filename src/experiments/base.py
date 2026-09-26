@@ -16,6 +16,7 @@ from loguru import logger
 
 from src.experiments.configs import (
     ANNOTATE_SWEEP_PLOT,
+    DATASET_DEFAULTS,
     EPS_TOL,
     IM_CI_REPLICATES,
     IM_CI_SEED_OFFSET,
@@ -736,6 +737,11 @@ class ExperimentOrchestrator(ABC):
         self.name = experiment_name
         self.registry = method_registry
         self.kwargs = kwargs
+        # the m sweep's n fallback as `resolve_dataset_block` fills it, for an
+        # orchestrator built without the yaml
+        defaults = DATASET_DEFAULTS.get(experiment_name)
+        if defaults is not None and defaults.m_sweep_n_percent is not None:
+            self.kwargs.setdefault("m_sweep_n_percent", defaults.m_sweep_n_percent)
         self._sweep_cache = {}  # (param) -> (x, results, statuses), memo per param
         self._sweep_vlines = {}  # (param) -> measured reference x positions
         self._sweep_axis = {}  # (param) -> factors behind a measured x, or None
