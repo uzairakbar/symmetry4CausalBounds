@@ -56,7 +56,7 @@ cigarettes:
     n_experiments: 8
     sweep_samples: 16
     m_sweep_n_percent: 10   # the m sweep draws this % of n_samples
-    da_amplitude: 2.0
+    da_amplitude: 1.0
     sliver: false
     methods:
         - PI+INV+IV
