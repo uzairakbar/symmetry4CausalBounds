@@ -11,9 +11,6 @@ from src.sem.simulation import LinearSimulationSEM as SEM
 
 EXPERIMENT_NAME = "simulation"
 
-# m-sweep holds n fixed here (PLAN 5.5)
-FOLD_SWEEP_SAMPLES: int = 128
-
 
 # =============================================================================
 # ORCHESTRATOR
@@ -121,9 +118,6 @@ class SimulationOrchestrator(ExperimentOrchestrator):
 
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
-                extra = {}
-                if param == "m":
-                    extra["n_samples_override"] = FOLD_SWEEP_SAMPLES
                 super().__init__(
                     sem_factory=outer._sem_factory,
                     da_factory=outer._da_factory,  # expects the SEM as argument
@@ -132,7 +126,6 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     default_gamma=SIMULATION_CONFIG.gamma,
                     default_epsilon=SIMULATION_CONFIG.epsilon,
                     experiment_name=EXPERIMENT_NAME,
-                    **extra,
                     **kwargs,
                 )
 

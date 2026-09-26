@@ -48,10 +48,6 @@ from src.sem.cigarettes import CigaretteSEM as SEM
 
 EXPERIMENT_NAME = "cigarettes"
 
-# m-sweep holds n fixed here (PLAN 5.5). 10 whole state histories: a multiple of
-# the 50-year history length, so the folds get whole states like every other draw.
-FOLD_SWEEP_SAMPLES: int = 256
-
 # eps* is a defect of the TARGET under the DA, and under the translation the defect
 # is w = -c (v-hat' b) with b homogeneous on both paths, so it is 0 whatever c comes
 # out of the draw. One seeded draw is therefore the population value, not a sample
@@ -493,9 +489,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
 
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
-                extra = {}
-                if param == "m":
-                    extra["n_samples_override"] = FOLD_SWEEP_SAMPLES
                 super().__init__(
                     sem_factory=sem_factory,
                     da_factory=outer._da_factory,
@@ -505,7 +498,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.epsilon),
                     experiment_name=EXPERIMENT_NAME,
                     declared_iv=bool(outer.iv_columns),
-                    **extra,
                     **kwargs,
                 )
 

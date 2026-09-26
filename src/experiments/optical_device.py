@@ -17,8 +17,6 @@ from src.sem.optical_device import OpticalDeviceSEM as SEM
 
 EXPERIMENT_NAME = "optical_device"
 
-# m-sweep holds n fixed here (PLAN 5.5)
-FOLD_SWEEP_SAMPLES: int = 128
 # eps* is an RMS over one DA draw, so it carries draw noise; pool this many draws
 # (in the SQUARE, which is what an RMS averages) so the budget does not wobble
 # between runs. The X it is evaluated on is the WHOLE pool, not a resample of it:
@@ -204,8 +202,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
                 extra = {}
-                if param == "m":
-                    extra["n_samples_override"] = FOLD_SWEEP_SAMPLES
                 if param == "omega":
                     extra["augment_kwargs_fn"] = _knob_to_augment_kwargs
                 super().__init__(

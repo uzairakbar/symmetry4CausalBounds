@@ -256,6 +256,10 @@ CIGARETTE_CONFIG = CigaretteConfig()
 # =============================================================================
 
 
+# the m sweep's n, in percent of `n_samples`: the dataset blocks' fallback
+M_SWEEP_N_PERCENT: float = 6.25
+
+
 @dataclass(frozen=True)
 class DatasetDefaults:
     """Filled in when the root yaml omits the key."""
@@ -263,18 +267,30 @@ class DatasetDefaults:
     n_samples: int
     n_experiments: int
     sweep_samples: int
+    # the m sweep's n, a percentage of `n_samples` (`percent_of`); None = no m sweep
+    m_sweep_n_percent: float | None = None
     # simulation only: the SEM's treatment dimension. None = the dataset has no such key.
     treatment_dim: int | None = None
 
 
 DATASET_DEFAULTS: dict[str, DatasetDefaults] = {
-    "simulation": DatasetDefaults(n_samples=2048, n_experiments=1, sweep_samples=32, treatment_dim=TREATMENT_DIMENSION),
-    "optical_device": DatasetDefaults(n_samples=1000, n_experiments=8, sweep_samples=32),
+    "simulation": DatasetDefaults(
+        n_samples=2048,
+        n_experiments=1,
+        sweep_samples=32,
+        m_sweep_n_percent=M_SWEEP_N_PERCENT,
+        treatment_dim=TREATMENT_DIMENSION,
+    ),
+    "optical_device": DatasetDefaults(
+        n_samples=1000, n_experiments=8, sweep_samples=32, m_sweep_n_percent=M_SWEEP_N_PERCENT
+    ),
     # sweep_samples = the 10 digit exemplars on the query x-axis
     "do_mnist": DatasetDefaults(n_samples=1_200_000, n_experiments=1, sweep_samples=10),
     # n_samples = the whole balanced panel; ask for more and the SEM resamples
     # whole state histories WITH replacement
-    "cigarettes": DatasetDefaults(n_samples=2450, n_experiments=8, sweep_samples=32),
+    "cigarettes": DatasetDefaults(
+        n_samples=2450, n_experiments=8, sweep_samples=32, m_sweep_n_percent=M_SWEEP_N_PERCENT
+    ),
 }
 
 
@@ -1139,6 +1155,7 @@ DATASET_KEYS: dict[str, set] = {
         "n_samples",
         "n_experiments",
         "sweep_samples",
+        "m_sweep_n_percent",
         "methods",
         "augmentation",
         "kernel_dim",
@@ -1146,12 +1163,21 @@ DATASET_KEYS: dict[str, set] = {
         "iv",
     },
     # no `iv` here or on do_mnist: the key is rejected on those blocks, not ignored
-    "optical_device": {"seed", "n_samples", "n_experiments", "sweep_samples", "methods", "augmentation"},
+    "optical_device": {
+        "seed",
+        "n_samples",
+        "n_experiments",
+        "sweep_samples",
+        "m_sweep_n_percent",
+        "methods",
+        "augmentation",
+    },
     "cigarettes": {
         "seed",
         "n_samples",
         "n_experiments",
         "sweep_samples",
+        "m_sweep_n_percent",
         "methods",
         "augmentation",
         "target",
@@ -1393,6 +1419,18 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     defaults = DATASET_DEFAULTS[name]
     for key in ("n_samples", "n_experiments", "sweep_samples"):
         block.setdefault(key, getattr(defaults, key))
+    # the m sweep's n as a percentage of `n_samples`, rounded by `percent_of`; do-MNIST
+    # has no m sweep and no such key. bool is an int subclass: `true` is no percentage
+    if defaults.m_sweep_n_percent is not None:
+        block.setdefault("m_sweep_n_percent", defaults.m_sweep_n_percent)
+        percent = block["m_sweep_n_percent"]
+        if isinstance(percent, bool) or not isinstance(percent, int | float) or not 0 < percent <= 100:
+            raise ValueError(f"config.{name}.m_sweep_n_percent must be a percentage in (0, 100]; got {percent!r}.")
+        if percent_of(block["n_samples"], percent) < 2:
+            raise ValueError(
+                f"config.{name}.m_sweep_n_percent = {percent!r} of n_samples = {block['n_samples']!r} "
+                "rounds to fewer than 2 rows."
+            )
     if defaults.treatment_dim is not None:
         block.setdefault("treatment_dim", defaults.treatment_dim)
         dim = block["treatment_dim"]
