@@ -95,9 +95,12 @@ from src.oracle import eps_iv_z_star, gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
-# the simulation block with `iv: 4` that owns the gamma sweep this leg drives;
-# the recipes are split by experiment type, so the sweep lives in its own file
+# the simulation block with `iv: 2` that owns the gamma sweep this leg drives;
+# the recipes are split by experiment type, so the sweep lives in its own file.
+# Leg (vi) builds its orchestrator from it, so its checks use the recipe's width;
+# the synthetic legs keep M
 RECIPE = "validityFig9.yaml"
+RECIPE_IV = 2
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
 IV_BOUND = 0.05  # p6's evi
 NAMES = ["PI", "PI+IV", "PI+INV", "PI+INV+IV", "DA+PI+IV"]
@@ -111,8 +114,9 @@ P6_WIDTHS = {
     "DA+PI+IV": (0.1351, 0.1221, 1.0198, 0.5939),
 }
 # (vi): the raw observed-Z budget eps_iv_z_star on the gamma runner's base sample
-# and on the query runner's own draw (MEASURED on refactor25 at n 512, experiment 0)
-Z_BUDGET_RECORDED = {"base sample": 0.054257865, "query draw": 0.048559556}
+# and on the query runner's own draw (MEASURED at n 512, experiment 0; re-measured
+# for the recipe's iv 2, iv 4 gave 0.054257865 and 0.048559556)
+Z_BUDGET_RECORDED = {"base sample": 0.024615979, "query draw": 0.048542323}
 FAIL = []
 SKIPPED = []
 
@@ -293,24 +297,24 @@ def leg_vi(seed):
     check("(vi) the observational draw has k + m columns too", XZ_obs.shape[1] == D + M)
 
     block = resolve_dataset_block("simulation", recipe_block())
-    check(f"(vi) recipes/{RECIPE} resolves with iv 4", block.get("iv") == 4)
+    check(f"(vi) recipes/{RECIPE} resolves with iv {RECIPE_IV}", block.get("iv") == RECIPE_IV)
     reduced = {**block, "n_experiments": 1, "n_samples": 512, "sweep_samples": 4, "n_jobs": 1}
     set_seed(reduced["seed"])
     orchestrator = SimulationOrchestrator(**reduced, hyperparameters=munchify(digest_leg.HYPERPARAMETERS))
-    check("(vi) the orchestrator carries iv_dim 4", orchestrator.iv_dim == 4)
-    check("(vi) _sem_factory hands the SEM iv_dim 4", orchestrator._sem_factory().iv_width == 4)
+    check(f"(vi) the orchestrator carries iv_dim {RECIPE_IV}", orchestrator.iv_dim == RECIPE_IV)
+    check(f"(vi) _sem_factory hands the SEM iv_dim {RECIPE_IV}", orchestrator._sem_factory().iv_width == RECIPE_IV)
 
     runner = orchestrator.get_sweep_runner_cls("gamma")(
         methods=orchestrator.methods, method_factory=orchestrator.build_methods, **orchestrator._get_clean_kwargs()
     )
-    check("(vi) the sweep SEM carries iv_width 4", runner.sems[0].iv_width == 4)
+    check(f"(vi) the sweep SEM carries iv_width {RECIPE_IV}", runner.sems[0].iv_width == RECIPE_IV)
     X_raw, X, y, X_test, estimand, Z = runner._base_data(0)
-    check("(vi) _draw_base: X_train has k columns, Z_train m", X.shape[1] == D and Z.shape == (len(X), M))
+    check("(vi) _draw_base: X_train has k columns, Z_train m", X.shape[1] == D and Z.shape == (len(X), RECIPE_IV))
     check(
         "(vi) _draw_base: X_test has k columns, f sees k", X_test.shape[1] == D and estimand.shape == (len(X_test), 1)
     )
     data = runner.generate_data(0, 1.0)
-    check("(vi) SweepData.Z is (n, 4)", data.Z.shape == (len(data.X), M))
+    check(f"(vi) SweepData.Z is (n, {RECIPE_IV})", data.Z.shape == (len(data.X), RECIPE_IV))
     eps_da, eps_z = runner.fit_epsilon_iv(0, 0, data), runner.fit_epsilon_iv_z(0, data)
     oracle = runner.get_oracle(0)
     check("(vi) declared_iv is False on the sim sweep runner", runner.declared_iv is False)
@@ -348,8 +352,8 @@ def leg_vi(seed):
         methods=orchestrator.methods, **{**orchestrator._get_clean_kwargs(), "n_experiments": 1}
     )
     check(
-        "(vi) the query runner's Z is (n, 4) and X_raw has k columns",
-        query.Z.shape == (len(query.X_raw), M) and query.X_raw.shape[1] == D,
+        f"(vi) the query runner's Z is (n, {RECIPE_IV}) and X_raw has k columns",
+        query.Z.shape == (len(query.X_raw), RECIPE_IV) and query.X_raw.shape[1] == D,
     )
     query_z = float(
         eps_iv_z_star(
@@ -395,8 +399,8 @@ def leg_vi(seed):
         da=context.da,
     )
     check(
-        f"(vi) {fixture} fitted through the query context sees a 4-column Z",
-        model._has_iv and model.Z_projector_R.shape[0] == M + D,
+        f"(vi) {fixture} fitted through the query context sees a {RECIPE_IV}-column Z",
+        model._has_iv and model.Z_projector_R.shape[0] == RECIPE_IV + D,
     )
 
 

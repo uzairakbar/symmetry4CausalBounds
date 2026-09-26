@@ -14,7 +14,7 @@ simulation:
     m_sweep_n_percent: 6.25   # the m sweep draws this % of n_samples
     kernel_dim: 0
     treatment_dim: 64
-    iv: 4
+    iv: 2
     methods:
         - PI+INV+IV
         - PI+IV

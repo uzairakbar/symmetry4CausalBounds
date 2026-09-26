@@ -13,7 +13,7 @@ simulation:
     sweep_samples: 16
     kernel_dim: 0
     treatment_dim: 32
-    iv: 4
+    iv: 2
     methods:
         - PI+INV+IV
         - PI+IV

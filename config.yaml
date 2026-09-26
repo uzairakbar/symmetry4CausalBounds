@@ -33,7 +33,7 @@ simulation:
     # X through a rank-m map into a 32-dim treatment: an INCOMPLETE IV that
     # identifies m of k directions and nothing else. 0 or omitted = no instrument
     # and every number is the one shipped today. The IV run is recipes/iv_fig13.yaml.
-    # iv: 4
+    # iv: 2
     n_experiments: 8
     sweep_samples: 8
     m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; the n sweep is 6.25..100 % of it

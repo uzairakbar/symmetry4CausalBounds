@@ -13,7 +13,7 @@ simulation:
     sweep_samples: 16       # unused by n: its grid is 6.25, 12.5, 25, 50, 100 % of n_samples
     kernel_dim: 0
     treatment_dim: 32
-    iv: 4
+    iv: 2
     methods:
         - PI+INV+IV
         - PI+IV
