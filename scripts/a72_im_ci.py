@@ -6,12 +6,13 @@ sweep a base row with its m augmented copies, carried together), C the
 root of Phi(C + Delta / sigma) - Phi(-C) = level; the four sweep metrics read that
 interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
 
-  0. grids off `sweep_samples`: the n and m grids at 16 equal, bit for bit, the arrays
-     RECORDED on `finite` before the change; at 8 they have 8 points with the same
-     end points (m is 1..8), at 32 (the DatasetDefaults fallback) 32; the n and m
-     strategies take that many steps at sweep_samples 8 without an override; no
-     16 / 17 literal left in either `grid_fn`. Catches: a grid that ignores the knob,
-     a changed spacing at 16.
+  0. grids: the m grid off `sweep_samples`, at 16 equal, bit for bit, the array
+     RECORDED on `finite` before the change, at 8 it is 1..8, at 32 (the
+     DatasetDefaults fallback) 32 points; the n grid is the percentage ladder
+     `N_PERCENTS` at every count and the sim n strategy takes its 5 row counts
+     (128 .. 2048 of 2048) at sweep_samples 8, the m strategy 8 steps at 6.25% of
+     2048 = 128 rows; no 16 / 17 literal left in either `grid_fn`. Catches: an m
+     grid that ignores the knob, an n ladder that reads it.
   1. the arithmetic on synthetic inputs: C at Delta 0 is z_0.975 and at Delta/sigma
      100 is z_0.95, C decreasing in Delta, level 90 at Delta 0 is z_0.95, the
      equation holds on a d grid, sigma 0 and one zero SE leave those ends, a raw NaN
@@ -111,6 +112,7 @@ from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
     IM_CI_REPLICATES,
     IM_CI_SEED_OFFSET,
+    N_PERCENTS,
     PARAM_SPECS,
     TOGGLE_KEYS,
     SweepSpec,
@@ -133,12 +135,8 @@ SKIPPED = []
 MADE = []  # the directories this run created under TMPROOT, removed on PASS
 
 # RECORDED on `finite` 109e507 before the change: PARAM_SPECS[p].grid_fn(dataset, 16)
-PRE_GRIDS = {
-    ("simulation", "n"): [128, 187, 247, 307, 366, 426, 486, 546, 605, 665, 725, 785, 844, 904, 964, 1024],
-    ("optical_device", "n"): [128, 186, 244, 302, 360, 418, 476, 534, 593, 651, 709, 767, 825, 883, 941, 1000],
-    ("cigarettes", "n"): [245, 392, 539, 686, 833, 980, 1127, 1274, 1421, 1568, 1715, 1862, 2009, 2156, 2303, 2450],
-    **{(dataset, "m"): list(range(1, 17)) for dataset in DATASETS},
-}
+# (n has since moved to the percentage ladder, N_PERCENTS, off `sweep_samples`)
+PRE_GRIDS = {(dataset, "m"): list(range(1, 17)) for dataset in DATASETS}
 # RECORDED on `finite` 109e507: leg 3's fixture, `digest_leg.digest` of every array
 # (wall_clock excluded), "__all__" over the whole record
 PRE_DIGESTS = {
@@ -168,6 +166,9 @@ SPEEDUP_RECORDED = 24.2  # 32 workers, 2026-09-22
 # (per step: CI and raw coverage, CI/raw width ratio, valid fraction; the slope of the
 # CI excess width in log x). m re-pinned the same day under the unit bootstrap, with the
 # CI excess width per step (the plateau the DA+ family reaches once a unit is its m copies)
+# The "n" pins predate the percentage ladder (8 steps, 128..1024 rows); the sweep now
+# runs the ladder's 5 (128..2048), so they need re-pinning from a full leg 6 run. The
+# m pins stand: the m sweep still draws 128 rows (6.25% of 2048).
 RECORDED_6 = {
     "n": {
         "PI+INV": {
@@ -397,7 +398,7 @@ def column(statuses, name):
 
 
 def leg_0():
-    print("(0) the n and m grids read sweep_samples")
+    print("(0) the m grid reads sweep_samples, the n grid is the percentage ladder")
     for (dataset, param), want in PRE_GRIDS.items():
         got = PARAM_SPECS[param].grid_fn(dataset, 16)
         check(
@@ -411,10 +412,19 @@ def leg_0():
             check(f"(0) {dataset} {param} at {count}: {count} points, same end points", len(grid) == count and ends)
         if param == "m":
             check(f"(0) {dataset} m at 8 is 1..8", PARAM_SPECS["m"].grid_fn(dataset, 8).tolist() == list(range(1, 9)))
+    for dataset in DATASETS:
+        grids = [PARAM_SPECS["n"].grid_fn(dataset, count) for count in (8, 16, 32)]
+        check(
+            f"(0) {dataset} n at 8, 16, 32 == N_PERCENTS",
+            all(np.array_equal(grid, N_PERCENTS) for grid in grids),
+            f"{grids[0].tolist()}",
+        )
     orch = sim_orchestrator(["PI"])
-    for param in ("n", "m"):
-        runner = runner_for(orch, param)
-        check(f"(0) the sim {param} strategy takes 8 steps at sweep_samples 8", len(runner.get_param_range()) == 8)
+    rows = runner_for(orch, "n").get_param_range().tolist()
+    check("(0) the sim n strategy takes the ladder's rows of 2048", rows == [128, 256, 512, 1024, 2048], f"{rows}")
+    runner = runner_for(orch, "m")
+    check("(0) the sim m strategy takes 8 steps at sweep_samples 8", len(runner.get_param_range()) == 8)
+    check("(0) ... at 6.25% of 2048 = 128 rows", runner.n_samples_override == 128, f"{runner.n_samples_override}")
     tree = ast.parse(read(os.path.join(REPO, "src/experiments/configs.py")))
     literals = {}
     for node in ast.walk(tree):
@@ -695,18 +705,21 @@ def fixture_digests(x, results, statuses):
 
 def leg_3(quick):
     print("(3) im-ci 0 reproduces finite; im-ci 95 keeps it as results_raw, the pad at eps* alone")
-    _, x, results, statuses = fixture_run(0.0)
-    got = fixture_digests(x, results, statuses)
+    # the digests were RECORDED with x = the rows; x is now their percentage of 2048,
+    # so the rows the runner ran at stand in for it
+    runner, x, results, statuses = fixture_run(0.0)
+    check("(3) x is the fixture's rows in percent of 2048", np.array_equal(x, [6.25, 25.0]), f"{x}")
+    got = fixture_digests(runner.get_param_range(), results, statuses)
     bad = sorted(k for k in PRE_DIGESTS if got.get(k) != PRE_DIGESTS[k])
     check("(3) im_ci 0: every digest == RECORDED on finite", not bad, f"{got['__all__']} {bad}")
     count = QUICK_REPLICATES if quick else IM_CI_REPLICATES
     with replicates(count):
-        runner, x95, results95, statuses95 = fixture_run(95.0, pool=-1)
+        runner, _, results95, statuses95 = fixture_run(95.0, pool=-1)
     # under the IM-CI the pad drops EPS_TOL (BoundedSA.pad_tolerance), so the raw record
     # is finite's for the unpadded PI and the padded methods are narrower by at most
     # 2 EPS_TOL, exactly that on a standalone DA+ method; the statuses never move
     raw = runner.im_ci_record["results_raw"]
-    got = fixture_digests(x95, raw, statuses)
+    got = fixture_digests(runner.get_param_range(), raw, statuses)
     unpadded = [k for k in PRE_DIGESTS if k.startswith(("results/PI/", "x"))]
     bad = sorted(k for k in unpadded if got.get(k) != PRE_DIGESTS[k])
     check(f"(3) im_ci 95 (B = {count}): results_raw of the unpadded PI == RECORDED on finite", not bad, f"{bad}")

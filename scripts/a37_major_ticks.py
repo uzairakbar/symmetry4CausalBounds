@@ -10,10 +10,12 @@ experiment. Three legs:
         y random (16, 3), through `create_sweep_plot`: x and y each hold >= 2
         major tick LOCATIONS inside the view (matplotlib keeps Text objects for
         out-of-view ticks, so labels are not what is counted), no plotting error
-        swallowed. Fails without the helper on n (0 or 1 majors);
-  (ii)  the n sweep: the in-view majors are exactly [200, 500, 1000] on both
-        datasets (x runs to the grid's last point, 1024 / 1000), and their label
-        texts, stripped of `$\\mathdefault{...}$`, read 200, 500, 1000;
+        swallowed. Fails without the helper on a legacy n grid (0 or 1 majors);
+  (ii)  the n sweep: on its percentage ladder the in-view majors are exactly
+        `N_PERCENTS` (the spec's `xticks`) labelled 6.25, 12.5, 25, 50, 100 with
+        no minor ticks; on a pre-ladder absolute grid (128..1024 / 128..1000, no
+        ticks) exactly [200, 500, 1000], label texts stripped of
+        `$\\mathdefault{...}$` reading 200, 500, 1000;
   (iii) `create_query_sweep_plot` on synthetic positive angles with a log x scale
         (the function has no y-scale argument; y is a linear `plt.ylim`), and
         the three perf sweep figures as `_run_perf` draws them: a `(4, 1)`
@@ -53,11 +55,16 @@ from loguru import logger  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
+from src.experiments.configs import METRIC_SPECS, N_PERCENTS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
 
 DATASETS = ("simulation", "optical_device")
 EXPECT_N_MAJORS = {"simulation": [200.0, 500.0, 1000.0], "optical_device": [200.0, 500.0, 1000.0]}
+# a pre-ladder tree's absolute n grid, drawn without fixed ticks
+LEGACY_N_GRID = {
+    "simulation": np.linspace(128, 1024, 16, dtype=int),
+    "optical_device": np.linspace(128, 1000, 16, dtype=int),
+}
 FAIL = []
 SKIPPED = []
 _errors = []
@@ -89,8 +96,8 @@ def minor_labels(fig):
 
 
 def plain(text):
-    """A tick label with the mathtext wrapper removed."""
-    return re.sub(r"^\$\\mathdefault\{(.*)\}\$$", r"\1", text.strip())
+    """A tick label with the mathtext wrapper, or a bare `$...$`, removed."""
+    return re.sub(r"^\$(?:\\mathdefault\{(.*)\}|([^$]*))\$$", r"\1\2", text.strip())
 
 
 def in_view_labels(axis):
@@ -125,10 +132,12 @@ def drawn_vlines(ax):
     return out
 
 
-def render_sweep(dataset, param, seed=0, x=None, y=None):
+def render_sweep(dataset, param, seed=0, x=None, y=None, xticks=None):
     rng = np.random.default_rng(seed)
     if x is None:
         x = PARAM_SPECS[param].grid_fn(dataset, 16)
+    if xticks is None:
+        xticks = PARAM_SPECS[param].xticks
     if y is None:
         y = {"PI": 1.0 + 0.3 * rng.random((len(x), 3)), "DA+PI": 0.8 + 0.3 * rng.random((len(x), 3))}
     plt.close("all")
@@ -143,6 +152,7 @@ def render_sweep(dataset, param, seed=0, x=None, y=None):
         fname=f"{param}_width",
         savefig=False,
         vlines=PARAM_SPECS[param].vlines,
+        xticks=xticks,
         has_z=False,
     )
     return plt.gca()
@@ -165,19 +175,32 @@ def leg_i():
 
 
 def leg_ii():
-    print("(ii) the n sweep: (1, 2, 5) majors with plain labels")
+    print("(ii) the n sweep: majors on the ladder; the (1, 2, 5) fallback on a legacy grid")
+    want_ladder = [float(p) for p in N_PERCENTS]
     for dataset in DATASETS:
         ax = render_sweep(dataset, "n")
         xs = majors_in_view(ax.xaxis)
         labels = in_view_labels(ax.xaxis)
+        check(f"(ii) {dataset} n: in-view majors == {want_ladder}", xs == want_ladder, f"{xs}")
+        check(
+            f"(ii) {dataset} n: labels read {[f'{v:g}' for v in want_ladder]}",
+            labels == [f"{v:g}" for v in want_ladder],
+            f"{labels}",
+        )
+        check(f"(ii) {dataset} n: no minor ticks", len(ax.xaxis.get_minorticklocs()) == 0)
+        plt.close("all")
+
+        ax = render_sweep(dataset, "n", x=LEGACY_N_GRID[dataset], xticks=())
+        xs = majors_in_view(ax.xaxis)
+        labels = in_view_labels(ax.xaxis)
         want = EXPECT_N_MAJORS[dataset]
         check(
-            f"(ii) {dataset} n: in-view majors == {want}",
+            f"(ii) {dataset} legacy n: in-view majors == {want}",
             np.allclose(xs, want) if len(xs) == len(want) else False,
             f"{xs}",
         )
         check(
-            f"(ii) {dataset} n: labels read {[str(int(v)) for v in want]}",
+            f"(ii) {dataset} legacy n: labels read {[str(int(v)) for v in want]}",
             labels == [str(int(v)) for v in want],
             f"{labels}",
         )

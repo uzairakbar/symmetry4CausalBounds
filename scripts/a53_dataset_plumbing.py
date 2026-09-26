@@ -17,9 +17,11 @@ equivalent one. So the gate is half regression and half interface. Legs:
   (ii)  the rewritten `finite_pool` predicate agrees with the old class-name test
         on both shipped SEMs. Catches: a pool attribute appearing on a generator
         SEM. Misses: a third SEM neither predicate was written for.
-  (iii) the omega and n grids: sim and optical elementwise unchanged, cigarettes at
-        [0.125, 8] and [245, 2450]. Catches: a branch that swallows another
-        dataset's grid.
+  (iii) the omega grids: sim and optical elementwise unchanged, cigarettes at
+        [0.125, 8]; the n grid is the percentage ladder `N_PERCENTS` on every
+        dataset at any `sweep_samples`, and `percent_of` its `n_samples` reads
+        {128 .. 2048}, {63 .. 1000}, {153 .. 2450}. Catches: a branch that
+        swallows another dataset's grid, a ladder that reads `sweep_samples`.
   (iv)  the two ROBUSTNESS tables carry exactly three keys, with the shipped two
         values untouched. Catches: an edited sim or optical constant.
   (v)   the cigarette epsilon sweep runs: the tuned DA reaches the configured
@@ -80,9 +82,11 @@ sys.path.insert(0, REPO)
 from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     DATASET_DEFAULTS,
+    N_PERCENTS,
     PARAM_SPECS,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
+    percent_of,
 )
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
@@ -120,7 +124,12 @@ PARENT_DIGESTS: dict[str, str] = {
 
 # leg (iii)
 CIGARETTE_OMEGA = (0.125, 8.0)
-CIGARETTE_N = (245, 2450)
+# the n ladder in rows of each block's n_samples, rounded half up
+N_ROWS = {
+    "simulation": (2048, [128, 256, 512, 1024, 2048]),
+    "optical_device": (1000, [63, 125, 250, 500, 1000]),
+    "cigarettes": (2450, [153, 306, 613, 1225, 2450]),
+}
 # leg (iv)
 DATASET_KEYS = {"simulation", "optical_device", "cigarettes"}
 SHIPPED_ROBUSTNESS = {"simulation": (3.0, None), "optical_device": (5.0, "gaussian-noise")}
@@ -278,41 +287,38 @@ def leg_ii(orchs):
 
 
 def leg_iii():
-    print("(iii) the omega and n grids: two unchanged, one added")
+    print("(iii) the omega grids unchanged, one added; the n ladder on every dataset")
     omega, n = PARAM_SPECS["omega"].grid_fn, PARAM_SPECS["n"].grid_fn
     steps = 7
     expected_omega = {
         "simulation": np.logspace(-1.5, 1.0, num=steps),
         "optical_device": np.linspace(0.2, 0.99, num=steps),
     }
-    expected_n = {
-        "simulation": np.linspace(128, 1024, 16, dtype=int),
-        "optical_device": np.linspace(128, 1000, 16, dtype=int),
-    }
     for name in ("simulation", "optical_device"):
         check(f"(iii) {name}: omega grid unchanged", np.array_equal(omega(name, steps), expected_omega[name]))
-        check(f"(iii) {name}: n grid unchanged", np.array_equal(n(name, steps), expected_n[name]))
 
     cig_omega = np.asarray(omega("cigarettes", steps), dtype=float)
-    cig_n = np.asarray(n("cigarettes", steps), dtype=int)
     check(
         "(iii) cigarettes: omega grid ends",
         np.allclose([cig_omega[0], cig_omega[-1]], CIGARETTE_OMEGA) and len(cig_omega) == steps,
         f"[{cig_omega[0]:.4g}, {cig_omega[-1]:.4g}] over {len(cig_omega)} steps",
     )
     check("(iii) cigarettes: omega grid is increasing", np.all(np.diff(cig_omega) > 0))
-    check(
-        "(iii) cigarettes: n grid ends",
-        (cig_n[0], cig_n[-1]) == CIGARETTE_N and len(cig_n) == 16,
-        f"[{cig_n[0]}, {cig_n[-1]}] over {len(cig_n)} steps",
-    )
     # the branches must not collide: the added grid is nobody else's
     for name in ("simulation", "optical_device"):
         check(
             f"(iii) cigarettes omega differs from {name}",
             not np.allclose(cig_omega, np.asarray(omega(name, steps), dtype=float)),
         )
-        check(f"(iii) cigarettes n differs from {name}", not np.array_equal(cig_n, np.asarray(n(name, 16), dtype=int)))
+    for name, (n_samples, rows) in N_ROWS.items():
+        grids = [np.asarray(n(name, count), dtype=float) for count in (steps, 16, 32)]
+        check(
+            f"(iii) {name}: n grid is N_PERCENTS at any sweep_samples",
+            all(np.array_equal(grid, N_PERCENTS) for grid in grids),
+            f"{grids[0].tolist()}",
+        )
+        got = [percent_of(n_samples, p) for p in grids[0]]
+        check(f"(iii) {name}: n rows of {n_samples} == {rows}", got == rows, f"{got}")
 
 
 # =============================================================================
