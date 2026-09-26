@@ -50,7 +50,7 @@ EXPERIMENT_NAME = "cigarettes"
 
 # m-sweep holds n fixed here (PLAN 5.5). 10 whole state histories: a multiple of
 # the 50-year history length, so the folds get whole states like every other draw.
-FOLD_SWEEP_SAMPLES: int = 128
+FOLD_SWEEP_SAMPLES: int = 256
 
 # eps* is a defect of the TARGET under the DA, and under the translation the defect
 # is w = -c (v-hat' b) with b homogeneous on both paths, so it is 0 whatever c comes
