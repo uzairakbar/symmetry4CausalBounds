@@ -30,7 +30,7 @@ simulation:
 optical_device:
     seed: 42
     n_samples: 1_000
-    n_experiments: 12
+    n_experiments: 10
     sweep_samples: 16
     m_sweep_n_percent: 10   # the m sweep draws this % of n_samples
     methods:
