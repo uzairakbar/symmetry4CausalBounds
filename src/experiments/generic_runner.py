@@ -17,7 +17,6 @@ from src.experiments.configs import (
     OMEGA_XLABEL,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
-    ROBUSTNESS_EPSILON_UNIT,
     SPECTRUM_KEEP,
     percent_of,
 )
@@ -30,7 +29,6 @@ from src.oracle import (
     eps_iv_star,
     eps_iv_z_star,
     epsilon_star,
-    h_star_spread,
     pool_oracles,
     preserve_rng,
     recalibrated_da_epsilon,
@@ -57,20 +55,15 @@ class OracleMixin:
     """
 
     epsilon_true: float | None = None
-    # the unit `epsilon_true` is stated in: None = outcome units, "std_h" = a
-    # multiple of std(h_*) on the tuning rows (ROBUSTNESS_EPSILON_UNIT)
-    epsilon_unit: str | None = None
 
     def prepare_pair(self, sem, da, features: Callable | None = None):
         pool = getattr(sem, "pool", None)
         if self.epsilon_true is not None:
-            X = None if pool is None else pool[0]  # the device's own rows, as below
-            scale = h_star_spread(sem, X=X, features=features) if self.epsilon_unit == "std_h" else 1.0
             recalibrated_da_epsilon(
                 sem=sem,
                 da=da,
-                epsilon_target=self.epsilon_true * scale,
-                X=X,
+                epsilon_target=self.epsilon_true,
+                X=None if pool is None else pool[0],  # the device's own rows, as below
                 features=features,
             )
 
@@ -567,8 +560,7 @@ class EpsilonRatioStrategy(GenericParamSweep):
     intersections inheriting that invalidity -- see PLAN 7.)
 
     This is the ONLY sweep that recalibrates the DA (to
-    ROBUSTNESS_EPSILON_TRUE[experiment_name], in the unit of
-    ROBUSTNESS_EPSILON_UNIT[experiment_name]), so that eps* > 0 makes the ratio
+    ROBUSTNESS_EPSILON_TRUE[experiment_name]), so that eps* > 0 makes the ratio
     axis meaningful, and the only one that appends
     ROBUSTNESS_AUGMENTATION[experiment_name] to the configured DA chain where
     that is set (optical: the configured chain has no knob to tune).
@@ -590,8 +582,6 @@ class EpsilonRatioStrategy(GenericParamSweep):
         # scoped to this sweep only; never leaks into omega/n/m/perf or the query panel
         name = kwargs.get("experiment_name", "simulation")
         kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[name]
-        # set before the base constructor, which tunes the DAs
-        self.epsilon_unit = ROBUSTNESS_EPSILON_UNIT[name]
         component = ROBUSTNESS_AUGMENTATION[name]
         if component is not None:
             kwargs["da_factory"] = partial(kwargs["da_factory"], append=component)

@@ -393,27 +393,10 @@ GAMMA_Z_DEFAULT: float = 0.0177
 # 1.007 at 1.0 against the unrestricted target), and at 0.5 the DA+PI coverage runs
 # 0.797 at r = 2^-6 up to 1.000 at r = 1 for 1.486x the width -- the same profile
 # the simulation's 3.0 was chosen for. a53(v) is where it is re-read.
-# Optical is stated UNITLESS, as a multiple of std(h_*) on the device's pool
-# (ROBUSTNESS_EPSILON_UNIT below): the sweeps span twelve devices whose outcome
-# scales differ by four orders (std(h*) 0.008 on device 5, 119 on device 6), so
-# one number in outcome units put device 6 under its own zero-strength floor
-# (eps* 62) and devices 1, 5, 9, 11 at 200-630 std of h*. eps/std(h*) is the
-# relative invariance defect: how far the DA moves h_* against h_*'s own spread,
-# free of the outcome noise the DA never touches (the a40(vii) ratio). 7.0 is the
-# measured 5 above on device 8 (std(h*) 0.719 there, so eps* 5.03).
 ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
     "simulation": 3.0,
-    "optical_device": 7.0,
+    "optical_device": 5.0,
     "cigarettes": 0.5,
-}
-
-# The unit of each ROBUSTNESS_EPSILON_TRUE entry, read in `OracleMixin.prepare_pair`:
-# None = outcome units (one SEM scale per dataset), "std_h" = a multiple of
-# std(h_*) on the tuning rows (`oracle.h_star_spread`).
-ROBUSTNESS_EPSILON_UNIT: dict[str, str | None] = {
-    "simulation": None,
-    "optical_device": "std_h",
-    "cigarettes": None,
 }
 
 # The component the robustness sweep APPENDS to the configured DA chain, where
