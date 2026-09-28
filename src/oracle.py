@@ -15,6 +15,7 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from src.methods.regression import LeastSquaresClosedForm as OLS
+from src.methods.regression import residual_variance
 
 CALIBRATION_SAMPLES: int = 2048
 # `epsilon_pad_star`: how many augmentation realisations to pool, which quantile of
@@ -631,7 +632,8 @@ def _noise_ratio(
     """rho = sigma-tilde^2 / sigma^2, the information-loss factor (DPI: >= 1).
 
     `mean_match` takes the post-DA MMSE over Lem. 2's class (free intercept), the
-    same class the solver's sigma-tilde-hat comes from.
+    same class the solver's sigma-tilde-hat comes from, on the same SSR / (n - k):
+    the numerator is a fit over a population sigma^2, and 1/n reads it low by k/n.
     """
     sigma_sq = sem.sigma_sq
     if sigma_sq <= 0.0:
@@ -645,7 +647,9 @@ def _noise_ratio(
         fit = OLS(fit_intercept=mean_match).fit(Phi, y)
         residuals = y.flatten() - fit.predict(Phi).flatten()
 
-    return float(np.mean(residuals**2) / sigma_sq)
+    return float(
+        residual_variance(residuals, np.asarray(Phi).reshape(len(Phi), -1).shape[1] + int(mean_match)) / sigma_sq
+    )
 
 
 def compute_oracle_parameters(
