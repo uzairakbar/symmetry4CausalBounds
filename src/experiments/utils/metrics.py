@@ -8,6 +8,7 @@ import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
+from src.methods.regression import residual_variance
 from src.methods.sensitivity_models import SolveStatus
 
 from .constants import DEFAULT_NORMALIZE_ERROR
@@ -204,25 +205,40 @@ def coverage(
     return float(np.mean(np.where(np.isnan(estimate).any(axis=1), False, covered)))
 
 
-def sigma_sq_hat(X: NDArray, y: NDArray, intercept: bool = False) -> float:
+def sigma_sq_hat(
+    X: NDArray, y: NDArray, intercept: bool = False, n_obs: int | None = None, absorbed_rate: float = 0.0
+) -> float:
     """
     MMSE of OLS on a sample: sigma-hat^2 on X, sigma-tilde-hat^2 on GX. The
-    noise level a ball fit on that design scales its radius by (`BoundedSA.scale`).
+    noise level a ball fit on that design scales its radius by (`BoundedSA.scale`),
+    on the same k and n_obs, so the two agree to rounding.
 
     Args:
         X: Design in the feature space the methods use
         y: Outcomes
         intercept: fit with a free intercept (Lem. 2's hypothesis class, the
             `mean_match` geometry) rather than the intercept-free one
+        n_obs: distinct observations behind the rows (the m sweep tiles them);
+            None is one per row
+        absorbed_rate: controls partialled out of the design per observation
+            (the cigarette FWL), charged as `absorbed_rate * n_obs` parameters
     """
+    n_obs = len(X) if n_obs is None else int(n_obs)
     target = y.flatten() - (np.mean(y) if intercept else 0.0)
     if intercept:
         X = X - X.mean(axis=0)
     residuals = target - X @ np.linalg.lstsq(X, target, rcond=None)[0]
-    return float(np.mean(residuals**2))
+    return residual_variance(residuals, X.shape[1] + int(intercept) + absorbed_rate * n_obs, n_obs)
 
 
-def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> float:
+def rho_hat(
+    X: NDArray,
+    GX: NDArray,
+    y: NDArray,
+    intercept: bool = False,
+    n_obs: int | None = None,
+    absorbed_rate: float = 0.0,
+) -> float:
     """
     Information-loss factor rho = sigma-tilde^2 / sigma^2 measured on a sample:
     MSE of OLS on GX over MSE of OLS on X. >= 1 by the DPI.
@@ -235,14 +251,17 @@ def rho_hat(X: NDArray, GX: NDArray, y: NDArray, intercept: bool = False) -> flo
             hypothesis class rather than over the intercept-free one. Its sibling
             `trace_S_over_k` already centres, so `mean_match` runs make the two
             factors of the omega axis consistent.
+        n_obs, absorbed_rate: as `sigma_sq_hat`, on both sides; the dof factor
+            cancels in the ratio
 
     Returns:
         rho_hat, or NaN if the baseline MSE vanishes
     """
-    denominator = sigma_sq_hat(X, y, intercept=intercept)
+    kwargs = dict(intercept=intercept, n_obs=n_obs, absorbed_rate=absorbed_rate)
+    denominator = sigma_sq_hat(X, y, **kwargs)
     if denominator <= 0.0:
         return np.nan
-    return sigma_sq_hat(GX, y, intercept=intercept) / denominator
+    return sigma_sq_hat(GX, y, **kwargs) / denominator
 
 
 # =============================================================================

@@ -19,6 +19,31 @@ def _solve_conic(prob, backend=None):
         prob.solve(solver=cp.ECOS)
 
 
+def residual_variance(residuals, n_params: float, n_obs: int | None = None) -> float:
+    """Residual variance of a least-squares fit, SSR / (n - k) on untiled rows.
+
+    `mean(r^2) n_obs / (n_obs - n_params)`: the rows may be an m-fold tiling of
+    `n_obs` distinct observations (the m sweep), and the mean is tiling-invariant
+    where the SSR is not. `n_params` counts every fitted parameter, the free
+    intercept and any controls partialled out beforehand included, so it need not
+    be an integer. No degrees of freedom left is an error, not a NaN: the budget
+    it scales is a nonneg cvx Parameter downstream.
+
+    Args:
+        residuals: the fit's residuals, one per row
+        n_params: parameters fitted, k
+        n_obs: distinct observations behind the rows; None is one per row
+    """
+    residuals = np.asarray(residuals, dtype=float).ravel()
+    n_obs = len(residuals) if n_obs is None else int(n_obs)
+    dof = n_obs - float(n_params)
+    if dof <= 0.0:
+        raise ValueError(
+            f"residual variance with {n_obs} observations and {float(n_params):g} parameters: no dof left."
+        )
+    return float(np.mean(residuals**2) * n_obs / dof)
+
+
 class LeastSquaresClosedForm(pointEstimator):
     """Closed-form least squares regression.
 
@@ -155,7 +180,7 @@ class MomentConstrainedLeastSquares(pointEstimator):
 
         # gamma_min: the smallest ERM budget of (P2) whose ellipsoid reaches this
         # set, || Xc (h - h_erm) ||^2 / (n sigma-hat^2) at the returned point
-        sigma_sq = float(np.mean((yc - Xc @ h_erm) ** 2))
+        sigma_sq = residual_variance(yc - Xc @ h_erm, Xc.shape[1] + int(self.fit_intercept))
         gamma_min = float(np.sum((Xc @ (self._W - h_erm)) ** 2) / (len(Xc) * sigma_sq)) if sigma_sq > 0 else 0.0
         logger.info(
             f"ERM+IV: d_z={Zc.shape[1]}, d_h={Xc.shape[1]}, moment floor m*={m_star:.3e}, gamma_min={gamma_min:.6g}"
