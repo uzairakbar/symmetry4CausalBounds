@@ -86,21 +86,13 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         super().__init__(EXPERIMENT_NAME, OpticalRegistry(), **kwargs)
 
-    def _sem_factory(self, device: int | None = None):
-        """Factory for creating SEM instances; `dataset_index` unless a device is named."""
+    def _sem_factory(self):
+        """Factory for creating SEM instances."""
         return SEM(
-            experiment=OPTICAL_CONFIG.dataset_index if device is None else int(device),
+            experiment=OPTICAL_CONFIG.dataset_index,
             ground_truth=OPTICAL_CONFIG.ground_truth_model,
             intercept=self.toggles["mean_match"],
         )
-
-    @staticmethod
-    def sweep_devices() -> tuple[int, ...]:
-        """The device of each sweep experiment (`OpticalDeviceConfig.sweep_devices`)."""
-        if OPTICAL_CONFIG.sweep_devices is not None:
-            return tuple(int(d) for d in OPTICAL_CONFIG.sweep_devices)
-        first = OPTICAL_CONFIG.dataset_index
-        return (first, *(d for d in sorted(SEM.dataset()) if d != first))
 
     def _oracle_pieces(self):
         """(sem, da, features) for the budget estimators, built once."""
@@ -224,17 +216,5 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     **extra,
                     **kwargs,
                 )
-
-            def make_sem(inner_self, experiment_index: int):
-                """Experiment j runs on its own device: replicates span the
-                recorded devices rather than redraw one of them."""
-                devices = outer.sweep_devices()
-                if inner_self.n_experiments > len(devices):
-                    raise ValueError(f"n_experiments {inner_self.n_experiments} exceeds the {len(devices)} devices")
-                return outer._sem_factory(devices[experiment_index])
-
-            def poly_for_sem(inner_self, sem):
-                """The selected degree differs by device (1 or 2)."""
-                return PolynomialFeatures(sem.poly_degree, include_bias=False)
 
         return ConfiguredSweep
