@@ -637,7 +637,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         tax_diff, lag = self.benchmarks()["tax_diff"][3], self.benchmarks()["lag_q"][3]
         # the floor at PI+IV's bound s sqrt(gamma_z): the panel is sigma-normalised
         # (`build_design` divides y by the OLS residual sd), so PI+IV's s is 1 and
-        # the bound is sqrt(gamma_z) in outcome units, what SS3.3's 0.1107 was
+        # the bound is sqrt(gamma_z) in outcome units, what SS3.3's floor (0.1074) is
         # measured at
         floor = feasibility_floor(design, Z, np.sqrt(self.gamma_z))
         gamma_star = float(runner.sem.bias_sq / runner.sem.sigma_sq)
