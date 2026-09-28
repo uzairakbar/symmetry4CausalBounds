@@ -24,9 +24,10 @@ stability. A row is drawn only where some dataset ran its metric. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
 rows the state and neighbour price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
-the reference marks of each panel, one legend inside the top-right panel, pinned
-upper left, in the repo's legend order (`_legend_key`: PI+INV+IV, PI+IV, then the
-DA+ methods). From the do-MNIST tint sweep pkls, the stacked tint figure
+x clipped to each column's grid with the budget the other column holds fixed
+marked, one legend inside the top-right panel, pinned upper left, in the repo's
+legend order (`_legend_key`: PI+INV+IV, PI+IV, then the DA+ methods). From the
+do-MNIST tint sweep pkls, the stacked tint figure
 (`do_mnist_tint.pdf`): one row per digit, 0 at the top, the bounds along the tint
 grid in the middle with the digit's blue-tint image on the left and its red-tint
 image on the right (full resolution, white background), titled $h({\bm{x}})$, the
@@ -649,7 +650,7 @@ def elasticity_grid(artifacts: str, out: str | None = None):
                 handles.setdefault(name, handle)
             lo, hi = min(lo, panel_lo), max(hi, panel_hi)
             marks = load(f"{stem}_vlines.pkl") if os.path.exists(f"{stem}_vlines.pkl") else ()
-            x_lo, x_hi, marks = _mark_frame(x, marks, spec["xscale"])
+            x_lo, x_hi, marks = _mark_frame(x, marks, spec["xscale"], clip=True)
             ax.set_xscale(spec["xscale"])
             ax.set_xlim(x_lo, x_hi)
             ax.tick_params(labelsize=FS_TICK)

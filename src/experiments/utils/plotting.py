@@ -423,14 +423,17 @@ def mark_failed(
     return drawn
 
 
-def _mark_frame(x_values: NDArray, vlines, xscale: str) -> tuple[float, float, list[float]]:
+def _mark_frame(x_values: NDArray, vlines, xscale: str, clip: bool = False) -> tuple[float, float, list[float]]:
     """(x_lo, x_hi, marks): the grid, widened to cover every finite mark with a
-    small margin, so a mark beyond the solved grid (F1's feasibility floor, its
-    3x benchmark) sits inside the frame over empty axis. The margin is a fraction
-    of the span, in decades on a log axis, where a linear margin below a small
-    left edge goes negative and the axis drops the frame."""
+    small margin, so a mark beyond the solved grid sits inside the frame over
+    empty axis. The margin is a fraction of the span, in decades on a log axis,
+    where a linear margin below a small left edge goes negative and the axis
+    drops the frame. `clip` keeps the frame at the grid's ends instead, with only
+    the marks inside it."""
     marks = [float(x) for x in vlines if np.isfinite(x)]
     x_lo, x_hi = float(np.min(x_values)), float(np.max(x_values))
+    if clip:
+        return x_lo, x_hi, [x for x in marks if x_lo <= x <= x_hi]
     if marks:
         x_lo, x_hi = min(x_lo, min(marks)), max(x_hi, max(marks))
         if xscale == "log":
@@ -712,6 +715,7 @@ def create_query_sweep_plot(
     vlines: tuple[float, ...] = (),
     legend_width: float | None = None,
     mark_missing: bool = False,
+    clip_x: bool = False,
     *,
     has_z: bool,
 ):
@@ -720,8 +724,8 @@ def create_query_sweep_plot(
 
     Handles both point estimates and interval estimates (PI methods).
     `vlines` marks reference x positions, as on `create_sweep_plot`, and the frame
-    widens to cover them (`X_MARK_MARGIN`); empty by default, so every existing
-    figure is drawn as before.
+    widens to cover them (`X_MARK_MARGIN`) unless `clip_x` holds it to the grid's
+    ends; empty by default, so every existing figure is drawn as before.
 
     Args:
         x_values: Query values for x-axis
@@ -749,6 +753,8 @@ def create_query_sweep_plot(
             does, with the figure widened so the axes keep their size.
         mark_missing: a cross on the x-axis where an interval method has no bound
             (`mark_failed`).
+        clip_x: the x-axis spans exactly `x_values`; only the `vlines` inside it
+            are drawn.
         has_z: whether the experiment has a real Z (`constants.method_style`).
     """
     legend_items = [item for item in (legend_items or []) if item in y_results]
@@ -764,7 +770,7 @@ def create_query_sweep_plot(
 
     # Formatting
     _apply_style(plt.gca(), style, xlabel, ylabel)
-    x_lo, x_hi, marks = _mark_frame(x_values, vlines, xscale)
+    x_lo, x_hi, marks = _mark_frame(x_values, vlines, xscale, clip=clip_x)
     plt.xlim([x_lo, x_hi])
 
     padding = 0.05 * max_mean

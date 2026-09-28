@@ -667,6 +667,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 fname=stem,
                 experiment=self.name,
                 vlines=f1_marks,
+                clip_x=True,
                 has_z=self.has_z,
             )
 
@@ -700,6 +701,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 fname=stem,
                 experiment=self.name,
                 vlines=f2_marks,
+                clip_x=True,
                 has_z=self.has_z,
             )
 
