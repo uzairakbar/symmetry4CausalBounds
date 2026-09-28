@@ -36,7 +36,10 @@ before (blue) and after (red) DA, its legend at the bottom right. From the
 do-MNIST population pkls and `run.json`, the results table (`do_mnist_table.tex`):
 one row per interval method, coverage and width with bootstrap bands over the
 population queries, Omega-hat on the DA+ rows, worst error, the one-time fit, the
-mean per-query solve and the latency (the fit plus the per-query solve).
+mean per-query solve and the latency (the fit plus the per-query solve). From the
+do-MNIST `seeds.json`, the table across seeds (`do_mnist_seeds_table.tex`,
+`do_mnist.domnist_seed_table`): coverage, width and worst error per interval method,
+mean +- SE over the seeds, the best in bold and the second best in italics.
 """
 
 import argparse
@@ -53,6 +56,7 @@ from loguru import logger
 from matplotlib.lines import Line2D
 
 from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
+from src.experiments.do_mnist import domnist_seed_table
 from src.experiments.utils.constants import (
     CLAMP_YLIM,
     COEFFICIENT_LABELS,
@@ -221,6 +225,10 @@ def _has_domnist_table(artifacts: str) -> bool:
     return all(
         os.path.exists(f"{folder}/{name}") for name in ("run.json", "population_values.pkl", "population_outcomes.pkl")
     )
+
+
+def _has_domnist_seeds(artifacts: str) -> bool:
+    return os.path.exists(f"{_tint_folder(artifacts)}/seeds.json")
 
 
 def _has_perf(artifacts: str, dataset: str, metric: str) -> bool:
@@ -1089,6 +1097,30 @@ def domnist_table(artifacts: str, out: str | None = None) -> str | None:
     return tex
 
 
+def domnist_seeds(artifacts: str, out: str | None = None) -> str | None:
+    """The do-MNIST table across seeds, re-rendered from `seeds.json` by
+    `domnist_seed_table` (the run writes the same tex as `seeds_table.tex`), written
+    to `out/do_mnist_seeds_table.tex` when given; returns the tex, or None without
+    the json."""
+    if not _has_domnist_seeds(artifacts):
+        return None
+    with open(f"{_tint_folder(artifacts)}/seeds.json") as fh:
+        seeds = json.load(fh)
+    tex = domnist_seed_table(
+        seeds["records"],
+        has_z=column_has_z(artifacts, "do_mnist"),
+        target_coverage=seeds.get("target_coverage", float("nan")),
+        fixed=seeds.get("fixed"),
+    )
+    if out is not None:
+        os.makedirs(out, exist_ok=True)
+        path = f"{out}/do_mnist_seeds_table.tex"
+        with open(path, "w") as fh:
+            fh.write(tex)
+        logger.info(f"aggregate: wrote {path}")
+    return tex
+
+
 # ------------------------------------------------------------------ cli
 
 
@@ -1101,7 +1133,12 @@ def main(argv=None) -> None:
     out = os.path.abspath(args.out) if args.out else f"{artifacts}/aggregate"
 
     datasets = columns(artifacts)
-    drawn = _has_elasticities(artifacts) or _has_tint(artifacts) or _has_domnist_table(artifacts)
+    drawn = (
+        _has_elasticities(artifacts)
+        or _has_tint(artifacts)
+        or _has_domnist_table(artifacts)
+        or _has_domnist_seeds(artifacts)
+    )
     if not datasets and not drawn:
         logger.warning(f"aggregate: nothing to draw under {artifacts}.")
         return
@@ -1120,6 +1157,8 @@ def main(argv=None) -> None:
         plt.close(tint_stack(artifacts, out))
     if _has_domnist_table(artifacts):
         domnist_table(artifacts, out)
+    if _has_domnist_seeds(artifacts):
+        domnist_seeds(artifacts, out)
 
 
 if __name__ == "__main__":

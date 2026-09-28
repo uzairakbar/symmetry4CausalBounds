@@ -72,6 +72,15 @@ prefit nets. The main knobs:
   tint sweep per digit: one MNIST-test image rendered from blue (0) to red (1) and
   scored by every method, with the target constant along it
   (`recipes/doMnistTintFigF2.yaml` sweeps all ten).
+- `n_experiments` is the number of seeds the population metrics are read at:
+  `seed`, `seed + 1`, ... Every seed draws its own replicate, retrains the nets and
+  refits every method; the split, the population and the exemplars stay fixed. The
+  figure, `run.json` and the population pkls are the first seed's. The run writes
+  `do_mnist/query/seeds.json` (coverage, width, worst error, NaN share and RMSE per
+  seed) and `seeds_table.tex`: coverage, width and worst error of each interval
+  method, mean +- standard error over the seeds, the best `\bm`, the second best
+  `\mathit` (coverage highest, width and worst error lowest), the point estimators'
+  RMSE in a comment line. It needs `\usepackage{bm}`.
 
 `python -m src.aggregate --artifacts DIR` then writes `DIR/aggregate/do_mnist_tint.pdf`
 (the sweeps stacked, 0 at the top, the tint histogram before and after DA at the
@@ -79,7 +88,8 @@ bottom) and `DIR/aggregate/do_mnist_table.tex`: coverage and width with 95% boot
 bands over the 2,000 population queries, Omega-hat, worst error, and the latency of
 each method, its one-time fit (every net, DA pass, model fit and floor it needs) plus
 its mean per-query solve at the run's `n_jobs`. The fit and the per-query solve are
-also columns of their own.
+also columns of their own. With `seeds.json` present it also re-renders the table
+across seeds to `DIR/aggregate/do_mnist_seeds_table.tex`.
 
 ## CPU vs. GPU backend
 PyTorch picks CUDA/MPS automatically when available (only do-MNIST trains nets; `optical_device` and `simulation` never touch torch). To force CPU, set `CPU_ONLY = True` in `./src/methods/nets.py`.

@@ -44,10 +44,11 @@ from loguru import logger
 
 from src.data_augmentors.do_mnist import DoMNISTDA as DA
 from src.experiments.base import ExperimentDataContext, ExperimentOrchestrator, SweepData
-from src.experiments.configs import ANNOTATE_SWEEP_PLOT, DOMNIST_CONFIG, MethodRegistry, TintSpec
+from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, DOMNIST_CONFIG, MethodRegistry, TintSpec
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.experiments.utils import save
 from src.experiments.utils.constants import SUBDIR_QUERY
+from src.experiments.utils.constants import label as method_label
 from src.experiments.utils.diagnostics import erm_report, net_noise, prescreen, probe
 from src.experiments.utils.metrics import STATUS_CATEGORIES, evaluate_queries
 from src.experiments.utils.plotting import create_digit_sweep_plot, create_query_sweep_plot
@@ -452,6 +453,116 @@ def _jsonable(value):
     if isinstance(value, list | tuple):
         return [_jsonable(v) for v in value]
     return value
+
+
+# =============================================================================
+# SEED TABLE
+# =============================================================================
+
+
+#: the seed table's columns: (metric, header, precision, higher is better)
+SEED_COLUMNS: tuple[tuple[str, str, str, bool], ...] = (
+    ("coverage", "coverage", ".3f", True),
+    ("width", "width", ".3f", False),
+    ("worst_error", "worst err.", ".4f", False),
+)
+
+
+def _mean_se(values) -> tuple[float, float, int]:
+    """Mean and standard error (std with ddof 1 over sqrt n) of the finite values,
+    and their count n; NaN where there are too few."""
+    x = np.asarray(values, dtype=float)
+    x = x[np.isfinite(x)]
+    mean = float(x.mean()) if len(x) else float("nan")
+    se = float(x.std(ddof=1) / np.sqrt(len(x))) if len(x) > 1 else float("nan")
+    return mean, se, len(x)
+
+
+def _ranks(means: dict[str, float], fmt: str, higher: bool) -> dict[str, int]:
+    """1 for the best mean, 2 for the second best, compared at the printed
+    precision so a tie shares its mark; a NaN mean is not ranked."""
+    printed = {m: float(format(v, fmt)) for m, v in means.items() if np.isfinite(v)}
+    levels = sorted(set(printed.values()), reverse=higher)[:2]
+    return {m: levels.index(v) + 1 for m, v in printed.items() if v in levels}
+
+
+def domnist_seed_table(
+    records: list[dict[str, Any]],
+    has_z: bool = False,
+    target_coverage: float = float("nan"),
+    fixed: dict[str, Any] | None = None,
+) -> str:
+    """The population metrics across seeds (`seeds.json`'s records): one row per
+    interval method present, in `ALL_METHODS` order; coverage, width and worst
+    error, each the mean over seeds +- its standard error. Per column the best
+    mean is set in bold math, the second best in math italics (coverage highest,
+    width and worst error lowest). A method without a bound at any query of any
+    seed prints `--` and is not ranked. The point estimators are not ranked: their
+    RMSE goes in a comment line."""
+    fixed = fixed or {}
+    seeds = [int(r["seed"]) for r in records]
+    methods = [
+        m for m in ALL_METHODS if m != "ATE" and m not in POINT_METHODS and any(f"coverage_{m}" in r for r in records)
+    ]
+    stats = {
+        (m, metric): _mean_se([r.get(f"{metric}_{m}", float("nan")) for r in records])
+        for m in methods
+        for metric, *_ in SEED_COLUMNS
+    }
+    cells = {m: [method_label(m, has_z)] for m in methods}
+    for metric, _, fmt, higher in SEED_COLUMNS:
+        ranks = _ranks({m: stats[m, metric][0] for m in methods}, fmt, higher)
+        for m in methods:
+            mean, se, n = stats[m, metric]
+            if not n:
+                cells[m].append("--")
+                continue
+            body = f"{mean:{fmt}}" + (rf" \pm {se:{fmt}}" if n > 1 else "")
+            body = {1: rf"\bm{{{body}}}", 2: rf"\mathit{{{body}}}"}.get(ranks.get(m), body)
+            cells[m].append(f"${body}$")
+
+    def summary(prefix: str, names, fmt: str) -> str:
+        parts = []
+        for m in names:
+            mean, se, n = _mean_se([r.get(f"{prefix}{m}", float("nan")) for r in records])
+            if n:
+                parts.append(f"{m} {mean:{fmt}}" + (f" +- {se:{fmt}}" if n > 1 else ""))
+        return ", ".join(parts) or "none"
+
+    counts = {m: stats[m, "coverage"][2] for m in methods}
+    rmse = [m for m in ("ERM", "DA+ERM", "ERM+INV") if any(f"rmse_{m}" in r for r in records)]
+    lines = [
+        f"% do-MNIST population metrics across {len(seeds)} seeds {seeds}: mean +- SE over the seeds "
+        "(std with ddof 1 over sqrt of the seeds with a finite value).",
+        f"% {fixed.get('n_queries')} MNIST-test queries at pop_seed {fixed.get('pop_seed')}; gamma "
+        f"{fixed.get('gamma')}; target_coverage {target_coverage}.",
+        f"% split_seed {fixed.get('split_seed')} / pop_seed {fixed.get('pop_seed')} / exemplar_seed "
+        f"{fixed.get('exemplar_seed')} fixed; replicate draw and nets vary per seed.",
+        "% per column the best mean in bold, the second best in italics, ties at the printed precision sharing the "
+        "mark: coverage highest, width and worst error lowest; -- for a method without a bound at any query.",
+        "% worst err. is the mean over queries of the larger squared bound error.",
+        *(
+            [f"% seeds with a bound: {', '.join(f'{m} {n}/{len(seeds)}' for m, n in counts.items())}."]
+            if any(n < len(seeds) for n in counts.values())
+            else []
+        ),
+        f"% share of queries without a bound, mean +- SE: {summary('nan_', methods, '.3f')}.",
+        f"% point estimators, not ranked, population RMSE to h_*, mean +- SE: {summary('rmse_', rmse, '.4f')}.",
+        r"% needs \usepackage{bm}",
+    ]
+    head = ["", *(header for _, header, _, _ in SEED_COLUMNS)]
+    lines += [
+        r"{\small",
+        r"\begin{tabular}{l" + "r" * (len(head) - 1) + "}",
+        r"\toprule",
+        " & ".join(head) + r" \\",
+        r"\midrule",
+        *[" & ".join(cells[m]) + r" \\" for m in methods],
+        r"\bottomrule",
+        r"\end{tabular}",
+        r"}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 # =============================================================================
@@ -1127,7 +1238,8 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         builds a fresh runner, which redraws the replicate, retrains its nets and
         refits every method. The split, the population and the exemplars stay
         fixed. The first runner's replicate is released first (the caller still
-        holds it). `seeds.json` is rewritten after every seed."""
+        holds it). `seeds.json` and its table `seeds_table.tex`
+        (`domnist_seed_table`) are rewritten after every seed."""
         seed, n_seeds = int(self.kwargs["seed"]), int(self.kwargs["n_experiments"])
         records = [self._seed_record(seed, scores)]
         self._save_seeds(records)
@@ -1168,6 +1280,10 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
             ),
         )
         save(_jsonable(seeds), "seeds", self.name, "json", subdir=SUBDIR_QUERY)
+        tex = domnist_seed_table(
+            records, has_z=self.has_z, target_coverage=seeds["target_coverage"], fixed=seeds["fixed"]
+        )
+        save(tex, "seeds_table", self.name, "tex", subdir=SUBDIR_QUERY)
 
     @staticmethod
     def _exemplar_summary(results, ate) -> dict[str, float]:
