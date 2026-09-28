@@ -4,10 +4,10 @@ refactor8 is on top of refactor6's tip M. `benchmark_gamma_z` projects the same
 omitted W onto the configured instrument set instead of the treatments (Cinelli
 and Hazlett's IV framework, paper [12]); `direct_effect_gamma_z` converts a direct
 tax elasticity to gamma_z (Conley, Hansen and Rossi); T3 (`benchmarks_iv.tex`)
-prints both; F1 and F2 now come in a pair per coefficient (`beta_pn_*`, `beta_p_*`)
-and F2 marks the declared radius and the two benchmark leaks after the bootstrap
-quantiles. refactor20 draws F2 in gamma_z units: the grid is `GAMMA_Z_RANGE`, each
-model is handed gamma_z itself, and the marks are gamma_z values. Legs:
+prints both; F1 and F2 now come in a pair per coefficient (`beta_pn_*`, `beta_p_*`).
+refactor20 draws F2 in gamma_z units: the grid is `GAMMA_Z_RANGE` and each model is
+handed gamma_z itself. F2 marks only the declared gamma_z, the budget F1 holds
+fixed. Legs:
 
   (i)   T2 does not move: the `benchmark_gamma` refactor keeps lag-q 0.3121 and
         tax-diff 0.1502 to 1e-3 and the OVB / CH identity to 1e-9 on every row.
@@ -24,9 +24,8 @@ model is handed gamma_z itself, and the marks are gamma_z values. Legs:
         another. Catches: a var(z_tax) or sigma slipped in the formula, a moved
         default whose delta was not re-derived.
   (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): every
-        `beta_p_*` and `beta_pn_*` file and T3 exist; F2's marks are (0.010798,
-        0.050914, GAMMA_Z_DEFAULT, 0.311252, 0.090531) to relative 1e-3, the old radii
-        squared, so a61's first two stay where they were; F2's grid spans
+        `beta_p_*` and `beta_pn_*` file and T3 exist; F2's marks are exactly
+        (GAMMA_Z_DEFAULT,) on both coefficients; F2's grid spans
         GAMMA_Z_RANGE, the square of the old r_Z grid (`OLD_BUDGET_RANGE`); the
         precondition that makes the relabelling exact holds, s^2 = sigma_sq / rho is 1
         to 1e-12 on every swept model and on the runner the marks are read at; F2's
@@ -40,10 +39,10 @@ model is handed gamma_z itself, and the marks are gamma_z values. Legs:
         largest gamma_z to 1e-3, the addiction-stock leak having slackened the
         instrument, and whatever the block lists, every band the gamma_z axis moves
         widens along it monotonically and strictly end to end. Catches: the loop
-        writing one coefficient twice, the marks reordered or left in radius units,
-        the leak grid not reaching the benchmark, the relabelling moving a curve (or a
-        model whose s^2 left 1, where it would), a model left at a swept gamma_z, a
-        band that stops respecting nesting.
+        writing one coefficient twice, a benchmark mark back on F2, the leak grid not
+        reaching the benchmark, the relabelling moving a curve (or a model whose s^2
+        left 1, where it would), a model left at a swept gamma_z, a band that stops
+        respecting nesting.
   (D)   the digest leg (scripts/digest_leg.py): with `iv: []` nothing here runs
         and the shipped artifacts hash as before.
 
@@ -73,7 +72,6 @@ from src.experiments.cigarettes import (  # noqa: E402
     GAMMA_Z_RANGE,
     HEADLINE_COEFFICIENTS,
     HEADLINE_METHODS,
-    IV_BENCHMARKS,
     benchmark_covariates,
     benchmark_gamma,
     benchmark_gamma_z,
@@ -283,15 +281,9 @@ def leg_iv():
         all(s in table for s in ("0.3113", "0.0905", f"{DECLARED_DELTA:.4f}")),
     )
     marks = load(folder, "beta_pn_budget_vlines.pkl")
-    # gamma_z units: the bootstrap radii 0.1039 and 0.2256 squared over s^2 = 1, the
-    # declared gamma_z, and T3's two leaks (the old radii 0.5579 and 0.3009, squared)
-    want = np.array((0.010798, 0.050914, GAMMA_Z_DEFAULT, 0.311252, 0.090531))
-    check(
-        "(iv) F2 marks (median, p95, declared, lag-q, tax-diff) to relative 1e-3",
-        len(marks) == 3 + len(IV_BENCHMARKS) and np.max(np.abs(np.asarray(marks) - want) / want) < 1e-3,
-        f"{np.round(marks, 4)}",
-    )
-    check("(iv) beta_p and beta_pn F2 marks agree", np.allclose(marks, load(folder, "beta_p_budget_vlines.pkl")))
+    # only the declared gamma_z, the budget F1 holds fixed
+    check("(iv) F2 marks only the declared gamma_z", np.array_equal(marks, [GAMMA_Z_DEFAULT]), f"{marks}")
+    check("(iv) beta_p and beta_pn F2 marks agree", np.array_equal(marks, load(folder, "beta_p_budget_vlines.pkl")))
     gamma_zs = load(folder, "beta_pn_budget_values.pkl")
     check(
         "(iv) F2 grid spans GAMMA_Z_RANGE",

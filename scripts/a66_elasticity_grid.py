@@ -21,7 +21,9 @@ pinned upper left. Legs:
   (iii) `_draw_bands` on a synthetic pair: one fill and two edge lines per
         interval method, the edges in `line_style`'s pattern, a (patch, line)
         legend handle; `_mark_frame` keeps a log frame positive with a mark far
-        above the grid. Catches: the edges dropped, the F2 blank frame back.
+        above the grid, and with `clip` holds the frame to the grid's ends and
+        drops the marks outside it. Catches: the edges dropped, the F2 blank frame
+        back, a clipped frame widened again.
   (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): the
         F1 and F2 outcomes of both coefficients are keyed by the headline methods
         THE RECIPE LISTS (the intersection, as `cigarettes.py` keys the figure),
@@ -38,7 +40,9 @@ pinned upper left. Legs:
         one legend, in the top-right panel pinned upper left, one entry per
         headline method the recipe lists; x labels on the bottom row
         only, y labels on the first column only, the row labels the two thetas,
-        the gamma column linear and the gamma_z (leak) column log;
+        the gamma column linear and the gamma_z (leak) column log; each panel
+        carries exactly one mark, the budget its row's other figure holds fixed
+        (the panel's own `_vlines.pkl`), and its x-limits are its grid's ends;
         on a copy with the neighbour-price pkls removed the bottom row is off and
         the top row still draws. Catches: the grid not wired, the legend shared,
         a missing pair taking the grid down.
@@ -231,6 +235,13 @@ def leg_iii():
         "(iii) a log frame with a far mark stays positive and covers the mark",
         x_lo > 0 and x_hi >= 0.5579 and marks == [0.5579],
     )
+    grid = np.geomspace(2**-16, 2**-1, 4)
+    x_lo, x_hi, marks = plotting._mark_frame(grid, (0.0177, 0.5579, np.nan), "log", clip=True)
+    check(
+        "(iii) a clipped frame is the grid's ends and keeps only the marks inside it",
+        (x_lo, x_hi) == (grid[0], grid[-1]) and marks == [0.0177],
+        f"{x_lo} {x_hi} {marks}",
+    )
 
 
 def leg_iv():
@@ -358,6 +369,21 @@ def leg_v(artifacts):
             "(v) the leak (gamma_z) column is log, the confounding (gamma) column linear",
             axes[0, 1].get_xscale() == "log" and axes[0, 0].get_xscale() == "linear",
         )
+        for r, (coefficient, _) in enumerate(aggregate.ELASTICITY_ROWS):
+            for c, axis in enumerate(aggregate.ELASTICITY_AXES):
+                ax, stem = axes[r, c], aggregate._elasticity_stem(artifacts, coefficient, axis)
+                grid, want = load(f"{stem}_values.pkl"), load(f"{stem}_vlines.pkl")
+                # an axvline is the one two-point line spanning the axes' height
+                vlines = [
+                    line.get_xdata()[0]
+                    for line in ax.get_lines()
+                    if len(line.get_xdata()) == 2 and list(line.get_ydata()) == [0, 1]
+                ]
+                check(
+                    f"(v) beta_{coefficient} {axis}: one mark, the held budget, x-limits the grid's ends",
+                    len(want) == 1 and vlines == [want[0]] and ax.get_xlim() == (float(grid[0]), float(grid[-1])),
+                    f"{vlines} vs {want}, {ax.get_xlim()} vs ({grid[0]}, {grid[-1]})",
+                )
     plt.close(fig)
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(artifacts, "cigarettes", SUBDIR_QUERY)

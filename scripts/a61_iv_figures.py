@@ -17,7 +17,8 @@ toggle) and both recipes (`normalize: true`). Legs:
         and is non-empty: F1 and F2 with their pkls, T1 carrying the benchmark
         column, T2, and the four gamma sweep figures; F1's own grid
         (`beta_pn_gamma_values.pkl`) spans exactly `GAMMA_RANGE` and its outcomes
-        carry no NaN cell, so (ii)'s "shipped grid" is the figure's; `_run_sweeps` handed
+        carry no NaN cell, so (ii)'s "shipped grid" is the figure's; F1 marks only
+        the query gamma and F2 only the declared gamma_z; `_run_sweeps` handed
         `normalize=True` to every sweep figure of both runs. `create_sweep_plot`
         swallows exceptions and only logs them, so existence is the check that
         bites. Catches: a figure that raises inside the plotter, the toggle not
@@ -112,6 +113,7 @@ from src.experiments.cigarettes import (  # noqa: E402
 )
 from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
+    QUERY_GAMMA,
     MethodRegistry,
     parse_experiment_plan,
     resolve_dataset_block,
@@ -428,27 +430,15 @@ def leg_i():
     )
     check("(i) F1's grid spans exactly GAMMA_RANGE", spans, f"{f1_grid}")
     check("(i) F1's outcomes carry no NaN cell", all(np.all(np.isfinite(v)) for v in outcomes.values()))
+    # each figure marks only the budget the other holds fixed: F1 the query gamma,
+    # F2 the declared gamma_z (the gate's own radius, `GATE_GAMMA_Z`)
+    gamma = QUERY_GAMMA[recipe("cigarettes")["spec"]]
     with open(os.path.join(query, "beta_pn_gamma_vlines.pkl"), "rb") as handle:
         vlines = pickle.load(handle)  # noqa: S301
-    print(
-        f"      RECORDED F1 marks: floor {vlines[0]:.4f}, tax-diff {vlines[1]:.4f}, lag-q {vlines[2]:.4f}, "
-        f"gamma*(b) {vlines[3]:.4f}, 3x {vlines[4]:.4f}"
-    )
-    check(
-        "(i) F1's marks are the plan's (0.111, 0.150, 0.312, 0.371, 0.450) to 1e-3",
-        np.abs(vlines - (0.1107, 0.1502, 0.3121, 0.3705, 0.4505)).max() < 1e-3,
-    )
+    check(f"(i) F1 marks only the query gamma {gamma:g}", np.array_equal(vlines, [gamma]), f"{vlines}")
     with open(os.path.join(query, "beta_pn_budget_vlines.pkl"), "rb") as handle:
         marks = pickle.load(handle)  # noqa: S301
-    # F2 is in gamma_z units: p5's moment radii 0.1039 and 0.2256, squared over s^2 = 1
-    print(
-        f"      RECORDED F2 marks: cluster-bootstrap moment median {marks[0]:.6f}, p95 {marks[1]:.6f} "
-        "(p5: 0.1039^2 = 0.0108, 0.2256^2 = 0.0509)"
-    )
-    check(
-        "(i) F2's marks are p5's radii in gamma_z units, 0.010798 and 0.050914 to relative 1e-3",
-        abs(marks[0] / 0.010798 - 1) < 1e-3 and abs(marks[1] / 0.050914 - 1) < 1e-3,
-    )
+    check(f"(i) F2 marks only the declared gamma_z {GATE_GAMMA_Z:g}", np.array_equal(marks, [GATE_GAMMA_Z]), f"{marks}")
     for metric in ("width", "worst_error", "approx_error", "coverage"):
         check(
             f"(i) cigarettes: _run_sweeps handed normalize=True to gamma_{metric}",
