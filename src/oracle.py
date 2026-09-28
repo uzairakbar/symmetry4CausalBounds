@@ -488,8 +488,8 @@ def eps_iv_z_star(
 
     ONE number serves every Z constraint (SS2.6), hence the max: the budget has to
     admit both. They differ only by the DA's own misspecification. MEASURED on the
-    simulation at `iv: 4` (d 32, m 4, n 2048): 0.031089 and 0.031089 under the
-    shipped, exactly invariant DA, 0.031089 and 0.557738 under the robustness
+    simulation at `iv: 1` (d 32, m 1, n 2048): 0.026391 and 0.026391 under the
+    shipped, exactly invariant DA, 0.026391 and 0.155385 under the epsilon
     sweep's retuned one. No orthogonalisation against the translation amounts:
     the T constraint is a separate constraint with a separate budget, and nothing
     is added in quadrature any more.
