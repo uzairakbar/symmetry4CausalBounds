@@ -242,7 +242,7 @@ def a29_optical_report(n_experiments=8):
         a_sq, b_sq, s_sq, s_da_sq = sample_quantities(data, runner.sems[j], runner.mean_match)
         r_emp = b_sq / (s_da_sq * (a_sq / s_sq))
         o = oracle_of(a_sq, s_sq, s_da_sq / s_sq)
-        eps = epsilon_star(runner.sems[j], runner.das[j], features=runner._features_at(j))
+        eps = epsilon_star(runner.sems[j], runner.das[j], features=runner._features)
         print(
             f"  report: optical exp {j} SAMPLE-FIT (not the population threshold): r_emp {r_emp:.4f} vs "
             f"new {thm1_gamma_min(o) / o.gamma_star:.4f} old {old_gamma_min(o) / o.gamma_star:.4f} "
