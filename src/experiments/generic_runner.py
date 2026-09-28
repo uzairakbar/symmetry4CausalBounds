@@ -365,12 +365,31 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
     def _features(self) -> Callable | None:
         return self.poly.fit_transform if self.poly else None
 
+    def make_sem(self, experiment_index: int):
+        """Experiment j's SEM. A fresh factory call by default; a dataset with
+        several recorded SEMs picks one per experiment instead."""
+        return self.sem_factory()
+
+    def poly_for_sem(self, sem) -> Callable | None:
+        """The feature map of one SEM; the shared transform by default."""
+        return self.poly
+
+    def _poly_at(self, experiment_index: int) -> Callable | None:
+        polys = getattr(self, "polys", None)
+        return self.poly if polys is None else polys[experiment_index]
+
+    def _features_at(self, experiment_index: int) -> Callable | None:
+        poly = self._poly_at(experiment_index)
+        return poly.fit_transform if poly else None
+
     def setup_sems_and_das(self):
         """Setup SEMs and DAs for all experiments."""
-        self.sems = [self.sem_factory() for _ in range(self.n_experiments)]
+        self.sems = [self.make_sem(j) for j in range(self.n_experiments)]
+        self.polys = [self.poly_for_sem(sem) for sem in self.sems]
         self.das = [self.da_factory(sem) for sem in self.sems]
         self.oracles = [
-            self.prepare_pair(sem, da, features=self._features) for sem, da in zip(self.sems, self.das, strict=False)
+            self.prepare_pair(sem, da, features=self._features_at(j))
+            for j, (sem, da) in enumerate(zip(self.sems, self.das, strict=True))
         ]
 
     def get_da(self, experiment_index: int):
@@ -379,9 +398,10 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
     def get_oracle(self, experiment_index: int):
         return self.oracles[experiment_index]
 
-    def apply_transform(self, X: np.ndarray) -> np.ndarray:
-        if self.poly:
-            return self.poly.fit_transform(X)
+    def apply_transform(self, X: np.ndarray, experiment_index: int) -> np.ndarray:
+        poly = self._poly_at(experiment_index)
+        if poly:
+            return poly.fit_transform(X)
         return X
 
     @property
@@ -430,7 +450,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
                 X=X_raw,
                 y=y,
                 Z=Z_base,
-                features=self._features,
+                features=self._features_at(experiment_index),
                 mean_match=self.mean_match,
             )
         z_piece = self._baseline_z[experiment_index]
@@ -461,8 +481,15 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             XZ_test, _ = sem(N=int(self.test_fraction * n_total), intervention=True)
             X_test_raw, _ = sem.split_instruments(XZ_test)
 
-        X_test = self.apply_transform(X_test_raw)
-        return (X_train_raw, self.apply_transform(X_train_raw), y_train, X_test, sem.f(X_test), Z_train)
+        X_test = self.apply_transform(X_test_raw, experiment_index)
+        return (
+            X_train_raw,
+            self.apply_transform(X_train_raw, experiment_index),
+            y_train,
+            X_test,
+            sem.f(X_test),
+            Z_train,
+        )
 
     def _extent(self, experiment_index: int, X_test) -> np.ndarray:
         """Target-set half-width at each query, beside `sem.f(X_test)`. Zeros for a
@@ -491,7 +518,7 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         return SweepData(
             X=X,
             y=y,
-            GX=self.apply_transform(GX_raw),
+            GX=self.apply_transform(GX_raw, experiment_index),
             G=G,
             X_test=X_test,
             estimand=estimand,
@@ -647,7 +674,7 @@ class ExpansionStrategy(GenericParamSweep):
                 self.sems[experiment_index],
                 self.das[experiment_index],
                 X=X_raw,
-                features=self._features,
+                features=self._features_at(experiment_index),
                 **augment_kwargs,
             )
             + EPS_TOL
@@ -662,7 +689,7 @@ class ExpansionStrategy(GenericParamSweep):
             self.sems[experiment_index],
             self.das[experiment_index],
             X=X_raw,
-            features=self._features,
+            features=self._features_at(experiment_index),
             mean_match=self.mean_match,
             **augment_kwargs,
         )[0]
@@ -855,7 +882,7 @@ class SampleSizeStrategy(GenericParamSweep):
         return SweepData(
             X=X,
             y=y,
-            GX=self.apply_transform(GX_raw),
+            GX=self.apply_transform(GX_raw, experiment_index),
             G=G,
             X_test=X_test,
             estimand=estimand,
@@ -916,7 +943,7 @@ class FoldStrategy(GenericParamSweep):
             # transform is row-wise: transform(tile(.)) == tile(transform(.))
             X=np.tile(X, (m, 1)),
             y=np.tile(y, (m, 1)),
-            GX=self.apply_transform(np.vstack(GX_raws)),
+            GX=self.apply_transform(np.vstack(GX_raws), experiment_index),
             G=np.vstack(Gs),
             X_test=X_test,
             estimand=estimand,

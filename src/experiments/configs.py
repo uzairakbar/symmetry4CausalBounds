@@ -129,6 +129,11 @@ class OpticalDeviceConfig:
     eps_tol: float = 2**-8
     test_fraction: float = 0.1
     dataset_index: int = 8
+    # the device of each sweep experiment: experiment j runs on the j-th entry.
+    # None = `dataset_index` first, then every other device ascending, so a
+    # one-experiment runner stays on `dataset_index`. More experiments than
+    # entries raises rather than reusing a device.
+    sweep_devices: tuple[int, ...] | None = None
     ground_truth_model: Literal["linear", "polynomial"] = "polynomial"
 
 
