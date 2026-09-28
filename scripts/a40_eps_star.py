@@ -36,8 +36,10 @@
         config.yaml that already names gaussian-noise, where the sweep and the
         rest legitimately share it.
   (vi)  the optical dip, mirroring (iii): three optical experiments, 5 steps, the
-        configured toggles; the lowest of the DA+PI and DA+PI+IV means at the
-        smallest r is < 1, both are 1.0 at r = 1 and above 0.7 throughout.
+        configured toggles, all three pinned to device 8 (`sweep_devices`, patched
+        here), the device the constant and the thresholds were tuned on; the
+        lowest of the DA+PI and DA+PI+IV means at the smallest r is < 1, both
+        are 1.0 at r = 1 and above 0.7 throughout.
         Catches: the constant back at 2^-1 (flat), the component gone (flat).
         Misses: how faint the dip is; the constant's comment says the device
         floors it near 0.95.
@@ -60,6 +62,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import replace
 
 import numpy as np
 import yaml
@@ -68,7 +71,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments import generic_runner  # noqa: E402
+from src.experiments import generic_runner, optical_device  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     DATASET_DEFAULTS,
     ROBUSTNESS_AUGMENTATION,
@@ -283,6 +286,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     seed = parser.parse_args().seed
     toggles, draw, chain = configured()
+    # the optical legs read device 8's numbers; the sweeps would otherwise span devices
+    optical_device.OPTICAL_CONFIG = replace(
+        optical_device.OPTICAL_CONFIG,
+        sweep_devices=(optical_device.OPTICAL_CONFIG.dataset_index,) * N_EXPERIMENTS_OPTICAL,
+    )
     orchs = {name: build(name, draw, chain, seed, **toggles) for name in ("simulation", "optical_device")}
     runners = {name: epsilon_runner(orch) for name, orch in orchs.items()}
     leg_i(runners)
