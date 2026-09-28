@@ -13,7 +13,7 @@ cigarettes:
     iv: [tax_s, y, cpi]
     gamma_z: 0.0177
     n_samples: 2_450
-    n_experiments: 8
+    n_experiments: 10
     sweep_samples: 64
     da_amplitude: 2.0
     sliver: false
