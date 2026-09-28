@@ -95,6 +95,10 @@ def fit_model(
 
     # Prepare fit kwargs with hyperparameters
     fit_kwargs = {**(hyperparameters or {}), **kwargs}
+    # the balls fit on the m-fold tiling take their sigma-hat dof from the
+    # untiled rows; PI and PI+IV fit on those rows already, and the point
+    # estimators take no such kwarg
+    ball_kwargs = fit_kwargs if X_base is None else {**fit_kwargs, "n_obs": len(X_base)}
 
     # baselines ignore GX: tiling them is exactly a no-op, so use the base copy
     X_solo = X if X_base is None else X_base
@@ -123,11 +127,11 @@ def fit_model(
 
     elif base == "DA+PI":
         # DA+PI uses augmented data only
-        model.fit(X=GX, y=y, **fit_kwargs)
+        model.fit(X=GX, y=y, **ball_kwargs)
 
     elif base == "PI+INV":
         # PI+INV uses both original and augmented data
-        model.fit(X=X, y=y, GX=pairs, G=G, **fit_kwargs)
+        model.fit(X=X, y=y, GX=pairs, G=G, **ball_kwargs)
 
     elif base == "PI+IV":
         # the real instrument alone, never G; empty reduces it to PI exactly
@@ -135,23 +139,23 @@ def fit_model(
 
     elif base == "PI+INV+IV":
         # the INV cone needs GX, the IV cone the real Z; empty is PI+INV exactly
-        model.fit(X=X, y=y, GX=pairs, G=G, Z=Z, **fit_kwargs)
+        model.fit(X=X, y=y, GX=pairs, G=G, Z=Z, **ball_kwargs)
 
     elif base == "DA+PI+IV":
         # the DA ball on GX with one constraint per block it is handed; an empty
         # block is (n, 0) and contributes nothing. `X_pre` is the un-augmented
         # design: a declared Z radius needs it to cross over to GX (SS2.6)
-        model.fit(X=GX, y=y, Z=z_da, T=t_da, X_pre=X, **fit_kwargs)
+        model.fit(X=GX, y=y, Z=z_da, T=t_da, X_pre=X, **ball_kwargs)
 
     elif base == "PI&DA+PI":
         # intersections fit a baseline branch on X and a DA branch on GX
-        model.fit(X=X, y=y, GX=GX, G=G, **fit_kwargs)
+        model.fit(X=X, y=y, GX=GX, G=G, **ball_kwargs)
 
     elif base == "PI&DA+PI+IV":
         # raw Z: the class hands it to its baseline and stacks G onto its DA
         # branch itself (or not, in the (Z) mode it was built for), so
         # pre-stacking here would give that branch [G, G, Z]
-        model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **fit_kwargs)
+        model.fit(X=X, y=y, GX=GX, G=G, Z=Z, **ball_kwargs)
 
     elif base == "ERM":
         # ERM uses original data

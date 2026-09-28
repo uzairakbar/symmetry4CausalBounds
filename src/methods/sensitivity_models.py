@@ -16,6 +16,7 @@ from threadpoolctl import threadpool_limits
 
 from src.methods.abstract import sensitivityAnalyzer as SA
 from src.methods.regression import LeastSquaresClosedForm as OLS
+from src.methods.regression import residual_variance
 
 # Global flag: use closed form analytic solutions where possible (standard PI)
 CLOSED_FORM_SOLUTION: bool = False
@@ -82,6 +83,7 @@ class BoundedSA(SA):
         n_jobs=1,
         mean_match=True,
         rho=1.0,
+        absorbed_rate=0.0,
     ):
         if gamma is None:
             raise ValueError("gamma must be explicitly provided")
@@ -111,6 +113,10 @@ class BoundedSA(SA):
         # Lem. 2: the identified set lives on the mean-matched slice
         # H_X = {h : E[h(X)] = E[Y]}. False keeps the pre-2026-09 geometry.
         self.mean_match = mean_match
+        # parameters partialled out of the design before it got here, per
+        # observation: the sigma-hat dof charge `absorbed_rate * n_obs` (the
+        # cigarette FWL controls, prorated to the rows fitted); 0 everywhere else
+        self.absorbed_rate = absorbed_rate
         self.query_status = None  # per-query SolveStatus, set on every predict
         self.query_diagnostics = None  # optional per-query extras, set on predict
         self.raw_bounds_ = None  # the last predict's unpadded bounds, for `repad`
@@ -257,6 +263,7 @@ class PartialR2(BoundedSA):
         n_jobs=1,
         mean_match=True,
         rho=1.0,
+        absorbed_rate=0.0,
     ):
         self._supports_closed_form = True
 
@@ -288,6 +295,7 @@ class PartialR2(BoundedSA):
             n_jobs=n_jobs,
             mean_match=mean_match,
             rho=rho,
+            absorbed_rate=absorbed_rate,
         )
 
     # ------------------------------------------------------------------ fit
@@ -320,8 +328,10 @@ class PartialR2(BoundedSA):
                 kwargs = {**kwargs, key: np.asarray(value).reshape(len(X), -1) - self.mu_}
         return X - self.mu_, np.asarray(y) - self.y_offset_, kwargs
 
-    def _fit(self, X, y, **kwargs):
+    def _fit(self, X, y, n_obs=None, **kwargs):
         self.N_samples = len(X)
+        # distinct observations behind the rows: the m sweep tiles them m-fold
+        n_obs = len(X) if n_obs is None else int(n_obs)
 
         # observable outcome limits (clipy) -- on the RAW outcome scale, which is
         # the scale `_finalize` clips on and the scale bounds come back in
@@ -330,9 +340,11 @@ class PartialR2(BoundedSA):
         X, y, kwargs = self._centre(X, y, **kwargs)
         self.h_erm = OLS().fit(X, y).solution.flatten()
 
-        # noise level: sigma^2 = min MSE. Fit on post-DA data => sigma-tilde^2.
+        # noise level: sigma^2 = min MSE, SSR / (n - k) with the intercept the
+        # slice eliminated counted in k. Fit on post-DA data => sigma-tilde^2.
         residuals = y.flatten() - X @ self.h_erm
-        self.sigma_sq = float(np.mean(residuals**2))
+        k = X.shape[1] + int(self.mean_match) + self.absorbed_rate * n_obs
+        self.sigma_sq = residual_variance(residuals, k, n_obs)
 
         # || X(h - h_erm) || = || R(h - h_erm) || for X = QR: solve on M x M
         _, R = np.linalg.qr(X)
@@ -487,7 +499,20 @@ def _trust_region_min(B, c, delta, tol=1e-12, max_iter=200):
     return float(np.linalg.norm(B @ u - c))
 
 
-def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True, rho=1.0, recalibrate=True):
+def constraint_floor(
+    design,
+    y,
+    gamma,
+    *,
+    kind,
+    GX=None,
+    Z=None,
+    mean_match=True,
+    rho=1.0,
+    recalibrate=True,
+    n_obs=None,
+    absorbed_rate=0.0,
+):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
     Returned SQUARED, matching `CopSensPI._budget()`, so the smallest admissible
@@ -516,6 +541,9 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True
         rho, recalibrate: the DA ball's factor and toggle, so the floor is over
             the recalibrated budget the fitted model actually solves at
             (`BoundedSA.budget`). Leave both at their defaults for a baseline.
+        n_obs, absorbed_rate: the sigma-hat dof of the ball, as `PartialR2._fit`
+            takes them: the distinct observations behind `design`'s rows and the
+            controls partialled out per observation.
 
     Returns:
         floor in squared budget units
@@ -532,7 +560,8 @@ def constraint_floor(design, y, gamma, *, kind, GX=None, Z=None, mean_match=True
 
     h_erm = OLS().fit(design, y).solution.flatten()
     residuals = np.asarray(y).flatten() - design @ h_erm
-    scale = float(np.sqrt(np.mean(residuals**2)))
+    n_obs = N if n_obs is None else int(n_obs)
+    scale = float(np.sqrt(residual_variance(residuals, M + int(mean_match) + absorbed_rate * n_obs, n_obs)))
     delta = np.sqrt(N) * scale * np.sqrt(max(recalibrated_gamma(gamma, rho, recalibrate), 0.0))
 
     if kind == "inv":
@@ -930,22 +959,23 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             clipy=self.clipy,
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
+            absorbed_rate=self.absorbed_rate,
         )
         branch.pad_tolerance = self.pad_tolerance  # the sweeps' IM-CI setting reaches the DA branch
         return branch
 
-    def _fit_branches(self, X, y, GX, G, Z=None):
-        self.baseline = self._branch(pad=False).fit(X, y)
-        self.augmented = self._branch(pad=self.pad).fit(GX, y)
+    def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
+        self.baseline = self._branch(pad=False).fit(X, y, n_obs=n_obs)
+        self.augmented = self._branch(pad=self.pad).fit(GX, y, n_obs=n_obs)
         # rho known once both noise levels are; the DA branch solves at gamma~
         self.augmented.rho = self.rho
 
-    def _fit(self, X, y, GX=None, G=None, Z=None, **kwargs):
+    def _fit(self, X, y, GX=None, G=None, Z=None, n_obs=None, **kwargs):
         if GX is None:
             raise ValueError("GX (augmented treatment) required")
 
         GX = np.asarray(GX).reshape(len(GX), -1)
-        self._fit_branches(X, y, GX, G, Z)
+        self._fit_branches(X, y, GX, G, Z, n_obs=n_obs)
 
         self.sigma_sq = self.baseline.sigma_sq
         self.y_min, self.y_max = float(np.min(y)), float(np.max(y))
@@ -1000,15 +1030,16 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             clipy=self.clipy,
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
+            absorbed_rate=self.absorbed_rate,
         )
         branch.pad_tolerance = self.pad_tolerance
         return branch
 
-    def _fit_branches(self, X, y, GX, G, Z=None):
+    def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
         # empty is spelled (n, 0), and a branch handed it carries no constraint
         Z = _instrument_columns(Z, len(X))
         T = _instrument_columns(G, len(X))
-        self.baseline = self._branch(pad=False).fit(X, y, Z=Z)
+        self.baseline = self._branch(pad=False).fit(X, y, Z=Z, n_obs=n_obs)
         # `X_pre` is the design before augmentation: the DA branch's declared Z
         # radius needs it to carry the declaration across (D20)
         self.augmented = self._branch(pad=self.pad).fit(
@@ -1017,6 +1048,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             Z=Z if self.instrument in ("T,Z", "Z") else None,
             T=T if self.instrument in ("T,Z", "T") else None,
             X_pre=X,
+            n_obs=n_obs,
         )
         # rho known once both noise levels are: the ball and both IV thresholds
         # are cvx Parameters, set at predict

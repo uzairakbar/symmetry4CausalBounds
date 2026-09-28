@@ -177,7 +177,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         # a raw declared gamma into the paper's units: the solver's radius
         # sigma-hat sqrt(gamma / sigma-hat^2) is back at sqrt(gamma)
         if self.raw_gamma:
-            sigma_sq = sigma_sq_hat(self.X, self.y, intercept=self.mean_match)
+            sigma_sq = sigma_sq_hat(self.X, self.y, intercept=self.mean_match, absorbed_rate=self.absorbed_rate)
             if not np.isfinite(sigma_sq) or sigma_sq <= 0.0:
                 raise ValueError(f"raw_gamma: sigma-hat^2 of the draw is {sigma_sq!r}; cannot rescale gamma.")
             self.default_gamma = default_gamma / sigma_sq
@@ -247,6 +247,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 mean_match=self.mean_match,
                 rho=self.fit_rho(),
                 recalibrate=self.recalibrate,
+                absorbed_rate=self.absorbed_rate,
             )
         except Exception as error:
             logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")

@@ -149,6 +149,11 @@ class SweepData:
 class BaseExperimentRunner(ABC):
     """Base class for experiment runners."""
 
+    # controls partialled out of the design per observation, charged to every
+    # sigma-hat as `absorbed_rate * n_obs` dof; set per dataset by the
+    # orchestrator (the cigarette FWL), 0 everywhere else
+    absorbed_rate: float = 0.0
+
     def __init__(
         self,
         seed: int,
@@ -447,6 +452,9 @@ class ParamSweepRunner(BaseExperimentRunner):
                 self.fit_gamma(experiment_index),
                 kind=kind,
                 mean_match=self.mean_match,
+                # the ball's own dof: the m sweep's rows are an m-fold tiling
+                n_obs=None if getattr(data, "X_base", None) is None else len(data.X_base),
+                absorbed_rate=self.absorbed_rate,
                 **extra,
             )
         except Exception as error:  # never let a diagnostic break a run
