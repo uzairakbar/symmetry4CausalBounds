@@ -150,8 +150,8 @@ def residualise(A: NDArray, C: NDArray) -> NDArray:
 class PanelDesign:
     """One (spec, anchor) FWL design, in the paper's units.
 
-    `y` and `b_ols` are divided by the OLS residual sd, so sigma^2 = 1 and
-    gamma* = bias^2 -- what `OpticalDeviceSEM.__init__` does, and what makes
+    `y` and `b_ols` are divided by the OLS residual sd, SSR / (n - K), so
+    sigma^2 = 1 and gamma* = bias^2 -- what `OpticalDeviceSEM.__init__` does, and what makes
     `EPS_TOL` (a module constant in outcome units) mean the same thing here.
     `X` and `Z` are left in log units; a coefficient is read back raw by
     multiplying by `sigma`.
@@ -228,8 +228,10 @@ def build_design(
     X = residualise(np.log(treatments), C)
     Z = residualise(np.log(instruments), C)
 
+    # sigma on the pre-FWL regression's dof, n - K with the controls counted
+    # (`PanelDesign.K`), as `homogeneity_f` and the clustered vcov already take it
     b_ols = np.linalg.lstsq(X, y, rcond=None)[0]
-    sigma = float(np.sqrt(np.mean((y - X @ b_ols) ** 2)))
+    sigma = float(np.sqrt(np.sum((y - X @ b_ols) ** 2) / (len(y) - X.shape[1] - C.shape[1])))
     return PanelDesign(
         X=X,
         y=y / sigma,

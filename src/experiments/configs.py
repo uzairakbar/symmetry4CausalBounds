@@ -976,6 +976,7 @@ class MethodRegistry:
         n_jobs: int = 1,
         mean_match: bool = True,
         rho: float = 1.0,
+        absorbed_rate: float = 0.0,
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
@@ -1028,6 +1029,9 @@ class MethodRegistry:
                 under a non-empty `iv:`; it enters the Z radius only
                 (`z_bound`), never the T one
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
+            absorbed_rate: controls partialled out of the design per observation,
+                charged to every ball's sigma-hat as `absorbed_rate * n_obs` dof
+                (the cigarette FWL); 0 is none. partial_r2 only.
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
@@ -1079,6 +1083,7 @@ class MethodRegistry:
             clipy=clipy,
             n_jobs=n_jobs,
             mean_match=mean_match,
+            absorbed_rate=absorbed_rate,
         )
         # every IV ball carries BOTH radii; which constraints it ends up with
         # follows from the instrument blocks it is FITTED with (`fit_model`), so

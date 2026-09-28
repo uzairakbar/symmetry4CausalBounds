@@ -258,6 +258,14 @@ def direct_effect_gamma_z(design, delta: float) -> float:
     return float((delta / design.sigma) ** 2 * np.mean(z_tax**2))
 
 
+def absorbed_rate(design, mean_match: bool = True) -> float:
+    """The FWL controls per panel row, the dof every sigma-hat on this design is
+    charged beyond its own columns: `absorbed_rate * n_obs` on the rows a ball is
+    fit on, which on the full panel is exactly `PanelDesign.K` with the free
+    intercept (the dummies span it) counted once."""
+    return (design.C.shape[1] - int(mean_match)) / design.n
+
+
 def feasibility_floor(design, Z: np.ndarray, bound: float) -> float:
     """The smallest gamma at which the PI+IV set is non-empty at this IV bound:
     the Lem. 2 ball has to reach the moment line (SS3.3). Bisected on the
@@ -265,7 +273,9 @@ def feasibility_floor(design, Z: np.ndarray, bound: float) -> float:
     low, high = 1e-6, 4.0
     for _ in range(50):
         mid = 0.5 * (low + high)
-        floor = constraint_floor(design.X, design.y, mid, kind="iv", Z=Z, mean_match=True)
+        floor = constraint_floor(
+            design.X, design.y, mid, kind="iv", Z=Z, mean_match=True, absorbed_rate=absorbed_rate(design)
+        )
         if np.sqrt(floor) <= bound:
             high = mid
         else:
@@ -354,6 +364,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         design = build_design(SEM.panel(), spec=spec, anchor=anchor)
         self._amplitude = float(da_amplitude) * float(np.std(design.X @ (V / np.linalg.norm(V))))
         logger.info(f"DA amplitude {da_amplitude:g} x sd(X . v-hat) = {self._amplitude:.6f} at {spec}.")
+        # the FWL is done once on the full panel and the sweeps subsample it, so
+        # every ball, floor and sigma-hat is charged the controls prorated to the
+        # rows it fits: sigma-hat^2 = 1 on the full panel, a few dof on a small cell
+        self.absorbed_rate = absorbed_rate(design, toggles["mean_match"])
+        toggles["absorbed_rate"] = self.absorbed_rate
 
         # DECLARED, per spec, and only the query panel ever sees it: the sweeps
         # solve at gamma*(target) through `ParamSweepRunner.fit_gamma`. See
@@ -442,6 +457,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         outer = self
 
         class CigaretteQuerySweep(GenericQuerySweep):
+            absorbed_rate = outer.absorbed_rate
+
             def __init__(inner_self, **kwargs):
                 super().__init__(
                     sem_factory=outer._sem_factory,  # bootstrap=False: the panel itself
@@ -488,6 +505,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         sem_factory = partial(outer._sem_factory, bootstrap=(outer.target == "iv" and not outer.iv_columns))
 
         class ConfiguredSweep(Strategy):
+            absorbed_rate = outer.absorbed_rate
+
             def __init__(inner_self, **kwargs):
                 super().__init__(
                     sem_factory=sem_factory,
@@ -631,7 +650,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # the moment is a radius in outcome units: over the runner's s^2 it reads
         # as the gamma_z whose bound s sqrt(gamma_z) it would fill (s is 1 here)
         median, p95 = moment_quantiles(design, Z, b)
-        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match, absorbed_rate=runner.absorbed_rate)
         leaks = tuple(float(self.benchmarks_iv()[key][3]) for key in IV_BENCHMARKS)
         logger.info(
             f"F2 benchmarks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f} (gamma_z "
