@@ -32,12 +32,14 @@ constant along it. Of the sweeps only `gamma` is wired (a ratio grid around the 
 """
 
 import dataclasses
+import gc
 import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import torch
 from loguru import logger
 
 from src.data_augmentors.do_mnist import DoMNISTDA as DA
@@ -57,6 +59,26 @@ EXPERIMENT_NAME = "do_mnist"
 
 #: the point estimators of the backend; everything else predicts an interval
 POINT_METHODS: frozenset = frozenset({"ERM", "DA+ERM", "ERM+INV"})
+
+#: the population metrics each seed contributes to `seeds.json`, by key prefix
+SEED_METRICS: tuple[str, ...] = ("coverage_", "width_", "worst_error_", "nan_", "rmse_")
+
+#: what a query runner holds of its replicate (arrays, nets, fitted models); released
+#: before the next seed's runner is built, so two replicates never share the memory
+RUNNER_STATE: tuple[str, ...] = (
+    "data_",
+    "nets",
+    "X",
+    "GX",
+    "X_raw",
+    "GX_raw",
+    "y",
+    "G",
+    "Z",
+    "context_",
+    "models_",
+    "methods",
+)
 
 
 class Flatten:
@@ -564,14 +586,16 @@ class DoMNISTQuerySweep(GenericQuerySweep):
 
     # ------------------------------------------------------------- population
 
-    def evaluate_population(self) -> dict[str, Any]:
+    def evaluate_population(self, save_outcomes: bool = True) -> dict[str, Any]:
         """Every fitted model scored on the evaluation population: coverage, width,
         approximation and worst error, wall clock (predict seconds per query) and
         the status split for the intervals, RMSE for the point estimators, each
         method's `fit_model` and floor seconds, the NaN-row share, and the
         INV floor / budget pair where PI+INV was fitted, and under `inv` the
         ERM+INV centre's own constraint value `erm_inv_con0`. A method whose every
-        interval is NaN reads coverage NaN (`evaluate_queries`), not 0."""
+        interval is NaN reads coverage NaN (`evaluate_queries`), not 0. The
+        per-query pkls are written only under `save_outcomes`, so a later seed
+        never overwrites the first seed's, which the results table reads."""
         P, h_star, _, _ = population(self.sem_test, self.n_queries, self.pop_seed)
         target = np.asarray(h_star).reshape(-1, 1)  # (n, 1), the shape `sem.f` gives elsewhere
         out: dict[str, Any] = {}
@@ -612,8 +636,9 @@ class DoMNISTQuerySweep(GenericQuerySweep):
             prediction = np.asarray(self.nets["INV"].predict(P))
             out["rmse_ERM+INV"] = float(np.sqrt(np.nanmean((prediction.ravel() - target.ravel()) ** 2)))
         # per query, so the table can bootstrap its bands instead of reading means
-        save(target, "population_values", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
-        save(outcomes, "population_outcomes", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
+        if save_outcomes:
+            save(target, "population_values", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
+            save(outcomes, "population_outcomes", EXPERIMENT_NAME, "pkl", subdir=SUBDIR_QUERY)
         return out
 
     @staticmethod
@@ -1035,7 +1060,8 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
     def _plot_query_sweep(self, runner, results):
         """x-axis is the digit exemplars, so thumbnails replace a numeric axis. The
         population metrics, the ERM report, the prescreen and the provenance go to
-        `run.json` beside the pkls."""
+        `run.json` beside the pkls. Then the population metrics across seeds
+        (`_run_seeds`), the first seed being this runner's."""
         log_nesting(results, self.inv_recenter)
         log_vacuous(results)
         digits = [int(d) for d in runner.digits_]
@@ -1045,7 +1071,8 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
 
         ate = np.asarray(results["ATE"]).reshape(len(digits), -1) if "ATE" in results else runner.estimand(None)
         record = dict(runner.data_.diagnostics)
-        record.update(runner.evaluate_population())
+        scores = runner.evaluate_population()
+        record.update(scores)
         record.update(self._exemplar_summary(results, ate))
         if self.tint_ is not None:
             # after the population: its status split is read right after its own predict
@@ -1092,6 +1119,55 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         logger.info(f"do-mnist population: {headline}")
 
         create_digit_sweep_plot(runner.exemplar_images_, results, labels=digits, experiment=self.name, has_z=self.has_z)
+        self._run_seeds(runner, scores)
+
+    def _run_seeds(self, runner, scores: dict[str, Any]):
+        """The population metrics at `n_experiments` seeds, `seed + j` as on the
+        gamma sweep path: seed 0 is the query runner's, and every further seed
+        builds a fresh runner, which redraws the replicate, retrains its nets and
+        refits every method. The split, the population and the exemplars stay
+        fixed. The first runner's replicate is released first (the caller still
+        holds it). `seeds.json` is rewritten after every seed."""
+        seed, n_seeds = int(self.kwargs["seed"]), int(self.kwargs["n_experiments"])
+        records = [self._seed_record(seed, scores)]
+        self._save_seeds(records)
+        self._release(runner)
+        for j in range(1, n_seeds):
+            logger.info(f"do-mnist: population at seed {seed + j} ({j + 1}/{n_seeds})")
+            r = self.get_query_runner_cls()(
+                methods=self.methods, **{**self._get_clean_kwargs(), "n_experiments": 1, "seed": seed + j}
+            )
+            r.run("Query Sweep")
+            records.append(self._seed_record(seed + j, r.evaluate_population(save_outcomes=False)))
+            self._save_seeds(records)
+            self._release(r)
+            del r
+
+    @staticmethod
+    def _seed_record(seed: int, scores: dict[str, Any]) -> dict[str, Any]:
+        return {"seed": seed, **{k: v for k, v in scores.items() if k.startswith(SEED_METRICS)}}
+
+    @staticmethod
+    def _release(runner):
+        for name in RUNNER_STATE:
+            if hasattr(runner, name):
+                setattr(runner, name, None)
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def _save_seeds(self, records: list[dict[str, Any]]):
+        seeds = dict(
+            records=records,
+            target_coverage=float(self.target_coverage),
+            fixed=dict(
+                gamma=float(self.gamma),
+                n_queries=int(self.n_queries),
+                split_seed=int(self.split_seed),
+                pop_seed=int(self.pop_seed),
+                exemplar_seed=int(self.exemplar_seed),
+            ),
+        )
+        save(_jsonable(seeds), "seeds", self.name, "json", subdir=SUBDIR_QUERY)
 
     @staticmethod
     def _exemplar_summary(results, ate) -> dict[str, float]:
