@@ -13,9 +13,10 @@ net, no run; seconds on a CPU).
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
         the seven methods with PI+INV last, carry the
         pinned values (`inv_recenter: off`, PI's selected gamma, `target_coverage`
-        0.995, `erm_inv_tau` 4e-4, `net: domnist-pool`), agree on every key, and the smoke script's
+        0.995, `erm_inv_tau` 4e-4, `net: domnist-pool`), agree on every key but
+        `n_experiments` (the recipe runs RECIPE_SEEDS seeds), and the smoke script's
         BLOCK mirrors them; the tint recipe F2 is F1's block plus the ten-digit
-        tint spec.
+        tint spec, its seed count aside.
   (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
         unknown backend raises, `partial_r2` still builds `ALL_METHODS`, and the
         do-MNIST orchestrator's own registry builds the block's method list lazily
@@ -66,6 +67,7 @@ def check(name: str, condition: bool, detail: str = ""):
 
 #: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows), pooled nets
 GAMMA = 0.062082436071912536
+RECIPE_SEEDS = 10  # doMnistFigF1's population seeds
 MINIMAL = dict(seed=42, augmentation="translate", gamma=0.085, epsilon=0.04, methods=["PI"])
 
 
@@ -189,19 +191,26 @@ def leg_ii():
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
         check(f"(ii) {name} split 40k/10k/10k", resolved["split"] == {"A": 40_000, "B": 10_000, "C": 10_000})
-    shared = set(shipped) & set(block_r) - {"experiment"}
+    # the recipe's seed count is its own: F1 scores the population over RECIPE_SEEDS
+    # seeds while config.yaml and F2 keep one
+    shared = set(shipped) & set(block_r) - {"experiment", "n_experiments"}
     same = [k for k in shared if shipped[k] == block_r[k]]
     differ = sorted(set(shared) - set(same))
-    check("(ii) the two blocks agree on every shared key", not differ, str(differ))
+    check("(ii) the two blocks agree on every shared key but n_experiments", not differ, str(differ))
+    check(
+        f"(ii) the recipe runs {RECIPE_SEEDS} seeds",
+        block_r["n_experiments"] == RECIPE_SEEDS,
+        str(block_r["n_experiments"]),
+    )
     check("(ii) the recipe carries the query experiment only", block_r["experiment"] == {"query": True})
     toggles = recipe["defaults"]
     check("(ii) the recipe pins the toggles", toggles["recalibrate"] is False and toggles["pad"] is False)
     with open(os.path.join(REPO, "recipes", "doMnistTintFigF2.yaml")) as fh:
         tint_recipe = yaml.safe_load(fh)
     block_t = tint_recipe["do_mnist"]
-    same_t = {k for k in set(block_t) - {"experiment"} if block_t[k] == block_r.get(k)}
-    differ_t = sorted(set(block_t) - {"experiment"} - same_t)
-    check("(ii) the tint recipe F2 is F1's block key for key", not differ_t, str(differ_t))
+    same_t = {k for k in set(block_t) - {"experiment", "n_experiments"} if block_t[k] == block_r.get(k)}
+    differ_t = sorted(set(block_t) - {"experiment", "n_experiments"} - same_t)
+    check("(ii) the tint recipe F2 is F1's block key for key but n_experiments", not differ_t, str(differ_t))
     check(
         "(ii) F2 and F1 share their defaults and hyperparameters",
         tint_recipe["defaults"] == recipe["defaults"] and tint_recipe["hyperparameters"] == recipe["hyperparameters"],
