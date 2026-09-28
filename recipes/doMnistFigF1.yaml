@@ -25,7 +25,7 @@ do_mnist:
     calibrate_sigma: true
     gamma: 0.062082436071912536     # PI's gamma at target_coverage on split C (select_domnist_gamma.py)
     target_coverage: 0.995
-    epsilon: 0.04
+    epsilon: 0.05                   # headroom over DA+PI+IV's constraint floor across seeds
     erm_inv_tau: 0.0004
     gamma_z_star: 0.0
     inv_recenter: off               # default copsens behavior
@@ -46,6 +46,8 @@ do_mnist:
         - PI
         - DA+PI
         - DA+PI+IV
+        - PI&DA+PI
+        - PI&DA+PI+IV
         - PI+INV
     experiment:
         query: true

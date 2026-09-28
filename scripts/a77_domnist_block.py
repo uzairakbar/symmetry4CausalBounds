@@ -11,12 +11,14 @@ net, no run; seconds on a CPU).
         an instrument-mode spelling and the old `backend`/`unfrozen_layers`/`link`/
         `solver` keys all raise; `im-ci` is forced to 0.
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
-        the seven methods with PI+INV last, carry the
+        their method lists with PI+INV last (config.yaml the seven, the recipe
+        RECIPE_METHODS with both intersections), carry the
         pinned values (`inv_recenter: off`, PI's selected gamma, `target_coverage`
         0.995, `erm_inv_tau` 4e-4, `net: domnist-pool`), agree on every key but
-        `n_experiments` (the recipe runs RECIPE_SEEDS seeds), and the smoke script's
+        `n_experiments`, `epsilon` and `methods` (the recipe runs RECIPE_SEEDS seeds
+        at RECIPE_EPSILON), and the smoke script's
         BLOCK mirrors them; the tint recipe F2 is F1's block plus the ten-digit
-        tint spec, its seed count aside.
+        tint spec, the recipe's own keys aside.
   (iii) the registry: `backend="copsens"` builds exactly the ten `COPSENS_METHODS`, an
         unknown backend raises, `partial_r2` still builds `ALL_METHODS`, and the
         do-MNIST orchestrator's own registry builds the block's method list lazily
@@ -68,6 +70,8 @@ def check(name: str, condition: bool, detail: str = ""):
 #: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows), pooled nets
 GAMMA = 0.062082436071912536
 RECIPE_SEEDS = 10  # doMnistFigF1's population seeds
+RECIPE_EPSILON = 0.05  # doMnistFigF1's budget
+RECIPE_METHODS = ["ATE", "ERM", "DA+ERM", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV", "PI+INV"]
 MINIMAL = dict(seed=42, augmentation="translate", gamma=0.085, epsilon=0.04, methods=["PI"])
 
 
@@ -175,28 +179,34 @@ def leg_ii():
     with open(os.path.join(REPO, "recipes", "doMnistFigF1.yaml")) as fh:
         recipe = yaml.safe_load(fh)
     block_r = recipe["do_mnist"]
-    for name, block in (("config.yaml", shipped), ("recipe", block_r)):
+    for name, block, count, eps in (
+        ("config.yaml", shipped, 7, 0.04),
+        ("recipe", block_r, len(RECIPE_METHODS), RECIPE_EPSILON),
+    ):
         resolved = resolve_dataset_block("do_mnist", {**block, "im-ci": 0})
         check(f"(ii) {name} block resolves", resolved is not None)
         methods = resolved["methods"]
-        seven = len(methods) == 7 and methods[-1] == "PI+INV"
-        check(f"(ii) {name} lists seven methods, PI+INV last", seven, str(methods))
+        listed = len(methods) == count and methods[-1] == "PI+INV"
+        check(f"(ii) {name} lists {count} methods, PI+INV last", listed, str(methods))
         check(f"(ii) {name} does not list ERM+INV", "ERM+INV" not in methods)
         check(f"(ii) {name} inv_recenter off", resolved["inv_recenter"] == "off")
         check(f"(ii) {name} gamma is PI's selected {GAMMA}", resolved["gamma"] == GAMMA)
         check(f"(ii) {name} target_coverage 0.995", resolved["target_coverage"] == 0.995)
         check(f"(ii) {name} erm_inv_tau 4e-4", resolved["erm_inv_tau"] == 4e-4)
-        check(f"(ii) {name} epsilon 0.04", resolved["epsilon"] == 0.04)
+        check(f"(ii) {name} epsilon {eps}", resolved["epsilon"] == eps)
         check(f"(ii) {name} net domnist-pool", resolved["net"] == "domnist-pool")
         check(f"(ii) {name} mix_in 0.05", resolved["mix_in"] == 0.05)
         check(f"(ii) {name} exemplar_seed 420", resolved["exemplar_seed"] == 420)
         check(f"(ii) {name} split 40k/10k/10k", resolved["split"] == {"A": 40_000, "B": 10_000, "C": 10_000})
-    # the recipe's seed count is its own: F1 scores the population over RECIPE_SEEDS
-    # seeds while config.yaml and F2 keep one
-    shared = set(shipped) & set(block_r) - {"experiment", "n_experiments"}
+    # the recipe's seed count, budget and method list are its own: F1 scores the
+    # population over RECIPE_SEEDS seeds at RECIPE_EPSILON with both intersections,
+    # while config.yaml and F2 keep one seed, 0.04 and the seven methods
+    check("(ii) the recipe lists RECIPE_METHODS", block_r["methods"] == RECIPE_METHODS, str(block_r["methods"]))
+    own = {"experiment", "n_experiments", "epsilon", "methods"}
+    shared = set(shipped) & set(block_r) - own
     same = [k for k in shared if shipped[k] == block_r[k]]
     differ = sorted(set(shared) - set(same))
-    check("(ii) the two blocks agree on every shared key but n_experiments", not differ, str(differ))
+    check("(ii) the two blocks agree on every shared key but the recipe's own", not differ, str(differ))
     check(
         f"(ii) the recipe runs {RECIPE_SEEDS} seeds",
         block_r["n_experiments"] == RECIPE_SEEDS,
@@ -208,9 +218,9 @@ def leg_ii():
     with open(os.path.join(REPO, "recipes", "doMnistTintFigF2.yaml")) as fh:
         tint_recipe = yaml.safe_load(fh)
     block_t = tint_recipe["do_mnist"]
-    same_t = {k for k in set(block_t) - {"experiment", "n_experiments"} if block_t[k] == block_r.get(k)}
-    differ_t = sorted(set(block_t) - {"experiment", "n_experiments"} - same_t)
-    check("(ii) the tint recipe F2 is F1's block key for key but n_experiments", not differ_t, str(differ_t))
+    same_t = {k for k in set(block_t) - own if block_t[k] == block_r.get(k)}
+    differ_t = sorted(set(block_t) - own - same_t)
+    check("(ii) the tint recipe F2 is F1's block key for key but the recipe's own", not differ_t, str(differ_t))
     check(
         "(ii) F2 and F1 share their defaults and hyperparameters",
         tint_recipe["defaults"] == recipe["defaults"] and tint_recipe["hyperparameters"] == recipe["hyperparameters"],
