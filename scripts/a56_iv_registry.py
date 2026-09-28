@@ -89,6 +89,7 @@ import digest_leg  # noqa: E402
 
 import src.methods.sensitivity_models as solvers  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
+from src.experiments.cigarettes import absorbed_rate  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     ALL_METHODS,
     COPSENS_METHODS,
@@ -548,6 +549,7 @@ def leg_vi(seed):
         clipy=False,
         n_jobs=1,
         mean_match=True,
+        absorbed_rate=absorbed_rate(design),
     )
     fitted = {name: declared[name]().fit(**calls[name]) for name in declared}
     fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline
@@ -580,6 +582,7 @@ def leg_vi(seed):
         clipy=False,
         n_jobs=1,
         mean_match=True,
+        absorbed_rate=absorbed_rate(design),
     )
     fitted = {name: both[name]().fit(**calls[name]) for name in both}
     fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline

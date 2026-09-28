@@ -53,6 +53,7 @@ from src.experiments.configs import TOGGLE_KEYS, MethodRegistry, resolve_dataset
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
+from src.methods.regression import residual_variance  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
     IntersectedPartialR2,
     PartialR2,
@@ -98,7 +99,7 @@ def cor3(design, y, Q, gamma):
     mu, ybar = design.mean(axis=0), float(np.mean(y))
     Dc, yc = design - mu, np.asarray(y).flatten() - ybar
     h_erm = np.linalg.lstsq(Dc, yc, rcond=None)[0]
-    sigma = float(np.sqrt(np.mean((yc - Dc @ h_erm) ** 2)))
+    sigma = float(np.sqrt(residual_variance(yc - Dc @ h_erm, Dc.shape[1] + 1)))
     cov_inv = np.linalg.pinv(Dc.T @ Dc / len(Dc))
     Qc = Q - mu
     margin = sigma * np.sqrt(gamma) * np.sqrt(np.maximum(0.0, np.sum((Qc @ cov_inv) * Qc, axis=1)))

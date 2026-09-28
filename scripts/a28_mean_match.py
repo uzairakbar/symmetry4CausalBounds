@@ -31,6 +31,7 @@ from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.methods.regression import residual_variance  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
     constraint_floor,
     inv_constraint_terms,
@@ -101,7 +102,7 @@ def _ball(design, y, gamma):
     D = np.hstack([design, np.ones((N, 1))])
     h1_erm = np.linalg.lstsq(D, y, rcond=None)[0]
     residual = y - D @ h1_erm
-    scale = float(np.sqrt(np.mean(residual**2)))
+    scale = float(np.sqrt(residual_variance(residual, D.shape[1])))
     _, R = np.linalg.qr(D)
     return R, h1_erm, np.sqrt(N) * scale * np.sqrt(max(gamma, 0.0)), D, float(np.mean(y))
 
@@ -252,7 +253,7 @@ def leg_ii():
     mu, ybar = X.mean(axis=0), float(np.mean(y))
     Xc, yc = X - mu, np.asarray(y).flatten() - ybar
     h_erm = np.linalg.lstsq(Xc, yc, rcond=None)[0]
-    scale = float(np.sqrt(np.mean((yc - Xc @ h_erm) ** 2)))
+    scale = float(np.sqrt(residual_variance(yc - Xc @ h_erm, Xc.shape[1] + 1)))
     cov_inv = np.linalg.pinv(Xc.T @ Xc / len(Xc))
     Qc = Q - mu
     margin = scale * np.sqrt(GAMMA) * np.sqrt(np.maximum(0.0, np.sum((Qc @ cov_inv) * Qc, axis=1)))

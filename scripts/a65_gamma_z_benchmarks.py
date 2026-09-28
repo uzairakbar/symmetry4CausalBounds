@@ -96,10 +96,11 @@ SPEC, IV = "t3", ("tax_s", "y", "cpi")
 OLD_BUDGET_RANGE = (2**-8, 2**-0.5)
 # the declared budget read back as a direct tax elasticity,
 # delta = sqrt(gamma_z / E[z^2]) * sigma  (`cigarettes.py::_write_benchmarks_iv`).
-# At the panel's E[z^2] = 0.149006 and sigma = 0.145507 the Conley-scale default
-# 0.0177 gives 0.05015. RE-DERIVE this whenever GAMMA_Z_DEFAULT moves: it was 0.0236
-# at the old 2^-8 and went stale when f2b1101 adopted the Conley scale.
-DECLARED_DELTA = 0.0501
+# At the panel's E[z^2] = 0.149006 and sigma = 0.147199 (SSR / (n - K)) the
+# Conley-scale default 0.0177 gives 0.05073 (0.05015 at the 1/n sigma 0.145507).
+# RE-DERIVE this whenever GAMMA_Z_DEFAULT moves: it was 0.0236 at the old 2^-8 and
+# went stale when f2b1101 adopted the Conley scale.
+DECLARED_DELTA = 0.0507
 FAIL = []
 
 
@@ -308,7 +309,7 @@ def leg_iv():
         orch, runner = seen["orch"], seen["runner"]
         models = {fold_default_mode(n): m for n, m in seen["fitted"].items()}
         models = {name: models[name] for name in HEADLINE_METHODS if name in models}
-        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+        s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match, absorbed_rate=runner.absorbed_rate)
         check("(iv) the runner's s^2, the marks' scale, is 1 to 1e-12", abs(s_sq - 1.0) < 1e-12, f"{s_sq!r}")
         for name, model in models.items():
             if hasattr(model, "gamma_z"):

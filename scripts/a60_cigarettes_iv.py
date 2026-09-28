@@ -29,9 +29,9 @@ set in `configs.py` (a56 gains the case). Legs:
   (iii) the phase-b target satisfies v'b = 0 and the three moments to 1e-12
         (MEASURED p5: 2.3e-16). Catches: a target off the wrong set or off a raw
         column. Misses: nothing about its coverage, which (v) has.
-  (iv)  gamma*(b) = 0.3705 to 1e-4, on the SEM and through the runner's oracle
-        (MEASURED p4, p5: 0.37052). Catches: the target built from the anchor set
-        under a configured one (gamma* then reads 0.1922). Misses: nothing else.
+  (iv)  gamma*(b) = 0.3621 to 1e-4, on the SEM and through the runner's oracle
+        (MEASURED p4, p5: 0.37052, 0.36205 on the n - K sigma). Catches: the target built from the anchor set
+        under a configured one (gamma* then reads 0.1878). Misses: nothing else.
   (v)   the replicate mechanism follows decision 9: with a non-empty `iv:` the
         sweep runner's SEMs carry `bootstrap` False (90% row splits) and both
         runners `declared_iv` True, the solver reads `gamma_z` 2^-8 with
@@ -77,7 +77,7 @@ import digest_leg  # noqa: E402
 from munch import munchify  # noqa: E402
 
 import src.sem.cigarettes as sem_module  # noqa: E402
-from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
+from src.experiments.cigarettes import CigaretteOrchestrator, absorbed_rate  # noqa: E402
 from src.experiments.configs import EPS_TOL, GAMMA_Z_DEFAULT, resolve_dataset_block  # noqa: E402
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.utils import PanelBuilder, set_seed  # noqa: E402
@@ -90,14 +90,15 @@ IV_BOUND = 0.0625  # s sqrt(2^-8) on the sigma-normalised panel
 B_R_RAW = (-1.992, 0.507, 1.237, 0.249)  # SS1 fact 5
 SINGULAR_VALUES = (3.1421, 2.4750, 1.5042)  # p1
 ABS_VD, D_PN = 0.407190, 0.9399  # p1
-GAMMA_STAR_B = 0.37052  # p4, p5
-# p8 M6: spec -> (signed v'd under d_pn > 0, gamma*(b), PI+IV floor at bound 0.0625)
+GAMMA_STAR_B = 0.36205  # p4, p5 re-measured on the n - K sigma (0.37052 on 1/n)
+# p8 M6: spec -> (signed v'd under d_pn > 0, gamma*(b), PI+IV floor at bound 0.0625),
+# the last two re-measured on the n - K sigma and the prorated ball
 SPEC_TABLE = {
-    "s": (-0.0243, 2.9301, 0.1104),
-    "t1": (0.3536, 0.3494, 0.1397),
-    "t2": (1.0349, 0.4033, 0.1040),
-    "t3": (0.4072, 0.3705, 0.1107),
-    "t4": (0.4108, 0.4343, 0.1330),
+    "s": (-0.0243, 2.8667, 0.1074),
+    "t1": (0.3536, 0.3417, 0.1358),
+    "t2": (1.0349, 0.3943, 0.1009),
+    "t3": (0.4072, 0.3621, 0.1074),
+    "t4": (0.4108, 0.4242, 0.1290),
 }
 P10_BOOTSTRAP_COVERAGE = {"PI": 0.500, "PI+IV": 0.375}
 REPLICATES = 8
@@ -204,7 +205,10 @@ def min_feasible_gamma(design, Z, bound=IV_BOUND):
     lo, hi = 1e-6, 4.0
     for _ in range(50):
         mid = 0.5 * (lo + hi)
-        if np.sqrt(constraint_floor(design.X, design.y, mid, kind="iv", Z=Z, mean_match=True)) <= bound:
+        floor = constraint_floor(
+            design.X, design.y, mid, kind="iv", Z=Z, mean_match=True, absorbed_rate=absorbed_rate(design)
+        )
+        if np.sqrt(floor) <= bound:
             hi = mid
         else:
             lo = mid
@@ -343,7 +347,7 @@ def leg_iv():
     print("(iv) gamma*(b)")
     sem = CigaretteSEM(spec="t3", target="iv", anchor="own-tax", iv_columns=PHASE_B)
     gamma = sem.bias_sq / sem.sigma_sq
-    check("(iv) gamma*(b) = 0.3705 to 1e-4 on the SEM", abs(gamma - GAMMA_STAR_B) < 1e-4, f"{gamma:.6f}")
+    check("(iv) gamma*(b) = 0.3621 to 1e-4 on the SEM", abs(gamma - GAMMA_STAR_B) < 1e-4, f"{gamma:.6f}")
     orch = orchestrator(recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1))
     runner = sweep_runner(orch)
     oracle = runner.get_oracle(0)

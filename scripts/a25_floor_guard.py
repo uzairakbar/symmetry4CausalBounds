@@ -46,6 +46,7 @@ from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import evaluate_queries  # noqa: E402
 from src.methods.regression import LeastSquaresClosedForm as OLS  # noqa: E402
+from src.methods.regression import residual_variance  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
     SolveStatus,
     constraint_floor,
@@ -91,7 +92,7 @@ def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, mean_match=True):
     if not mean_match:
         h_erm = OLS().fit(design, y).solution.flatten()
         resid = y.flatten() - design @ h_erm
-        scale = float(np.sqrt(np.mean(resid**2)))
+        scale = float(np.sqrt(residual_variance(resid, M)))
         delta = np.sqrt(N) * scale * np.sqrt(gamma)
         A, b = inv_constraint_terms(design, GX) if kind == "inv" else iv_constraint_terms(design, y, Z)
         _, R = np.linalg.qr(design)
@@ -110,7 +111,7 @@ def cvxpy_floor(design, y, gamma, kind, GX=None, Z=None, mean_match=True):
         augmented = np.hstack([design, np.ones((N, 1))])
         h1_erm = np.linalg.lstsq(augmented, y.flatten(), rcond=None)[0]
         resid = y.flatten() - augmented @ h1_erm
-        scale = float(np.sqrt(np.mean(resid**2)))
+        scale = float(np.sqrt(residual_variance(resid, M + 1)))
         delta = np.sqrt(N) * scale * np.sqrt(gamma)
         _, R = np.linalg.qr(augmented)
         h1 = cp.Variable(M + 1)
@@ -210,6 +211,8 @@ def cell_floor(runner, e, data, kind):
     design = data.X if kind == "inv" else data.GX
     if kind == "iv":  # the DA ball is recalibrated, as in `_floor_report`
         kw.update(rho=runner.fit_rho(e, data), recalibrate=runner.recalibrate)
+    # the ball's dof: the m sweep's rows are an m-fold tiling of X_base
+    kw.update(n_obs=None if data.X_base is None else len(data.X_base), absorbed_rate=runner.absorbed_rate)
     return constraint_floor(design, data.y, runner.fit_gamma(e), kind=kind, mean_match=runner.mean_match, **kw)
 
 
@@ -324,9 +327,15 @@ def never_raised(label, runner, steps):
 
 def a25_never_raised():
     """No budget moves, feasible or not. The sim m fixture is the grid where the
-    oracle INV budget sits under its floor in most cells (PLAN v16 SS2.2); the
-    optical gamma one is where both budgets clear it."""
+    oracle INV budget sat under its floor in most cells (PLAN v16 SS2.2) until the
+    ball took its sigma-hat on n - k dof: it now clears the floor there, and the
+    n sweep's smallest step at 1024 rows (64 fitted) is where it sits under it; the optical
+    gamma one is where both budgets clear it."""
     try:
+        # the n sweep's smallest step at half the recipe's n (64 rows against 33
+        # parameters), first, on a fresh stream: their draws do not hang on the m cells
+        n_runner = recipe_runner("simulation", "n", n_experiments=2, steps=16, n_samples=1024)
+        small = never_raised("sim n", n_runner, (0,))
         m_runner = recipe_runner("simulation", "m", n_experiments=2, steps=16)
     except (FileNotFoundError, KeyError) as error:  # a renamed recipe is a FAIL, not a traceback
         check("A25 the recipe fixture is present", False, str(error))
@@ -334,8 +343,9 @@ def a25_never_raised():
     last = len(m_runner.get_param_range()) - 1
     sim = never_raised("sim m", m_runner, (0, last // 2, last))
     optical = never_raised("optical gamma", optical_gamma_runner(), (0,))
-    check("A25 the fixtures exercised an infeasible cell", sim[1] + optical[1] > 0, f"{sim[1] + optical[1]}")
-    check("A25 the fixtures exercised a feasible cell", sim[0] + optical[0] > 0, f"{sim[0] + optical[0]}")
+    infeasible, feasible = sim[1] + small[1] + optical[1], sim[0] + small[0] + optical[0]
+    check("A25 the fixtures exercised an infeasible cell", infeasible > 0, f"{infeasible}")
+    check("A25 the fixtures exercised a feasible cell", feasible > 0, f"{feasible}")
 
 
 # ---------------------------------------------------- 3. empty reads INFEASIBLE

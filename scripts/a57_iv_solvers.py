@@ -101,6 +101,7 @@ import digest_leg  # noqa: E402
 
 import src.methods.sensitivity_models as solvers  # noqa: E402
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
+from src.experiments.cigarettes import absorbed_rate  # noqa: E402
 from src.experiments.configs import EPS_TOL  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
     InstrumentalVariablePartialR2,
@@ -118,21 +119,24 @@ GAMMA_Z = 2**-8
 COMMON = dict(clipy=False, mean_match=True, n_jobs=1, recalibrate=True, pad=False)
 PHASE_B = ("tax_s", "y", "cpi")
 # raw beta_pn at 14509db with the p8 prototype, one seed-0 DA draw (the probe log
-# beside this batch's report); the plan's SS4.1 digits in the labels
+# beside this batch's report); the plan's SS4.1 digits in the labels. Re-measured on
+# the n - K sigma, whose raw ball is sqrt(n / (n - K)) = 1.0115x (was
+# [0.374940, 1.644600] and [0.951673, 1.644600])
 REFERENCE = {
-    "PI+IV": (0.37494044773078467, 1.6446003962347882),
-    "PI+INV+IV": (0.9516730404805537, 1.6446004352912316),
+    "PI+IV": (0.358594946, 1.658163776),
+    "PI+INV+IV": (0.941185206, 1.658163802),
 }
-PLAN_DIGITS = {"PI+IV": "[0.375, 1.645]", "PI+INV+IV": "[0.952, 1.645]"}
+PLAN_DIGITS = {"PI+IV": "[0.359, 1.658]", "PI+INV+IV": "[0.941, 1.658]"}
 # the DA rows changed PROGRAM in round 14: one pooled constraint on the stacked
 # matrix at 0.0625 became a T constraint at r_T = 0.0625 beside a Z constraint at
-# r_Z = 0.0625, which admits more. RECORDED here, superseding [1.149780, 1.648402]
+# r_Z = 0.0625, which admits more. RECORDED here (re-measured on the n - K sigma),
+# superseding [1.149780, 1.648402]
 # the standalone row is at r_Z = 0.0625 with no `X_pre`; the intersection's DA
 # branch is fitted through the class, so its declared radius also carries the D20
 # allowance and it is a WIDER interval, which is why the two are pinned apart
 RECORDED = {
-    "DA+PI+IV": (0.8513706565948552, 1.6487486320559676),
-    "DA+PI+IV branch": (0.6966065657601866, 1.6547022161437242),
+    "DA+PI+IV": (0.838358355, 1.662340503),
+    "DA+PI+IV branch": (0.681794682, 1.667460892),
 }
 INTERVAL_TOL = 1e-6
 RSS_BOUND = 0.069877  # sqrt(0.03125^2 + 0.0625^2)
@@ -151,6 +155,8 @@ def check(name, ok, detail=""):
 def design_and_draw(seed):
     """The t3 / own-tax design, the phase-b instrument matrix and one DA draw."""
     design = build_design(CigaretteSEM.panel(), spec="t3", anchor="own-tax")
+    # every ball charged the FWL controls, as the orchestrator builds them: s = 1
+    COMMON["absorbed_rate"] = absorbed_rate(design)
     columns = {name: design.X[:, j] for j, name in enumerate(TREATMENTS)}
     Z = np.column_stack([design.Z[:, 0] if name == "tax_s" else columns[name] for name in PHASE_B])
     np.random.seed(seed)

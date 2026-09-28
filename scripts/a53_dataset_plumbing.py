@@ -114,12 +114,14 @@ OPTICAL_POOL = 1000
 # Caveat: these are float bit patterns. A rerun on the SAME node reproduces them
 # exactly; a different node, BLAS build or thread count may drift by a few ULP and
 # turn the leg red without anything being wrong. Re-record with `--record` on the
-# parent before believing a lone (i) failure.
+# parent before believing a lone (i) failure. The two gamma digests and the
+# simulation query one were re-recorded 2026-09-28 on the degrees-of-freedom
+# sigma-hat (SSR / (n - k)), which moves every ball.
 PARENT_DIGESTS: dict[str, str] = {
-    "optical_device/gamma": "74a4205ff747ab3a",
+    "optical_device/gamma": "0ed9f2b9e608d804",
     "optical_device/query": "f2acb071110c9bb8",
-    "simulation/gamma": "7b21bf701c0cd4c9",
-    "simulation/query": "97a1e953dad97e47",
+    "simulation/gamma": "2db379d33959e6f7",
+    "simulation/query": "76cf8869fc112140",
 }
 
 # leg (iii)

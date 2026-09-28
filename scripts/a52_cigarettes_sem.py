@@ -3,7 +3,7 @@ SS6 says, and never lets the real instrument near a solver.
 
   (i)    `iv`: `solution` is the restricted-IV point, recomputed here from the
          normal equations of the projected program rather than by calling the
-         loader's QR form; v'solution is machine zero; gamma* is 0.1922 and
+         loader's QR form; v'solution is machine zero; gamma* is 0.1878 and
          sigma^2 is 1. Catches: the unrestricted 2SLS passed off as the target
          (v'b is 0.271/sigma there), a target that forgot the normalisation.
   (ii)   `sample` under both flags. `pool` is byte-identical across constructions
@@ -67,7 +67,7 @@ from src.sem.cigarettes import (  # noqa: E402
 
 SEED = 42
 SPEC = "t3"
-GAMMA_STAR = 0.192215  # MEASURED; the plan quotes it to 4 decimals as 0.1922
+GAMMA_STAR = 0.187821  # MEASURED on the n - K sigma (0.192215 on 1/n)
 GAMMA_TRUE = 0.25
 NOISE_STD = 0.1
 # gamma-hat* of ONE plasmode draw carries a real spread: b_ols picks up the cross
@@ -86,11 +86,11 @@ PADDED = 2500
 COMPATIBILITY = {"iid": (6.68, 6.62, 6.73), "state": (8.93, 2.74, 2.79), "year": (2.18, 1.75, 1.90)}
 WALD_GAP = 0.2
 ONE_STEP_GAP = 3.0
-SLIVER_RATIO = 0.063
+SLIVER_RATIO = 0.067
 SLIVER_RATIO_TOL = 0.005
-SLIVER_CPI = 0.533
+SLIVER_CPI = 0.562
 SLIVER_CPI_TOL = 0.005
-DOUBLING = 2.635
+DOUBLING = 2.518
 QUERIES = 512
 FAIL = []
 

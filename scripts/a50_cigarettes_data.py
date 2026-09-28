@@ -29,7 +29,7 @@ The loader is numpy and the stdlib `csv` module; every number below is read off
         normalisation, controls without the dummies.
   (vi)  the anchor and the restricted target at t3: first-stage F under both
         clusterings, b_r in raw log units, v'b_r = 0 to machine precision, and
-        gamma* = 0.1922. Catches: the federal tax in Z (7 year-common changes,
+        gamma* = 0.1878. Catches: the federal tax in Z (7 year-common changes,
         collinear with any rich time control), an unrestricted fit passed off as
         the target. Misses: whether the SEM wires this b_r through; that is a52.
   (vii) no pandas under `src/`. It is not a dependency of this project (it reaches
@@ -50,6 +50,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.experiments.cigarettes import absorbed_rate  # noqa: E402
 from src.experiments.utils.metrics import sigma_sq_hat  # noqa: E402
 from src.sem.cigarettes import (  # noqa: E402
     ANCHORS,
@@ -92,7 +93,7 @@ LADDER = {
 SPEC = "t3"
 FIRST_STAGE = {"state": 67.6, "year": 324.4}
 B_R = np.array([-1.992, 0.507, 1.237, 0.249])
-GAMMA_STAR = 0.1922
+GAMMA_STAR = 0.1878
 FAIL = []
 
 
@@ -179,7 +180,7 @@ def leg_v(panel):
     for spec in SPECS:
         design = build_design(panel, spec=spec)
         centred = max(abs(float(design.y.mean())), float(np.abs(design.X.mean(axis=0)).max()))
-        variance = sigma_sq_hat(design.X, design.y, intercept=True)
+        variance = sigma_sq_hat(design.X, design.y, intercept=True, absorbed_rate=absorbed_rate(design))
         check(f"(v) {spec} residual means", centred < 1e-10, f"max |mean| {centred:.2e}")
         check(f"(v) {spec} sigma-hat^2 == 1", abs(variance - 1.0) < 1e-12, f"{variance:.15f}")
 

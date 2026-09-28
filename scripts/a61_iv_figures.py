@@ -108,6 +108,7 @@ from src.experiments.cigarettes import (  # noqa: E402
     HEADLINE_METHODS,
     PN,
     CigaretteOrchestrator,
+    absorbed_rate,
     benchmark_covariates,
     benchmark_gamma,
 )
@@ -145,15 +146,16 @@ BINDING_POINT = 0.176  # p8, PI+INV+IV at the SS4.1 convention
 TABLE_GAMMAS = (0.150, 0.250, 0.311, 0.37052, 0.450)  # p5's columns
 # p8 B1 lower bounds (6 decimals) on beta_pn, raw, at TABLE_GAMMAS' first three and
 # 0.371 / 0.450 (p8 ran 0.3710 where p5 ran 0.37052; the flat rows do not care)
+# re-measured on the n - K sigma: the raw ball is sqrt(n / (n - K)) = 1.0115x p8's
 P8_LOWER = {
-    "PI+IV": (0.672691, 0.374940, 0.248499, None, 0.018921),
-    "PI+INV+IV": (0.984557, 0.951673, 0.951673, 0.951673, 0.951673),
+    "PI+IV": (0.653324, 0.358595, 0.231929, None, 0.001140),
+    "PI+INV+IV": (0.967027, 0.941185, 0.941185, 0.941185, 0.941185),
 }
-# p5 (4 decimals): PI interval and every upper bound
-P5_PI = ((-0.1787, 1.4202), (-0.4114, 1.6528), (-0.5304, 1.7718), (-0.6357, 1.8772), (-0.7640, 2.0054))
+# p5 (4 decimals): PI interval and every upper bound, re-measured as P8_LOWER
+P5_PI = ((-0.1880, 1.4295), (-0.4234, 1.6648), (-0.5438, 1.7852), (-0.6504, 1.8918), (-0.7801, 2.0215))
 P5_UPPER = {
-    "PI+IV": (1.3468, 1.6446, 1.7710, 1.8772, 2.0054),
-    "PI+INV+IV": (1.3425, 1.6446, 1.7710, 1.8772, 2.0054),
+    "PI+IV": (1.3634, 1.6582, 1.7848, 1.8918, 2.0215),
+    "PI+INV+IV": (1.3608, 1.6582, 1.7848, 1.8918, 2.0215),
 }
 REVIEW_DA = {"flat": 1.052921, "binding": (0.170, 0.175), "floor": 0.1343, "width_at_0.25": 0.6004}
 BENCHMARK_PINS = {"lag_q": 0.3121, "tax_diff": 0.1502, "log_tax_s": 0.0680}
@@ -320,6 +322,7 @@ def convention_models(design, Z):
         gamma_z=GATE_GAMMA_Z,
         rho=rho,
         pad=False,
+        absorbed_rate=absorbed_rate(design),
         **TOGGLES,
     )
     models = {}
@@ -529,8 +532,8 @@ def leg_ii_iii():
                 f"bracket {bracket}",
             )
             check(
-                "(iii) convention: the PI+INV+IV flat value is 0.951673 to 1e-6",
-                abs(flat - 0.951673) < 1e-6,
+                "(iii) convention: the PI+INV+IV flat value is 0.941185 to 1e-6",
+                abs(flat - 0.941185) < 1e-6,
                 f"{flat:.6f}",
             )
         else:
@@ -636,6 +639,7 @@ def leg_v():
         gamma_z=GATE_GAMMA_Z,
         rho=conv["DA+PI+IV"].rho,
         pad=False,
+        absorbed_rate=absorbed_rate(design),
         **TOGGLES,
     ).fit(GX, design.y, T=np.reshape(G, (len(design.X), -1)), Z=Z_set)
     bare = beta_pn({"bare": no_allowance}, np.array([0.25]), design.sigma)["bare"][0]

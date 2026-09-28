@@ -96,11 +96,12 @@ GAMMA_Z = 2**-8
 TOGGLES = dict(clipy=False, mean_match=True, n_jobs=1, recalibrate=True)
 SPELLINGS = ("PI+IV", "PI+INV+IV", "DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "PI&DA+PI+IV")
 # RECORDED on this tree at the adopted leak budget (gamma_z 0.0177), the query
-# panel of recipes/cigarettesFig7.yaml at n_experiments 1, sweep_samples 8
+# panel of recipes/cigarettesFig7.yaml at n_experiments 1, sweep_samples 8, on the
+# n - K sigma
 QUERY_ROWS = {
-    "PI+IV": (0.108698, 1.652794),
-    "DA+PI+IV(Z)": (0.163583, 1.655723),
-    "DA+PI+IV": (0.379622, 1.655723),
+    "PI+IV": (0.092735, 1.664795),
+    "DA+PI+IV(Z)": (0.221204, 1.669156),
+    "DA+PI+IV": (0.374879, 1.669156),
 }
 QUERY_TOL = 1e-3
 FAIL = []

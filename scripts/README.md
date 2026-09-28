@@ -230,3 +230,7 @@ python scripts/a10_partial_r2_regression.py --mean-match false > /tmp/off.json
 no longer holds: since the `recalibrate` toggle replaced the old sigma toggle every ball has the
 sigma-scaled radius, so every digest moved (checked 2026-09-11). Diff two trees
 that both carry the sigma-scaled ball; `a38` pins the mechanism itself.
+The degrees-of-freedom sigma-hat (SSR / (n - k), `residual_variance`) moved every
+bound digest again (checked 2026-09-28): only the statuses and the PI+INV
+coverage, approximation error and status counts kept theirs, and serial still
+equals parallel.
