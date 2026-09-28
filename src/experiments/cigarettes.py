@@ -71,10 +71,10 @@ NORMAL_95: float = 1.959963984540054
 # coefficient in HEADLINE_COEFFICIENTS. F1: the coefficient against the
 # confounding budget on the benchmarked range, 1x to 3x the tax-differential
 # benchmark. F2: the coefficient against the real-Z leakiness budget gamma_z
-# (Asm. 3; the radius r_Z = s sqrt(gamma_z)) at the query budget, the declared
-# gamma_z, the cluster-bootstrap moment and the gamma_z benchmarks marked, so the
-# leak assumption is seen against what the panel itself says. Both are read off
-# the query panel's fitted models, one band per method. The gamma_z range reaches
+# (Asm. 3; the radius r_Z = s sqrt(gamma_z)) at the query budget. Each marks only
+# the budget the other holds fixed (F1 the query gamma, F2 the declared gamma_z),
+# on an x-axis clipped to its own grid; the benchmarks are logged and tabled.
+# Both are read off the query panel's fitted models, one band per method. The gamma_z range reaches
 # the addiction-stock leak (gamma_z 0.311); it is the square of the r_Z range
 # (2^-8, 2^-0.5) the figure swept before, the same curves at s = 1.
 HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "DA+PI+IV")
@@ -591,19 +591,19 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         HEADLINE_COEFFICIENTS entry (`beta_pn_*`, `beta_p_*`).
 
         F1: the coefficient's interval of each headline method against gamma on
-        the benchmarked range, with the PI+IV feasibility floor, the two
-        benchmarks (1x tax-differential, 1x addiction stock), gamma*(b) and 3x the
-        tax-differential marked, the frame widened to show all five. Reading on
-        beta_pn: the lower bound flattens by 0.19 and only the upper end grows
-        with the budget (that PI never separates from PI+INV is T1's row, not a
-        band here).
+        the benchmarked range, at the declared gamma_z, which F2 holds fixed.
+        Reading on beta_pn: the lower bound flattens by 0.19 and only the upper
+        end grows with the budget (that PI never separates from PI+INV is T1's
+        row, not a band here).
         F2: the same methods against the leakiness budget gamma_z at the query
-        budget. Marks, in order and in gamma_z units: the cluster-bootstrap
-        median and p95 of the moment at the target (squared over s^2), the
-        declared gamma_z, then the gamma_z of each IV_BENCHMARKS leak, so the
-        declared budget is seen against what a resampled panel reads and against
-        what the same omitted variables that benchmark gamma would do to the
-        instruments. Every model's `gamma_z` is put back after.
+        budget gamma, which F1 holds fixed. Every model's `gamma_z` is put back
+        after.
+        Each figure marks only the budget the other holds fixed, on an x-axis
+        clipped to its own grid. The PI+IV feasibility floor, the gamma
+        benchmarks (1x tax-differential, 1x addiction stock, 3x tax-differential),
+        gamma*(b), the cluster-bootstrap median and p95 of the moment at the
+        target (squared over s^2) and the gamma_z of each IV_BENCHMARKS leak are
+        logged, and the benchmarks are tabled.
         """
         # a spelled default (`DA+PI+IV(T,Z)`) is the headline `DA+PI+IV`; the
         # `(Z)` variant is its own headline, PI+IV on the DA'd data with no T term
@@ -620,26 +620,22 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # (`build_design` divides y by the OLS residual sd), so PI+IV's s is 1 and
         # the bound is sqrt(gamma_z) in outcome units, what SS3.3's 0.1107 was
         # measured at
-        f1_marks = (
-            feasibility_floor(design, Z, np.sqrt(self.gamma_z)),
-            tax_diff,
-            lag,
-            float(runner.sem.bias_sq / runner.sem.sigma_sq),
-            3.0 * tax_diff,
-        )
+        floor = feasibility_floor(design, Z, np.sqrt(self.gamma_z))
+        gamma_star = float(runner.sem.bias_sq / runner.sem.sigma_sq)
         logger.info(
-            f"F1 marks: PI+IV floor {f1_marks[0]:.4f}, 1x tax-diff {f1_marks[1]:.4f}, 1x lag-q {f1_marks[2]:.4f}, "
-            f"gamma*(b) {f1_marks[3]:.4f}, 3x tax-diff {f1_marks[4]:.4f}"
+            f"F1 benchmarks: PI+IV floor {floor:.4f}, 1x tax-diff {tax_diff:.4f}, 1x lag-q {lag:.4f}, "
+            f"gamma*(b) {gamma_star:.4f}, 3x tax-diff {3.0 * tax_diff:.4f}"
         )
+        # each figure marks only the budget the other holds fixed
+        f1_marks, f2_marks = (self.gamma,), (self.gamma_z,)
         # the moment is a radius in outcome units: over the runner's s^2 it reads
         # as the gamma_z whose bound s sqrt(gamma_z) it would fill (s is 1 here)
         median, p95 = moment_quantiles(design, Z, b)
         s_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
         leaks = tuple(float(self.benchmarks_iv()[key][3]) for key in IV_BENCHMARKS)
-        f2_marks = (median**2 / s_sq, p95**2 / s_sq, self.gamma_z, *leaks)
         logger.info(
-            f"F2 marks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f} (gamma_z "
-            f"{f2_marks[0]:.6f}, {f2_marks[1]:.6f} at s^2 {s_sq:.6f}); declared gamma_z {f2_marks[2]:.4f}; "
+            f"F2 benchmarks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f} (gamma_z "
+            f"{median**2 / s_sq:.6f}, {p95**2 / s_sq:.6f} at s^2 {s_sq:.6f}); declared gamma_z {self.gamma_z:.4f}; "
             f"leak gamma_z {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
         )
         gammas = np.linspace(*GAMMA_RANGE, points)
