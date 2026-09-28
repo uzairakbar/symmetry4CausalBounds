@@ -832,7 +832,9 @@ def create_panel_plot(
 
     column_titles = [
         r"principal direction 1" + "\n" + r"${\bm{x}} := t\cdot {\bm{\nu}}_1$",
-        r"radial sweep" + "\n" + r"${\bm{x}} := s_1\sin(\vartheta){\bm{\nu}}_1 + s_2 \cos(\vartheta){\bm{\nu}}_2$",
+        r"radial sweep"
+        + "\n"
+        + r"${\bm{x}} := \mathrm{sd}_1\cos(\vartheta){\bm{\nu}}_1 + \mathrm{sd}_2\sin(\vartheta){\bm{\nu}}_2$",
         r"principal direction 2" + "\n" + r"${\bm{x}} := t\cdot {\bm{\nu}}_2$",
     ]
     x_labels = [r"$t$", r"$\vartheta$", r"$t$"]
