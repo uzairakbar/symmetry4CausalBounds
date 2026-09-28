@@ -44,8 +44,8 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
   (vi)  the carrier on the shipped SEM (batch B hand-off): the interventional draw
         has k + m columns, `f` sees k columns through the sweep runner's own
         `_draw_base` and the query runner's `_load_data`, the recipe `validityFig9.yaml`
-        resolves and its orchestrator hands the SEM factory `iv_dim` 4 (the sweep
-        SEMs and the query SEM carry `iv_width` 4, Z_train and Z are (n, 4)), and on
+        resolves and its orchestrator hands the SEM factory `iv_dim` 1 (the sweep
+        SEMs and the query SEM carry `iv_width` 1, Z_train and Z are (n, 1)), and on
         this SEM the two IV terms coincide to the bit (h* is exactly T-invariant, so
         `eps_iv_star` is 0 and the joint budget IS the Z piece). The Z budget is
         `eps_iv_z_star` recomputed here on the runner's base sample (the query
@@ -95,12 +95,12 @@ from src.oracle import eps_iv_z_star, gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
-# the simulation block with `iv: 2` that owns the gamma sweep this leg drives;
+# the simulation block with `iv: 1` that owns the gamma sweep this leg drives;
 # the recipes are split by experiment type, so the sweep lives in its own file.
 # Leg (vi) builds its orchestrator from it, so its checks use the recipe's width;
 # the synthetic legs keep M
 RECIPE = "validityFig9.yaml"
-RECIPE_IV = 2
+RECIPE_IV = 1
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
 IV_BOUND = 0.05  # p6's evi
 NAMES = ["PI", "PI+IV", "PI+INV", "PI+INV+IV", "DA+PI+IV"]
@@ -115,8 +115,8 @@ P6_WIDTHS = {
 }
 # (vi): the raw observed-Z budget eps_iv_z_star on the gamma runner's base sample
 # and on the query runner's own draw (MEASURED at n 512, experiment 0; re-measured
-# for the recipe's iv 2, iv 4 gave 0.054257865 and 0.048559556)
-Z_BUDGET_RECORDED = {"base sample": 0.024615979, "query draw": 0.048542323}
+# for the recipe's iv 1, iv 2 gave 0.024615979 and 0.048542323)
+Z_BUDGET_RECORDED = {"base sample": 0.001548225, "query draw": 0.019727476}
 FAIL = []
 SKIPPED = []
 

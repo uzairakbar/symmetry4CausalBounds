@@ -59,7 +59,7 @@ apart from (vi). Legs:
          keyed on a column that draws nothing. Misses: the perf grid (a64 (vi)).
   (vi)   the writer: one query panel per dataset through the production path
          (`resolve_dataset_block`, the orchestrator, `.run`) in a temp cwd under
-         ~/scratch, simulation `iv: 2` and optical, tiny samples, `im-ci` 0:
+         ~/scratch, simulation `iv: 1` and optical, tiny samples, `im-ci` 0:
          `artifacts/<dataset>/labels.json` holds `{has_z, methods}` with the
          orchestrator's `has_z` (true on the simulation, false on optical) beside
          `query/`. `--skip-run` keeps the property check and skips the run.
@@ -608,7 +608,7 @@ WRITER_BLOCKS = {
         n_samples=256,
         kernel_dim=0,
         treatment_dim=8,
-        iv=2,
+        iv=1,
         methods=["PI", "PI+IV", "DA+PI+IV(Z)"],
         augmentation="translate",
     ),

@@ -108,8 +108,9 @@ ORDERING = {
 }
 # leg (ix): the sim omega fixture's observed-Z budget, RAW (no EPS_TOL), on the base
 # sample it is now read on and on the setup oracle's own draw it used to be read on
-# (MEASURED on refactor25 at the fixture's n 512, experiment 0)
-Z_BUDGET_RECORDED = {"base sample": 0.054257865, "setup draw": 0.031089240}
+# (MEASURED at the fixture's n 512, experiment 0, at the recipe's iv 1; iv 4 gave
+# 0.054257865 and 0.031089240)
+Z_BUDGET_RECORDED = {"base sample": 0.001548225, "setup draw": 0.026390792}
 FAIL = []
 
 
@@ -120,7 +121,7 @@ def check(name, ok, detail=""):
 
 
 def sim_runner(methods=None, **overrides):
-    """The simulation `iv: 4` recipe on the epsilon strategy, cut to gate scale."""
+    """The simulation `iv: 1` recipe on the epsilon strategy, cut to gate scale."""
     block = resolve_dataset_block("simulation", a59.recipe_block())
     reduced = {**block, "n_experiments": 1, "n_samples": 512, "sweep_samples": 8, "n_jobs": 1, **overrides}
     if methods is not None:
@@ -359,7 +360,7 @@ def leg_vi():
         check(f"(vi) n = {n}: length {n | 1}, one exact 1.0 at the midpoint, symmetric on [0.5, 2]", ok, f"{len(grid)}")
     check("(vi) the vline is still at 1.0 and inside the range", PARAM_SPECS["epsilon"].vlines == (1.0,))
     gamma = _RATIO_GRID("simulation", 8)
-    want = np.geomspace(2**-6, 1.0, num=8)
+    want = np.geomspace(2**-6, 2.0, num=8)
     check("(vi) the gamma grid is unchanged at n = 8", np.array_equal(gamma, want), f"{np.round(gamma, 5).tolist()}")
 
 
