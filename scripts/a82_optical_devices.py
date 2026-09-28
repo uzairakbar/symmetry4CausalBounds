@@ -27,15 +27,15 @@ one-experiment runner stays on `dataset_index`. Legs:
   (iv)  simulation and cigarettes are untouched: their runners' `polys[j]` is the
         shared `poly` object (None) at every j; cigarettes on config.yaml's block.
   (v)   setup on all twelve devices: the gamma runner's oracles have finite
-        gamma*; the epsilon runner's DA, retuned per device, lands on
-        `ROBUSTNESS_EPSILON_TRUE["optical_device"]` within 5% on device 8 (the
-        pooled-oracle tolerance of a40) and 10% on the others (device 11 reads
-        -5.8%) wherever its zero-strength eps* is below the constant,
-        and is clamped at zero strength where it is not (device 6: std(h*) ~119,
-        eps* floor ~62, so its robustness DA does not vary; listed as a NOTE);
-        the n ladder's smallest cell keeps more train rows than the fit's k on
-        every device. Reported per device: degree, gamma*, k, the floor, the
-        tuned strength and eps*, and eps* / std(h*) (a40(vii)'s ratio).
+        gamma*; the optical robustness constant is stated in std(h*)
+        (`ROBUSTNESS_EPSILON_UNIT`), and on every device the zero-strength eps*
+        sits under that target, the tuned strength is > 0 (the sweep varies the
+        DA), and the pooled oracle eps* / std(h*) lands on the constant within 5%
+        on device 8 (a40's tolerance) and 10% elsewhere (device 11 reads -5.6%:
+        the tuner solves on one draw, the oracle pools eight); the n ladder's
+        smallest cell keeps more train rows than the fit's k. Reported per
+        device: degree, gamma*, k, sigma, std(h*), the floor, the strength,
+        eps*, eps* / std(h*) and eps* / sigma.
 
     uv run python scripts/a82_optical_devices.py
 """
@@ -56,6 +56,7 @@ from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     OPTICAL_CONFIG,
     ROBUSTNESS_EPSILON_TRUE,
+    ROBUSTNESS_EPSILON_UNIT,
     percent_of,
     resolve_dataset_block,
 )
@@ -63,15 +64,15 @@ from src.experiments.generic_runner import GenericParamSweep  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.oracle import STRENGTH_BRACKET, epsilon_star  # noqa: E402
+from src.oracle import STRENGTH_BRACKET, epsilon_star, h_star_spread  # noqa: E402
 
 SEED = 42
 N_DEVICES = 12
 METHODS = ["PI", "DA+PI"]
 N_JOBS = 4
 POOLED_ORACLE_RTOL = 0.05  # a40's, measured on device 8
-# the other devices' pooled oracle strays further from the tuner's single draw
-# (device 11: 4.71, -5.8%), so they get twice device 8's allowance
+# the tuner solves on one draw and the oracle pools eight; on the other devices
+# the two part further (device 11: 6.61 against 7, -5.6%)
 POOLED_ORACLE_RTOL_OTHERS = 0.10
 SMALLEST_PERCENT = 6.25
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
@@ -223,12 +224,16 @@ def leg_v():
     orch = orchestrator(N_DEVICES)
     gamma = sweep(orch, "gamma")
     eps = sweep(orch, "epsilon")
-    want = ROBUSTNESS_EPSILON_TRUE["optical_device"]
+    ratio = ROBUSTNESS_EPSILON_TRUE["optical_device"]
+    check("(v) the optical constant is stated in std(h*)", ROBUSTNESS_EPSILON_UNIT["optical_device"] == "std_h")
     rows = percent_of(1000, SMALLEST_PERCENT)
     n_train = int(round((1.0 - OPTICAL_CONFIG.test_fraction) * rows))
-    print(f"      smallest n cell: {rows} rows, {n_train} train rows")
-    print("       j device degree    gamma*     k n_train-k     floor  strength  tuned eps*  eps*/std(h*)")
-    finite, tuned, clamped, headroom = [], [], [], []
+    print(f"      smallest n cell: {rows} rows, {n_train} train rows; target eps* = {ratio:g} std(h*)")
+    print(
+        "       j device degree    gamma*     k n_train-k     sigma   std(h*)     floor  strength"
+        "      eps*  eps*/std(h*)  eps*/sigma"
+    )
+    finite, tuned, varied, headroom = [], [], [], []
     for j, sem in enumerate(gamma.sems):
         oracle, achieved = gamma.get_oracle(j), eps.get_oracle(j).epsilon_star
         features = gamma._features_at(j)
@@ -237,29 +242,26 @@ def leg_v():
         da.strength = STRENGTH_BRACKET[0]
         floor = epsilon_star(sem, da, X=sem.X, features=features)
         da.strength = strength
-        spread = float(np.std(sem.f(features(sem.X))))
+        spread = h_star_spread(sem, X=sem.X, features=features)
+        sigma = float(np.sqrt(oracle.sigma_sq))
         finite.append(bool(np.isfinite(oracle.gamma_star)))
-        if floor >= want:
-            # the tuner's documented clamp: the device's defect already exceeds
-            # the constant at zero strength, so the sweep cannot vary its DA
-            clamped.append(sem.device)
-            tuned.append(strength == STRENGTH_BRACKET[0])
-        else:
-            rtol = POOLED_ORACLE_RTOL if sem.device == OPTICAL_CONFIG.dataset_index else POOLED_ORACLE_RTOL_OTHERS
-            tuned.append(bool(np.isclose(achieved, want, rtol=rtol)))
+        rtol = POOLED_ORACLE_RTOL if sem.device == OPTICAL_CONFIG.dataset_index else POOLED_ORACLE_RTOL_OTHERS
+        tuned.append(bool(np.isclose(achieved / spread, ratio, rtol=rtol)))
+        varied.append(strength > STRENGTH_BRACKET[0] and floor < ratio * spread)
         headroom.append(n_train - k)
         print(
             f"      {j:>2} {sem.device:>6} {sem.poly_degree:>6} {oracle.gamma_star:>9.4g} {k:>5} {n_train - k:>9} "
-            f"{floor:>9.4g} {strength:>9.4g} {achieved:>11.5g} {achieved / spread:>13.4g}"
+            f"{sigma:>9.4g} {spread:>9.4g} {floor:>9.4g} {strength:>9.4g} {achieved:>9.4g} "
+            f"{achieved / spread:>13.4g} {achieved / sigma:>11.4g}"
         )
     check("(v) gamma* finite on every device", all(finite), f"{finite}")
+    check("(v) the zero-strength floor is under the target and the strength > 0 on every device", all(varied))
     check(
-        f"(v) the tuned DA lands on {want:g} (within {POOLED_ORACLE_RTOL:.0%} on device 8, "
-        f"{POOLED_ORACLE_RTOL_OTHERS:.0%} elsewhere), or clamps where the floor exceeds it",
+        f"(v) the tuned DA lands on {ratio:g} std(h*) within {POOLED_ORACLE_RTOL:.0%} on device 8, "
+        f"{POOLED_ORACLE_RTOL_OTHERS:.0%} elsewhere",
         all(tuned),
         f"{tuned}",
     )
-    print(f"  [NOTE] (v) devices whose zero-strength eps* already exceeds {want:g} (DA not varied): {clamped}")
     check("(v) the smallest n cell keeps n_train > k on every device", min(headroom) > 0, f"min {min(headroom)}")
 
 

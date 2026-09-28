@@ -134,7 +134,7 @@ N_ROWS = {
 }
 # leg (iv)
 DATASET_KEYS = {"simulation", "optical_device", "cigarettes"}
-SHIPPED_ROBUSTNESS = {"simulation": (3.0, None), "optical_device": (5.0, "gaussian-noise")}
+SHIPPED_ROBUSTNESS = {"simulation": (3.0, None), "optical_device": (7.0, "gaussian-noise")}
 # leg (v)
 METHODS_IV = ["PI", "DA+PI", "DA+PI+IV"]
 CIGARETTE_SAMPLES = 2450

@@ -216,6 +216,23 @@ def epsilon_star(
     return float(np.sqrt(np.mean(w**2)))
 
 
+def h_star_spread(
+    sem,
+    X: NDArray | None = None,
+    features: Callable | None = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+) -> float:
+    """std(h_*(X)): the scale a unitless eps is stated in (`ROBUSTNESS_EPSILON_UNIT`).
+
+    Drawn as `recalibrated_da_epsilon` draws when X is None (under `preserve_rng`,
+    so both read the same rows)."""
+    features = features or _identity
+    if X is None:
+        with preserve_rng():
+            X, _, _ = _draw(sem, n_samples)
+    return float(np.std(sem.f(features(X))))
+
+
 def epsilon_pad_star(
     sem,
     da,

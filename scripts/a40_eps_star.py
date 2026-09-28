@@ -7,8 +7,10 @@
   (i)   plumbing: constructing the epsilon sweep runner through each orchestrator
         (`get_sweep_runner_cls("epsilon")`, the production path) hands the dataset's
         own constant down as `epsilon_true`, for both datasets, read through the
-        runner's kwargs rather than a fixture, and the tuned DA's oracle eps* equals
-        the constant (the knob reached it) on both; on optical within 5%, since the
+        runner's kwargs rather than a fixture, with its unit
+        (`ROBUSTNESS_EPSILON_UNIT`), and the tuned DA's oracle eps* equals the
+        constant in outcome units (optical's times std(h*) on the pool; the knob
+        reached it) on both; on optical within 5%, since the
         tuner solves on one draw and the pooled oracle averages eight. Catches: a
         lookup pinned to one key, a constant that no longer flows, a target the
         tuner cannot reach.
@@ -43,12 +45,13 @@
         Catches: the constant back at 2^-1 (flat), the component gone (flat).
         Misses: how faint the dip is; the constant's comment says the device
         floors it near 0.95.
-  (vii) the optical constant is the chosen 5.0, and eps* / std(h*) on the pool
-        stays under 10: the round-5 value 8 was 11 std of h* and was rejected as
-        an artefact of a destroyed image, and the comment at the constant shows 6
-        already sits on the device's coverage floor. Catches: an edit that moves
-        the constant, or one that pushes it past the artefact regime. Misses:
-        that 5 is itself 7 std of h*; the number is measured, not principled.
+  (vii) the optical constant is the chosen 7.0, stated in std(h*) on the pool,
+        which puts device 8 at the measured 5.0 (within 1%), and it stays under
+        10: the round-5 value 8 was 11 std of h* and was rejected as an artefact
+        of a destroyed image, and the comment at the constant shows 6 already
+        sits on the device's coverage floor. Catches: an edit that moves the
+        constant or its unit, or one that pushes it past the artefact regime.
+        Misses: that 7 is measured on device 8, not principled.
   The old (iv), the pin on the inert optical 2^-1, is folded into (vii).
 
 Writes only into a fresh directory under `~/scratch/tmp/a40/`, removed when it
@@ -76,11 +79,13 @@ from src.experiments.configs import (  # noqa: E402
     DATASET_DEFAULTS,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
+    ROBUSTNESS_EPSILON_UNIT,
 )
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.oracle import h_star_spread  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
 METHODS_OPTICAL = ["PI", "DA+PI", "DA+PI+IV"]
@@ -89,7 +94,8 @@ N_EXPERIMENTS = 2
 N_EXPERIMENTS_OPTICAL = 3
 N_JOBS = 4
 COVERAGE_FLOOR = 0.7
-OPTICAL_EPS_STAR = 5.0
+OPTICAL_EPS_STAR = 5.0  # outcome units, device 8
+OPTICAL_EPS_RATIO = 7.0  # the constant, in std(h*)
 STD_RATIO_BOUND = 10.0
 POOLED_ORACLE_RTOL = 0.05
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
@@ -177,9 +183,15 @@ def parse_chain(chain: str) -> list[str]:
 def leg_i(runners):
     print("(i) the configured constant reaches each dataset's runner and its tuned DA lands on it")
     for name, (runner, handed) in runners.items():
-        want = ROBUSTNESS_EPSILON_TRUE[name]
-        check(f"(i) {name}: epsilon_true handed == constant", handed == want, f"{handed} vs {want}")
+        constant = ROBUSTNESS_EPSILON_TRUE[name]
+        check(f"(i) {name}: epsilon_true handed == constant", handed == constant, f"{handed} vs {constant}")
         check(f"(i) {name}: runner reports experiment_name", runner.experiment_name == name)
+        # the constant in outcome units: a unitless one is a multiple of std(h*)
+        # on the tuning rows, the device's own pool
+        unit = ROBUSTNESS_EPSILON_UNIT[name]
+        check(f"(i) {name}: the runner carries the constant's unit", runner.epsilon_unit == unit, f"{unit!r}")
+        sem = runner.sems[0]
+        want = constant * (h_star_spread(sem, X=sem.X, features=runner._features_at(0)) if unit == "std_h" else 1.0)
         achieved = runner.get_oracle(0).epsilon_star
         strength = runner.das[0].strength
         # the tuner solves on one frozen draw; a SEM with a fixed pool (optical)
@@ -264,16 +276,18 @@ def leg_vi(opt):
 
 def leg_vii(opt):
     print("(vii) the optical constant and its size against h*")
-    eps = ROBUSTNESS_EPSILON_TRUE["optical_device"]
-    check("(vii) optical == 5.0", eps == OPTICAL_EPS_STAR, f"{eps}")
+    ratio = ROBUSTNESS_EPSILON_TRUE["optical_device"]
+    check(f"(vii) optical == {OPTICAL_EPS_RATIO:g} std(h*)", ratio == OPTICAL_EPS_RATIO, f"{ratio}")
+    check("(vii) optical is stated in std(h*)", ROBUSTNESS_EPSILON_UNIT["optical_device"] == "std_h")
     sem = opt.sems[0]
     h = np.asarray(sem.f(opt._features(sem.X)), dtype=float).ravel()
-    ratio = eps / float(np.std(h))
+    eps = ratio * float(np.std(h))
     check(
-        f"(vii) eps* / std(h*) < {STD_RATIO_BOUND:g}",
-        ratio < STD_RATIO_BOUND,
-        f"std(h*) {np.std(h):.4f}, ratio {ratio:.3f}",
+        f"(vii) device 8's target is the measured {OPTICAL_EPS_STAR:g} within 1%",
+        np.isclose(eps, OPTICAL_EPS_STAR, rtol=0.01),
+        f"std(h*) {np.std(h):.4f}, eps* {eps:.4f}",
     )
+    check(f"(vii) eps* / std(h*) < {STD_RATIO_BOUND:g}", ratio < STD_RATIO_BOUND, f"{ratio:.3f}")
 
 
 if __name__ == "__main__":
