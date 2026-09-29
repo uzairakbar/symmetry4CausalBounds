@@ -40,7 +40,7 @@ simulation:
     # iv: 2
     n_experiments: 8
     sweep_samples: 8
-    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; the n sweep is 6.25..100 % of it
+    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; n grid: `sweep_samples` log-spaced points on 10..100 %
     methods:
         # - ATE
         # - ERM
@@ -155,7 +155,7 @@ optical_device:
                         # DA realisation -- not over devices. The oracle itself is
                         # read off the whole pool and does not move between them.
     sweep_samples: 8
-    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; the n sweep is 6.25..100 % of it
+    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; n grid: `sweep_samples` log-spaced points on 10..100 %
     methods:
         # - ATE
         # - ERM
@@ -214,7 +214,7 @@ cigarettes:
                             # (U, xi) per experiment on the fixed design.
     sweep_samples: 8      # also the per-dimension query grids, forced EVEN so
                             # the exact zero stays off them
-    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; the n sweep is 6.25..100 % of it
+    m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; n grid: `sweep_samples` log-spaced points on 10..100 %
     # DA amplitude along v = (1,1,1,1), in units of sd(X . v-hat) after FWL
     # (0.1055 at t3). The omega sweep multiplies this by its own `scale` knob.
     da_amplitude: 2.0

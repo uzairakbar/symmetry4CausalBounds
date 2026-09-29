@@ -804,32 +804,38 @@ class SampleSizeStrategy(GenericParamSweep):
     Sweep n. The base sample and the test set are drawn ONCE per experiment and
     only the train side is subsampled, so the test set is identical across n.
 
-    The grid is the percentage ladder N_PERCENTS of `n_samples`, whatever
-    `sweep_samples` says; the knob is the row count `percent_of(n_samples, p)`
-    (rounded half up) and the x plotted is p itself. Optical and cigarettes: n
-    is the PRE-SPLIT total, so the train set is round(0.9 n), e.g. {57, 112,
-    225, 450, 900} of the 1000-row optical pool. Simulation: the train set is
-    exactly n, taken from the default draw of `n_samples` train rows.
+    The grid is `sweep_samples` percentages of `n_samples` log-spaced on
+    N_PERCENT_RANGE (10 .. 100); the knob is the row count `percent_of(n_samples,
+    p)` (rounded half up) and the x plotted is p itself. Two percentages that
+    round to one row count raise. Optical and cigarettes: n is the PRE-SPLIT
+    total, so the train set is round(0.9 n), 90 .. 900 of the 1000-row optical
+    pool. Simulation: the train set is exactly n, taken from the default draw of
+    `n_samples` train rows.
     """
 
     param_key = "n"
 
     def __init__(self, **kwargs):
         self._n_train = {}  # (experiment, n) -> train rows used
-        self._percent = {}  # n -> the ladder percentage it was rounded from
+        self._percent = {}  # n -> the grid percentage it was rounded from
         super().__init__(**kwargs)
 
     def get_param_range(self) -> np.ndarray:
-        """Row counts, one per ladder percentage; an override is taken as rows."""
+        """Row counts, one per grid percentage; an override is taken as rows."""
         if self.param_grid_override is not None:
             return np.asarray(self.param_grid_override)
         percents = self.spec.grid_fn(self.experiment_name, self.sweep_samples)
         counts = [percent_of(self.n_samples, p) for p in percents]
+        if len(set(counts)) < len(counts):
+            raise ValueError(
+                f"n sweep: {len(percents)} percentages of n_samples = {self.n_samples} round to "
+                f"repeated row counts {counts}; lower sweep_samples or raise n_samples."
+            )
         self._percent.update(zip(counts, (float(p) for p in percents), strict=True))
         return np.asarray(counts, dtype=int)
 
     def observed_x(self, param_values: np.ndarray) -> np.ndarray:
-        """n as a percentage of `n_samples`: the ladder value it came from, exactly."""
+        """n as a percentage of `n_samples`: the grid value it came from, exactly."""
         return np.array(
             [self._percent.get(int(n), 100.0 * float(n) / self.n_samples) for n in param_values], dtype=float
         )

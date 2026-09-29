@@ -263,8 +263,8 @@ def _label_major_ticks_only(*axes):
 def fix_x_ticks(ax, ticks) -> None:
     """Labelled x majors at exactly `ticks` (plain numbers in math mode) and no
     minors; a no-op for an empty `ticks`. AFTER the last set_xscale, which
-    reinstalls the scale's own locators. The n sweep's percentage ladder: five
-    points a doubling apart that the default log locator does not land on."""
+    reinstalls the scale's own locators. The n sweep: its percentage range's two
+    decade ends, labelled plainly and without the log scale's minors."""
     if not len(ticks):
         return
     ax.xaxis.set_major_locator(FixedLocator([float(t) for t in ticks]))

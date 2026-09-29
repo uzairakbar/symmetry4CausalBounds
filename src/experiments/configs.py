@@ -457,10 +457,11 @@ OMEGA_XLABEL: dict[bool, str] = {
 }
 
 
-# the n sweep's ladder, in percent of the dataset block's `n_samples` (100% = all
-# of it): EXACTLY these five on every dataset, whatever `sweep_samples` says. One
-# doubling apart, so a log x puts them evenly and the ticks sit on them
-N_PERCENTS: tuple[float, ...] = (6.25, 12.5, 25.0, 50.0, 100.0)
+# the n sweep's range, in percent of the dataset block's `n_samples` (100% = all
+# of it): `sweep_samples` points log-spaced from the first to the last, so a log x
+# puts them evenly. The labelled majors are the two decade ends
+N_PERCENT_RANGE: tuple[float, float] = (10.0, 100.0)
+N_PERCENT_TICKS: tuple[float, ...] = (10.0, 100.0)
 # math-mode \% renders under usetex and mathtext alike; a bare \% outside $..$
 # prints the backslash under mathtext
 N_PERCENT_XLABEL: str = r"$n$ ($\%$)"
@@ -528,13 +529,14 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         vlines=(1.0,),
     ),
     "n": ParamSpec(
-        # x is the percentage of `n_samples`; SampleSizeStrategy turns each into
-        # rows (`percent_of`) and n keeps its per-dataset meaning (sim: train rows;
-        # optical and cigarettes: pre-split rows). `sweep_samples` is ignored.
+        # x is the percentage of `n_samples`: `sweep_samples` points log-spaced on
+        # N_PERCENT_RANGE, endpoints exact. SampleSizeStrategy turns each into rows
+        # (`percent_of`) and n keeps its per-dataset meaning (sim: train rows;
+        # optical and cigarettes: pre-split rows).
         # Pre-ladder trees plot absolute n and carry no n_axis.pkl: `legacy_xlabel`
         xlabel=N_PERCENT_XLABEL,
-        grid_fn=lambda dataset, n: np.asarray(N_PERCENTS, dtype=float),
-        xticks=N_PERCENTS,
+        grid_fn=lambda dataset, n: np.geomspace(*N_PERCENT_RANGE, num=n),
+        xticks=N_PERCENT_TICKS,
         legacy_xlabel=r"$n$",
     ),
     "m": ParamSpec(
@@ -1421,7 +1423,7 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
     sweep = experiment.get("sweep") if isinstance(experiment, dict) else None
     params = (sweep.get("param") or ()) if isinstance(sweep, dict) else ()
     params = (params,) if isinstance(params, str) else params
-    smallest = {"n": ("n ladder's", N_PERCENTS[0]), "m": ("m_sweep_n_percent", block.get("m_sweep_n_percent"))}
+    smallest = {"n": ("n range's", N_PERCENT_RANGE[0]), "m": ("m_sweep_n_percent", block.get("m_sweep_n_percent"))}
     for param, (what, percent) in smallest.items():
         if param in params and percent is not None and percent_of(block["n_samples"], percent) < 2:
             raise ValueError(
