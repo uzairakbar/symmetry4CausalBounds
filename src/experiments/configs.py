@@ -67,6 +67,12 @@ class SimulationConfig:
     # query runner divides it by sigma-hat^2 of the draw (`raw_gamma`)
     gamma: float = 1.0
     epsilon: float = 2**-8
+    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
+    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
+    # the RMS. Here eps* is the oracle's alone (`epsilon` above is declared), so
+    # it moves every sweep budget and the robustness sweep's tuning target.
+    epsilon_quantile: float | None = 0.95
+    query_epsilon_quantile: float | None = None
     # query sweep only; the sweeps use EPS_TOL (2**-5), which is
     # the more favourable setting there
     eps_tol: float = 2**-8
@@ -118,8 +124,8 @@ class OpticalDeviceConfig:
     epsilon: float | None = None
     query_epsilon: float | None = None
     # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
-    # = its RMS. The SWEEPS take the q0.95, the oracle's pick for this device; the
-    # query keeps the RMS. Split as `epsilon` / `query_epsilon` are.
+    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
+    # the RMS. Split as `epsilon` / `query_epsilon` are.
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
     # Thm. 3.A's epsilon, a POINTWISE budget on the same defect (SS2.4 states it as
@@ -232,6 +238,12 @@ class CigaretteConfig:
     # 0 by construction and the budget is pure knife-edge tolerance.
     epsilon: float | None = None
     query_epsilon: float | None = None
+    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
+    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
+    # the RMS. Either is 0 on the panel, where W is; the robustness sweep's
+    # tuned DA is where the choice shows.
+    epsilon_quantile: float | None = 0.95
+    query_epsilon_quantile: float | None = None
     # None pads DA+ intervals by `epsilon` (Thm. 3.A); with eps* = 0 that is
     # 2 x EPS_TOL of width, about 3% of the PI interval, and there is no defect
     # for it to repair.
@@ -349,6 +361,11 @@ GAMMA_Z_DEFAULT: float = 0.0177
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
 # true invariance error, so that eps/eps* is a meaningful ratio axis. Keyed by
 # EXPERIMENT_NAME (simulation.py, optical_device.py).
+# The target is eps* in the SWEEPS' norm, the q0.95 of |W| (`epsilon_quantile`),
+# on every dataset; the tables below were measured when it was the RMS. On sim and
+# cigarettes W is near Gaussian, q0.95 ~1.95x its RMS, so the same constant now
+# tunes about half the strength: sim 3.0 at 0.14-0.17 (RMS 1.5; 0.26-0.33 as an
+# RMS target), cigarettes 0.5 at 0.06-0.08 (RMS 0.26; 0.12-0.15). Seed 42.
 # Why the two differ. The DA+ ball keeps the radius sigma sqrt(gamma*) after
 # the DA (0.71 on sim: bias^2 0.505), so h* only leaves it below eps* once the
 # DA+ERM centre drifts by that much, and the drift grows with eps*. At the old

@@ -347,7 +347,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                 f"instrument set {list(self.iv_columns)}: the target is the restricted fit against it, gamma_z "
                 f"{self.gamma_z:g} declared (radius {np.sqrt(self.gamma_z):.4f} of the residual sd)."
             )
-        self._epsilon_star = None
+        self._epsilon_star = {}  # epsilon_quantile -> eps*
+        self._pieces = None
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
@@ -374,7 +375,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # solve at gamma*(target) through `ParamSweepRunner.fit_gamma`. See
         # `QUERY_GAMMA` for why the query budget is declared rather than measured.
         self.gamma = QUERY_GAMMA[spec]
-        epsilon = self._epsilon_budget(CIGARETTE_CONFIG.epsilon)
+        epsilon = self._epsilon_budget(CIGARETTE_CONFIG.epsilon, quantile=CIGARETTE_CONFIG.epsilon_quantile)
         gamma_z_declared = self.gamma_z
 
         class CigaretteRegistry(MethodRegistry):
@@ -393,16 +394,18 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
 
     # ---------------------------------------------------------------- factories
 
-    def _sem_factory(self, bootstrap: bool = False):
+    def _sem_factory(self, bootstrap: bool = False, epsilon_quantile: float | None = None):
         """Factory for creating SEM instances.
 
         `bootstrap` is the replicate mechanism and is bound PER RUNNER (SS6): the
         query figures and the coefficient table are fit on the full panel, the
         sweeps on replicates of it (`get_sweep_runner_cls` picks which kind).
         `pool` is the whole panel either way, so h_*, gamma* and eps* do not move
-        between them. The configured instrument set rides beside every draw.
+        between them. The configured instrument set rides beside every draw, and
+        `epsilon_quantile` on the SEM to `oracle.epsilon_star` (None = RMS), bound
+        per runner from CIGARETTE_CONFIG as `bootstrap` is.
         """
-        return SEM(
+        sem = SEM(
             spec=self.spec,
             target=self.target,
             anchor=self.anchor,
@@ -414,6 +417,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             confound_direction=CIGARETTE_CONFIG.confound_direction,
             outcome_noise_std=CIGARETTE_CONFIG.outcome_noise_std,
         )
+        sem.epsilon_quantile = epsilon_quantile
+        return sem
 
     def _da_factory(self, sem=None, append: str | None = None):
         """Factory for creating DA instances. The direction and the amplitude are
@@ -423,20 +428,29 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         return DA(V, std=self._amplitude)
 
     def _oracle_pieces(self):
-        """(sem, da, features) for the budget estimators, built once."""
-        return self._sem_factory(), self._da_factory(), None
+        """(sem, da, features) for the budget estimators, built once and shared
+        by every norm of W: a plasmode SEM draws its outcome on construction, so a
+        second build would move the caller's stream."""
+        if self._pieces is None:
+            self._pieces = (self._sem_factory(), self._da_factory(), None)
+        return self._pieces
 
-    def measured_epsilon_star(self) -> float:
-        """eps* for THIS (SEM, DA): the L2 defect on the panel. Cached."""
-        if self._epsilon_star is None:
+    def measured_epsilon_star(self, epsilon_quantile: float | None = None) -> float:
+        """eps* for THIS (SEM, DA): the defect's RMS on the panel, or its
+        `epsilon_quantile` of |W|. Cached per quantile."""
+        if epsilon_quantile not in self._epsilon_star:
             sem, da, features = self._oracle_pieces()
+            sem.epsilon_quantile = epsilon_quantile
             with preserve_rng():
                 np.random.seed(EPSILON_STAR_SEED)
-                self._epsilon_star = float(epsilon_star(sem, da, X=sem.X, features=features))
-            logger.info(f"Cigarette eps*: {self._epsilon_star:.3e}")
-        return self._epsilon_star
+                self._epsilon_star[epsilon_quantile] = float(epsilon_star(sem, da, X=sem.X, features=features))
+            norm = "RMS" if epsilon_quantile is None else f"q{epsilon_quantile:g}"
+            logger.info(f"Cigarette eps* ({norm} of |W|): {self._epsilon_star[epsilon_quantile]:.3e}")
+        return self._epsilon_star[epsilon_quantile]
 
-    def _epsilon_budget(self, configured: float | None, tol: float = EPS_TOL) -> float:
+    def _epsilon_budget(
+        self, configured: float | None, tol: float = EPS_TOL, *, quantile: float | None = None
+    ) -> float:
         """PI+INV's ASSUMED invariance bound -- the SS3.1 constraint budget.
 
         `None` means the measured eps* plus `tol`, which is what the optical
@@ -444,11 +458,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         h_* from the PI+INV set, which costs validity rather than width. Here eps*
         is 0 by construction on both targets (h_* is exactly homogeneous and the DA
         translates along v), so the budget IS the tolerance and nothing is padded
-        to cover a defect that does not exist.
+        to cover a defect that does not exist, in either norm: `quantile` picks
+        the norm of W the measured eps* is (`CigaretteConfig.epsilon_quantile`).
         """
         if configured is not None:
             return float(configured)
-        return self.measured_epsilon_star() + tol
+        return self.measured_epsilon_star(quantile) + tol
 
     # ------------------------------------------------------------------ runners
 
@@ -460,13 +475,17 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             absorbed_rate = outer.absorbed_rate
 
             def __init__(inner_self, **kwargs):
+                quantile = CIGARETTE_CONFIG.query_epsilon_quantile
                 super().__init__(
-                    sem_factory=outer._sem_factory,  # bootstrap=False: the panel itself
+                    # bootstrap=False: the panel itself
+                    sem_factory=partial(outer._sem_factory, epsilon_quantile=quantile),
                     da_factory=outer._da_factory,
                     poly_transform=None,
                     method_factory=outer.build_methods,
                     default_gamma=QUERY_GAMMA[outer.spec],
-                    default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.query_epsilon, tol=CIGARETTE_CONFIG.eps_tol),
+                    default_epsilon=outer._epsilon_budget(
+                        CIGARETTE_CONFIG.query_epsilon, tol=CIGARETTE_CONFIG.eps_tol, quantile=quantile
+                    ),
                     eps_tol=CIGARETTE_CONFIG.eps_tol,
                     # the panel is sigma-normalised, so gamma is already in the
                     # paper's units and sigma-hat^2 is 1: nothing to rescale
@@ -502,7 +521,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # row splits under a configured set, whose budget is declared against the
         # POOL and whose target is a pool quantity (SS2.4, decision 9); the fresh
         # outcome draw under `plasmode`
-        sem_factory = partial(outer._sem_factory, bootstrap=(outer.target == "iv" and not outer.iv_columns))
+        quantile = CIGARETTE_CONFIG.epsilon_quantile
+        sem_factory = partial(
+            outer._sem_factory,
+            bootstrap=(outer.target == "iv" and not outer.iv_columns),
+            epsilon_quantile=quantile,
+        )
 
         class ConfiguredSweep(Strategy):
             absorbed_rate = outer.absorbed_rate
@@ -514,7 +538,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     poly_transform=None,
                     test_fraction=CIGARETTE_CONFIG.test_fraction,
                     default_gamma=QUERY_GAMMA[outer.spec],
-                    default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.epsilon),
+                    default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.epsilon, quantile=quantile),
                     experiment_name=EXPERIMENT_NAME,
                     declared_iv=bool(outer.iv_columns),
                     **kwargs,

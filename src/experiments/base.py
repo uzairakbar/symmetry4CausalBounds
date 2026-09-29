@@ -384,8 +384,9 @@ class ParamSweepRunner(BaseExperimentRunner):
 
     def fit_epsilon(self, experiment_index: int, step_index: int = 0, data=None) -> float:
         """
-        Assumed invariance error: oracle eps* = ||W|| over the full augmentation,
-        just large enough to admit h_* in PI+INV, off the knife edge.
+        Assumed invariance error: oracle eps* = ||W|| over the full augmentation
+        (the q0.95 of |W| where the SEM carries `epsilon_quantile`, i.e. on every
+        sweep), just large enough to admit h_* in PI+INV, off the knife edge.
 
         The oracle quantity is the budget, as is: where it lands under what the
         constraint can attain on this ball it is reported (`_floor_report`) and

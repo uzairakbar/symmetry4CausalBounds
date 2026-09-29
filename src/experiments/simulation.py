@@ -3,6 +3,8 @@ Simulation experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
+from functools import partial
+
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.configs import SIMULATION_CONFIG, MethodRegistry
@@ -58,9 +60,13 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         """A real Z iff the SEM generates one (`iv > 0`)."""
         return self.iv_dim > 0
 
-    def _sem_factory(self):
-        """Factory for creating SEM instances."""
-        return SEM(treatment_dimension=self.treatment_dim, gamma=SIMULATION_CONFIG.gamma_true, iv_dim=self.iv_dim)
+    def _sem_factory(self, epsilon_quantile: float | None = None):
+        """Factory for creating SEM instances. `epsilon_quantile` rides on the SEM
+        to `oracle.epsilon_star` (None = RMS); the sweeps and the query each bind
+        their own from SIMULATION_CONFIG."""
+        sem = SEM(treatment_dimension=self.treatment_dim, gamma=SIMULATION_CONFIG.gamma_true, iv_dim=self.iv_dim)
+        sem.epsilon_quantile = epsilon_quantile
+        return sem
 
     def _da_factory(self, sem):
         """
@@ -78,7 +84,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         class SimulationQuerySweep(GenericQuerySweep):
             def __init__(inner_self, **kwargs):
                 # Create SEM first
-                sem = self._sem_factory()
+                sem = self._sem_factory(SIMULATION_CONFIG.query_epsilon_quantile)
 
                 # Create DA from SAME SEM
                 def da_factory_from_sem():
@@ -115,11 +121,12 @@ class SimulationOrchestrator(ExperimentOrchestrator):
     def get_sweep_runner_cls(self, param: str) -> type:
         """Configured strategy for one sweep parameter."""
         outer, Strategy = self, STRATEGIES[param]
+        quantile = SIMULATION_CONFIG.epsilon_quantile
 
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
                 super().__init__(
-                    sem_factory=outer._sem_factory,
+                    sem_factory=partial(outer._sem_factory, epsilon_quantile=quantile),
                     da_factory=outer._da_factory,  # expects the SEM as argument
                     poly_transform=None,
                     test_fraction=SIMULATION_CONFIG.test_fraction,
