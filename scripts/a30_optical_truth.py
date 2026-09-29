@@ -12,7 +12,8 @@ interval pinches to a point.
         pinches the interval to {ybar} -- is exactly the query that proves it;
   (ii)  bias_sq/sigma_sq/gamma* are measured over span(phi, 1), the SAME class
         the solver searches, and differ from the span(phi) numbers;
-  (iii) the PI+INV budget is at least the MEASURED eps*, so h_* is admitted;
+  (iii) the PI+INV budget is at least the MEASURED eps*, so h_* is admitted,
+        each of the sweeps' and the query's in its own norm of W;
   (iv)  that budget is reproducible -- it goes into published intervals;
   (v)   h_* is inside the PI and PI+INV intervals at gamma* on real queries;
   (vi)  importing the SEM does not reach for the network.
@@ -32,7 +33,7 @@ from sklearn.preprocessing import PolynomialFeatures  # noqa: E402
 
 from src.data_augmentors.optical_device import ALL_AUGMENTATIONS  # noqa: E402
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA  # noqa: E402
-from src.experiments.configs import OPTICAL_CONFIG  # noqa: E402
+from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG  # noqa: E402
 from src.experiments.optical_device import (  # noqa: E402
     EPSILON_STAR_DRAWS,
     EPSILON_STAR_SEED,
@@ -180,11 +181,12 @@ def a30_budget():
         eps_star = orchestrator.measured_epsilon_star()
         eps_pad = orchestrator.measured_epsilon_pad()
 
-        # THE check: whatever OpticalDeviceConfig actually carries -- None or a
-        # pinned float -- must clear the measured defect in its own norm
+        # the RMS REFERENCE: `epsilon` at the RMS eps* (+ EPS_TOL), which no run
+        # budgets at (the sweeps take the q0.95, the query eps_tol) but (v) fits
+        # PI+INV at -- the tightest of the three, so it admitting h_* is the floor
         configured = orchestrator._epsilon_budget(OPTICAL_CONFIG.epsilon)
         check(
-            f"A30 (iii) [{augmentation}] the configured PI+INV budget admits h_*",
+            f"A30 (iii) [{augmentation}] the RMS reference PI+INV budget admits h_*",
             configured >= eps_star,
             f"budget {configured:.4f} vs eps* {eps_star:.4f}",
         )
@@ -201,6 +203,25 @@ def a30_budget():
             configured_pad > 1.5 * eps_star,
             f"pad {configured_pad:.4f} vs L2 eps* {eps_star:.4f}",
         )
+        # the sweeps and the query each budget at eps* in their own norm of W
+        # (`epsilon_quantile`); the sweeps' q0.95 is the larger of the two
+        sweep_q, query_q = OPTICAL_CONFIG.epsilon_quantile, OPTICAL_CONFIG.query_epsilon_quantile
+        for name, configured_run, quantile, tol in (
+            ("sweeps'", OPTICAL_CONFIG.epsilon, sweep_q, EPS_TOL),
+            ("query's", OPTICAL_CONFIG.query_epsilon, query_q, OPTICAL_CONFIG.eps_tol),
+        ):
+            star = orchestrator.measured_epsilon_star(quantile)
+            budget = orchestrator._epsilon_budget(configured_run, tol=tol, quantile=quantile)
+            check(
+                f"A30 (iii) [{augmentation}] the {name} PI+INV budget admits h_* (q {quantile})",
+                budget >= star,
+                f"budget {budget:.4f} vs eps* {star:.4f}",
+            )
+        check(
+            f"A30 (iii) [{augmentation}] the sweeps' eps* exceeds the query's",
+            orchestrator.measured_epsilon_star(sweep_q) > orchestrator.measured_epsilon_star(query_q),
+            f"{orchestrator.measured_epsilon_star(sweep_q):.4f} vs {orchestrator.measured_epsilon_star(query_q):.4f}",
+        )
         budgets[augmentation] = (configured, configured_pad)
 
     # (iv) reproducible across incoming RNG states -- it goes into published intervals
@@ -208,7 +229,13 @@ def a30_budget():
     for seed in (1, 12345):
         np.random.seed(seed)
         orchestrator = OpticalOrchestrator("all", methods=["PI"], n_jobs=1)
-        values.append((orchestrator.measured_epsilon_star(), orchestrator.measured_epsilon_pad()))
+        values.append(
+            (
+                orchestrator.measured_epsilon_star(),
+                orchestrator.measured_epsilon_star(OPTICAL_CONFIG.epsilon_quantile),
+                orchestrator.measured_epsilon_pad(),
+            )
+        )
     # to a tolerance, not exactly: OpticalDeviceSEM centres its cached array in
     # place, so repeated construction drifts the fit in the last few digits. A real
     # dependence on the incoming stream is percent-level (measured: 0.2553 vs

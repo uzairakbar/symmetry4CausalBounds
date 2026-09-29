@@ -31,8 +31,12 @@
         `ROBUSTNESS_AUGMENTATION`, so it carries gaussian-noise; every other
         strategy's runner (gamma, omega, n, m, recalibrate), the query runner and
         the orchestrator's own budget DA are config.yaml's chain and carry no
-        gaussian-noise. Catches: a component set to None (no knob, so no dip
-        either), a leak into any other sweep or the panel. Misses: a chain in
+        gaussian-noise. Likewise the norm of W eps* is: every strategy runner's
+        SEMs carry `OpticalDeviceConfig.epsilon_quantile` and budget at that eps*
+        (+ EPS_TOL), the query runner's SEM `query_epsilon_quantile` (the RMS) and
+        its budget that eps* (+ eps_tol). Catches: a component set to None (no
+        knob, so no dip either), a leak into any other sweep or the panel, a
+        quantile that misses a sweep or leaks into the query. Misses: a chain in
         config.yaml that already names gaussian-noise, where the sweep and the
         rest legitimately share it.
   (vi)  the optical dip, mirroring (iii): three optical experiments, 5 steps, the
@@ -71,6 +75,8 @@ sys.path.insert(0, REPO)
 from src.experiments import generic_runner  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     DATASET_DEFAULTS,
+    EPS_TOL,
+    OPTICAL_CONFIG,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
 )
@@ -246,12 +252,34 @@ def leg_v(orch, opt_eps, chain):
     eps_chain = chain_of(opt_eps.das[0])
     check("(v) epsilon runner DA == configured chain + gaussian-noise", eps_chain == want, f"{eps_chain}")
     check("(v) epsilon runner DA carries gaussian-noise", "gaussian-noise" in eps_chain)
-    others = {f"{p} runner": chain_of(sweep_runner(orch, p).das[0]) for p in STRATEGIES if p != "epsilon"}
-    others["query runner"] = chain_of(query_runner(orch).da)
+    built = {p: sweep_runner(orch, p) for p in STRATEGIES if p != "epsilon"}
+    query = query_runner(orch)
+    others = {f"{p} runner": chain_of(runner.das[0]) for p, runner in built.items()}
+    others["query runner"] = chain_of(query.da)
     others["orchestrator budget"] = chain_of(orch._oracle_pieces()[1])
     for name, got in others.items():
         check(f"(v) {name} DA == configured chain", got == configured_chain, f"{got}")
         check(f"(v) {name} DA has no gaussian-noise", "gaussian-noise" not in got)
+
+    # the norm of W eps* is: the sweeps' quantile on every strategy, the query's own
+    sweep_q, query_q = OPTICAL_CONFIG.epsilon_quantile, OPTICAL_CONFIG.query_epsilon_quantile
+    sweep_budget = orch.measured_epsilon_star(sweep_q) + EPS_TOL
+    for name, runner in {**{f"{p} runner": r for p, r in built.items()}, "epsilon runner": opt_eps}.items():
+        got = {getattr(sem, "epsilon_quantile", "unset") for sem in runner.sems}
+        check(f"(v) {name} SEMs carry epsilon_quantile {sweep_q}", got == {sweep_q}, f"{got}")
+        check(
+            f"(v) {name} budgets at that eps*",
+            runner.default_epsilon == sweep_budget,
+            f"{runner.default_epsilon:.6f} vs {sweep_budget:.6f}",
+        )
+    got = getattr(query.sem, "epsilon_quantile", "unset")
+    check(f"(v) query runner SEM carries query_epsilon_quantile {query_q}", got == query_q, f"{got}")
+    query_budget = orch.measured_epsilon_star(query_q) + OPTICAL_CONFIG.eps_tol
+    check(
+        "(v) query runner budgets at that eps*",
+        query.default_epsilon == query_budget,
+        f"{query.default_epsilon:.6f} vs {query_budget:.6f}",
+    )
 
 
 def leg_vi(opt):
