@@ -213,6 +213,11 @@ def epsilon_star(
         (Phi(GX) - Phi(X)) h_* = -w. So eps* + EPS_TOL admits h_* by construction.
     """
     w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
+    # a SEM may carry `epsilon_quantile`: eps* is then that quantile of |W| rather
+    # than its RMS, and every budget built on eps* follows it
+    quantile = getattr(sem, "epsilon_quantile", None)
+    if quantile is not None:
+        return float(np.quantile(np.abs(w), quantile))
     return float(np.sqrt(np.mean(w**2)))
 
 

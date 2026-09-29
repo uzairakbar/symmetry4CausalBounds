@@ -3,6 +3,8 @@ Optical device experiment using generic runners.
 Dramatically reduced code duplication.
 """
 
+from functools import partial
+
 import numpy as np
 from loguru import logger
 from sklearn.preprocessing import PolynomialFeatures
@@ -63,7 +65,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         Initialize optical orchestrator.
         """
         self.augmentation = augmentation
-        self._epsilon_star = None
+        self._epsilon_star = {}  # epsilon_quantile -> eps*
         self._epsilon_pad = None
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
@@ -73,7 +75,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             mean_match=kwargs.get("mean_match", True),
         )
         toggles = self.toggles
-        epsilon = self._epsilon_budget(OPTICAL_CONFIG.epsilon)
+        epsilon = self._epsilon_budget(OPTICAL_CONFIG.epsilon, quantile=OPTICAL_CONFIG.epsilon_quantile)
         pad_epsilon = self._pad_budget(OPTICAL_CONFIG.pad_epsilon)
 
         # Create registry with optical-specific parameters
@@ -86,32 +88,41 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         super().__init__(EXPERIMENT_NAME, OpticalRegistry(), **kwargs)
 
-    def _sem_factory(self):
-        """Factory for creating SEM instances."""
-        return SEM(
+    def _sem_factory(self, epsilon_quantile: float | None = None):
+        """Factory for creating SEM instances. `epsilon_quantile` rides on the SEM
+        to `oracle.epsilon_star` (None = RMS); the sweeps and the query each bind
+        their own from OPTICAL_CONFIG."""
+        sem = SEM(
             experiment=OPTICAL_CONFIG.dataset_index,
             ground_truth=OPTICAL_CONFIG.ground_truth_model,
             intercept=self.toggles["mean_match"],
         )
+        sem.epsilon_quantile = epsilon_quantile
+        return sem
 
-    def _oracle_pieces(self):
+    def _oracle_pieces(self, epsilon_quantile: float | None = None):
         """(sem, da, features) for the budget estimators, built once."""
-        sem, da = self._sem_factory(), self._da_factory()
+        sem, da = self._sem_factory(epsilon_quantile), self._da_factory()
         return sem, da, self._poly_factory().fit(sem.X).transform
 
-    def measured_epsilon_star(self) -> float:
-        """eps* for THIS (SEM, DA, features): the L2 defect, pooled over
-        `EPSILON_STAR_DRAWS` independent draws on the full pool. Cached."""
-        if self._epsilon_star is None:
-            sem, da, features = self._oracle_pieces()
+    def measured_epsilon_star(self, epsilon_quantile: float | None = None) -> float:
+        """eps* for THIS (SEM, DA, features): the defect's RMS, or its
+        `epsilon_quantile` of |W|, pooled over `EPSILON_STAR_DRAWS` independent
+        draws on the full pool. Cached per quantile."""
+        if epsilon_quantile not in self._epsilon_star:
+            sem, da, features = self._oracle_pieces(epsilon_quantile)
             with preserve_rng():
                 squares = []
                 for draw in range(EPSILON_STAR_DRAWS):
                     np.random.seed(EPSILON_STAR_SEED + draw)  # per draw; see the constant
                     squares.append(epsilon_star(sem, da, X=sem.X, features=features) ** 2)
-            self._epsilon_star = float(np.sqrt(np.mean(squares)))
-            logger.info(f"Optical eps* over {EPSILON_STAR_DRAWS} draws: {self._epsilon_star:.6f}")
-        return self._epsilon_star
+            self._epsilon_star[epsilon_quantile] = float(np.sqrt(np.mean(squares)))
+            norm = "RMS" if epsilon_quantile is None else f"q{epsilon_quantile:g}"
+            logger.info(
+                f"Optical eps* ({norm} of |W|) over {EPSILON_STAR_DRAWS} draws: "
+                f"{self._epsilon_star[epsilon_quantile]:.6f}"
+            )
+        return self._epsilon_star[epsilon_quantile]
 
     def measured_epsilon_pad(self) -> float:
         """Thm. 3.A's epsilon for this pair: the POINTWISE defect, not the L2 one.
@@ -123,7 +134,9 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             logger.info(f"Optical padding eps (q{PAD_QUANTILE:g} of |W|): {self._epsilon_pad:.6f}")
         return self._epsilon_pad
 
-    def _epsilon_budget(self, configured: float | None, tol: float = EPS_TOL) -> float:
+    def _epsilon_budget(
+        self, configured: float | None, tol: float = EPS_TOL, *, quantile: float | None = None
+    ) -> float:
         """PI+INV's ASSUMED invariance bound -- the SS3.1 constraint budget.
 
         `None` means take the measured one. SS3.1 constrains E_inv(h) <= eps^2, and
@@ -134,17 +147,20 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         `rotation > gaussian-noise`, which config.yaml ships, but 0.2600 for
         `all`), which is exactly why this is measured rather than declared. A
         configured float is passed through unchanged so a number can still be
-        pinned; `a30` gates the relation either way.
+        pinned; `a30` gates the relation either way. `quantile` picks the norm of
+        W the measured eps* is (`OpticalDeviceConfig.epsilon_quantile`).
         """
         if configured is not None:
             return float(configured)
-        return self.measured_epsilon_star() + tol
+        return self.measured_epsilon_star(quantile) + tol
 
     def _pad_budget(self, configured: float | None) -> float:
         """Thm. 3.A's epsilon. `None` takes the measured pointwise budget; a float
-        pins it. NOTE this is ~3x the constraint budget on this device (0.691 vs
-        0.212): the two are different norms of the same W, and padding by the L2
-        one is not the guarantee Thm. 3.A states."""
+        pins it. NOTE this is ~3x the query's RMS constraint budget on this
+        device (0.691 vs 0.212 under `rotation > gaussian-noise`) and ~1.5x the
+        sweeps' q0.95 one (0.868 vs ~0.55 under the shipped chain, mean_match
+        true): they are different norms of the same W, and padding by either
+        constraint budget is not the guarantee Thm. 3.A states."""
         if configured is not None:
             return float(configured)
         return self.measured_epsilon_pad() + EPS_TOL
@@ -166,14 +182,17 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         class OpticalQuerySweep(GenericQuerySweep):
             def __init__(inner_self, **kwargs):
+                quantile = OPTICAL_CONFIG.query_epsilon_quantile
                 super().__init__(
-                    sem_factory=self._sem_factory,
+                    sem_factory=partial(self._sem_factory, epsilon_quantile=quantile),
                     da_factory=self._da_factory,
                     poly_transform=self._poly_factory(),
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     method_factory=self.build_methods,
                     default_gamma=OPTICAL_CONFIG.gamma,
-                    default_epsilon=self._epsilon_budget(OPTICAL_CONFIG.query_epsilon, tol=OPTICAL_CONFIG.eps_tol),
+                    default_epsilon=self._epsilon_budget(
+                        OPTICAL_CONFIG.query_epsilon, tol=OPTICAL_CONFIG.eps_tol, quantile=quantile
+                    ),
                     eps_tol=OPTICAL_CONFIG.eps_tol,
                     raw_gamma=True,
                     **kwargs,
@@ -198,6 +217,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
     def get_sweep_runner_cls(self, param: str) -> type:
         """Configured strategy for one sweep parameter."""
         outer, Strategy = self, STRATEGIES[param]
+        quantile = OPTICAL_CONFIG.epsilon_quantile
 
         class ConfiguredSweep(Strategy):
             def __init__(inner_self, **kwargs):
@@ -205,13 +225,13 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                 if param == "omega":
                     extra["augment_kwargs_fn"] = _knob_to_augment_kwargs
                 super().__init__(
-                    sem_factory=outer._sem_factory,
+                    sem_factory=partial(outer._sem_factory, epsilon_quantile=quantile),
                     da_factory=outer._da_factory,
                     poly_transform=outer._poly_factory(),
                     test_fraction=OPTICAL_CONFIG.test_fraction,
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     default_gamma=OPTICAL_CONFIG.gamma,
-                    default_epsilon=outer._epsilon_budget(OPTICAL_CONFIG.epsilon),
+                    default_epsilon=outer._epsilon_budget(OPTICAL_CONFIG.epsilon, quantile=quantile),
                     experiment_name=EXPERIMENT_NAME,
                     **extra,
                     **kwargs,

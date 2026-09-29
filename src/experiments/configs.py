@@ -117,11 +117,19 @@ class OpticalDeviceConfig:
     # dependence on which augmentation someone uncomments. A float pins it instead.
     epsilon: float | None = None
     query_epsilon: float | None = None
+    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
+    # = its RMS. The SWEEPS take the q0.95, the oracle's pick for this device; the
+    # query keeps the RMS. Split as `epsilon` / `query_epsilon` are.
+    epsilon_quantile: float | None = 0.95
+    query_epsilon_quantile: float | None = None
     # Thm. 3.A's epsilon, a POINTWISE budget on the same defect (SS2.4 states it as
-    # a sup; SS3.1's `epsilon` above is an L2 budget on it). None = measured. These
-    # are NOT interchangeable: on this device the L2 budget is 0.212 and the
-    # pointwise one 0.691 (the q0.99; the raw sup is 1.23), so padding by the
-    # former understates Thm. 3.A's own requirement ~3x. See `epsilon_pad_star`.
+    # a sup; SS3.1's `epsilon` above is an RMS budget on it, a q0.95 one on the
+    # sweeps). None = measured. These are NOT interchangeable: under `rotation >
+    # gaussian-noise` the query's RMS budget is 0.212 and the pointwise one 0.691
+    # (the q0.99; the raw sup is 1.23), so padding by the former understates Thm.
+    # 3.A's own requirement ~3x. The sweeps' q0.95 budget is closer but still
+    # short: ~0.55 against a pad of 0.868 under the shipped chain (mean_match
+    # true), ~1.5x. See `epsilon_pad_star`.
     pad_epsilon: float | None = None
     epsilon_true: float | None = None
     # query sweep only; the sweeps use EPS_TOL (2**-5), which is
