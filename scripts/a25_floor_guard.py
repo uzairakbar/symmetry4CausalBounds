@@ -329,12 +329,12 @@ def a25_never_raised():
     """No budget moves, feasible or not. The sim m fixture is the grid where the
     oracle INV budget sat under its floor in most cells (PLAN v16 SS2.2) until the
     ball took its sigma-hat on n - k dof: it now clears the floor there, and the
-    n sweep's smallest step at 1024 rows (64 fitted) is where it sits under it; the optical
-    gamma one is where both budgets clear it."""
+    n sweep's smallest step (10 %) of 640 rows (64 fitted) is where it sits under it; the
+    optical gamma one is where both budgets clear it."""
     try:
-        # the n sweep's smallest step at half the recipe's n (64 rows against 33
-        # parameters), first, on a fresh stream: their draws do not hang on the m cells
-        n_runner = recipe_runner("simulation", "n", n_experiments=2, steps=16, n_samples=1024)
+        # the n sweep's smallest step at 640 rows (64 rows against 33 parameters),
+        # first, on a fresh stream: their draws do not hang on the m cells
+        n_runner = recipe_runner("simulation", "n", n_experiments=2, steps=4, n_samples=640)
         small = never_raised("sim n", n_runner, (0,))
         m_runner = recipe_runner("simulation", "m", n_experiments=2, steps=16)
     except (FileNotFoundError, KeyError) as error:  # a renamed recipe is a FAIL, not a traceback

@@ -11,9 +11,9 @@ experiment. Three legs:
         major tick LOCATIONS inside the view (matplotlib keeps Text objects for
         out-of-view ticks, so labels are not what is counted), no plotting error
         swallowed. Fails without the helper on a legacy n grid (0 or 1 majors);
-  (ii)  the n sweep: on its percentage ladder the in-view majors are exactly
-        `N_PERCENTS` (the spec's `xticks`) labelled 6.25, 12.5, 25, 50, 100 with
-        no minor ticks; on a pre-ladder absolute grid (128..1024 / 128..1000, no
+  (ii)  the n sweep: on its log-spaced percentage grid (10 .. 100) the in-view
+        majors are exactly `N_PERCENT_TICKS` (the spec's `xticks`) labelled 10,
+        100 with no minor ticks; on a pre-ladder absolute grid (128..1024 / 128..1000, no
         ticks) exactly [200, 500, 1000], label texts stripped of
         `$\\mathdefault{...}$` reading 200, 500, 1000;
   (iii) `create_query_sweep_plot` on synthetic positive angles with a log x scale
@@ -55,7 +55,7 @@ from loguru import logger  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments.configs import METRIC_SPECS, N_PERCENTS, PARAM_SPECS  # noqa: E402
+from src.experiments.configs import METRIC_SPECS, N_PERCENT_TICKS, PARAM_SPECS  # noqa: E402
 from src.experiments.utils import plotting  # noqa: E402
 
 DATASETS = ("simulation", "optical_device")
@@ -175,8 +175,8 @@ def leg_i():
 
 
 def leg_ii():
-    print("(ii) the n sweep: majors on the ladder; the (1, 2, 5) fallback on a legacy grid")
-    want_ladder = [float(p) for p in N_PERCENTS]
+    print("(ii) the n sweep: majors at the range's ends; the (1, 2, 5) fallback on a legacy grid")
+    want_ladder = [float(p) for p in N_PERCENT_TICKS]
     for dataset in DATASETS:
         ax = render_sweep(dataset, "n")
         xs = majors_in_view(ax.xaxis)

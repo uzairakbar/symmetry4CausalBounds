@@ -8,11 +8,11 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
 
   0. grids: the m grid off `sweep_samples`, at 16 equal, bit for bit, the array
      RECORDED on `finite` before the change, at 8 it is 1..8, at 32 (the
-     DatasetDefaults fallback) 32 points; the n grid is the percentage ladder
-     `N_PERCENTS` at every count and the sim n strategy takes its 5 row counts
-     (128 .. 2048 of 2048) at sweep_samples 8, the m strategy 8 steps at 6.25% of
-     2048 = 128 rows; no 16 / 17 literal left in either `grid_fn`. Catches: an m
-     grid that ignores the knob, an n ladder that reads it.
+     DatasetDefaults fallback) 32 points; the n grid is `geomspace(10, 100,
+     count)` at every count and the sim n strategy takes its 8 row counts
+     (205 .. 2048 of 2048) at sweep_samples 8, the m strategy 8 steps at 6.25% of
+     2048 = 128 rows; no 16 / 17 literal left in either `grid_fn`. Catches: a
+     grid that ignores the knob.
   1. the arithmetic on synthetic inputs: C at Delta 0 is z_0.975 and at Delta/sigma
      100 is z_0.95, C decreasing in Delta, level 90 at Delta 0 is z_0.95, the
      equation holds on a d grid, sigma 0 and one zero SE leave those ends, a raw NaN
@@ -54,8 +54,9 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      (coverage, CI/raw width ratio, the log-log slope of the CI excess width in x,
      the valid fractions; on m the CI excess width per step too) printed and compared
      with RECORDED; the n readings must equal RECORDED exactly (the unit bootstrap is
-     the iid one off the fold sweep), and PI, a base-group method, must read on m
-     what it read under the iid rule (its CI excess within `IID_EXCESS_RTOL`).
+     the iid one off the fold sweep; a SKIP until re-pinned on the log-spaced grid),
+     and PI, a base-group method, must read on m what it read under the iid rule (its
+     CI excess within `IID_EXCESS_RTOL`).
   7. render: the width figure of leg 6's record drawn without a swallowed error; its
      line is the CI record's nanmean in sorted-x order.
   8. the Slurm launcher (`sbatch_sweeps.py --dry-run`), no submission: one yaml per
@@ -112,7 +113,7 @@ from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
     IM_CI_REPLICATES,
     IM_CI_SEED_OFFSET,
-    N_PERCENTS,
+    N_PERCENT_RANGE,
     PARAM_SPECS,
     TOGGLE_KEYS,
     SweepSpec,
@@ -135,7 +136,7 @@ SKIPPED = []
 MADE = []  # the directories this run created under TMPROOT, removed on PASS
 
 # RECORDED on `finite` 109e507 before the change: PARAM_SPECS[p].grid_fn(dataset, 16)
-# (n has since moved to the percentage ladder, N_PERCENTS, off `sweep_samples`)
+# (n has since moved to a percentage grid, `sweep_samples` points on N_PERCENT_RANGE)
 PRE_GRIDS = {(dataset, "m"): list(range(1, 17)) for dataset in DATASETS}
 # RECORDED on `finite` 109e507: leg 3's fixture, `digest_leg.digest` of every array
 # (wall_clock excluded), "__all__" over the whole record; the widths and worst errors
@@ -172,59 +173,9 @@ SPEEDUP_RECORDED = 24.2  # 32 workers, 2026-09-22
 # CI excess width in log x). m re-pinned the same day under the unit bootstrap, with the
 # CI excess width per step (the plateau the DA+ family reaches once a unit is its m copies)
 # Both re-pinned 2026-09-28 from a full leg 6 run on the degrees-of-freedom sigma-hat
-# (SSR / (n - k)): n on the percentage ladder's 5 steps (128..2048 rows), m at 128
-# rows (6.25% of 2048).
+# (SSR / (n - k)): m at 128 rows (6.25% of 2048). n dropped 2026-09-29 when its grid
+# moved to sweep_samples log-spaced points on 10..100 %: re-pin it from a full leg 6 run.
 RECORDED_6 = {
-    "n": {
-        "PI+INV": {
-            "excess": [1.4993, 1.179, 0.9905, 0.7136, 0.4305],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [0.8971, 0.9975, 1.0, 1.0, 1.0],
-            "ratio": [1.7488, 1.4606, 1.4007, 1.3088, 1.1771],
-            "valid": [0.305, 0.725, 0.98, 0.985, 1.0],
-            "slope": -0.4325,
-        },
-        "PI": {
-            "excess": [2.3907, 1.3581, 0.894, 0.607, 0.4227],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2538, 1.155, 1.1087, 1.0736, 1.052],
-            "valid": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6161,
-        },
-        "DA+PI": {
-            "excess": [1.8143, 1.0226, 0.6721, 0.4691, 0.3163],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2967, 1.1774, 1.1243, 1.0865, 1.0591],
-            "valid": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6164,
-        },
-        "DA+PI+IV": {
-            "excess": [1.8322, 1.0477, 0.7039, 0.4874, 0.3321],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.3814, 1.23, 1.1675, 1.1149, 1.0799],
-            "valid": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6031,
-        },
-        "PI&DA+PI": {
-            "excess": [1.7548, 1.0067, 0.6826, 0.4634, 0.3223],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.2873, 1.1747, 1.1263, 1.0854, 1.0602],
-            "valid": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.6009,
-        },
-        "PI&DA+PI+IV": {
-            "excess": [1.8678, 1.0792, 0.742, 0.503, 0.35],
-            "coverage": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "coverage_raw": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "ratio": [1.389, 1.2369, 1.1766, 1.1186, 1.0842],
-            "valid": [1.0, 1.0, 1.0, 1.0, 1.0],
-            "slope": -0.5933,
-        },
-    },
     "m": {
         "PI+INV": {
             "excess": [1.4353, 1.5072, 1.3898, 1.4352, 1.5096, 1.3983, 1.322, 1.4654],
@@ -409,7 +360,7 @@ def column(statuses, name):
 
 
 def leg_0():
-    print("(0) the m grid reads sweep_samples, the n grid is the percentage ladder")
+    print("(0) the m grid reads sweep_samples, the n grid is log-spaced on 10..100 %")
     for (dataset, param), want in PRE_GRIDS.items():
         got = PARAM_SPECS[param].grid_fn(dataset, 16)
         check(
@@ -426,13 +377,17 @@ def leg_0():
     for dataset in DATASETS:
         grids = [PARAM_SPECS["n"].grid_fn(dataset, count) for count in (8, 16, 32)]
         check(
-            f"(0) {dataset} n at 8, 16, 32 == N_PERCENTS",
-            all(np.array_equal(grid, N_PERCENTS) for grid in grids),
+            f"(0) {dataset} n at 8, 16, 32 == geomspace({N_PERCENT_RANGE[0]:g}, {N_PERCENT_RANGE[1]:g}, count)",
+            all(
+                np.array_equal(grid, np.geomspace(*N_PERCENT_RANGE, num=count))
+                for grid, count in zip(grids, (8, 16, 32), strict=True)
+            ),
             f"{grids[0].tolist()}",
         )
     orch = sim_orchestrator(["PI"])
     rows = runner_for(orch, "n").get_param_range().tolist()
-    check("(0) the sim n strategy takes the ladder's rows of 2048", rows == [128, 256, 512, 1024, 2048], f"{rows}")
+    want_rows = [205, 285, 395, 549, 763, 1061, 1474, 2048]
+    check("(0) the sim n strategy takes the grid's rows of 2048 at 8", rows == want_rows, f"{rows}")
     runner = runner_for(orch, "m")
     check("(0) the sim m strategy takes 8 steps at sweep_samples 8", len(runner.get_param_range()) == 8)
     check("(0) ... at 6.25% of 2048 = 128 rows", runner.n_samples_override == 128, f"{runner.n_samples_override}")
@@ -1198,9 +1153,12 @@ def leg_6(quick):
         skip("(6) RECORDED readings", f"--quick (B = {count})")
     else:
         # off the fold sweep the unit bootstrap draws the iid rows: n must not move at all
-        for name, want in RECORDED_6["n"].items():
-            have = {key: got["n"][name][key] for key in want}
-            check(f"(6) n {name}: readings == RECORDED exactly", have == want, f"{have}")
+        if "n" in RECORDED_6:
+            for name, want in RECORDED_6["n"].items():
+                have = {key: got["n"][name][key] for key in want}
+                check(f"(6) n {name}: readings == RECORDED exactly", have == want, f"{have}")
+        else:
+            skip("(6) n RECORDED readings", f"re-pin pending (needs B = {IM_CI_REPLICATES})")
         have = got["m"]["PI"]
         check(
             "(6) m PI (base group): coverage, ratio, valid, slope == the iid rule's",

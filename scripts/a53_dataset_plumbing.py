@@ -18,10 +18,12 @@ equivalent one. So the gate is half regression and half interface. Legs:
         on both shipped SEMs. Catches: a pool attribute appearing on a generator
         SEM. Misses: a third SEM neither predicate was written for.
   (iii) the omega grids: sim and optical elementwise unchanged, cigarettes at
-        [0.125, 8]; the n grid is the percentage ladder `N_PERCENTS` on every
-        dataset at any `sweep_samples`, and `percent_of` its `n_samples` reads
-        {128 .. 2048}, {63 .. 1000}, {153 .. 2450}. Catches: a branch that
-        swallows another dataset's grid, a ladder that reads `sweep_samples`.
+        [0.125, 8]; the n grid is `sweep_samples` points log-spaced on
+        `N_PERCENT_RANGE` (endpoints exactly 10 and 100, one log step, strictly
+        increasing) on every dataset, and at 16 `percent_of` its `n_samples`
+        reads {205 .. 2048}, {100 .. 1000}, {245 .. 2450}, all distinct.
+        Catches: a branch that swallows another dataset's grid, a grid that
+        ignores `sweep_samples`.
   (iv)  the robustness target is ONE rule, `ROBUSTNESS_EPSILON_RADII` = 1.0
         confounding radius for every dataset (it replaced the per-dataset table
         3.0 / 5.0 / 0.5), and `ROBUSTNESS_AUGMENTATION` carries exactly three keys
@@ -87,7 +89,7 @@ from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     CIGARETTE_CONFIG,
     DATASET_DEFAULTS,
-    N_PERCENTS,
+    N_PERCENT_RANGE,
     PARAM_SPECS,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_RADII,
@@ -135,11 +137,11 @@ PARENT_DIGESTS: dict[str, str] = {
 
 # leg (iii)
 CIGARETTE_OMEGA = (0.125, 8.0)
-# the n ladder in rows of each block's n_samples, rounded half up
+# the n grid at sweep_samples 16 in rows of each block's n_samples, rounded half up
 N_ROWS = {
-    "simulation": (2048, [128, 256, 512, 1024, 2048]),
-    "optical_device": (1000, [63, 125, 250, 500, 1000]),
-    "cigarettes": (2450, [153, 306, 613, 1225, 2450]),
+    "simulation": (2048, [205, 239, 278, 325, 378, 441, 514, 600, 699, 815, 951, 1108, 1292, 1507, 1757, 2048]),
+    "optical_device": (1000, [100, 117, 136, 158, 185, 215, 251, 293, 341, 398, 464, 541, 631, 736, 858, 1000]),
+    "cigarettes": (2450, [245, 286, 333, 388, 453, 528, 615, 718, 837, 975, 1137, 1326, 1546, 1802, 2101, 2450]),
 }
 # leg (iv)
 DATASET_KEYS = {"simulation", "optical_device", "cigarettes"}
@@ -298,7 +300,7 @@ def leg_ii(orchs):
 
 
 def leg_iii():
-    print("(iii) the omega grids unchanged, one added; the n ladder on every dataset")
+    print("(iii) the omega grids unchanged, one added; the log-spaced n grid on every dataset")
     omega, n = PARAM_SPECS["omega"].grid_fn, PARAM_SPECS["n"].grid_fn
     steps = 7
     expected_omega = {
@@ -321,15 +323,32 @@ def leg_iii():
             f"(iii) cigarettes omega differs from {name}",
             not np.allclose(cig_omega, np.asarray(omega(name, steps), dtype=float)),
         )
+    counts = (steps, 16, 32)
     for name, (n_samples, rows) in N_ROWS.items():
-        grids = [np.asarray(n(name, count), dtype=float) for count in (steps, 16, 32)]
+        grids = [np.asarray(n(name, count), dtype=float) for count in counts]
         check(
-            f"(iii) {name}: n grid is N_PERCENTS at any sweep_samples",
-            all(np.array_equal(grid, N_PERCENTS) for grid in grids),
-            f"{grids[0].tolist()}",
+            f"(iii) {name}: n grid has sweep_samples points at {counts}",
+            [len(grid) for grid in grids] == list(counts),
+            f"{[len(grid) for grid in grids]}",
         )
-        got = [percent_of(n_samples, p) for p in grids[0]]
-        check(f"(iii) {name}: n rows of {n_samples} == {rows}", got == rows, f"{got}")
+        check(
+            f"(iii) {name}: n grid ends exactly at {N_PERCENT_RANGE}",
+            all(grid[0] == N_PERCENT_RANGE[0] and grid[-1] == N_PERCENT_RANGE[1] for grid in grids),
+            f"{[(grid[0], grid[-1]) for grid in grids]}",
+        )
+        check(
+            f"(iii) {name}: n grid strictly increasing, one log step",
+            all(
+                np.all(np.diff(grid) > 0) and np.allclose(np.diff(np.log(grid)), np.log(grid[1] / grid[0]))
+                for grid in grids
+            ),
+        )
+        got = [percent_of(n_samples, p) for p in grids[1]]
+        check(f"(iii) {name}: n rows of {n_samples} at 16 == {rows}", got == rows, f"{got}")
+        check(
+            f"(iii) {name}: n rows distinct at {counts}",
+            all(len({percent_of(n_samples, p) for p in grid}) == len(grid) for grid in grids),
+        )
 
 
 # =============================================================================
