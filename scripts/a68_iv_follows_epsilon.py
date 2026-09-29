@@ -24,9 +24,16 @@ both halves of the robustness axis are on the figure. Legs:
   (v)   do-MNIST, STATIC ONLY: signatures and source text, no net, no data, no run.
   (vi)  the grid: odd length, exactly one 1.0 at the midpoint, log-symmetric, 0.5
         to 2.0, strictly increasing, and `gamma` still on `_RATIO_GRID`.
-  (vii) R5.2, the ordering: no `+IV` family more infeasible than `PI+INV` at the
-        same grid point, against RECORDED integers so a family that empties at a
-        NEW point fails even when the ordering still holds.
+  (vii) R5.2, restated: which families the epsilon sweep refutes, and where,
+        against RECORDED integers so a family that empties at a NEW point fails.
+        The ordering it used to state -- no `+IV` family more infeasible than
+        `PI+INV` at the same ratio -- held while both budgets were r times an RMS
+        oracle. The INV budget is now r times the q0.95 of |W| (~2x its RMS), so
+        PI+INV admits h_* down to r = 0.5, while the T-as-IV budget stays r times
+        its RMS-type eps_iv* (Thm. 3.B's norm, unchanged) and falls under its
+        floor first. So: nothing is refuted at r >= 1, only a family with a T
+        constraint is ever refuted (PI+INV, PI+IV and the Z-only family never),
+        and one is (the fixture still reaches the floor).
   (viii) ruff and ASCII on the touched files.
   (ix)  the omega sweep refits the T budget per step, not only the epsilon sweep.
         On OPTICAL, the one omega dataset whose h_* is not exactly invariant: the
@@ -87,19 +94,22 @@ from src.oracle import eps_iv_star, eps_iv_z_star  # noqa: E402
 # tree at the fixtures leg (vii) names; a family that empties at a NEW point fails
 # (a) even where the ordering of (b) still holds
 ORDERING = {
-    # sim `iv: 0`, 51 queries: PI+INV is refuted over the whole under-budget half
-    # and the T family enters one grid point earlier
+    # sim `iv: 0`, 51 queries: the T family is refuted at the three points under
+    # r = 0.84 and PI+INV nowhere (its q0.95 budget at r = 0.5 still clears the RMS
+    # defect); re-recorded 2026-09-29 on the q0.95 sweep eps* (it was PI+INV at the
+    # four points under r = 1)
     "simulation iv: 0": {
         "PI": [0] * 9,
-        "PI+INV": [51, 51, 51, 51, 0, 0, 0, 0, 0],
+        "PI+INV": [0] * 9,
         "DA+PI+IV": [51, 51, 51, 0, 0, 0, 0, 0, 0],
     },
-    # the plasmode recipe, 245 queries: every family that carries a constraint is
-    # refuted at r = 0.5 alone, where PI+INV is too, and feasible above it. The
-    # boundary ratio is per-draw, so a production run can move it
+    # the plasmode recipe, 245 queries: the T families are refuted at r = 0.5
+    # alone and feasible above it; PI+INV, which was refuted there too before the
+    # q0.95 sweep eps*, no longer is. The boundary ratio is per-draw, so a
+    # production run can move it
     "cigarettes plasmode": {
         "PI": [0] * 9,
-        "PI+INV": [245, 0, 0, 0, 0, 0, 0, 0, 0],
+        "PI+INV": [0] * 9,
         "PI+IV": [0] * 9,
         "DA+PI+IV": [245, 0, 0, 0, 0, 0, 0, 0, 0],
         "DA+PI+IV(T)": [245, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -365,7 +375,7 @@ def leg_vi():
 
 
 def leg_vii():
-    print("(vii) R5.2: no +IV family more infeasible than PI+INV at the same ratio")
+    print("(vii) R5.2: only a T-constrained family is refuted, and only under r = 1")
     fixtures = (
         ("simulation iv: 0", lambda: sim_runner(methods=["PI", "PI+INV", "DA+PI+IV"], iv=0)),
         (
@@ -384,14 +394,16 @@ def leg_vii():
             check(f"(vii) {label}: no recorded table yet", False, "record the printed rows in ORDERING")
             continue
         check(f"(vii) {label}: every count equals the recorded integer", counts == recorded, f"{counts}")
-        baseline = counts.get("PI+INV")
-        ordered = all(
-            all(a <= b for a, b in zip(row, baseline, strict=True))
-            for name, row in counts.items()
-            if "IV" in name and name != "PI+INV"
+        grid = np.asarray(x, dtype=float)
+        at_or_above = grid >= 1.0 - 1e-12
+        refuted = {name for name, row in counts.items() if any(row)}
+        check(
+            f"(vii) {label}: nothing refuted at r >= 1",
+            all(not np.asarray(row)[at_or_above].any() for row in counts.values()),
         )
-        check(f"(vii) {label}: no +IV family more infeasible than PI+INV", ordered)
-        check(f"(vii) {label}: PI+INV has a feasible point, so that is not vacuous", min(baseline) == 0, f"{baseline}")
+        t_families = {name for name in counts if name.startswith("DA+PI+IV") and not name.endswith("(Z)")}
+        check(f"(vii) {label}: only a T-constrained family is refuted", refuted <= t_families, f"{sorted(refuted)}")
+        check(f"(vii) {label}: one is, so that is not vacuous", bool(refuted), f"{sorted(refuted)}")
 
 
 def leg_viii():

@@ -24,8 +24,12 @@ Legs:
   3. the simulation perf path end to end (5 methods, 4 sweep samples, 1 experiment,
      serial), run twice under the orchestrator: seed_var alone, then seed_var and
      feasibility. `epsilon_feasibility_results.pkl` is (grid points, n_queries) per
-     method with values in [0, 1]; `PI+INV` reads 0 at every step where all its
-     runs fail (RECORDED) and 1 at r = 1; the per-dataset figure, as `_run_perf`
+     method with values in [0, 1]; a method reads 0 at every step where all its
+     runs fail, the methods that do are the RECORDED T family (DA+PI+IV(T) and
+     its intersection) and only under r = 1 -- it was PI+INV until the sweeps
+     read eps* as the q0.95 of |W|, which PI+INV's r eps* clears down to r = 0.5
+     while the T family's RMS-type r eps_iv* does not -- and PI+INV reads 1 at
+     r = 1; the per-dataset figure, as `_run_perf`
      draws it, is on `CLAMP_YLIM` and linear; the seed_var terms, failures and
      statuses of the two runs are `array_equal`, so building the runs once moved no
      number and no RNG draw. Catches: the runs built twice or in another order,
@@ -103,6 +107,9 @@ from src.methods.sensitivity_models import SolveStatus  # noqa: E402
 
 TMPROOT = os.path.expanduser("~/scratch/tmp/a70")
 PERF_METHODS = ["PI", "PI+INV", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
+# RECORDED 2026-09-29 on the q0.95 sweep eps*: the methods refuted at every run of
+# some step of leg 3 (PI+INV before, at two steps)
+REFUTED_RECORDED = ["DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
 YLABEL = "feasible rate (over backends)"
 FAIL = []
 
@@ -309,17 +316,28 @@ def leg_3_4():
             for k in PERF_METHODS
         ),
     )
-    refuted = failures["PI+INV"] == n_runs * n_queries
+    # which method the data refute moved with the q0.95 sweep eps*: PI+INV's
+    # budget r eps* now clears the RMS defect down to r = 0.5, and the T family,
+    # whose r eps_iv* stays RMS-type, is refuted under r = 1 instead (RECORDED)
+    refuted = {k: failures[k] == n_runs * n_queries for k in PERF_METHODS}
     mid = int(np.argmin(np.abs(np.log(x))))
-    print(f"      RECORDED PI+INV refuted at r = {np.round(x[refuted], 3).tolist()}")
+    for k, steps in refuted.items():
+        if steps.any():
+            print(f"      RECORDED {k} refuted at r = {np.round(x[steps], 3).tolist()}")
     print(
         "      RECORDED feasibility per step: "
         + "; ".join(f"{k} {np.round(v.mean(axis=1), 3).tolist()}" for k, v in feasible.items())
     )
+    names = sorted(k for k, steps in refuted.items() if steps.any())
     check(
-        "(3) PI+INV reads 0 at every all-failed step (at least one)",
-        refuted.any() and np.all(feasible["PI+INV"][refuted] == 0.0),
-        f"{int(refuted.sum())} step(s)",
+        "(3) a refuted method reads 0 at every all-failed step (at least one)",
+        bool(names) and all(np.all(feasible[k][refuted[k]] == 0.0) for k in names),
+        f"{ {k: int(refuted[k].sum()) for k in names} }",
+    )
+    check(
+        "(3) the refuted methods are the RECORDED T family, under r = 1 only",
+        names == REFUTED_RECORDED and all(np.all(x[refuted[k]] < 1.0) for k in names),
+        f"{names}",
     )
     check(
         "(3) PI+INV reads 1 at r = 1",

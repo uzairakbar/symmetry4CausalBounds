@@ -139,17 +139,21 @@ MADE = []  # the directories this run created under TMPROOT, removed on PASS
 PRE_GRIDS = {(dataset, "m"): list(range(1, 17)) for dataset in DATASETS}
 # RECORDED on `finite` 109e507: leg 3's fixture, `digest_leg.digest` of every array
 # (wall_clock excluded), "__all__" over the whole record; the widths and worst errors
-# re-pinned 2026-09-28 on the degrees-of-freedom sigma-hat (the ball is SSR / (n - k))
+# re-pinned 2026-09-28 on the degrees-of-freedom sigma-hat (the ball is SSR / (n - k)),
+# the DA+ ones 2026-09-29 on the sweeps' q0.95 eps* (an ULP-level pad: eps* is ~1e-15
+# in either norm here; the same fixture with `epsilon_quantile` None reproduces the
+# old `__all__` bit for bit, and q0.95 against it moves the DA+ widths by at most
+# 8.9e-15 and the worst errors by 2.5e-14, PI not at all)
 PRE_DIGESTS = {
-    "__all__": "1854dbf0635e7085",
+    "__all__": "e7aaf8bca9543536",
     "results/DA+PI/approximation_error": "5390cc747eeef506",
     "results/DA+PI/coverage": "cf28966d4471fd5d",
-    "results/DA+PI/interval_width": "1404111759ad3df5",
-    "results/DA+PI/worst_error": "0aa4bcb5dc9da4ac",
+    "results/DA+PI/interval_width": "1cf7fb25ff973e23",
+    "results/DA+PI/worst_error": "51e2dec76cd62381",
     "results/PI&DA+PI/approximation_error": "5390cc747eeef506",
     "results/PI&DA+PI/coverage": "cf28966d4471fd5d",
-    "results/PI&DA+PI/interval_width": "2ae9488052bcad8a",
-    "results/PI&DA+PI/worst_error": "f5a4253d5875ee3c",
+    "results/PI&DA+PI/interval_width": "3245347371afd80b",
+    "results/PI&DA+PI/worst_error": "6a7642b688a41a78",
     "results/PI/approximation_error": "5390cc747eeef506",
     "results/PI/coverage": "cf28966d4471fd5d",
     "results/PI/interval_width": "fe889a2952b9411f",

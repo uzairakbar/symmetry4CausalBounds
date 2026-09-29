@@ -51,6 +51,15 @@
         already sits on the device's coverage floor. Catches: an edit that moves
         the constant, or one that pushes it past the artefact regime. Misses:
         that 5 is itself 7 std of h*; the number is measured, not principled.
+  (viii) the norm of W on the other two datasets, as (v) reads it on optical:
+        every strategy runner's SEMs carry the dataset config's `epsilon_quantile`
+        (q0.95) and the query runner's SEM its `query_epsilon_quantile` (the
+        RMS), on the sim orchestrator and on a cigarette one (the robustness
+        recipe's plasmode block, one experiment); the cigarette budgets are that
+        measured eps* (+ EPS_TOL / + eps_tol), and the sim epsilon runner's tuned
+        oracle eps* is the q0.95 of its W, not the RMS. Catches: a quantile that
+        misses a dataset or a sweep, or leaks into a query panel. Misses: do-MNIST,
+        whose epsilon is declared.
   The old (iv), the pin on the inert optical 2^-1, is folded into (vii).
 
 Writes only into a fresh directory under `~/scratch/tmp/a40/`, removed when it
@@ -73,17 +82,21 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from src.experiments import generic_runner  # noqa: E402
+from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
+    CIGARETTE_CONFIG,
     DATASET_DEFAULTS,
     EPS_TOL,
     OPTICAL_CONFIG,
     ROBUSTNESS_AUGMENTATION,
     ROBUSTNESS_EPSILON_TRUE,
+    SIMULATION_CONFIG,
 )
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
+from src.oracle import _draw, _invariance_signal, preserve_rng  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
 METHODS_OPTICAL = ["PI", "DA+PI", "DA+PI+IV"]
@@ -96,6 +109,7 @@ OPTICAL_EPS_STAR = 5.0
 STD_RATIO_BOUND = 10.0
 POOLED_ORACLE_RTOL = 0.05
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
+RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 TMPROOT = os.path.expanduser("~/scratch/tmp/a40")
 FAIL = []
 
@@ -301,6 +315,68 @@ def leg_vii(opt):
     )
 
 
+def leg_viii(sim_orch, sim_eps, seed, **toggles):
+    print("(viii) the sweeps' q0.95 and the query's RMS on simulation and cigarettes")
+    set_seed(seed)
+    with open(RECIPE) as handle:
+        block = yaml.safe_load(handle)["cigarettes"]
+    cig_orch = CigaretteOrchestrator(
+        target=block["target"],
+        spec=block["spec"],
+        anchor=block["anchor"],
+        da_amplitude=float(block["da_amplitude"]),
+        iv=list(block["iv"]),
+        gamma_z=float(block["gamma_z"]),
+        seed=seed,
+        n_samples=int(block["n_samples"]),
+        n_experiments=1,
+        sweep_samples=N_STEPS,
+        hyperparameters={},
+        n_jobs=N_JOBS,
+        methods=METHODS,
+        **toggles,
+    )
+    for name, orch, config in (
+        ("simulation", sim_orch, SIMULATION_CONFIG),
+        ("cigarettes", cig_orch, CIGARETTE_CONFIG),
+    ):
+        sweep_q, query_q = config.epsilon_quantile, config.query_epsilon_quantile
+        check(f"(viii) {name}: the sweeps take q0.95, the query the RMS", (sweep_q, query_q) == (0.95, None))
+        for param in STRATEGIES:
+            runner = sweep_runner(orch, param)
+            got = {getattr(sem, "epsilon_quantile", "unset") for sem in runner.sems}
+            check(f"(viii) {name}: {param} runner SEMs carry {sweep_q}", got == {sweep_q}, f"{got}")
+        query = query_runner(orch)
+        got = getattr(query.sem, "epsilon_quantile", "unset")
+        check(f"(viii) {name}: query runner SEM carries {query_q}", got == query_q, f"{got}")
+    budgets = (
+        (
+            "gamma runner",
+            sweep_runner(cig_orch, "gamma").default_epsilon,
+            cig_orch.measured_epsilon_star(0.95) + EPS_TOL,
+        ),
+        (
+            "query runner",
+            query_runner(cig_orch).default_epsilon,
+            cig_orch.measured_epsilon_star(None) + CIGARETTE_CONFIG.eps_tol,
+        ),
+    )
+    for name, got, want in budgets:
+        check(f"(viii) cigarettes: {name} budgets at its eps*", got == want, f"{got:.6g} vs {want:.6g}")
+    sem, da = sim_eps.sems[0], sim_eps.das[0]
+    with preserve_rng():
+        X, _, _ = _draw(sem, 2048)
+        w = _invariance_signal(sem, da, X)[0]
+    rms, q95 = float(np.sqrt(np.mean(w**2))), float(np.quantile(np.abs(w), 0.95))
+    achieved = sim_eps.get_oracle(0).epsilon_star
+    check(
+        "(viii) simulation: the tuned eps* is the q0.95 of W, not its RMS",
+        # a fresh draw of the sim SEM, not the tuner's frozen one: to a few percent
+        np.isclose(achieved, q95, rtol=POOLED_ORACLE_RTOL) and not np.isclose(achieved, rms, rtol=0.2),
+        f"oracle {achieved:.4f}, q0.95 {q95:.4f}, RMS {rms:.4f}",
+    )
+
+
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -321,6 +397,7 @@ if __name__ == "__main__":
     leg_v(orchs["optical_device"], opt, chain)
     x_opt, cov_opt, ratio_opt = leg_vi(opt)
     leg_vii(opt)
+    leg_viii(orchs["simulation"], sim, seed, **toggles)
     with open(os.path.join(tmp, "dip.txt"), "w") as handle:
         for name, xs, cs, ws in (("simulation", x, cov, ratio), ("optical_device", x_opt, cov_opt, ratio_opt)):
             for r, c, w in zip(xs, cs, ws, strict=True):

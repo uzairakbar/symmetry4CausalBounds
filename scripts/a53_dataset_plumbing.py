@@ -25,7 +25,8 @@ equivalent one. So the gate is half regression and half interface. Legs:
   (iv)  the two ROBUSTNESS tables carry exactly three keys, with the shipped two
         values untouched. Catches: an edited sim or optical constant.
   (v)   the cigarette epsilon sweep runs: the tuned DA reaches the configured
-        eps* within 5%, DA+PI and DA+PI+IV dip under the PI baseline at the
+        eps* in the sweeps' norm of W (`CigaretteConfig.epsilon_quantile`)
+        within 5%, DA+PI and DA+PI+IV dip under the PI baseline at the
         smallest ratio, climb back to it by r = 1 and never go under 0.7. The
         baseline is PI's own coverage (0.963 measured), not 1.0: the sweep fits
         bootstrap replicates against a pool oracle, so nothing covers 1.000 here.
@@ -81,6 +82,7 @@ sys.path.insert(0, REPO)
 
 from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
+    CIGARETTE_CONFIG,
     DATASET_DEFAULTS,
     N_PERCENTS,
     PARAM_SPECS,
@@ -116,11 +118,15 @@ OPTICAL_POOL = 1000
 # turn the leg red without anything being wrong. Re-record with `--record` on the
 # parent before believing a lone (i) failure. The two gamma digests and the
 # simulation query one were re-recorded 2026-09-28 on the degrees-of-freedom
-# sigma-hat (SSR / (n - k)), which moves every ball.
+# sigma-hat (SSR / (n - k)), which moves every ball. 2026-09-29: the simulation
+# gamma digest re-recorded on the sweeps' q0.95 eps* (`epsilon_quantile`); the
+# optical one only caught up -- it was already stale on working5, moved to
+# 70b891f331420cd8 by 1389769 (q95 epsilon on optical sweeps; 9f411eb before it
+# reads 474d52137cef167c, itself already off the pin). The query ones stay.
 PARENT_DIGESTS: dict[str, str] = {
-    "optical_device/gamma": "0ed9f2b9e608d804",
+    "optical_device/gamma": "70b891f331420cd8",
     "optical_device/query": "f2acb071110c9bb8",
-    "simulation/gamma": "2db379d33959e6f7",
+    "simulation/gamma": "5bc02bf14d17a075",
     "simulation/query": "76cf8869fc112140",
 }
 
@@ -353,7 +359,10 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
     from src.sem.cigarettes import CigaretteSEM, V
 
     def sem_factory():
-        return CigaretteSEM(spec="t3", target="iv", anchor="own-tax", bootstrap=True)
+        sem = CigaretteSEM(spec="t3", target="iv", anchor="own-tax", bootstrap=True)
+        # the sweeps' norm of W, as the orchestrator binds it
+        sem.epsilon_quantile = CIGARETTE_CONFIG.epsilon_quantile
+        return sem
 
     amplitude = float(np.std(sem_factory().X @ (V / np.linalg.norm(V))))
 
@@ -587,8 +596,8 @@ def leg_ix(draw, chain, seed, **toggles):
     orch = build("simulation", draw, chain, seed, **toggles)
     point_factory = orch._sem_factory
 
-    def set_factory():
-        sem = point_factory()
+    def set_factory(**kwargs):
+        sem = point_factory(**kwargs)
         sem.__class__ = SetTargetSEM
         return sem
 
