@@ -107,8 +107,8 @@ from src.methods.sensitivity_models import SolveStatus  # noqa: E402
 
 TMPROOT = os.path.expanduser("~/scratch/tmp/a70")
 PERF_METHODS = ["PI", "PI+INV", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
-# RECORDED 2026-09-29 on the q0.95 sweep eps*: the methods refuted at every run of
-# some step of leg 3 (PI+INV before, at two steps)
+# RECORDED 2026-09-29 on the q0.95 sweep eps* and the 1 R robustness target: the
+# methods refuted at every run of some step of leg 3 (PI+INV before, at two steps)
 REFUTED_RECORDED = ["DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
 YLABEL = "feasible rate (over backends)"
 FAIL = []

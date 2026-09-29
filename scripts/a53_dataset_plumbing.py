@@ -22,15 +22,18 @@ equivalent one. So the gate is half regression and half interface. Legs:
         dataset at any `sweep_samples`, and `percent_of` its `n_samples` reads
         {128 .. 2048}, {63 .. 1000}, {153 .. 2450}. Catches: a branch that
         swallows another dataset's grid, a ladder that reads `sweep_samples`.
-  (iv)  the two ROBUSTNESS tables carry exactly three keys, with the shipped two
-        values untouched. Catches: an edited sim or optical constant.
-  (v)   the cigarette epsilon sweep runs: the tuned DA reaches the configured
-        eps* in the sweeps' norm of W (`CigaretteConfig.epsilon_quantile`)
-        within 5%, DA+PI and DA+PI+IV dip under the PI baseline at the
+  (iv)  the robustness target is ONE rule, `ROBUSTNESS_EPSILON_RADII` = 1.0
+        confounding radius for every dataset (it replaced the per-dataset table
+        3.0 / 5.0 / 0.5), and `ROBUSTNESS_AUGMENTATION` carries exactly three keys
+        with the shipped two components untouched. Catches: an edited multiplier
+        or component.
+  (v)   the cigarette epsilon sweep runs: the tuned DA reaches its target, 1 x
+        sigma sqrt(gamma*) of the SEM in the sweeps' norm of W
+        (`CigaretteConfig.epsilon_quantile`), within 5%, DA+PI and DA+PI+IV dip under the PI baseline at the
         smallest ratio, climb back to it by r = 1 and never go under 0.7. The
         baseline is PI's own coverage (0.963 measured), not 1.0: the sweep fits
         bootstrap replicates against a pool oracle, so nothing covers 1.000 here.
-        Catches: a constant that is too small (a flat line) or too large (a cliff).
+        Catches: a target that is too small (a flat line) or too large (a cliff).
   (vi)  `create_query_sweep_plot` writes the same filename as before when `fname`
         is omitted, and `fname` is keyword-with-default. Catches: a positional
         argument, a changed derived name.
@@ -87,7 +90,7 @@ from src.experiments.configs import (  # noqa: E402
     N_PERCENTS,
     PARAM_SPECS,
     ROBUSTNESS_AUGMENTATION,
-    ROBUSTNESS_EPSILON_TRUE,
+    ROBUSTNESS_EPSILON_RADII,
     percent_of,
 )
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
@@ -140,7 +143,7 @@ N_ROWS = {
 }
 # leg (iv)
 DATASET_KEYS = {"simulation", "optical_device", "cigarettes"}
-SHIPPED_ROBUSTNESS = {"simulation": (3.0, None), "optical_device": (5.0, "gaussian-noise")}
+SHIPPED_COMPONENTS = {"simulation": None, "optical_device": "gaussian-noise"}
 # leg (v)
 METHODS_IV = ["PI", "DA+PI", "DA+PI+IV"]
 CIGARETTE_SAMPLES = 2450
@@ -335,13 +338,15 @@ def leg_iii():
 
 
 def leg_iv():
-    print("(iv) the robustness tables gain a key and keep their two values")
-    for label, table in (("epsilon_true", ROBUSTNESS_EPSILON_TRUE), ("augmentation", ROBUSTNESS_AUGMENTATION)):
-        check(f"(iv) {label}: exactly three keys", set(table) == DATASET_KEYS, f"{sorted(table)}")
-    for name, (eps, component) in SHIPPED_ROBUSTNESS.items():
-        check(f"(iv) {name}: eps* constant unchanged", ROBUSTNESS_EPSILON_TRUE.get(name) == eps, f"{eps}")
+    print("(iv) one robustness rule for every dataset; the component table gains a key and keeps its two")
+    check(
+        "(iv) the target multiplier is one float, 1.0",
+        isinstance(ROBUSTNESS_EPSILON_RADII, float) and ROBUSTNESS_EPSILON_RADII == 1.0,
+        f"{ROBUSTNESS_EPSILON_RADII!r}",
+    )
+    check("(iv) augmentation: exactly three keys", set(ROBUSTNESS_AUGMENTATION) == DATASET_KEYS)
+    for name, component in SHIPPED_COMPONENTS.items():
         check(f"(iv) {name}: appended component unchanged", ROBUSTNESS_AUGMENTATION.get(name) == component)
-    check("(iv) cigarettes: eps* constant is 0.5", ROBUSTNESS_EPSILON_TRUE.get("cigarettes") == 0.5)
     check("(iv) cigarettes: no appended component", ROBUSTNESS_AUGMENTATION.get("cigarettes") is None)
 
 
@@ -404,13 +409,13 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
 
 
 def leg_v(seed, micro, **toggles):
-    print("(v) the cigarette robustness sweep reaches its constant and dips")
+    print("(v) the cigarette robustness sweep reaches its target and dips")
     runner = cigarette_epsilon_runner(seed, MICRO_SAMPLES if micro else CIGARETTE_SAMPLES, **toggles)
-    want = ROBUSTNESS_EPSILON_TRUE["cigarettes"]
+    want = runner.robustness_target(runner.sems[0])
     achieved = runner.get_oracle(0).epsilon_star
     strength = runner.das[0].strength
     check(
-        "(v) the tuned DA reaches the constant",
+        "(v) the tuned DA reaches the target",
         strength is not None and np.isclose(achieved, want, rtol=EPS_STAR_RTOL),
         f"eps* {achieved:.6g} vs {want:g} at strength {strength!r}",
     )

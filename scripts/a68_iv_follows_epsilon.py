@@ -94,14 +94,14 @@ from src.oracle import eps_iv_star, eps_iv_z_star  # noqa: E402
 # tree at the fixtures leg (vii) names; a family that empties at a NEW point fails
 # (a) even where the ordering of (b) still holds
 ORDERING = {
-    # sim `iv: 0`, 51 queries: the T family is refuted at the three points under
-    # r = 0.84 and PI+INV nowhere (its q0.95 budget at r = 0.5 still clears the RMS
-    # defect); re-recorded 2026-09-29 on the q0.95 sweep eps* (it was PI+INV at the
-    # four points under r = 1)
+    # sim `iv: 0`, 51 queries: the T family is refuted at r = 0.5 alone and PI+INV
+    # nowhere (its q0.95 budget at r = 0.5 still clears the RMS defect); re-recorded
+    # 2026-09-29 on the q0.95 sweep eps* and the 1 R robustness target (it was
+    # PI+INV at the four points under r = 1, the T family at three)
     "simulation iv: 0": {
         "PI": [0] * 9,
         "PI+INV": [0] * 9,
-        "DA+PI+IV": [51, 51, 51, 0, 0, 0, 0, 0, 0],
+        "DA+PI+IV": [51, 0, 0, 0, 0, 0, 0, 0, 0],
     },
     # the plasmode recipe, 245 queries: the T families are refuted at r = 0.5
     # alone and feasible above it; PI+INV, which was refuted there too before the

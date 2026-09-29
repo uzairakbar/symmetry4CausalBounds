@@ -26,9 +26,11 @@ quadrature across instruments any more. Legs:
         leak budget with the DA-side allowance in force. Catches: the two radii
         swapped, the allowance dropped.
   (v)   floors and budgets: the T constraint's own floor differs from the stacked
-        one, `fit_epsilon_iv` is the raw T piece (never raised), and the declared
-        path logs "the T constraint's own floor" and never raises. Catches: the
-        floor report measuring the stacked instrument again.
+        one (relative to the floor, both RECORDED: the fixture's DA is the
+        robustness target's, whose scale moved with it), `fit_epsilon_iv` is the
+        raw T piece (never raised), and the declared path logs "the T
+        constraint's own floor" and never raises. Catches: the floor report
+        measuring the stacked instrument again.
   (vi)  the oracle: `eps_iv_z_star` is the larger of the two residual moments, it
         uses the same `W#` as `eps_iv_star`, and `OracleParameters` has no
         `iv_budget`. Catches: the span(Z|G) orthogonalisation put back, the sign of
@@ -104,6 +106,9 @@ QUERY_ROWS = {
     "DA+PI+IV": (0.374879, 1.669156),
 }
 QUERY_TOL = 1e-3
+# leg (v): the T-alone and stacked IV floors of its fixture, RECORDED 2026-09-29 at
+# the 1 R robustness target and the q0.95 sweep eps*
+FLOORS_RECORDED = (0.058349, 0.059260)
 FAIL = []
 
 
@@ -408,10 +413,16 @@ def leg_v(seed):
     floor_t = constraint_floor(data.GX, data.y, runner.fit_gamma(0), Z=G, **common)
     floor_stacked = constraint_floor(data.GX, data.y, runner.fit_gamma(0), Z=np.column_stack([G, data.Z]), **common)
     print(f"      RECORDED floors: T alone {floor_t:.6f}, stacked {floor_stacked:.6f}")
+    # the fixture is the epsilon runner, whose DA is tuned to the robustness
+    # target: at 1 R (the rule since 2026-09-29) the floors are ~0.06 in squared
+    # budget units, where the old 3.0 put them at ~2.7, so the gap is read
+    # RELATIVE to the floor (1.5% now, 0.18% then), and both floors are pinned
+    gap = abs(floor_t - floor_stacked) / floor_stacked
+    check("(v) the T constraint's own floor differs from the stacked one", gap > 1e-3, f"{gap:.6f} relative")
     check(
-        "(v) the T constraint's own floor differs from the stacked one",
-        abs(floor_t - floor_stacked) > 1e-3,
-        f"{abs(floor_t - floor_stacked):.6f}",
+        "(v) both floors at their RECORDED values",
+        np.allclose([floor_t, floor_stacked], FLOORS_RECORDED, rtol=1e-4),
+        f"{floor_t:.6f}, {floor_stacked:.6f} vs {FLOORS_RECORDED}",
     )
     raw = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
     got = runner.fit_epsilon_iv(0, 0, data)

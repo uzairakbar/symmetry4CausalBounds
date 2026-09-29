@@ -1,31 +1,47 @@
-"""A40: the robustness sweep's true eps* is per dataset, and both datasets dip.
+"""A40: the robustness sweep's true eps* is a rule, the same on every dataset.
 
-`ROBUSTNESS_EPSILON_TRUE` is a dict keyed by EXPERIMENT_NAME; the epsilon sweep
-(and only it) retunes a strength-knob DA to it, swapping in the chain of
-`ROBUSTNESS_AUGMENTATION` where the configured one has no knob (optical). Legs:
+The epsilon sweep (and only it) retunes a strength-knob DA to eps* (the sweeps'
+q0.95 of |W|) = `ROBUSTNESS_EPSILON_RADII` x sigma sqrt(gamma*), the confounding
+radius R of that SEM, swapping in the chain of `ROBUSTNESS_AUGMENTATION` where the
+configured one has no knob (optical). It replaced the per-dataset constants 3.0 /
+5.0 / 0.5 (4.2, 7.9 and 1.1 R), so the legs that read those are restated on the
+rule. Legs:
 
   (i)   plumbing: constructing the epsilon sweep runner through each orchestrator
-        (`get_sweep_runner_cls("epsilon")`, the production path) hands the dataset's
-        own constant down as `epsilon_true`, for both datasets, read through the
-        runner's kwargs rather than a fixture, and the tuned DA's oracle eps* equals
-        the constant (the knob reached it) on both; on optical within 5%, since the
-        tuner solves on one draw and the pooled oracle averages eight. Catches: a
-        lookup pinned to one key, a constant that no longer flows, a target the
-        tuner cannot reach.
-        Misses: a sweep that reads the constant but never pads with it (a38/a29).
-  (ii)  mechanism: the sim constant exceeds the post-DA ball's radius, both as
-        sqrt(gamma*) and in outcome units sigma sqrt(gamma*) = sqrt(bias^2), read
-        off the runner's own oracle. This is the reason a dip exists at all.
-        Catches: a constant put back under the radius (the old 2^-1). Misses:
-        whether the excess is enough to move the centre out; that is (iii).
-  (iii) the dip, in data: two sim experiments, 5 steps, `runner.run` under the
-        toggles, `n_samples` and `treatment_dim` of config.yaml (DatasetDefaults
-        when omitted, so a moved dimension is tested at the figure's own); the
-        mean DA+PI coverage at the smallest r is < 1, at r = 1 it is 1.0, and its
-        minimum over the grid stays above 0.7. Catches: a flat line (constant too
-        small), a cliff (too large), a curve that does not recover at eps*.
-        Misses: the 8-experiment band and the other DA+ lines, which the probe
-        log holds (see the comment at the constant).
+        (`get_sweep_runner_cls("epsilon")`, the production path) carries the
+        multiplier, pinned at 1.0, its per-SEM target is that multiple of the
+        runner's own oracle sigma sqrt(gamma*), and the tuned DA's oracle eps*
+        lands on it: exactly on sim, whose oracle reads the tuner's draw; on
+        optical at the RECORDED pooled value, since the tuner solves on one draw
+        and the pooled oracle averages eight, and at 1 R the noise is weak enough
+        that the eight read 8% under the one (at the old 5.0 it was 2%). Catches: a
+        multiplier that no longer flows, a target off the oracle, a target the
+        tuner cannot reach. Misses: a sweep that never pads with it (a38/a29).
+  (ii)  mechanism: the sim target IS the post-DA ball's radius in outcome units,
+        sigma sqrt(gamma*) = sqrt(bias^2) (sigma~ sqrt(gamma*/rho) under
+        `recalibrate: true`), read off the runner's own oracle, at the RECORDED R.
+        The old leg required a constant ABOVE the radius so DA+PI would leave it;
+        at 1 R the dip comes from the T-constrained lines instead, (iii). Catches:
+        a multiplier or a ruler that moved.
+  (iii) the dip, in data, on the lines the figure draws: the simulation block of
+        recipes/robustnessFig11.yaml (its d, iv, n and methods), two experiments,
+        5 steps, `runner.run` under config.yaml's toggles. The old leg read plain
+        DA+PI on config.yaml's block, which the recipe does not draw and which no
+        longer dips at 1 R. Now: r = 1 is the grid's midpoint (the grid is centred
+        on it, a68 (vi)); every DA+ line is 1.0 at r = 1; the number of
+        experiments each line is feasible on, per step, is RECORDED; and so is
+        the one dip. Stated as it is: the T family (DA+PI+IV(T,Z) and its
+        intersection) is INFEASIBLE on both experiments at r = 0.5 and on one of
+        the two at r = 0.71 -- its RMS-type budget r eps_iv* falls under its floor
+        as r shrinks, while the INV budget is read in the q0.95 norm (a68 (vii)
+        records the cells) -- and the dip is that r = 0.71 cell, 0.574 on the one
+        feasible experiment, RECORDED. The Z-only lines are feasible everywhere
+        and stay at 1.0. The 0.7 floor therefore still binds the Z-only lines at
+        every r, but NO LONGER APPLIES to the T family under r = 1 at 1 R: the
+        only reading there is a one-experiment tail count below it, and the
+        cells around it are empty. Catches: a target that moves the feasible
+        counts or the dip, a curve that does not recover at eps*. Misses: the
+        10-experiment band, where the partial cell averages over more draws.
   (v)   isolation of the appended component: the optical epsilon runner's DA (read
         off the runner, `das[0]`) is config.yaml's chain plus the component of
         `ROBUSTNESS_AUGMENTATION`, so it carries gaussian-noise; every other
@@ -39,18 +55,19 @@
         quantile that misses a sweep or leaks into the query. Misses: a chain in
         config.yaml that already names gaussian-noise, where the sweep and the
         rest legitimately share it.
-  (vi)  the optical dip, mirroring (iii): three optical experiments, 5 steps, the
-        configured toggles; the lowest of the DA+PI and DA+PI+IV means at the
-        smallest r is < 1, both are 1.0 at r = 1 and above 0.7 throughout.
-        Catches: the constant back at 2^-1 (flat), the component gone (flat).
-        Misses: how faint the dip is; the constant's comment says the device
-        floors it near 0.95.
-  (vii) the optical constant is the chosen 5.0, and eps* / std(h*) on the pool
+  (vi)  optical, mirroring (iii): three experiments, 5 steps, the configured
+        toggles; every DA+ line is feasible on all three at every step, 1.0 at
+        r = 1 and above 0.7 throughout, and the lowest DA+ coverage under r = 1 is
+        the RECORDED 1.0. The device caps the
+        dip: no multiple of R from 1 to 8 moved it off 1.000 (the comment at
+        `ROBUSTNESS_EPSILON_RADII`), and the old 5.0 was already flat on working5.
+        Catches: the component gone or the chain changed (the widths move and a
+        line leaves 1.0). Misses: a dip, which this device does not show.
+  (vii) the optical target is the RECORDED 1 R, and eps* / std(h*) on the pool
         stays under 10: the round-5 value 8 was 11 std of h* and was rejected as
-        an artefact of a destroyed image, and the comment at the constant shows 6
-        already sits on the device's coverage floor. Catches: an edit that moves
-        the constant, or one that pushes it past the artefact regime. Misses:
-        that 5 is itself 7 std of h*; the number is measured, not principled.
+        an artefact of a destroyed image. Catches: a ruler or multiplier that
+        moved, or one that pushes the target past the artefact regime (1 R is
+        0.88 std of h*).
   (viii) the norm of W on the other two datasets, as (v) reads it on optical:
         every strategy runner's SEMs carry the dataset config's `epsilon_quantile`
         (q0.95) and the query runner's SEM its `query_epsilon_quantile` (the
@@ -73,6 +90,7 @@ import os
 import shutil
 import sys
 import tempfile
+import warnings
 
 import numpy as np
 import yaml
@@ -89,7 +107,7 @@ from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
     OPTICAL_CONFIG,
     ROBUSTNESS_AUGMENTATION,
-    ROBUSTNESS_EPSILON_TRUE,
+    ROBUSTNESS_EPSILON_RADII,
     SIMULATION_CONFIG,
 )
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
@@ -105,11 +123,29 @@ N_EXPERIMENTS = 2
 N_EXPERIMENTS_OPTICAL = 3
 N_JOBS = 4
 COVERAGE_FLOOR = 0.7
-OPTICAL_EPS_STAR = 5.0
+EPSILON_RADII = 1.0
+# RECORDED at seed 42: the confounding radius sigma sqrt(gamma*) of the sim and
+# optical robustness SEMs (the rule's targets), and the optical pooled oracle eps*
+# the tuner's one-draw 0.6345 reads as
+SIM_RADIUS = 0.7106
+OPTICAL_RADIUS = 0.6345
+OPTICAL_POOLED_EPS = 0.5816
+RADIUS_ATOL = 1e-3
+# RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 0.5 .. 2 in 5 steps): the
+# experiments each DA+ line is feasible on per step, and its one dip (coverage,
+# line, r, feasible experiments behind it); the T family is empty at r = 0.5 and
+# half-feasible at 0.71, where the dip is a one-experiment reading
+SIM_FEASIBLE = {
+    "DA+PI+IV(Z)": [2, 2, 2, 2, 2],
+    "DA+PI+IV(T,Z)": [0, 1, 2, 2, 2],
+    "PI&DA+PI+IV(Z)": [2, 2, 2, 2, 2],
+    "PI&DA+PI+IV(T,Z)": [0, 1, 2, 2, 2],
+}
+SIM_DIP = (0.5735, "DA+PI+IV(T,Z)", 0.7071, 1)
+RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 STD_RATIO_BOUND = 10.0
 POOLED_ORACLE_RTOL = 0.05
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
-RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 TMPROOT = os.path.expanduser("~/scratch/tmp/a40")
 FAIL = []
 
@@ -192,67 +228,129 @@ def parse_chain(chain: str) -> list[str]:
 
 
 def leg_i(runners):
-    print("(i) the configured constant reaches each dataset's runner and its tuned DA lands on it")
+    print("(i) the rule's multiplier reaches each dataset's runner and its tuned DA lands on the target")
+    check(
+        "(i) ROBUSTNESS_EPSILON_RADII is 1.0", ROBUSTNESS_EPSILON_RADII == EPSILON_RADII, f"{ROBUSTNESS_EPSILON_RADII}"
+    )
     for name, (runner, handed) in runners.items():
-        want = ROBUSTNESS_EPSILON_TRUE[name]
-        check(f"(i) {name}: epsilon_true handed == constant", handed == want, f"{handed} vs {want}")
+        check(f"(i) {name}: no constant handed down as epsilon_true", handed is None, f"{handed}")
         check(f"(i) {name}: runner reports experiment_name", runner.experiment_name == name)
-        achieved = runner.get_oracle(0).epsilon_star
+        check(f"(i) {name}: runner carries the multiplier", runner.epsilon_radii == ROBUSTNESS_EPSILON_RADII)
+        oracle, sem = runner.get_oracle(0), runner.sems[0]
+        want = ROBUSTNESS_EPSILON_RADII * float(np.sqrt(oracle.sigma_sq * oracle.gamma_star))
+        target = runner.robustness_target(sem)
+        check(
+            f"(i) {name}: target == multiplier x the oracle's sigma sqrt(gamma*)",
+            np.isclose(target, want),
+            f"{target:.6g} vs {want:.6g}",
+        )
+        achieved = oracle.epsilon_star
         strength = runner.das[0].strength
         # the tuner solves on one frozen draw; a SEM with a fixed pool (optical)
-        # then reports the oracle pooled over ORACLE_POOL_DRAWS draws, and the
-        # RMS of a noise DA moves a few percent between draws (measured 2.4%)
-        tolerance = POOLED_ORACLE_RTOL if getattr(runner.sems[0], "pool", None) is not None else 1e-6
+        # then reports the oracle pooled over ORACLE_POOL_DRAWS draws, which at 1 R
+        # reads 8% under the one draw, so the pooled value is RECORDED
+        pooled = getattr(sem, "pool", None) is not None
+        reference = OPTICAL_POOLED_EPS if pooled else target
+        tolerance = POOLED_ORACLE_RTOL if pooled else 1e-6
         check(
-            f"(i) {name}: tuned DA reaches the constant",
-            strength is not None and np.isclose(achieved, want, rtol=tolerance),
-            f"eps* {achieved:.6g} at strength {strength!r:.6}, rtol {tolerance:g}",
+            f"(i) {name}: tuned DA reaches the target" + (" (the RECORDED pooled read)" if pooled else ""),
+            strength is not None and strength > 0 and np.isclose(achieved, reference, rtol=tolerance),
+            f"eps* {achieved:.6g} vs {reference:.6g} (target {target:.6g}) "
+            f"at strength {strength!r:.6}, rtol {tolerance:g}",
         )
 
 
 def leg_ii(sim):
-    print("(ii) the sim constant clears the post-DA ball radius")
+    print("(ii) the sim target is the post-DA ball's radius")
     oracle = sim.get_oracle(0)
-    radius_paper = float(np.sqrt(oracle.gamma_star))
     radius_outcome = float(np.sqrt(oracle.sigma_sq * oracle.gamma_star))
-    eps = ROBUSTNESS_EPSILON_TRUE["simulation"]
+    target = sim.robustness_target(sim.sems[0])
     print(
         f"      gamma* {oracle.gamma_star:.4g}, bias^2 {oracle.bias_sq:.4g}, sigma^2 {oracle.sigma_sq:.4g}; "
-        f"sqrt(gamma*) {radius_paper:.4g}, sigma sqrt(gamma*) {radius_outcome:.4g}; eps* {eps:.4g}"
+        f"sigma sqrt(gamma*) {radius_outcome:.4g}; target {target:.4g}"
     )
-    check("(ii) eps* > sqrt(gamma*)", eps > radius_paper, f"{eps:.4g} vs {radius_paper:.4g}")
-    check("(ii) eps* > sigma sqrt(gamma*)", eps > radius_outcome, f"{eps:.4g} vs {radius_outcome:.4g}")
+    check("(ii) sigma sqrt(gamma*) == sqrt(bias^2)", np.isclose(radius_outcome, np.sqrt(oracle.bias_sq)))
+    check("(ii) target == 1 x sigma sqrt(gamma*)", np.isclose(target, radius_outcome), f"{target:.6g}")
+    check("(ii) at the RECORDED R", np.isclose(radius_outcome, SIM_RADIUS, atol=RADIUS_ATOL), f"{radius_outcome:.4g}")
 
 
-def dip(runner, tag):
-    """`runner.run`; the DA+ coverage curves must dip at the smallest r (the lowest
-    of them, so a tail count on one line is enough), each recover at r = 1 and
-    never go under the floor."""
+def dip(runner, tag, feasible_recorded, lowest_recorded):
+    """`runner.run`; every DA+ line (standalone or intersected) recovers to 1 at
+    r = 1; its per-step count of feasible experiments equals `feasible_recorded`;
+    it stays above the floor on every step where all experiments are feasible;
+    and the lowest DA+ mean coverage under r = 1 (over the experiments a line is
+    feasible on) is `lowest_recorded` = (coverage, line, r, feasible count)."""
     x, results, _ = runner.run(f"a40 {tag} epsilon sweep")
     x = np.asarray(x, dtype=float)
-    lines = [m for m in results if m.startswith("DA+")]
-    cov = {m: np.asarray(results[m]["coverage"], dtype=float).mean(axis=1) for m in lines}
-    per_exp = np.asarray(results["DA+PI"]["coverage"], dtype=float)
-    w_da = np.asarray(results["DA+PI"]["interval_width"], dtype=float).mean(axis=1)
-    w_pi = np.asarray(results["PI"]["interval_width"], dtype=float).mean(axis=1)
+    lines = [m for m in results if "DA+" in m]
+    base = "PI" if "PI" in results else "PI+IV"
+    raw = {m: np.asarray(results[m]["coverage"], dtype=float) for m in lines}
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cov = {m: np.nanmean(raw[m], axis=1) for m in lines}
+        w_da = {m: np.nanmean(np.asarray(results[m]["interval_width"], dtype=float), axis=1) for m in lines}
+    w_base = np.asarray(results[base]["interval_width"], dtype=float).mean(axis=1)
     print("      r:        " + " ".join(f"{v:.4g}" for v in x))
     for m in lines:
-        print(f"      {m:9s} " + " ".join(f"{v:.3f}" for v in cov[m]))
-    print("      DA+PI per exp at the smallest r: " + " ".join(f"{v:.3f}" for v in per_exp[0]))
-    print("      DA+PI/PI  " + " ".join(f"{v:.3f}" for v in w_da / w_pi))
-    lowest = min(cov[m][0] for m in lines)
-    check(f"{tag} r = 1 is the last grid point", np.isclose(x[-1], 1.0), f"{x[-1]:.6g}")
-    check(f"{tag} lowest DA+ coverage < 1 at the smallest r", lowest < 1.0, f"{lowest:.4f} at r {x[0]:.4g}")
+        print(
+            f"      {m:18s} "
+            + " ".join(f"{v:.3f}" for v in cov[m])
+            + f" | width/{base} at r = 1 {w_da[m][len(x) // 2] / w_base[len(x) // 2]:.3f}"
+        )
+    mid = len(x) // 2
+    check(f"{tag} r = 1 is the grid's midpoint", len(x) % 2 == 1 and np.isclose(x[mid], 1.0), f"{x}")
+    counts = {m: np.isfinite(raw[m]).sum(axis=1).astype(int).tolist() for m in lines}
+    check(f"{tag} feasible experiments per step == RECORDED", counts == feasible_recorded, f"{counts}")
+    under = [(cov[m][i], m, i) for m in lines for i in range(mid) if np.isfinite(cov[m][i])]
+    value, line, step = min(under)
+    want, want_line, want_r, want_count = lowest_recorded
+    check(
+        f"{tag} lowest DA+ coverage under r = 1 == RECORDED {want:g} ({want_line}, r {want_r:g}, on {want_count})",
+        np.isclose(value, want, atol=1e-3)
+        and (want == 1.0 or (line.endswith(want_line) and np.isclose(x[step], want_r, atol=1e-3)))
+        and (want == 1.0 or counts[line][step] == want_count),
+        f"{value:.4f} ({line}, r {x[step]:.4g}, on {counts[line][step]})",
+    )
+    n_exp = raw[lines[0]].shape[1]
     for m in lines:
-        check(f"{tag} {m} coverage == 1 at r = 1", np.isclose(cov[m][-1], 1.0), f"{cov[m][-1]:.4f}")
-        floor_ok = np.nanmin(cov[m]) > COVERAGE_FLOOR
-        check(f"{tag} {m} min coverage above the floor", floor_ok, f"{np.nanmin(cov[m]):.4f}")
-    return x, cov["DA+PI"], w_da / w_pi
+        check(f"{tag} {m} coverage == 1 at r = 1", np.isclose(cov[m][mid], 1.0), f"{cov[m][mid]:.4f}")
+        full = np.asarray(counts[m]) == n_exp
+        check(
+            f"{tag} {m} above the floor on every all-feasible step",
+            bool(full.any() and np.min(cov[m][full]) > COVERAGE_FLOOR),
+            f"at r {np.round(x[full], 3).tolist()}: {np.round(cov[m][full], 4).tolist()}",
+        )
+    ratio = w_da[lines[0]] / w_base
+    return x, cov[lines[0]], ratio
 
 
-def leg_iii(sim, draw):
-    print(f"(iii) the dip on {N_EXPERIMENTS} sim experiments, n {draw['n_samples']}, d {draw['treatment_dim']}")
-    return dip(sim, "(iii)")
+def recipe_sim(seed, **toggles):
+    """The simulation block of the robustness recipe: its draw and its methods."""
+    with open(RECIPE) as handle:
+        block = yaml.safe_load(handle)["simulation"]
+    set_seed(seed)
+    return SimulationOrchestrator(
+        kernel_dim=int(block.get("kernel_dim", 0)),
+        treatment_dim=int(block["treatment_dim"]),
+        iv=int(block.get("iv", 0)),
+        n_samples=int(block["n_samples"]),
+        n_experiments=N_EXPERIMENTS,
+        sweep_samples=N_STEPS,
+        methods=list(block["methods"]),
+        seed=seed,
+        hyperparameters={},
+        n_jobs=N_JOBS,
+        **toggles,
+    )
+
+
+def leg_iii(seed, **toggles):
+    orch = recipe_sim(seed, **toggles)
+    print(
+        f"(iii) the dip on {N_EXPERIMENTS} sim experiments of the robustness recipe, methods {orch.kwargs['methods']}"
+    )
+    runner, _ = epsilon_runner(orch)
+    return dip(runner, "(iii)", SIM_FEASIBLE, SIM_DIP)
 
 
 def leg_v(orch, opt_eps, chain):
@@ -297,17 +395,23 @@ def leg_v(orch, opt_eps, chain):
 
 
 def leg_vi(opt):
-    print(f"(vi) the dip on {N_EXPERIMENTS_OPTICAL} optical experiments")
-    return dip(opt, "(vi)")
+    print(f"(vi) the optical curve on {N_EXPERIMENTS_OPTICAL} experiments")
+    return dip(
+        opt, "(vi)", {m: [N_EXPERIMENTS_OPTICAL] * N_STEPS for m in METHODS_OPTICAL if "DA+" in m}, (1.0, "", 0, 0)
+    )
 
 
 def leg_vii(opt):
-    print("(vii) the optical constant and its size against h*")
-    eps = ROBUSTNESS_EPSILON_TRUE["optical_device"]
-    check("(vii) optical == 5.0", eps == OPTICAL_EPS_STAR, f"{eps}")
+    print("(vii) the optical target and its size against h*")
     sem = opt.sems[0]
+    target = opt.robustness_target(sem)
+    check(
+        "(vii) optical target at the RECORDED 1 R",
+        np.isclose(target, OPTICAL_RADIUS, atol=RADIUS_ATOL),
+        f"{target:.4g}",
+    )
     h = np.asarray(sem.f(opt._features(sem.X)), dtype=float).ravel()
-    ratio = eps / float(np.std(h))
+    ratio = target / float(np.std(h))
     check(
         f"(vii) eps* / std(h*) < {STD_RATIO_BOUND:g}",
         ratio < STD_RATIO_BOUND,
@@ -393,7 +497,7 @@ if __name__ == "__main__":
     sim, _ = runners["simulation"]
     opt, _ = runners["optical_device"]
     leg_ii(sim)
-    x, cov, ratio = leg_iii(sim, draw)
+    x, cov, ratio = leg_iii(seed, **toggles)
     leg_v(orchs["optical_device"], opt, chain)
     x_opt, cov_opt, ratio_opt = leg_vi(opt)
     leg_vii(opt)
