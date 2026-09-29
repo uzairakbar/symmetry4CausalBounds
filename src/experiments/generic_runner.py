@@ -16,7 +16,7 @@ from src.experiments.configs import (
     EPS_TOL,
     OMEGA_XLABEL,
     ROBUSTNESS_AUGMENTATION,
-    ROBUSTNESS_EPSILON_TRUE,
+    ROBUSTNESS_EPSILON_RADII,
     SPECTRUM_KEEP,
     percent_of,
 )
@@ -29,6 +29,7 @@ from src.oracle import (
     eps_iv_star,
     eps_iv_z_star,
     epsilon_star,
+    gamma_star,
     pool_oracles,
     preserve_rng,
     recalibrated_da_epsilon,
@@ -532,8 +533,9 @@ class EpsilonRatioStrategy(GenericParamSweep):
     invalid by construction, leaving PI+INV infeasible throughout and the
     intersections inheriting that invalidity -- see PLAN 7.)
 
-    This is the ONLY sweep that recalibrates the DA (to
-    ROBUSTNESS_EPSILON_TRUE[experiment_name]), so that eps* > 0 makes the ratio
+    This is the ONLY sweep that recalibrates the DA (to eps* =
+    ROBUSTNESS_EPSILON_RADII x sigma sqrt(gamma*) of each SEM, `robustness_target`),
+    so that eps* > 0 makes the ratio
     axis meaningful, and the only one that appends
     ROBUSTNESS_AUGMENTATION[experiment_name] to the configured DA chain where
     that is set (optical: the configured chain has no knob to tune).
@@ -554,7 +556,8 @@ class EpsilonRatioStrategy(GenericParamSweep):
     def __init__(self, **kwargs):
         # scoped to this sweep only; never leaks into omega/n/m/perf or the query panel
         name = kwargs.get("experiment_name", "simulation")
-        kwargs["epsilon_true"] = ROBUSTNESS_EPSILON_TRUE[name]
+        # the target is per SEM (`robustness_target`), set in `prepare_pair`
+        self.epsilon_radii = float(ROBUSTNESS_EPSILON_RADII)
         component = ROBUSTNESS_AUGMENTATION[name]
         if component is not None:
             kwargs["da_factory"] = partial(kwargs["da_factory"], append=component)
@@ -573,7 +576,18 @@ class EpsilonRatioStrategy(GenericParamSweep):
                 "keeps the DA as configured (eps* may be 0)."
             )
             self.epsilon_true = None
+        else:
+            self.epsilon_true = self.robustness_target(sem)
         return super().prepare_pair(sem, da, features=features)
+
+    def robustness_target(self, sem) -> float:
+        """The tuned DA's eps* (in the sweeps' norm of W): `epsilon_radii` confounding
+        radii R = sigma sqrt(gamma*), with the oracle's sigma and gamma* of this SEM
+        -- the units the DA+ ball is drawn in (see ROBUSTNESS_EPSILON_RADII)."""
+        radius = float(np.sqrt(sem.sigma_sq * gamma_star(sem)))
+        target = self.epsilon_radii * radius
+        logger.info(f"robustness eps* target {target:.6g} = {self.epsilon_radii:g} x sigma sqrt(gamma*) {radius:.6g}")
+        return target
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
         return self._sweep_data(experiment_index)

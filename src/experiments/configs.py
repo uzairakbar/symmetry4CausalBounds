@@ -358,73 +358,34 @@ IM_CI_SEED_OFFSET: int = 20_000
 # sat below the bootstrap noise floor 0.104 of the moment it bounds.
 GAMMA_Z_DEFAULT: float = 0.0177
 
-# the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to this
-# true invariance error, so that eps/eps* is a meaningful ratio axis. Keyed by
-# EXPERIMENT_NAME (simulation.py, optical_device.py).
-# The target is eps* in the SWEEPS' norm, the q0.95 of |W| (`epsilon_quantile`),
-# on every dataset; the tables below were measured when it was the RMS. On sim and
-# cigarettes W is near Gaussian, q0.95 ~1.95x its RMS, so the same constant now
-# tunes about half the strength: sim 3.0 at 0.14-0.17 (RMS 1.5; 0.26-0.33 as an
-# RMS target), cigarettes 0.5 at 0.06-0.08 (RMS 0.26; 0.12-0.15). Seed 42.
-# Why the two differ. The DA+ ball keeps the radius sigma sqrt(gamma*) after
-# the DA (0.71 on sim: bias^2 0.505), so h* only leaves it below eps* once the
-# DA+ERM centre drifts by that much, and the drift grows with eps*. At the old
-# 0.5 nothing ever left the ball and every DA+ coverage curve sat at 1.0.
-# Measured on sim (seed 42, d 32, n 2048, recalibrate/pad/mean_match on, clipy
-# off, r = eps/eps* from 2^-6 to 1; logs ~/scratch/tmp/impl_v7/logs/runs/):
-#   eps*  strength   DA+PI at 2^-6   min DA+PI+IV   DA+PI/PI width at r = 1
-#   1     0.09-0.10  1.000           1.000          0.91
-#   2     0.18-0.20  1.000           0.983          1.16
-#   3     0.26-0.30  0.917           0.885          1.37   (4 exp, 16 steps)
-#   4     0.35-0.40  0.757           0.737          1.62   (4 exp, 16 steps)
-#   6     0.54-0.61  0.576           0.576          2.13
-# All are back at 1.0 by r = 1. 3 is the smallest with a dip the experiment
-# band does not swallow (per-experiment 0.84-0.97 at 2^-6), a slope and not a
-# cliff; 4 slips under 0.8 and 6 is a failure mode. The price is DA+PI 1.37x
-# PI wide at eps = eps*.
-# The optical device has no knob under the configured permutation chain, so
-# the sweep appends gaussian-noise (ROBUSTNESS_AUGMENTATION) and tunes its
-# strength. Measured there (seed 42, same toggles, 2 exp, 8 steps unless
-# noted; std(h*) 0.72 on the pool; logs ~/scratch/tmp/impl_v7/logs/optical/runs/):
-#   eps*   strength   DA+PI at 2^-6   min DA+PI+IV   DA+PI/PI width at r = 1
-#   0.5-3  0.74-2.65  1.000           1.000          0.72-1.05
-#   4      3.10       0.980           0.962          1.28   (4 exp, 16 steps; flat on seed 7)
-#   5      3.49       0.962           0.952          1.50   (4 exp, 16 steps; seeds 7 / 1: 0.98 / 0.97)
-#   6      3.85       0.958           0.952          1.73   (4 exp, 16 steps)
-#   8      4.47       0.960           0.955          2.17
-# The dip is capped by the device and the toggles, not by eps*. Under
-# `recalibrate: true` the DA+PI radius is sigma~ sqrt(gamma*/rho_hat) =
-# sigma_X sqrt(gamma*) = 0.635, the baseline PI radius, whatever the noise
-# does: rho_hat keeps rising with the strength (2.1 -> 2.3) and is cancelled.
-# What the noise moves is the representer norm of the centred clean query
-# against the noise-dominated Sigma_GX, and that floors at 2.2 (a second
-# moment over its variance for the squared features), so the raw DA+PI
-# half-width floors at 0.635 x 2.2 = 1.41 while the DA+ERM centre collapses
-# to the train mean (std 0.20 -> 0.06). Coverage then tends to
-# P(|h* - mean| < 1.41) = 0.947 on the pool: h* has a 5% right tail (2.1 to
-# 3.9) and no left tail, and those same queries miss at every eps* from 5 up
-# (0.955-0.96 in the mean, 0.94-0.98 per 100-query split, at 5, 8, 12, 20).
-# 5 is the smallest value whose dip shows on every draw seen (4 is flat on
-# seed 7) and already sits on that floor; 6 and 8 add width, nothing else.
-# It is 7 std of h* and noise 3.5x the pixel std: a tail count of 4-5
-# queries in 100, not the sim's slope. Every DA+ line stays above 0.95. The
-# tuner solves on one draw; the pooled oracle (8 draws) reads 4.88 for it.
-# Cigarettes: eps* is LINEAR in the translation strength (0.096 at 0, 0.509 at 0.5,
-# 1.007 at 1.0 against the unrestricted target), and at 0.5 the DA+PI coverage runs
-# 0.797 at r = 2^-6 up to 1.000 at r = 1 for 1.486x the width -- the same profile
-# the simulation's 3.0 was chosen for. a53(v) is where it is re-read.
-ROBUSTNESS_EPSILON_TRUE: dict[str, float] = {
-    "simulation": 3.0,
-    "optical_device": 5.0,
-    "cigarettes": 0.5,
-}
+# the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to a
+# true invariance error, so that eps/eps* is a meaningful ratio axis. The target
+# is a RULE, one for every dataset: eps* (the sweeps' q0.95 of |W|,
+# `epsilon_quantile`) = ROBUSTNESS_EPSILON_RADII x sigma sqrt(gamma*), with sigma
+# and gamma* the oracle's for that experiment's SEM (`EpsilonRatioStrategy`). The
+# ruler is the confounding radius R = sigma sqrt(gamma*) in outcome units, which is
+# also the DA+ ball's under `recalibrate: true` (sigma~ sqrt(gamma*/rho) =
+# sigma sqrt(gamma*)), so the misstated invariance is measured against the
+# sensitivity budget it competes with. R, seed 42: sim 0.711, optical 0.635,
+# cigarettes 0.449. Scanned over 1, 2, 3, 4, 6, 8 R (2 exp, 5 steps, IM-CI 0):
+#   - 1 is the only one with a sim dip (DA+PI+IV(T,Z) 0.57 at r = 0.71; from 2
+#     up that line is INFEASIBLE under r = 1, where the RMS-type T budget
+#     scaled by r falls under its floor), and the narrowest DA+ widths;
+#   - cigarettes dips at every multiple, DA+PI+IV(T,Z) 0.61 at r = 0.5 and
+#     back to 0.99 by 0.71 at 1 R (0.96 at 8 R), its DA+ width at r = 1 growing
+#     from 2x to 7x PI+IV's (the 10-experiment production run reads 0.957 at
+#     r = 0.707);
+#   - optical device 8 stays at 1.000 at every multiple (the device caps the
+#     dip), and 1 R clears its eps* floor of 0.49 at strength 0.
+# It replaces the hand-picked 3.0 / 5.0 / 0.5 (4.2 R, 7.9 R, 1.1 R).
+ROBUSTNESS_EPSILON_RADII: float = 1.0
 
 # The component the robustness sweep APPENDS to the configured DA chain, where
 # that chain has no strength knob. None = the configured chain as is. Optical:
 # config.yaml ships a permutation-only chain (eps* pinned at 0.254, every DA+
 # coverage line flat at 1.0), so the sweep, and ONLY it, runs config.yaml's
 # chain plus gaussian-noise (skipped when the chain already carries it, `all`
-# included) and retunes its strength to the constant above; the query panel and
+# included) and retunes its strength to the rule above; the query panel and
 # the other sweeps read config.yaml alone. Applied in EpsilonRatioStrategy,
 # derived in OpticalOrchestrator._da_factory.
 ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
@@ -435,8 +396,8 @@ ROBUSTNESS_AUGMENTATION: dict[str, str | None] = {
 }
 
 
-# Per-spec QUERY budget for the cigarette panel, a module constant beside the two
-# ROBUSTNESS tables, which is this file's pattern for a per-dataset lookup. It is
+# Per-spec QUERY budget for the cigarette panel, a module constant beside the
+# ROBUSTNESS_AUGMENTATION table, which is this file's pattern for a per-dataset lookup. It is
 # kept out of `CigaretteConfig` so that dataclass stays flat and scalar like the
 # other three: a dict field under `frozen=True` makes the generated __hash__ raise.
 # The rule: the smallest power of two STRICTLY ABOVE the measured gamma*(restricted)
