@@ -70,7 +70,7 @@ def check(name: str, condition: bool, detail: str = ""):
 #: the shipped gamma: PI's selection at target_coverage 0.995 on split C (5,000 rows), pooled nets
 GAMMA = 0.062082436071912536
 RECIPE_SEEDS = 10  # doMnistFigF1's population seeds
-RECIPE_EPSILON = 0.05  # doMnistFigF1's budget
+RECIPE_EPSILON = 0.0475  # doMnistFigF1's budget
 RECIPE_METHODS = ["ATE", "ERM", "DA+ERM", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV", "PI+INV"]
 MINIMAL = dict(seed=42, augmentation="translate", gamma=0.085, epsilon=0.04, methods=["PI"])
 
