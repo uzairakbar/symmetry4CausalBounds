@@ -661,9 +661,16 @@ class InstrumentalVariablePartialR2(PartialR2):
     Two instrument blocks reach `fit` by their own keyword: `T`, the DA
     translation amounts of SS4.3, and `Z`, the observed instrument. Every block
     that is present gets its own SOC constraint at its own radius -- `t_bound`
-    from `epsilon_iv`, `z_bound` from `epsilon_iv_z` and `gamma_z` -- so one
-    instrument's budget is never spent by the other. A missing block is (n, 0)
-    and contributes nothing; with both missing this is baseline PI exactly.
+    from `epsilon_iv`, `z_bound` from `epsilon_iv_z` and `gamma_z` (the query
+    radii; under `iv_recalibrate`, the sweeps', see `t_bound` / `z_bound`) -- so
+    one instrument's budget is never spent by the other. Under `iv_recalibrate` a
+    DA fit with both blocks also carries App. B / D's joint constraint on
+    span(T, Z) at `tz_bound`: each of the three admits h# at its own radius, so
+    their intersection does, and it is at least as tight as either the
+    separate pair or the joint one alone (MEASURED: the pair wins where the
+    leaks are lopsided, sim; the joint where eps and gamma_z dominate,
+    cigarettes). A missing block is (n, 0) and contributes nothing; with both
+    missing this is baseline PI exactly.
 
     Each constraint is valid on its own by the contraction step of Thm. 3.B's
     proof (E[U + xi | .] is conserved, T independent of (xi, U, Z)). The pair is
@@ -676,17 +683,37 @@ class InstrumentalVariablePartialR2(PartialR2):
     constraint set does, and nothing is inflated to hide it.
     """
 
-    def __init__(self, gamma=None, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, **kwargs):
+    def __init__(
+        self,
+        gamma=None,
+        gamma_z=0.0,
+        epsilon_iv=None,
+        epsilon_iv_z=0.0,
+        iv_recalibrate=False,
+        leak_t=0.0,
+        leak_tz=0.0,
+        **kwargs,
+    ):
         self.gamma_z = gamma_z
         # epsilon_iv: the T-as-IV budget ||E[W#|T]|| (oracle `eps_iv_star`), the
         # radius of the T constraint and of nothing else. Distinct from
         # `epsilon`, whose only role in this class is the +/-eps padding: padding
         # validity is pointwise (Thm. 3.A Jensen step), an IV budget is a
-        # projection norm. One attribute per role, one consumer each.
+        # projection norm. One attribute per role, one consumer each. Under
+        # `iv_recalibrate` (the sweeps) `epsilon` is both radii's eps as well and
+        # this one is not read (App. D, `t_bound` / `z_bound`).
         self.epsilon_iv = epsilon_iv
         # epsilon_iv_z: the observed instrument's measured piece, beside the
         # declared radius s sqrt(gamma_z) it is combined with (SS2.6)
         self.epsilon_iv_z = epsilon_iv_z
+        # the sweeps' App. D budget re-calibration of the radii (`t_bound`,
+        # `z_bound`, `tz_bound`); False, every query path, keeps the radii above
+        self.iv_recalibrate = iv_recalibrate
+        # under `iv_recalibrate`: the measured noise moments || Q' r* || / sqrt(N)
+        # of the residual at h_* on span(T) and on span(T, Z), the T and joint
+        # counterparts of `epsilon_iv_z` (the runner's `fit_iv_leaks`)
+        self.leak_t = leak_t
+        self.leak_tz = leak_tz
         super().__init__(gamma=gamma, **kwargs)
         self.T_projector_R = None
         self.t_residual_base = None
@@ -694,8 +721,17 @@ class InstrumentalVariablePartialR2(PartialR2):
         self.z_residual_base = None
         self.t_threshold_param = None
         self.z_threshold_param = None
+        # under `iv_recalibrate` a DA fit with both blocks also carries the joint
+        # constraint on span(T, Z), App. B / D's joint instrument (Z, T), beside the two
+        self.TZ_projector_R = None
+        self.tz_residual_base = None
+        self.tz_threshold_param = None
         self._has_t = False
         self._has_z = False
+        self._has_tz = False
+        # fitted on an augmented design (handed `X_pre`): a DA+ ball or an
+        # intersection's DA branch; set at fit
+        self._da_fit = False
         # how far the augmentation can move a DECLARED Z moment; set at fit
         self._z_allowance = 0.0
         self._budget_logged = False
@@ -710,15 +746,42 @@ class InstrumentalVariablePartialR2(PartialR2):
     def solves_on_epsilon(self) -> bool:
         """The T threshold is read at predict time (the epsilon sweep moves the T
         budget with the ratio), so a model with a T constraint re-solves per grid
-        point; one without it only pads. `PI+INV` and `PI+INV+IV` keep the class
-        attribute, which shadows this."""
-        return self._has_t
+        point; one without it only pads. Under `iv_recalibrate` a DA fit's Z radius
+        reads epsilon too, so a Z-only DA+ ball re-solves as well. `PI+INV` and
+        `PI+INV+IV` keep the class attribute, which shadows this."""
+        return self._has_t or (self.iv_recalibrate and self._has_z and self._da_fit)
+
+    def _recalibrated(self, leak: float) -> float:
+        """App. D's re-calibrated radius of a DA fit's constraint, in outcome units:
+        sigma~^2 gamma~_z(eps) = eps^2 + sigma~^2 gamma_z / rho (kappa = 0, E.2)
+        plus the measured noise moment `leak` of the block, in root sum square.
+        eps is the pad's own (`epsilon` less `pad_tolerance`: the q0.95 eps* under
+        the IM-CI; without it eps carries EPS_TOL, as the pad does), and no other
+        tolerance enters: at eps* = 0 the radius is exactly what admitting h# takes
+        on the oracle path, so h# sits on the boundary."""
+        eps_raw = max(float(self.epsilon) - self.pad_tolerance, 0.0)
+        return float(np.sqrt(eps_raw**2 + self.sigma_sq / self.rho * self.gamma_z + leak**2))
 
     @property
     def t_bound(self) -> float | None:
         """Radius of the T constraint: the T-as-IV budget, alone. None when the
-        model was built without one (it then carries no T block either)."""
+        model was built without one (it then carries no T block either).
+
+        Under `iv_recalibrate` (the sweeps) it is App. D's re-calibrated radius
+        (`_recalibrated`) with T's own noise moment `leak_t`: T is part of the
+        paper's joint instrument (Z, T), so it takes the declared gamma_z slack
+        too. `epsilon_iv` is then not read."""
+        if self.iv_recalibrate:
+            return self._recalibrated(self.leak_t)
         return None if self.epsilon_iv is None else float(self.epsilon_iv)
+
+    @property
+    def tz_bound(self) -> float | None:
+        """Radius of the joint constraint on span(T, Z), a DA fit's third one under
+        `iv_recalibrate`: App. D's re-calibrated radius with the joint noise moment
+        `leak_tz`, so eps and the gamma_z slack are counted once for both blocks.
+        None without the joint block."""
+        return self._recalibrated(self.leak_tz) if self._has_tz else None
 
     @property
     def z_bound(self) -> float:
@@ -737,8 +800,19 @@ class InstrumentalVariablePartialR2(PartialR2):
 
         Exactly s sqrt(gamma_z) on a declared non-DA method, and exactly
         `epsilon_iv_z` at gamma_z = 0.
+
+        Under `iv_recalibrate` (the sweeps) it is App. D's re-calibrated budget
+        eps^2 / sigma~^2 + gamma_z / rho (kappa = 0, E.2), in outcome units, with
+        the measured Z noise moment `epsilon_iv_z` (0 on the declared path, where
+        gamma_z carries it): sqrt(epsilon_iv_z^2 + s^2 gamma_z) alone on a non-DA
+        fit, `_recalibrated(epsilon_iv_z)` on a DA fit (optical's q0.99
+        `pad_epsilon` never enters, it has no Z); `_z_allowance` is not read.
         """
         s_sq = self.sigma_sq / self.rho
+        if self.iv_recalibrate:
+            if self._da_fit:
+                return self._recalibrated(self.epsilon_iv_z)
+            return float(np.sqrt(self.epsilon_iv_z**2 + s_sq * self.gamma_z))
         # the allowance rides with a DECLARED leak and disappears with it: the F2
         # figure sweeps `gamma_z` on a fitted model down to 0, and there the radius
         # must be exactly `epsilon_iv_z` again, not the fit-time allowance
@@ -749,13 +823,18 @@ class InstrumentalVariablePartialR2(PartialR2):
     def _precompute_matrices(self, X, y, Z=None, T=None, X_pre=None, **kwargs):
         T, Z = _instrument_columns(T, len(X)), _instrument_columns(Z, len(X))
         self._has_t, self._has_z = T.shape[1] > 0, Z.shape[1] > 0
-        if self._has_t and self.epsilon_iv is None:
+        self._da_fit = X_pre is not None
+        if self._has_t and self.epsilon_iv is None and not self.iv_recalibrate:
             raise ValueError("epsilon_iv is required with T-as-IV; pass the oracle `eps_iv_star` (+ EPS_TOL).")
         if self._has_t:
             self.T_projector_R, self.t_residual_base = iv_constraint_terms(X, y, T)
         if self._has_z:
             self.Z_projector_R, self.z_residual_base = iv_constraint_terms(X, y, Z)
-            self._z_allowance = self._declared_allowance(X, Z, X_pre)
+            # unused under `iv_recalibrate`, which adds eps in quadrature instead
+            self._z_allowance = 0.0 if self.iv_recalibrate else self._declared_allowance(X, Z, X_pre)
+        self._has_tz = self.iv_recalibrate and self._da_fit and self._has_t and self._has_z
+        if self._has_tz:
+            self.TZ_projector_R, self.tz_residual_base = iv_constraint_terms(X, y, np.hstack([T, Z]))
         if self._has_z and self.z_bound == 0.0:
             # the usual cause is a caller handing the translation amounts as `Z`:
             # T-as-IV goes in the `T` block, and the Z block's radius is 0 until
@@ -820,28 +899,39 @@ class InstrumentalVariablePartialR2(PartialR2):
                 cp.norm(cp.Constant(self.z_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var, 2)
                 <= self.z_threshold_param
             )
+        if self._has_tz:
+            self.tz_threshold_param = cp.Parameter(nonneg=True)
+            constraints.append(
+                cp.norm(cp.Constant(self.tz_residual_base) - cp.Constant(self.TZ_projector_R) @ self.h_var, 2)
+                <= self.tz_threshold_param
+            )
         return constraints
 
     def _set_solver_parameters(self, gamma):
         super()._set_solver_parameters(gamma)
         if self._has_t:
             self.t_threshold_param.value = np.sqrt(self.N_samples) * self.t_bound
+        if self._has_tz:
+            self.tz_threshold_param.value = np.sqrt(self.N_samples) * self.tz_bound
         if self._has_z:
             self.z_threshold_param.value = np.sqrt(self.N_samples) * self.z_bound
             if self.gamma_z != 0.0 and not self._budget_logged:
                 # once per fitted model, at the first solve: rho is final here (an
                 # intersection sets its DA branch's after fit), so s is too
                 self._budget_logged = True
+                allowance = "App. D re-calibrated" if self.iv_recalibrate else f"{self._z_allowance:.6g}"
                 logger.info(
                     f"IV: gamma_z={self.gamma_z:g}, s={np.sqrt(self.sigma_sq / self.rho):.6g}, "
-                    f"DA-side allowance {self._z_allowance:.6g}; r_Z={self.z_bound:.6g}, "
-                    f"r_T={'none' if self.t_bound is None else format(self.t_bound, '.6g')}. "
-                    "Two radii, one per instrument, never pooled."
+                    f"DA-side allowance {allowance}; r_Z={self.z_bound:.6g}, "
+                    f"r_T={'none' if self.t_bound is None else format(self.t_bound, '.6g')}"
+                    + ("" if self.tz_bound is None else f", r_TZ={self.tz_bound:.6g}")
+                    + ". One radius per instrument block, never pooled."
                 )
 
     def _predict(self, X, epsilon_iv=None, **kwargs):
         """`epsilon_iv` is the T budget at predict time; it reaches the T threshold
-        and nothing else, and a model without a T constraint ignores it. The program
+        and nothing else, and a model without a T constraint ignores it (so does
+        one under `iv_recalibrate`, whose T radius is `_recalibrated(leak_t)`). The program
         is unchanged, so this re-solves without re-canonicalising."""
         if epsilon_iv is not None and self._has_t:
             self.epsilon_iv = float(epsilon_iv)
@@ -1003,15 +1093,30 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     default), "Z" the observed instrument alone, "T" the translation amounts
     alone. Both radii travel to both branches and each uses the ones its blocks
     ask for: `epsilon_iv` is r_T, `epsilon_iv_z` with `gamma_z` is r_Z (0.0 under
-    a declared budget makes it exactly s sqrt(gamma_z)). An empty Z makes the
-    baseline plain PI and the DA branch T-only, which is today's run."""
+    a declared budget makes it exactly s sqrt(gamma_z)); under `iv_recalibrate`
+    (the sweeps) both branches get it and read App. D's radii instead, the DA
+    branch with the joint (T, Z) constraint beside the two. An empty
+    Z makes the baseline plain PI and the DA branch T-only, which is today's run."""
 
-    def __init__(self, gamma_z=0.0, epsilon_iv=None, epsilon_iv_z=0.0, instrument="T,Z", **kwargs):
+    def __init__(
+        self,
+        gamma_z=0.0,
+        epsilon_iv=None,
+        epsilon_iv_z=0.0,
+        instrument="T,Z",
+        iv_recalibrate=False,
+        leak_t=0.0,
+        leak_tz=0.0,
+        **kwargs,
+    ):
         if instrument not in ("T,Z", "Z", "T"):
             raise ValueError(f"instrument must be 'T,Z', 'Z' or 'T'; got {instrument!r}")
         self.gamma_z = gamma_z
         self.epsilon_iv = epsilon_iv
         self.epsilon_iv_z = epsilon_iv_z
+        self.iv_recalibrate = iv_recalibrate
+        self.leak_t = leak_t
+        self.leak_tz = leak_tz
         self.instrument = instrument
         super().__init__(**kwargs)
 
@@ -1024,6 +1129,9 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             epsilon=self.epsilon,
             epsilon_iv=self.epsilon_iv,
             epsilon_iv_z=self.epsilon_iv_z,
+            iv_recalibrate=self.iv_recalibrate,
+            leak_t=self.leak_t,
+            leak_tz=self.leak_tz,
             pad=pad,
             recalibrate=self.recalibrate,
             rho=1.0,

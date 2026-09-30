@@ -70,7 +70,8 @@ class SimulationConfig:
     # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
     # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
     # the RMS. Here eps* is the oracle's alone (`epsilon` above is declared), so
-    # it moves every sweep budget and the robustness sweep's tuning target.
+    # it moves every sweep budget and the robustness sweep's tuning target. On the
+    # sweeps it is the IV radii's eps too (App. D, `iv_recalibrate`).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
     # query sweep only; the sweeps use EPS_TOL (2**-5), which is
@@ -125,7 +126,8 @@ class OpticalDeviceConfig:
     query_epsilon: float | None = None
     # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
     # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
-    # the RMS. Split as `epsilon` / `query_epsilon` are.
+    # the RMS. Split as `epsilon` / `query_epsilon` are. On the sweeps it is the
+    # IV radii's eps too (App. D, `iv_recalibrate`).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
     # Thm. 3.A's epsilon, a POINTWISE budget on the same defect (SS2.4 states it as
@@ -241,7 +243,8 @@ class CigaretteConfig:
     # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
     # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
     # the RMS. Either is 0 on the panel, where W is; the robustness sweep's
-    # tuned DA is where the choice shows.
+    # tuned DA is where the choice shows. On the sweeps it is the IV radii's eps
+    # too (App. D, `iv_recalibrate`).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
     # None pads DA+ intervals by `epsilon` (Thm. 3.A); with eps* = 0 that is
@@ -370,7 +373,10 @@ GAMMA_Z_DEFAULT: float = 0.0177
 # cigarettes 0.449. Scanned over 1, 2, 3, 4, 6, 8 R (2 exp, 5 steps, IM-CI 0):
 #   - 1 is the only one with a sim dip (DA+PI+IV(T,Z) 0.57 at r = 0.71; from 2
 #     up that line is INFEASIBLE under r = 1, where the RMS-type T budget
-#     scaled by r falls under its floor), and the narrowest DA+ widths;
+#     scaled by r falls under its floor), and the narrowest DA+ widths.
+#     Scanned before the sweeps' T radius became App. D's
+#     sqrt((r eps*)^2 + s^2 gamma_z + leak_T^2) (`iv_recalibrate`); the RMS-type
+#     T budget is the query's alone now;
 #   - cigarettes dips at every multiple, DA+PI+IV(T,Z) 0.61 at r = 0.5 and
 #     back to 0.99 by 0.71 at 1 R (0.96 at 8 R), its DA+ width at r = 1 growing
 #     from 2x to 7x PI+IV's (the 10-experiment production run reads 0.957 at
@@ -961,6 +967,9 @@ class MethodRegistry:
         epsilon_iv: float | None = None,
         epsilon_iv_z: float = 0.0,
         gamma_z: float = 0.0,
+        iv_recalibrate: bool = False,
+        leak_t: float = 0.0,
+        leak_tz: float = 0.0,
         n_jobs: int = 1,
         mean_match: bool = True,
         rho: float = 1.0,
@@ -1016,6 +1025,17 @@ class MethodRegistry:
             gamma_z: leakiness budget of the observed instruments, `GAMMA_Z_DEFAULT`
                 under a non-empty `iv:`; it enters the Z radius only
                 (`z_bound`), never the T one
+            iv_recalibrate: App. D's budget re-calibration of the IV radii, the
+                sweeps' setting (`fit_budgets`): on a DA fit every block's radius
+                is sqrt(eps^2 + sigma~^2 gamma_z / rho + leak^2), eps the q0.95
+                eps* of E.2 the pad uses and leak the block's measured noise
+                moment, and a (T,Z) fit adds the joint constraint on span(T, Z);
+                a non-DA Z radius is sqrt(leak^2 + s^2 gamma_z). No tolerance.
+                `epsilon_iv` is then not read. False (the query runners) keeps
+                the radii above. partial_r2 only.
+            leak_t, leak_tz: the measured noise moments || Q' r* || / sqrt(N) on
+                span(T) and span(T, Z) (`fit_iv_leaks`), read under
+                `iv_recalibrate` only. partial_r2 only.
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
             absorbed_rate: controls partialled out of the design per observation,
                 charged to every ball's sigma-hat as `absorbed_rate * n_obs` dof
@@ -1076,7 +1096,15 @@ class MethodRegistry:
         # every IV ball carries BOTH radii; which constraints it ends up with
         # follows from the instrument blocks it is FITTED with (`fit_model`), so
         # one kwarg set serves the non-DA methods, the DA+ ones and every mode
-        iv_common = dict(common, epsilon_iv=epsilon_iv, epsilon_iv_z=epsilon_iv_z, gamma_z=gamma_z)
+        iv_common = dict(
+            common,
+            epsilon_iv=epsilon_iv,
+            epsilon_iv_z=epsilon_iv_z,
+            gamma_z=gamma_z,
+            iv_recalibrate=iv_recalibrate,
+            leak_t=leak_t,
+            leak_tz=leak_tz,
+        )
         # the standalone DA+ balls carry the step's rho; the intersections read
         # theirs off their two branches (`IntersectedPartialR2.rho`)
         da_common = dict(common, rho=rho)

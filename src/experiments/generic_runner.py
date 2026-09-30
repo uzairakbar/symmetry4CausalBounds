@@ -33,6 +33,7 @@ from src.oracle import (
     pool_oracles,
     preserve_rng,
     recalibrated_da_epsilon,
+    z_moment_star,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -274,9 +275,10 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
     def _baseline_epsilon_iv_z(self) -> float:
         """Baseline observed-Z budget: a pre-DA quantity, read once on this runner's
         own draw (`X_raw`, `y`, `Z`); never per query. `eps_iv_z_star` on the draw
-        plus `eps_tol`, as `GenericParamSweep.fit_epsilon_iv_z` reads it on each
-        experiment's base sample. Exits first, calling nothing, on a declared radius
-        or an empty Z (optical, do-MNIST's 4-tuple draw)."""
+        plus `eps_tol`; the sweeps read the leak `z_moment_star` alone
+        (`GenericParamSweep.fit_epsilon_iv_z`), their DA side re-calibrated. Exits
+        first, calling nothing, on a declared radius or an empty Z (optical,
+        do-MNIST's 4-tuple draw)."""
         if self.declared_iv or np.shape(self.Z)[1] == 0:
             return 0.0
         z_piece = eps_iv_z_star(
@@ -409,45 +411,48 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         return self._base[key]
 
     def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
-        """Baseline observed-Z budget: a pre-DA quantity (the DA knob does not touch
-        it), read on the rows this cell's +IV methods fit.
+        """The observed instrument's measured leak: the noise moment
+        || Q_Z' r* || / sqrt(N), r* = y - h_*(X), on the rows this cell's +IV
+        methods fit (`z_moment_star`; the untiled rows on the m sweep, as PI+IV
+        fits them, the Z moment of a tiling being the same). A pre-DA quantity,
+        measured per cell because the rows change with the step on the n and m
+        sweeps; no tolerance, so at it the Z constraints admit h_* (non-DA) and h#
+        (DA, beside eps: `z_bound` under `iv_recalibrate`) exactly, never
+        floor-reported.
 
-        0.0 on the declared path, without data, or under an empty Z, checked before
-        anything else, so a runner without Z (optical, do-MNIST) never reaches the
-        oracle from here. Else `eps_iv_z_star` on the cell's rows plus EPS_TOL, never
-        floor-reported: the m sweep's untiled rows, which PI+IV fits, else the
-        cell's own. Reading the experiment's whole sample at every step, as this
-        once did, under-measured the moment on the n sweep's smaller steps (it grows
-        like sqrt(n_samples / n)). The oracle draws the augmentation on the RAW
-        design: the cell's rows are raw unless the runner carries a polynomial map,
-        and then they are the first rows of the sample the experiment is cut from
-        (`_base_data`). The setup oracle's draw is not the fit sample, so its
-        `eps_iv_z_star` is not read here."""
+        0.0 on the declared path (gamma_z carries the moment), without data, or
+        under an empty Z, checked before anything else. The query runners keep the
+        shared `eps_iv_z_star` on their own draw."""
         Z = getattr(data, "Z", None)
         if self.declared_iv or data is None or Z is None or np.shape(Z)[1] == 0:
             return 0.0
         base = getattr(data, "X_base", None) is not None
-        X, y, Z = (data.X_base, data.y_base, data.Z_base) if base else (data.X, data.y, Z)
-        X_raw = X
-        if self.poly:
-            X_all_raw, X_all = self._base_data(experiment_index, getattr(self, "n_samples_override", None))[:2]
-            if not np.array_equal(X_all[: len(X)], X):
-                raise ValueError(
-                    f"the cell's {len(X)} rows are not the first rows of experiment {experiment_index}'s sample"
-                )
-            X_raw = X_all_raw[: len(X)]
-        z_piece = eps_iv_z_star(
-            self.sems[experiment_index],
-            self.das[experiment_index],
-            X=X_raw,
-            y=y,
-            Z=Z,
-            features=self._features,
-            mean_match=self.mean_match,
-        )
+        X, y = (data.X_base, data.y_base) if base else (data.X, data.y)
+        Z = data.Z_base if base and getattr(data, "Z_base", None) is not None else Z
+        z_piece = z_moment_star(self.sems[experiment_index], X=X, y=y, Z=Z, mean_match=self.mean_match)
         if not np.isfinite(z_piece):
             return 0.0
-        return float(z_piece) + EPS_TOL
+        return float(z_piece)
+
+    def fit_iv_leaks(self, experiment_index: int, data=None) -> dict[str, float]:
+        """The noise moments || Q' r* || / sqrt(N), r* = y - h_*(X), of the rows a
+        DA+ IV ball is fitted on (the cell's X, y and translation amounts G, tiled on
+        the m sweep): on span(T) (`leak_t`) and on span(T, Z) (`leak_tz`). They are
+        what the T and joint constraints need to admit h# beyond the invariance
+        error eps, which re-calibrated radii add in quadrature (App. D). On the
+        declared path gamma_z stands for the observed instrument's moment, so the
+        joint leak is T's. 0.0 without data or translation amounts."""
+        G = getattr(data, "G", None)
+        if data is None or G is None or np.size(G) == 0:
+            return {"leak_t": 0.0, "leak_tz": 0.0}
+        sem, X, y = self.sems[experiment_index], data.X, data.y
+        T = np.asarray(G, dtype=float).reshape(len(X), -1)
+        leak_t = float(z_moment_star(sem, X=X, y=y, Z=T, mean_match=self.mean_match))
+        Z = getattr(data, "Z", None)
+        if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
+            return {"leak_t": leak_t, "leak_tz": leak_t}
+        joint = np.hstack([T, np.asarray(Z, dtype=float).reshape(len(X), -1)])
+        return {"leak_t": leak_t, "leak_tz": float(z_moment_star(sem, X=X, y=y, Z=joint, mean_match=self.mean_match))}
 
     def _draw_base(self, experiment_index: int, n_samples: int | None = None):
         """Split site: a SEM with instruments emits them as the trailing columns of
@@ -706,19 +711,23 @@ class ExpansionStrategy(GenericParamSweep):
         self._floor_report(per_step, data, "inv", experiment_index, "epsilon")
         return per_step
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float | None:
+    def fit_epsilon_iv(
+        self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0, radius: float | None = None
+    ) -> float | None:
         """The per-step T budget, shaped exactly like `base.fit_epsilon_iv`:
         `ratio * raw + EPS_TOL` (the cache holds the raw oracle piece, so the
-        tolerance is never scaled), reported against its floor on both paths
-        and never raised. Without this the knob would move eps* and leave r_T
-        frozen at the setup-time value."""
+        tolerance is never scaled), and the radius solved at (`radius`, else the
+        budget) reported against its floor on both paths and never raised. Without
+        this the knob would move eps* and leave r_T frozen at the setup-time value."""
         per_step = self._step_epsilon_iv.get(experiment_index)
         if per_step is None:
-            return super().fit_epsilon_iv(experiment_index, step_index, data, ratio)
+            return super().fit_epsilon_iv(experiment_index, step_index, data, ratio, radius)
         if not np.isfinite(per_step):
             return None
         budget = float(ratio) * float(per_step) + EPS_TOL
-        self._floor_report(budget, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv)
+        self._floor_report(
+            budget if radius is None else radius, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
+        )
         return budget
 
     @property

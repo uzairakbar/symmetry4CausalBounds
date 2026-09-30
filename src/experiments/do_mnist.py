@@ -912,11 +912,19 @@ class DoMNISTMixin:
         `constraint_floor` does not apply to the latent ball."""
         return float(self.default_epsilon)
 
-    def fit_epsilon_iv(self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0) -> float:
+    def fit_epsilon_iv(
+        self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0, radius: float | None = None
+    ) -> float:
         """Same reasoning as fit_epsilon: the T-as-IV budget is the block epsilon
         (the reference's `from_eps`), and `ratio` (the epsilon sweep's per-step
-        call) does not move it."""
+        call) does not move it. `radius` (the base's floor-report radius) is
+        accepted and not read: there is no floor here."""
         return float(self.default_epsilon)
+
+    def fit_iv_leaks(self, experiment_index: int, data=None) -> dict[str, float]:
+        """No linear h_* to measure a noise moment at, and the backend reads no
+        leak: 0.0."""
+        return {"leak_t": 0.0, "leak_tz": 0.0}
 
     def fit_rho(self, experiment_index: int, data=None) -> float:
         """rho on the prefit nets' MSE over the step's rows (see `_net_rho`); the
@@ -1080,11 +1088,21 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         )
 
     def build_methods(
-        self, gamma: float, epsilon: float, epsilon_iv=None, n_jobs=None, rho=1.0, outcome_models=None, epsilon_iv_z=0.0
+        self,
+        gamma: float,
+        epsilon: float,
+        epsilon_iv=None,
+        n_jobs=None,
+        rho=1.0,
+        outcome_models=None,
+        epsilon_iv_z=0.0,
+        iv_recalibrate=False,
+        leak_t=0.0,
+        leak_tz=0.0,
     ):
-        """Methods at explicit budgets. `n_jobs` overrides the toggle. `epsilon_iv_z`
-        is accepted because the runner hands it to every factory; the backend has
-        no real-Z instrument and never reads it."""
+        """Methods at explicit budgets. `n_jobs` overrides the toggle. `epsilon_iv_z`,
+        `iv_recalibrate` and the leaks are accepted because the runner hands them to
+        every factory; the backend has no real-Z instrument and never reads them."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return self._build(
             self.kwargs["methods"],

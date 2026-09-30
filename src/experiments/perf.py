@@ -62,12 +62,18 @@ def installed_backends() -> list[tuple[str, dict[str, float | int]]]:
 
 def budgets(runner, data) -> dict[str, Any]:
     """The builder kwargs `ParamSweepRunner.build_models` computes at experiment 0."""
+    gamma = runner.fit_gamma(0)
+    epsilon = runner.fit_epsilon(0, 0, data)
+    leaks = runner.fit_iv_leaks(0, data)
+    radius = float(np.hypot(max(epsilon - runner.pad_tolerance, 0.0), leaks["leak_t"]))
     return dict(
-        gamma=runner.fit_gamma(0),
-        epsilon=runner.fit_epsilon(0, 0, data),
-        epsilon_iv=runner.fit_epsilon_iv(0, 0, data),
+        gamma=gamma,
+        epsilon=epsilon,
+        epsilon_iv=runner.fit_epsilon_iv(0, 0, data, radius=radius),
         epsilon_iv_z=runner.fit_epsilon_iv_z(0, data),
         rho=runner.fit_rho(0, data),
+        iv_recalibrate=True,
+        **leaks,
         **runner.method_kwargs(0),
     )
 
