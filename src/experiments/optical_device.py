@@ -88,17 +88,28 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         super().__init__(EXPERIMENT_NAME, OpticalRegistry(), **kwargs)
 
-    def _sem_factory(self, epsilon_quantile: float | None = None):
-        """Factory for creating SEM instances. `epsilon_quantile` rides on the SEM
-        to `oracle.epsilon_star` (None = RMS); the sweeps and the query each bind
-        their own from OPTICAL_CONFIG."""
+    def _sem_factory(self, epsilon_quantile: float | None = None, device: int | None = None):
+        """Factory for creating SEM instances; `dataset_index` unless a device is
+        named. `epsilon_quantile` rides on the SEM to `oracle.epsilon_star`
+        (None = RMS); the sweeps and the query each bind their own from OPTICAL_CONFIG."""
         sem = SEM(
-            experiment=OPTICAL_CONFIG.dataset_index,
+            experiment=OPTICAL_CONFIG.dataset_index if device is None else int(device),
             ground_truth=OPTICAL_CONFIG.ground_truth_model,
             intercept=self.toggles["mean_match"],
         )
         sem.epsilon_quantile = epsilon_quantile
         return sem
+
+    @staticmethod
+    def sweep_devices() -> tuple[int, ...]:
+        """The device of each sweep experiment (`OpticalDeviceConfig.sweep_devices`):
+        `dataset_index` first, then every loaded device not in `excluded_devices`,
+        ascending."""
+        if OPTICAL_CONFIG.sweep_devices is not None:
+            return tuple(int(d) for d in OPTICAL_CONFIG.sweep_devices)
+        first = OPTICAL_CONFIG.dataset_index
+        excluded = {int(d) for d in OPTICAL_CONFIG.excluded_devices}
+        return (first, *(d for d in sorted(SEM.dataset()) if d != first and d not in excluded))
 
     def _oracle_pieces(self, epsilon_quantile: float | None = None):
         """(sem, da, features) for the budget estimators, built once."""
@@ -250,5 +261,17 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     **extra,
                     **kwargs,
                 )
+
+            def make_sem(inner_self, experiment_index: int):
+                """Experiment j runs on its own device: replicates span the
+                recorded devices rather than redraw one of them."""
+                devices = outer.sweep_devices()
+                if inner_self.n_experiments > len(devices):
+                    raise ValueError(f"n_experiments {inner_self.n_experiments} exceeds the {len(devices)} devices")
+                return outer._sem_factory(epsilon_quantile=quantile, device=devices[experiment_index])
+
+            def poly_for_sem(inner_self, sem):
+                """The selected degree differs by device (1 or 2)."""
+                return PolynomialFeatures(sem.poly_degree, include_bias=False)
 
         return ConfiguredSweep

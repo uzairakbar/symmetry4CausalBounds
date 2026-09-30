@@ -145,6 +145,16 @@ class OpticalDeviceConfig:
     eps_tol: float = 2**-8
     test_fraction: float = 0.1
     dataset_index: int = 8
+    # the device of each sweep experiment: experiment j runs on the j-th entry.
+    # None = `dataset_index` first, then every loaded device not in
+    # `excluded_devices`, ascending (8, 0, 1, 2, 3, 4, 5, 7, 9, 10), so a
+    # one-experiment runner (perf, query) stays on `dataset_index`. More
+    # experiments than entries raises rather than reusing a device.
+    sweep_devices: tuple[int, ...] | None = None
+    # left out of every default sweep: 6 is exp_no_75 (brfactor 0: no confounding,
+    # gamma* 1e-4, sigma^2 762), 11 is exp_no_82 (`pure_confounding`); exp_no_81
+    # (random_image_section) is never loaded (`OpticalDeviceSEM.load_dataset`)
+    excluded_devices: tuple[int, ...] = (6, 11)
     ground_truth_model: Literal["linear", "polynomial"] = "polynomial"
 
 
