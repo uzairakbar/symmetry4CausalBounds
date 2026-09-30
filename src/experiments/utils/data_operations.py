@@ -45,23 +45,31 @@ def set_seed(seed: int = 42):
 # Bootstrap draws its own stream: off the global one the band moved run to run, and
 # the sweep limits/linear_width are derived FROM it.
 BOOTSTRAP_SEED: int = 0
+# resamples per (step, method): the sweep band is the BAND_PERCENTILES (plotting.py)
+# of this many resample means, i.e. a 95 % percentile-bootstrap CI of the mean
+BOOTSTRAP_RESAMPLES: int = 1000
 
 
 def bootstrap(
     data: dict[str, NDArray] | dict[str, dict[str, NDArray]],
-    n_samples: int = 1000,
+    n_samples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> dict:
     """
-    Generate bootstrap samples from data.
+    Bootstrap resample MEANS of each row: for every (step, method) row of shape
+    (n_experiments,), `n_samples` resamples of its columns (the experiments: the
+    sim SEMs, the optical devices, the cigarette resimulations) drawn with
+    replacement, each reduced to its nanmean. Percentiles of the result across
+    the resamples are a percentile-bootstrap CI of the mean over experiments --
+    the sweep band (`BAND_PERCENTILES`), not the spread of the raw experiments.
 
     Args:
         data: Dictionary of arrays or nested dictionary
-        n_samples: Number of bootstrap samples to generate
+        n_samples: Number of bootstrap resamples (BOOTSTRAP_RESAMPLES)
         seed: resample stream; fixed so the CI band is reproducible
 
     Returns:
-        Bootstrapped data with same structure as input
+        Resample means with the same keys as the input, each (n_steps, n_samples)
     """
     rng = np.random.default_rng(seed)
 

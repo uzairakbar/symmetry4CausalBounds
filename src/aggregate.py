@@ -13,7 +13,10 @@ the column count is odd, else centred), three y-labels without the "/ PI" suffix
 one legend inside the top panel of the middle column, pinned lower right, in the
 repo's legend order, the single intervals in its left column and PI+INV and the
 intersections (`SWEEP_LEGEND_RIGHT`) in its right. A missing pkl leaves its cells
-blank.
+blank. Each line is the mean over experiments and its band the 95 %
+percentile-bootstrap CI of that mean, as on the per-recipe figures:
+`BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample means (seed
+BOOTSTRAP_SEED).
 The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
 columns the datasets, x shared within a column, y within a row, the same x-label
 rule, one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else

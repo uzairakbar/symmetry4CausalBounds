@@ -50,6 +50,10 @@ PlotScale = Literal["linear", "log", "symlog", "asinh"]
 X_MARK_MARGIN: float = 0.02
 # the band edges of the query figures, in the method's line style
 BAND_EDGE_WIDTH: float = 1.2
+# the sweep band: these percentiles of each step's series. On a bootstrapped sweep
+# (the default) the series are `bootstrap`'s BOOTSTRAP_RESAMPLES resample means,
+# so the band is the 95 % percentile-bootstrap CI of the mean over experiments
+BAND_PERCENTILES: tuple[float, float] = (2.5, 97.5)
 
 # clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
 # large is the runaway. A symmetric floor crops the TIGHTEST method, which is the
@@ -446,11 +450,13 @@ def _mark_frame(x_values: NDArray, vlines, xscale: str, clip: bool = False) -> t
 
 
 def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False):
-    """One mean line and one 2.5 / 97.5 band per method on `ax`, in the method's
-    hue and line style (`method_style(name, has_z, merged=merged)`); a method with
+    """One mean line and one `BAND_PERCENTILES` band per method on `ax`, in the
+    method's hue and line style (`method_style(name, has_z, merged=merged)`); a method with
     no finite mean is skipped. Returns the line handles keyed by method in drawing
     order and the mean series, which alone decide the limits (the band is
-    contextual and clips against the frame)."""
+    contextual and clips against the frame). The percentiles are taken across
+    each row as given: over `bootstrap`'s resample means on a bootstrapped sweep
+    (a 95 % CI of the mean), over the raw columns otherwise."""
     handles, means = {}, []
     for method_name, errors in y_results.items():
         # sanitize: float64, Infs to NaNs, then the mean over what is finite
@@ -459,8 +465,8 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             mean_error = np.nanmean(clean_data, axis=1)
-            low = np.nanpercentile(clean_data, 2.5, axis=1)
-            high = np.nanpercentile(clean_data, 97.5, axis=1)
+            low = np.nanpercentile(clean_data, BAND_PERCENTILES[0], axis=1)
+            high = np.nanpercentile(clean_data, BAND_PERCENTILES[1], axis=1)
         if np.all(np.isnan(mean_error)):
             continue
         means.append(mean_error)
@@ -549,6 +555,12 @@ def create_sweep_plot(
 
     `has_z` is whether the experiment has a real Z: every label, hue and dash
     follows `constants.method_style(name, has_z)`.
+
+    Each line is the mean over experiments. With `bootstrapped` (the default, and
+    every param sweep's figure) its band is the 95 % percentile-bootstrap CI of
+    that mean: `BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample
+    means (seed BOOTSTRAP_SEED), resampling the experiments per step and method.
+    Without it the band is those percentiles of the raw columns.
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold). `xticks`, when given, are the only labelled x ticks (`fix_x_ticks`).
