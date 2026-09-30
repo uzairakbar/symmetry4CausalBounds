@@ -359,7 +359,6 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         self.default_gamma = default_gamma
         self.default_epsilon = default_epsilon
         self._base = {}
-        self._baseline_z = {}  # experiment -> raw eps_iv_z_star on its base sample
         super().__init__(**kwargs)
 
     @property
@@ -410,31 +409,42 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
         return self._base[key]
 
     def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
-        """Baseline observed-Z budget: a pre-DA quantity, read once per experiment on
-        its base sample; never per step (the DA knob does not touch it).
+        """Baseline observed-Z budget: a pre-DA quantity (the DA knob does not touch
+        it), read on the rows this cell's +IV methods fit.
 
         0.0 on the declared path, without data, or under an empty Z, checked before
-        anything else, so a runner without Z (optical, do-MNIST) never reaches
-        `_base_data` from here. Else `eps_iv_z_star` on the sample every step of this
-        experiment is cut from (`_base_data`, the m sweep's override included),
-        cached raw, plus EPS_TOL: the same number at every step and for every method,
-        never floor-reported. The setup oracle's draw is not the fit sample, so its
+        anything else, so a runner without Z (optical, do-MNIST) never reaches the
+        oracle from here. Else `eps_iv_z_star` on the cell's rows plus EPS_TOL, never
+        floor-reported: the m sweep's untiled rows, which PI+IV fits, else the
+        cell's own. Reading the experiment's whole sample at every step, as this
+        once did, under-measured the moment on the n sweep's smaller steps (it grows
+        like sqrt(n_samples / n)). The oracle draws the augmentation on the RAW
+        design: the cell's rows are raw unless the runner carries a polynomial map,
+        and then they are the first rows of the sample the experiment is cut from
+        (`_base_data`). The setup oracle's draw is not the fit sample, so its
         `eps_iv_z_star` is not read here."""
         Z = getattr(data, "Z", None)
         if self.declared_iv or data is None or Z is None or np.shape(Z)[1] == 0:
             return 0.0
-        if experiment_index not in self._baseline_z:
-            X_raw, _, y, _, _, Z_base = self._base_data(experiment_index, getattr(self, "n_samples_override", None))
-            self._baseline_z[experiment_index] = eps_iv_z_star(
-                self.sems[experiment_index],
-                self.das[experiment_index],
-                X=X_raw,
-                y=y,
-                Z=Z_base,
-                features=self._features,
-                mean_match=self.mean_match,
-            )
-        z_piece = self._baseline_z[experiment_index]
+        base = getattr(data, "X_base", None) is not None
+        X, y, Z = (data.X_base, data.y_base, data.Z_base) if base else (data.X, data.y, Z)
+        X_raw = X
+        if self.poly:
+            X_all_raw, X_all = self._base_data(experiment_index, getattr(self, "n_samples_override", None))[:2]
+            if not np.array_equal(X_all[: len(X)], X):
+                raise ValueError(
+                    f"the cell's {len(X)} rows are not the first rows of experiment {experiment_index}'s sample"
+                )
+            X_raw = X_all_raw[: len(X)]
+        z_piece = eps_iv_z_star(
+            self.sems[experiment_index],
+            self.das[experiment_index],
+            X=X_raw,
+            y=y,
+            Z=Z,
+            features=self._features,
+            mean_match=self.mean_match,
+        )
         if not np.isfinite(z_piece):
             return 0.0
         return float(z_piece) + EPS_TOL
