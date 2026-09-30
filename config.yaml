@@ -156,10 +156,12 @@ optical_device:
     seed: 42
     n_samples: 1_000    # the device recorded exactly this many rows; ask for more
                         # and the SEM resamples them WITH REPLACEMENT
-    n_experiments: 8    # replicates of the SAME device (`dataset_index` is fixed),
-                        # so the error bars are over the DRAW -- resampling and the
-                        # DA realisation -- not over devices. The oracle itself is
-                        # read off the whole pool and does not move between them.
+    n_experiments: 8    # sweep experiment j runs on its own recorded device,
+                        # `sweep_devices()[j]`: `dataset_index` (8) first, then the
+                        # rest ascending, the odd recordings 6 (no confounding) and
+                        # 11 (pure confounding) excluded, so at most 10. Each has
+                        # its own oracle and feature degree, and the bands span
+                        # devices. The query and perf paths run `dataset_index` alone.
     sweep_samples: 8
     m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; n grid: `sweep_samples` log-spaced points on 10..100 %
     methods:

@@ -28,7 +28,7 @@ simulation:
 optical_device:
     seed: 42
     n_samples: 1_000
-    n_experiments: 8
+    n_experiments: 8    # perf runs one experiment, on `dataset_index` (8)
     sweep_samples: 16
     methods:
         - PI+INV
