@@ -35,11 +35,14 @@ set in `configs.py` (a56 gains the case). Legs:
   (v)   the replicate mechanism follows decision 9: with a non-empty `iv:` the
         sweep runner's SEMs carry `bootstrap` False (90% row splits) and both
         runners `declared_iv` True, the solver reads `gamma_z` 2^-8 with
-        `epsilon_iv` 0 on PI+IV (bound exactly s sqrt(gamma_z)) and r_T on
-        DA+PI+IV; on the runner's own 8 seeded row splits at gamma*(b) the
-        coverage of b* on the four coefficient queries is 1.000 for PI and 1.000
-        for PI+IV; the same runner class forced onto the state-cluster bootstrap
-        reads PI+IV coverage under 1 (RECORDED beside p10's 0.500 / 0.375); with
+        `epsilon_iv` 0 on PI+IV (bound exactly s sqrt(gamma_z)) and, on DA+PI+IV
+        and the intersection's DA branch, App. D's radii (`iv_recalibrate`, since
+        working6): r_Z = sqrt(eps^2 + s^2 gamma_z) and, with T's measured leak,
+        r_T = r_TZ = sqrt(eps^2 + s^2 gamma_z + leak_t^2), eps the pad's; on the
+        runner's own 8 seeded row splits at gamma*(b) the coverage of b* on the
+        four coefficient queries is 1.000 for PI and 1.000 for PI+IV; the same
+        runner class forced onto the state-cluster bootstrap reads PI+IV coverage
+        under 1 (RECORDED beside p10's 0.500 / 0.375); with
         `iv: []` the runner is built with `bootstrap` True. Catches: `bootstrap`
         forced True under a configured set (the coverage then reads a resampling
         rate), `declared_iv` or `gamma_z` not forwarded. Misses: the production
@@ -393,7 +396,11 @@ def leg_v():
         len(data.X) == n_train and data.Z.shape == (n_train, 3),
     )
     models = fold_keys(runner.build_models(0, 0, data))
-    r_t = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
+    # App. D (`iv_recalibrate`): every DA block's radius is sqrt(eps^2 + s^2 gamma_z +
+    # leak^2), eps the pad's (the fit epsilon less the pad tolerance), T's leak measured
+    # on the cell's rows, the declared Z's 0 (gamma_z carries it)
+    budgets = runner.fit_budgets(0, 0, data)
+    epsilon, leak_t = float(budgets["epsilon"]), float(budgets["leak_t"])
     gated = listed(("PI+IV", "DA+PI+IV", "PI&DA+PI+IV"), block_methods, models, "(v) the declared budget")
     if "PI+IV" in gated:
         pi_iv = models["PI+IV"]
@@ -403,20 +410,34 @@ def leg_v():
             pi_iv.gamma_z == GAMMA_Z_DEFAULT and not pi_iv._has_t and pi_iv.z_bound == r_z,
             f"{pi_iv.z_bound:.6f}",
         )
-    if "DA+PI+IV" in gated:
-        da_pi_iv = models["DA+PI+IV"]
-        r_z_own = np.sqrt(da_pi_iv.sigma_sq / da_pi_iv.rho * GAMMA_Z_DEFAULT) + da_pi_iv._z_allowance
-        check(
-            "(v) DA+PI+IV: two constraints, r_T and r_Z",
-            abs(da_pi_iv.t_bound - r_t) < 1e-12 and abs(da_pi_iv.z_bound - r_z_own) < 1e-12,
-            f"r_T {da_pi_iv.t_bound:.6f}, r_Z {da_pi_iv.z_bound:.6f}",
-        )
-    check("(v) and r_T is eps_iv_star + EPS_TOL, never raised", abs(r_t - EPS_TOL) < 1e-12, f"{r_t!r}")
+
+    def radii(model):
+        eps_raw = max(epsilon - model.pad_tolerance, 0.0)
+        slack = model.sigma_sq / model.rho * GAMMA_Z_DEFAULT
+        return float(np.sqrt(eps_raw**2 + slack + leak_t**2)), float(np.sqrt(eps_raw**2 + slack))
+
+    da_fits = {"DA+PI+IV": models.get("DA+PI+IV")}
     if "PI&DA+PI+IV" in gated:
+        da_fits["the intersection's DA branch"] = models["PI&DA+PI+IV"].augmented
+        check("(v) the intersection's baseline carries no T block", not models["PI&DA+PI+IV"].baseline._has_t)
+    for name, model in da_fits.items():
+        if model is None or (name == "DA+PI+IV" and name not in gated):
+            continue
+        r_t, r_z = radii(model)
         check(
-            "(v) the intersection's baseline carries no T block, its DA branch r_T",
-            not models["PI&DA+PI+IV"].baseline._has_t and models["PI&DA+PI+IV"].augmented.t_bound == r_t,
+            f"(v) {name}: r_T = r_TZ = sqrt(eps^2 + s^2 gamma_z + leak_t^2), r_Z = sqrt(eps^2 + s^2 gamma_z)",
+            abs(model.t_bound - r_t) < 1e-12
+            and abs(model.z_bound - r_z) < 1e-12
+            and model._has_tz
+            and abs(model.tz_bound - r_t) < 1e-12,
+            f"r_T {model.t_bound:.6f}, r_Z {model.z_bound:.6f}, r_TZ {model.tz_bound!r}",
         )
+    eps_star = float(runner.get_oracle(0).epsilon_star)
+    check(
+        "(v) and eps is eps* + EPS_TOL at fit, never raised",
+        abs(epsilon - (eps_star + EPS_TOL)) < 1e-12,
+        f"{epsilon!r}",
+    )
 
     split = coverage_over_replicates(runner, target)
     for name in listed(("PI", "PI+IV"), block_methods, split, "(v) row-split coverage"):

@@ -31,8 +31,10 @@ equivalent one. So the gate is half regression and half interface. Legs:
         or component.
   (v)   the cigarette epsilon sweep runs: the tuned DA reaches its target, 1 x
         sigma sqrt(gamma*) of the SEM in the sweeps' norm of W
-        (`CigaretteConfig.epsilon_quantile`), within 5%, DA+PI and DA+PI+IV dip under the PI baseline at the
-        smallest ratio, climb back to it by r = 1 and never go under 0.7. The
+        (`CigaretteConfig.epsilon_quantile`), within 5%, DA+PI dips under the PI
+        baseline at the smallest ratio, climbs back to it by r = 1 and never goes
+        under 0.7; DA+PI+IV recovers by r = 1 and reads its RECORDED coverage per
+        ratio (INFEASIBLE, then a dip below 0.7, under the sweeps' App. D radii). The
         baseline is PI's own coverage (0.963 measured), not 1.0: the sweep fits
         bootstrap replicates against a pool oracle, so nothing covers 1.000 here.
         Catches: a target that is too small (a flat line) or too large (a cliff).
@@ -151,6 +153,12 @@ METHODS_IV = ["PI", "DA+PI", "DA+PI+IV"]
 CIGARETTE_SAMPLES = 2450
 EPSILON_GRID = (2.0**-6, 2.0**-3, 1.0)
 COVERAGE_FLOOR = 0.7
+# leg (v): DA+PI+IV's coverage per ratio, RECORDED 2026-09-30 under the sweeps' App. D
+# radii (`iv_recalibrate`): INFEASIBLE at r = 2^-6, a dip to 0.327 at 2^-3, 1.0 at r = 1.
+# It was [nan, nan, 1.0] under the RMS-type T budget, and 0.212 at 2^-3 under the bare
+# r eps* T radius; the 0.7 floor binds DA+PI alone, the line with no IV constraint
+IV_COVERAGE_RECORDED = (np.nan, 0.3265, 1.0)
+IV_COVERAGE_ATOL = 1e-3
 EPS_STAR_RTOL = 0.05
 MICRO_SAMPLES = 500
 # leg (ix): a half-width in the sim's outcome units. Wider than the HALF-widths the
@@ -393,9 +401,13 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
     def da_factory(sem=None, append=None):
         return ScaleTranslation(V, std=amplitude)
 
-    def method_factory(gamma, epsilon, epsilon_iv=None, rho=1.0, epsilon_iv_z=0.0):
+    def method_factory(
+        gamma, epsilon, epsilon_iv=None, rho=1.0, epsilon_iv_z=0.0, iv_recalibrate=False, leak_t=0.0, leak_tz=0.0
+    ):
         # the runner hands every factory `epsilon_iv_z` (the non-DA +IV term) since
-        # e4fb1a5; inert here, the SEM carries no real instrument under this design
+        # e4fb1a5; inert here, the SEM carries no real instrument under this design.
+        # `iv_recalibrate` (App. D) and its measured leaks since working6, forwarded
+        # as the sweeps' factories do
         from src.experiments.configs import MethodRegistry
 
         return MethodRegistry.build_methods(
@@ -404,6 +416,9 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
             epsilon=epsilon,
             epsilon_iv=epsilon_iv,
             epsilon_iv_z=epsilon_iv_z,
+            iv_recalibrate=iv_recalibrate,
+            leak_t=leak_t,
+            leak_tz=leak_tz,
             rho=rho,
             n_jobs=N_JOBS,
             **toggles,
@@ -453,13 +468,22 @@ def leg_v(seed, micro, **toggles):
     baseline = cov["PI"]
     check("(v) the PI baseline is flat in r", np.allclose(baseline, baseline[0]), f"{baseline[0]:.4f}")
     for m in lines:
-        check(f"(v) {m} dips under the baseline at the smallest r", cov[m][0] < baseline[0], f"{cov[m][0]:.4f}")
-        check(f"(v) {m} is non-decreasing in r", np.all(np.diff(cov[m]) >= -1e-12), f"{cov[m]}")
         check(
             f"(v) {m} recovers to the baseline at r = 1",
             cov[m][-1] >= baseline[-1],
             f"{cov[m][-1]:.4f} vs {baseline[-1]:.4f}",
         )
+        if "IV" in m:
+            # the IV line empties at the smallest ratio and dips below the floor at the
+            # next one: its readings, not the DA+PI shape, are what is pinned
+            check(
+                f"(v) {m} coverage per ratio == RECORDED {IV_COVERAGE_RECORDED}",
+                np.allclose(cov[m], IV_COVERAGE_RECORDED, atol=IV_COVERAGE_ATOL, rtol=0, equal_nan=True),
+                f"{np.round(cov[m], 4).tolist()}",
+            )
+            continue
+        check(f"(v) {m} dips under the baseline at the smallest r", cov[m][0] < baseline[0], f"{cov[m][0]:.4f}")
+        check(f"(v) {m} is non-decreasing in r", np.all(np.diff(cov[m]) >= -1e-12), f"{cov[m]}")
         check(f"(v) {m} stays above the floor", np.nanmin(cov[m]) > COVERAGE_FLOOR, f"{np.nanmin(cov[m]):.4f}")
 
 

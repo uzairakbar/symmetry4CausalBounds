@@ -68,20 +68,25 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         Catches: an unpicklable attribute on the fitted IV classes, a chunk that
         solves a different problem. Misses: timing.
   (vii) the two budgets per SS2.6 row on the oracle path (the batch B rulings): the
-        runner hands the factory `epsilon_iv_z = eps_iv_z_star + EPS_TOL` beside the
-        T-side `epsilon_iv`, `eps_iv_z_star` read on the experiment's base sample
-        (the query runner: on its own draw), not on the setup oracle's draw;
-        PI+IV, PI+INV+IV and the intersection's baseline branch carry it, DA+PI+IV
-        carries the T-side term, and the intersection is feasible on every query
-        under a real Z, both branches OK. Under an empty Z the term
-        is exactly 0.0 (inert). Catches: `epsilon_iv_z` not forwarded or ignored
+        runner hands the factory `epsilon_iv_z = z_moment_star` (the leak, no
+        tolerance; since working6 the sweeps re-calibrate per App. D,
+        `iv_recalibrate`) beside the T-side `epsilon_iv`, read on the cell's rows,
+        not on the setup oracle's draw; PI+IV, PI+INV+IV and the intersection's
+        baseline branch carry it as their Z radius, DA+PI+IV and the intersection's
+        DA branch carry hypot(epsilon, leak) on T, Z and the joint (T, Z) block,
+        each with its own measured leak (no IM-CI here, so the pad's eps is
+        epsilon), and the intersection is feasible on
+        every query under a real Z, both branches OK. Under an empty Z the term is
+        exactly 0.0 (inert). Catches: `epsilon_iv_z` not forwarded or ignored
         (the baseline bound is then 0 and every query INFEASIBLE), the T-side term
         leaking into the non-DA methods. Misses: a floor on this term, by ruling.
   (viii) the declared path: with `declared_iv=True` and a declared gamma_z handed
         to the registry (as the cigarette orchestrator will), the runner hands
         `epsilon_iv_z = 0.0`, so standalone PI+IV solves at exactly r_Z = s sqrt(gamma_z)
-        to the bit, as does the intersection's baseline, while DA+PI+IV keeps
-        r_T = eps_iv_star + EPS_TOL and every one of them solves OK. Catches: the
+        to the bit, as does the intersection's baseline, while DA+PI+IV and the DA
+        branch carry App. D's r_Z = sqrt(eps^2 + s^2 gamma_z) and, with T's measured
+        leak, r_T = r_TZ = sqrt(eps^2 + s^2 gamma_z + leak_t^2) (`iv_recalibrate`,
+        since working6) and every one of them solves OK. Catches: the
         T-side budget handed to the non-DA methods (their bound would read the joint
         0.0699 rather than 0.0625 on the cigarette panel), the declared skip lost.
         Misses: gamma_z's own route from the yaml (batch C).
@@ -121,7 +126,7 @@ from src.methods.sensitivity_models import (  # noqa: E402
     InstrumentalVariablePartialR2 as IVPartialR2,
 )
 from src.methods.sensitivity_models import SolveStatus, constraint_floor  # noqa: E402
-from src.oracle import eps_iv_z_star  # noqa: E402
+from src.oracle import eps_iv_z_star, z_moment_star  # noqa: E402
 from src.sem.abstract import StructuralEquationModel as SEM  # noqa: E402
 from src.sem.simulation import OUTCOME_NOISE_STD, LinearSimulationSEM  # noqa: E402
 
@@ -271,7 +276,19 @@ class Recorder:
 # ------------------------------------------------------------------ builders
 
 
-def factory(gamma, epsilon, epsilon_iv=None, rho=1.0, n_jobs=None, epsilon_iv_z=0.0, gamma_z=0.0, **kwargs):
+def factory(
+    gamma,
+    epsilon,
+    epsilon_iv=None,
+    rho=1.0,
+    n_jobs=None,
+    epsilon_iv_z=0.0,
+    gamma_z=0.0,
+    iv_recalibrate=False,
+    leak_t=0.0,
+    leak_tz=0.0,
+    **kwargs,
+):
     toggles = TOGGLES if n_jobs is None else {**TOGGLES, "n_jobs": n_jobs}
     return MethodRegistry.build_methods(
         NAMES,
@@ -280,6 +297,9 @@ def factory(gamma, epsilon, epsilon_iv=None, rho=1.0, n_jobs=None, epsilon_iv_z=
         epsilon_iv=epsilon_iv,
         epsilon_iv_z=epsilon_iv_z,
         gamma_z=gamma_z,
+        iv_recalibrate=iv_recalibrate,
+        leak_t=leak_t,
+        leak_tz=leak_tz,
         rho=rho,
         **toggles,
     )
@@ -364,12 +384,19 @@ def production(name, kind="sweep"):
 
 
 def budgets(runner, data):
+    """`fit_budgets`' kwargs at cell (0, 0): the sweeps re-calibrate the IV radii (App. D)
+    with the measured leaks."""
+    epsilon = runner.fit_epsilon(0, 0, data)
+    leaks = runner.fit_iv_leaks(0, data)
+    radius = float(np.hypot(max(epsilon - runner.pad_tolerance, 0.0), leaks["leak_t"]))
     return dict(
         gamma=runner.fit_gamma(0),
-        epsilon=runner.fit_epsilon(0, 0, data),
-        epsilon_iv=runner.fit_epsilon_iv(0, 0, data),
+        epsilon=epsilon,
+        epsilon_iv=runner.fit_epsilon_iv(0, 0, data, radius=radius),
         epsilon_iv_z=runner.fit_epsilon_iv_z(0, data),
         rho=runner.fit_rho(0, data),
+        iv_recalibrate=True,
+        **leaks,
     )
 
 
@@ -414,10 +441,10 @@ def finite_widths(results, expect_empty=()):
     """Every IV method's width finite at every step, except the families named in
     `expect_empty`, which must be EMPTY at every step.
 
-    On this fixture's n-sweep the decoupled pair once was, while the observed-Z
-    budget was read on the experiment's whole sample rather than the step's 64
-    rows, whose moment is larger; read on the step's rows (`fit_epsilon_iv_z`),
-    none is. No budget is ever raised off a floor."""
+    On this fixture's n-sweep the decoupled pair was, while its T radius was the
+    oracle 0.03125: under the T noise moment of the 64-row cell, which the sweeps'
+    App. D radius now carries (`leak_t`, since working6), so none is expected
+    empty there any more. No budget is ever raised off a floor."""
     bad = [
         name
         for name in IV_NAMES
@@ -521,9 +548,10 @@ def leg_i(seed):
     check("(i) n-sweep: Z sliced to n_train beside X", data_n.Z.shape == (64, M) and data_n.X.shape[0] == 64)
     check("(i) n-sweep: the slice is the first rows of the base Z", np.array_equal(data_n.Z, base_Z[:64]))
     check_dispatch("(i) n-sweep", recorded(runner_n, data_n), data_n.Z, data_n.Z, np.asarray(data_n.G))
-    # RECORDED: on this fixture the pair was empty at both n while the Z budget was
-    # read on the experiment's whole sample; re-recorded 2026-09-30 with it read on the
-    # step's own rows (larger on 64 of them), where every IV method is finite
+    # RECORDED: on this fixture the pair was empty at both n while the T radius was the
+    # oracle budget eps_iv* + EPS_TOL; re-recorded 2026-09-30 under the sweeps' App. D
+    # radii (`iv_recalibrate`), whose T radius carries T's measured noise moment
+    # (`leak_t`), so every IV method is finite at both n
     check(
         "(i) n-sweep runs end to end, the decoupled pair feasible throughout",
         finite_widths(sweep_runner("n", lambda: sem, [64, 128], seed=seed).run("n")[1]),
@@ -565,8 +593,8 @@ def leg_i(seed):
         budget**2 >= floor_t and floor_stacked > floor_t,
         f"r_T^2 {budget**2:.3g} vs {floor_t:.3g}",
     )
-    # and the OLD pooled program at the pooled radius reads what the pair does:
-    # feasible at every query, now that the Z budget is the step's own
+    # and the OLD pooled program is equally empty at the pooled radius, so nothing
+    # about the PAIR is what empties it
     pooled = float(np.hypot(budget, solo_runner.fit_epsilon_iv_z(0, data_solo)))
     old = IVPartialR2(
         gamma=solo_runner.fit_gamma(0),
@@ -579,8 +607,8 @@ def leg_i(seed):
         **{k: v for k, v in TOGGLES.items() if k != "pad"},
     ).fit(data_solo.GX, data_solo.y, T=np.column_stack([G_solo, data_solo.Z]))
     old.predict(data_solo.X_test)
-    old_ok = np.all(np.asarray(old.query_status) == SolveStatus.OK)
-    check("(i) n-sweep: the OLD pooled program is feasible at the pooled radius too", old_ok, f"{statuses(old)}")
+    old_empty = np.all(np.asarray(old.query_status) == SolveStatus.INFEASIBLE)
+    check("(i) n-sweep: the OLD pooled program is empty at the pooled radius too", old_empty, f"{statuses(old)}")
 
     # m-sweep: Z tiled with X, the untiled copy beside X_base
     runner_m = sweep_runner("m", lambda: sem, [1, 2], seed=seed)
@@ -959,12 +987,11 @@ def leg_vi(seed):
 
 
 def base_sample_z(runner, experiment_index=0):
-    """`eps_iv_z_star` restated on the sample the runner's steps are cut from."""
+    """The leak `z_moment_star` restated on the sample the runner's steps are cut from."""
     X_raw, _, y, _, _, Z = runner._base_data(experiment_index, getattr(runner, "n_samples_override", None))
     return float(
-        eps_iv_z_star(
+        z_moment_star(
             runner.sems[experiment_index],
-            runner.das[experiment_index],
             X=X_raw,
             y=y,
             Z=Z,
@@ -975,34 +1002,59 @@ def base_sample_z(runner, experiment_index=0):
 
 
 def leg_vii(seed):
-    print("(vii) the oracle path: non-DA +IV methods carry eps_iv_z_star + EPS_TOL, the intersection is feasible")
+    print("(vii) the oracle path: non-DA +IV methods carry the leak, DA ones App. D's radii, feasible")
     # the routing on a MISSPECIFIED symmetry (DA strength > 0), where the T-side
     # budget is far from the Z term, so substituting one for the other is visible
     np.random.seed(seed)
     runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed, strength=MISSPECIFIED_STRENGTH)
     data = runner.generate_data(0, GAMMA_GRID[0])
     oracle = runner.get_oracle(0)
-    want_z, want_t = base_sample_z(runner) + EPS_TOL, runner.fit_epsilon_iv(0, 0, data)
+    # App. D (`iv_recalibrate`), gamma_z 0, no IM-CI: every DA block's radius is
+    # hypot(epsilon, its measured leak), a non-DA Z radius the leak itself; no tolerance
+    eps, leaks = runner.fit_epsilon(0, 0, data), runner.fit_iv_leaks(0, data)
+    want_z = base_sample_z(runner)
+    want_t, want_da_z = float(np.hypot(eps, leaks["leak_t"])), float(np.hypot(eps, want_z))
+    want_tz = float(np.hypot(eps, leaks["leak_tz"]))
     apart = oracle.eps_iv_star > 10 * EPS_TOL and want_z != want_t
     check("(vii) the Z term and the T-side budget differ on this draw", apart, f"{want_z:.6g} vs {want_t:.6g}")
     check(
-        "(vii) fit_epsilon_iv_z is eps_iv_z_star on the base sample + EPS_TOL, unguarded",
-        runner.fit_epsilon_iv_z(0, data) == want_z,
-        f"{want_z:.6g} (setup draw {float(oracle.eps_iv_z_star) + EPS_TOL:.6g})",
+        "(vii) fit_epsilon_iv_z is the leak z_moment_star on the cell's rows, no tolerance, unguarded",
+        abs(runner.fit_epsilon_iv_z(0, data) - want_z) <= 1e-12 * want_z,
+        f"{want_z:.6g} (setup draw {float(oracle.eps_iv_z_star):.6g})",
     )
+
+    def near(a, b):
+        return a is not None and abs(a - b) <= 1e-12 * max(abs(b), 1e-300)
+
     models = runner.build_models(0, 0, data)
     for name in NON_DA_IV:
         model = models[name]
-        carries = model.epsilon_iv_z == want_z and model.z_bound == want_z and not model._has_t
+        carries = near(model.epsilon_iv_z, want_z) and near(model.z_bound, want_z) and not model._has_t
         check(f"(vii) {name} carries epsilon_iv_z as its Z radius, with no T block", carries, f"{model.z_bound!r}")
     inter = models[INTERSECTION]
     baseline = inter.baseline
     check(
         "(vii) the intersection's baseline carries epsilon_iv_z and no T block",
-        baseline.epsilon_iv_z == want_z and baseline.z_bound == want_z and not baseline._has_t,
+        near(baseline.epsilon_iv_z, want_z) and near(baseline.z_bound, want_z) and not baseline._has_t,
     )
-    t_side = inter.augmented.t_bound == want_t == models["DA+PI+IV"].t_bound
-    check("(vii) its DA branch and DA+PI+IV carry the T budget on their T constraint", t_side)
+    da_fits = (inter.augmented, models["DA+PI+IV"])
+    check(
+        "(vii) its DA branch and DA+PI+IV carry r_T = hypot(epsilon, leak_t) on their T constraint",
+        all(near(m.t_bound, want_t) for m in da_fits),
+        f"{[m.t_bound for m in da_fits]} vs {want_t!r}",
+    )
+    check(
+        "(vii) ... r_Z = hypot(epsilon, leak_z) on their Z constraint",
+        all(near(m.z_bound, want_da_z) for m in da_fits),
+        f"{[m.z_bound for m in da_fits]} vs {want_da_z!r}",
+    )
+    check(
+        "(vii) ... and the joint (T, Z) constraint at hypot(epsilon, leak_tz); none on the non-DA fits",
+        all(m._has_tz and near(m.tz_bound, want_tz) for m in da_fits)
+        and not any(models[name]._has_tz for name in NON_DA_IV)
+        and not baseline._has_tz,
+        f"{[m.tz_bound for m in da_fits]} vs {want_tz!r}",
+    )
     # feasibility on the WELL-SPECIFIED symmetry, the ruling's case: both budgets
     # admit h* there, so the two branches overlap at every query. (Under the
     # misspecified DA above the recalibrated DA ball can exclude h*, Thm. 1's
@@ -1041,13 +1093,15 @@ def leg_vii(seed):
 
 
 def leg_viii(seed):
-    print("(viii) the declared path: PI+IV solves at exactly r_Z = s sqrt(gamma_z), DA+PI+IV keeps r_T")
+    print("(viii) the declared path: PI+IV solves at exactly r_Z = s sqrt(gamma_z), DA+PI+IV at App. D's radii")
     np.random.seed(seed)
     pooled = PooledInstrumentedSEM()
     runner = sweep_runner("gamma", lambda: pooled, GAMMA_GRID, seed=seed, declared_iv=True, gamma_z=DECLARED_GAMMA_Z)
     data = runner.generate_data(0, GAMMA_GRID[0])
     check("(viii) fit_epsilon_iv_z is 0.0 on the declared path", runner.fit_epsilon_iv_z(0, data) == 0.0)
-    r_t = float(runner.get_oracle(0).eps_iv_star) + EPS_TOL
+    # App. D (`iv_recalibrate`): no IM-CI here, so the pad's eps is the fit epsilon; the
+    # declared gamma_z slack rides on every DA block, T's own leak on T and the joint one
+    r_t, leak_t = float(runner.fit_epsilon(0, 0, data)), runner.fit_iv_leaks(0, data)["leak_t"]
     models = runner.build_models(0, 0, data)
     for name in IV_NAMES:
         model = models[name]
@@ -1064,7 +1118,16 @@ def leg_viii(seed):
         exact = not model._has_t and model.z_bound == r_z
         check(f"(viii) {name}: no T block and z_bound exactly r_Z", exact, f"{model.z_bound!r}")
     for name, model in (("DA+PI+IV", models["DA+PI+IV"]), ("the DA branch", models[INTERSECTION].augmented)):
-        check(f"(viii) {name}: t_bound is r_T and z_bound is its own", model.t_bound == r_t and model.z_bound > 0.0)
+        slack = model.sigma_sq / model.rho * DECLARED_GAMMA_Z
+        r_z, r_tt = float(np.sqrt(r_t**2 + slack)), float(np.sqrt(r_t**2 + slack + leak_t**2))
+        check(
+            f"(viii) {name}: z_bound sqrt(eps^2 + s^2 gamma_z), t_bound and tz_bound with T's leak, on its own s",
+            abs(model.z_bound - r_z) <= 1e-12 * r_z
+            and abs(model.t_bound - r_tt) <= 1e-12 * r_tt
+            and model._has_tz
+            and abs(model.tz_bound - r_tt) <= 1e-12 * r_tt,
+            f"r_T {model.t_bound!r} vs {r_tt!r}, r_Z {model.z_bound!r} vs {r_z!r}, r_TZ {model.tz_bound!r}",
+        )
 
 
 if __name__ == "__main__":

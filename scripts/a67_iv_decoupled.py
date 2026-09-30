@@ -41,6 +41,17 @@ quadrature across instruments any more. Legs:
   (viii) the plasmode confounder (R8), SEM only, no solving: the projection, the
         calibration that survives it, and the instrument the projection rescues.
   (ix)  the two plasmode guards fire.
+  (x)   App. D's re-calibrated radii (`iv_recalibrate`, the sweeps' since working6)
+        on the fitted fixture at a pad tolerance and nonzero leaks: a DA fit
+        (DA+PI+IV, its (Z) and (T) modes, the intersection's DA branch) carries
+        each block at sqrt((epsilon - tol)^2 + s^2 gamma_z + leak^2) on its own s,
+        leak `leak_t` on T, `eps_iv_z` on Z and `leak_tz` on the joint (T, Z)
+        block, which it carries iff both blocks are there; a non-DA fit (PI+IV,
+        PI+INV+IV, the intersection's baseline) sqrt(eps_iv_z^2 + s^2 gamma_z)
+        alone and no joint block; the intersection hands its DA branch the flag; and the
+        cigarette query runner's builders carry the flag OFF. Catches: the flag
+        dropped on the way to a branch, eps double-counting EPS_TOL, a query path
+        re-calibrated.
 
     MPLBACKEND=Agg python scripts/a67_iv_decoupled.py [--seed 42] [--only LEG] [--skip-digest]
 """
@@ -638,6 +649,82 @@ def leg_viii():
     check("(viii) and lands it below s sqrt(gamma_z)", projected < r_z, f"{projected:.4f} < {r_z:.4f}")
 
 
+def leg_x(seed):
+    print("(x) App. D's re-calibrated radii on the fitted fixture, and the query builders flag-off")
+    _, X, y, GX, G, Z = fixture(seed)
+    # nonzero leaks so the measured-leak path is exercised (the runner measures them)
+    epsilon, tol, leak_t, leak_tz = 0.1, EPS_TOL, 0.07, 0.09
+    names = ["PI+IV", "PI+INV+IV", "DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "PI&DA+PI+IV"]
+    rho = float(rho_hat(X, GX, y, intercept=True))
+    builders = MethodRegistry.build_methods(
+        names,
+        gamma=GAMMA,
+        epsilon=epsilon,
+        epsilon_iv=EPS_IV,
+        epsilon_iv_z=EPS_IV_Z,
+        gamma_z=GAMMA_Z,
+        rho=rho,
+        pad=True,
+        iv_recalibrate=True,
+        leak_t=leak_t,
+        leak_tz=leak_tz,
+        **TOGGLES,
+    )
+    models = {}
+    for name in names:
+        model = builders[name]()
+        model.pad_tolerance = tol  # as the sweeps set it under the IM-CI, before fit
+        fit_model(model=model, method_name=name, X=X, y=y, GX=GX, G=G, Z=Z)
+        models[name] = model
+
+    def leak(model):
+        return float(np.sqrt(EPS_IV_Z**2 + model.sigma_sq / model.rho * GAMMA_Z))
+
+    def recalibrated(model, block_leak):
+        slack = model.sigma_sq / model.rho * GAMMA_Z
+        return float(np.sqrt((epsilon - tol) ** 2 + slack + block_leak**2))
+
+    inter = models["PI&DA+PI+IV"]
+    da_fits = {name: models[name] for name in ("DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)")}
+    da_fits["the intersection's DA branch"] = inter.augmented
+    non_da = {"PI+IV": models["PI+IV"], "PI+INV+IV": models["PI+INV+IV"]}
+    non_da["the intersection's baseline"] = inter.baseline
+    check(
+        "(x) the intersection hands both branches the flag",
+        inter.augmented.iv_recalibrate and inter.baseline.iv_recalibrate,
+    )
+    # the blocks each mode is fitted with, so neither radius check below goes vacuous
+    blocks = {"DA+PI+IV": (True, True), "DA+PI+IV(Z)": (False, True), "DA+PI+IV(T)": (True, False)}
+    blocks["the intersection's DA branch"] = (True, True)
+    for name, model in da_fits.items():
+        check(f"(x) {name}: fitted with its mode's blocks", (model._has_t, model._has_z) == blocks[name])
+        both = model._has_t and model._has_z
+        t_ok = not model._has_t or abs(model.t_bound - recalibrated(model, leak_t)) <= 1e-12
+        z_ok = not model._has_z or abs(model.z_bound - recalibrated(model, EPS_IV_Z)) <= 1e-12
+        tz_ok = model._has_tz == both and (not both or abs(model.tz_bound - recalibrated(model, leak_tz)) <= 1e-12)
+        check(
+            f"(x) {name}: a DA fit, each block at sqrt((eps - tol)^2 + s^2 gamma_z + its leak^2), joint iff T and Z",
+            model._da_fit and (model._has_t or model._has_z) and t_ok and z_ok and tz_ok,
+            f"r_T {model.t_bound!r}, r_Z {model.z_bound!r}, r_TZ {model.tz_bound!r}",
+        )
+    for name, model in non_da.items():
+        check(
+            f"(x) {name}: a non-DA fit, no T block, r_Z = the leak alone",
+            not model._da_fit
+            and not model._has_t
+            and not model._has_tz
+            and model._has_z
+            and model.z_bound == leak(model),
+            f"r_Z {model.z_bound:.6g} vs {leak(model):.6g}",
+        )
+    orch = a60.orchestrator(a60.recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1))
+    query = a60.query_runner(orch)
+    built_query = {name: build() for name, build in query.methods.items()}
+    flags = {name: model.iv_recalibrate for name, model in built_query.items() if hasattr(model, "iv_recalibrate")}
+    check("(x) the cigarette query runner builds IV models", bool(flags), f"{sorted(built_query)}")
+    check("(x) ... and every one carries the flag off", not any(flags.values()), f"{flags}")
+
+
 def leg_ix():
     print("(ix) the two plasmode guards")
     np.random.seed(42)
@@ -692,6 +779,7 @@ if __name__ == "__main__":
         ("vii", leg_vii),
         ("viii", leg_viii),
         ("ix", leg_ix),
+        ("x", partial(leg_x, args.seed)),
     ]
     if not args.skip_digest and args.only in (None, "D"):
         legs.append(("D", partial(leg_d, args.reference)))

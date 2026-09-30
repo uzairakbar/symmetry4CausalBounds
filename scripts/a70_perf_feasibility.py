@@ -25,11 +25,12 @@ Legs:
      serial), run twice under the orchestrator: seed_var alone, then seed_var and
      feasibility. `epsilon_feasibility_results.pkl` is (grid points, n_queries) per
      method with values in [0, 1]; a method reads 0 at every step where all its
-     runs fail, the methods that do are the RECORDED T family (DA+PI+IV(T) and
-     its intersection) and only under r = 1 -- it was PI+INV until the sweeps
-     read eps* as the q0.95 of |W|, which PI+INV's r eps* clears down to r = 0.5
-     while the T family's RMS-type r eps_iv* does not -- and PI+INV reads 1 at
-     r = 1; the per-dataset figure, as `_run_perf`
+     runs fail, the methods that do are the RECORDED ones and only under r = 1
+     -- none since the sweeps re-calibrate the T radius to r eps* + EPS_TOL (App.
+     D, `iv_recalibrate`); before it the T family (DA+PI+IV(T) and its
+     intersection), whose RMS-type r eps_iv* fell under its floor, and before
+     the q0.95 eps* PI+INV -- and PI+INV reads 1 at r = 1; the per-dataset
+     figure, as `_run_perf`
      draws it, is on `CLAMP_YLIM` and linear; the seed_var terms, failures and
      statuses of the two runs are `array_equal`, so building the runs once moved no
      number and no RNG draw. Catches: the runs built twice or in another order,
@@ -108,8 +109,10 @@ from src.methods.sensitivity_models import SolveStatus  # noqa: E402
 TMPROOT = os.path.expanduser("~/scratch/tmp/a70")
 PERF_METHODS = ["PI", "PI+INV", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
 # RECORDED 2026-09-29 on the q0.95 sweep eps* and the 1 R robustness target: the
-# methods refuted at every run of some step of leg 3 (PI+INV before, at two steps)
-REFUTED_RECORDED = ["DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
+# methods refuted at every run of some step of leg 3 (PI+INV before, at two steps).
+# Re-recorded 2026-09-29 under the sweeps' App. D T radius r eps* + EPS_TOL
+# (`iv_recalibrate`, which the perf budgets carry): none (the T family was, at r < 1)
+REFUTED_RECORDED = []
 YLABEL = "feasible rate (over backends)"
 FAIL = []
 
@@ -330,12 +333,12 @@ def leg_3_4():
     )
     names = sorted(k for k, steps in refuted.items() if steps.any())
     check(
-        "(3) a refuted method reads 0 at every all-failed step (at least one)",
-        bool(names) and all(np.all(feasible[k][refuted[k]] == 0.0) for k in names),
+        "(3) a refuted method reads 0 at every all-failed step",
+        all(np.all(feasible[k][refuted[k]] == 0.0) for k in names),
         f"{ {k: int(refuted[k].sum()) for k in names} }",
     )
     check(
-        "(3) the refuted methods are the RECORDED T family, under r = 1 only",
+        "(3) the refuted methods are the RECORDED ones, under r = 1 only",
         names == REFUTED_RECORDED and all(np.all(x[refuted[k]] < 1.0) for k in names),
         f"{names}",
     )

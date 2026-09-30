@@ -15,10 +15,14 @@ both halves of the robustness axis are on the figure. Legs:
   (ii)  r != 1 moves the T budget and ONLY it: the per-step values are
         `r eps_iv* + EPS_TOL` exactly and `fit_epsilon_iv_z` and `gamma_z` are
         identical at every r; on the plasmode cigarette recipe a fitted
-        `DA+PI+IV(T)` reads different widths at r = 0.5 and r = 2 while
-        `DA+PI+IV(Z)` moves only by the padding. Catches: the kwarg dropped.
-  (iii) `solves_on_epsilon` per mode on FITTED models. Catches: the property
-        keyed on `_has_iv` rather than `_has_t`.
+        `DA+PI+IV(T)` reads different widths at r = 0.5 and r = 2, and so does
+        `DA+PI+IV(Z)`: under the sweeps' App. D radii (`iv_recalibrate`, since
+        working6) r_T is the swept epsilon itself and a DA fit's r_Z carries it
+        too, so the Z-only line re-solves beyond the padding. Catches: the swept
+        epsilon not reaching either radius.
+  (iii) `solves_on_epsilon` per mode on FITTED models, with the flag off (the
+        query radii) and on (the sweeps', where a Z-only DA fit re-solves too).
+        Catches: the property keyed on `_has_iv` rather than `_has_t`.
   (iv)  perf cumulation: `_prepare` call counts per method on a 4-point grid handed
         in directly. Catches: the class attribute put back (the T rows read 3).
   (v)   do-MNIST, STATIC ONLY: signatures and source text, no net, no data, no run.
@@ -26,14 +30,14 @@ both halves of the robustness axis are on the figure. Legs:
         to 2.0, strictly increasing, and `gamma` still on `_RATIO_GRID`.
   (vii) R5.2, restated: which families the epsilon sweep refutes, and where,
         against RECORDED integers so a family that empties at a NEW point fails.
-        The ordering it used to state -- no `+IV` family more infeasible than
-        `PI+INV` at the same ratio -- held while both budgets were r times an RMS
-        oracle. The INV budget is now r times the q0.95 of |W| (~2x its RMS), so
-        PI+INV admits h_* down to r = 0.5, while the T-as-IV budget stays r times
-        its RMS-type eps_iv* (Thm. 3.B's norm, unchanged) and falls under its
-        floor first. So: nothing is refuted at r >= 1, only a family with a T
-        constraint is ever refuted (PI+INV, PI+IV and the Z-only family never),
-        and one is (the fixture still reaches the floor).
+        The INV budget is r times the q0.95 of |W| (~2x its RMS), so PI+INV
+        admits h_* down to r = 0.5. Under the sweeps' App. D radii
+        (`iv_recalibrate`, since working6) the T radius is that same r eps* +
+        EPS_TOL, no longer r times the RMS-type eps_iv*, so on both fixtures
+        nothing is refuted at any r (before it the T family fell under its floor
+        at r = 0.5). Still stated: nothing refuted at r >= 1, and only a family
+        with a T constraint may be (a (Z) DA line's radius shrinks with r too
+        under App. D, so it may in principle; RECORDED none).
   (viii) ruff and ASCII on the touched files.
   (ix)  the omega sweep refits the T budget per step, not only the epsilon sweep.
         On OPTICAL, the one omega dataset whose h_* is not exactly invariant: the
@@ -44,11 +48,12 @@ both halves of the robustness axis are on the figure. Legs:
         precision at every knob there, so that panel cannot move. Catches:
         `ExpansionStrategy.fit_epsilon_iv` missing, so the budget falls back to
         the setup-time oracle. The baseline observed-Z budget (refactor25): on
-        simulation it is `eps_iv_z_star` on the experiment's base sample +
-        EPS_TOL at every knob, not the setup oracle's draw (both RECORDED); a
-        recording DA shows `eps_iv_z_star` forwards its augment kwargs; optical
-        (no Z) reads 0.0; declared cigarettes reads 0.0 on the sweep and the query
-        runner and a spy shows the runner never calls `eps_iv_z_star` there.
+        simulation it is the leak `z_moment_star` on the cell's rows (the base
+        sample at every knob), no tolerance (App. D, since working6), not the setup
+        oracle's draw (both RECORDED); a recording DA shows `eps_iv_z_star` forwards its
+        augment kwargs; optical (no Z) reads 0.0; declared cigarettes reads 0.0 on
+        the sweep and the query runner and a spy shows the runner never calls
+        `z_moment_star` or `eps_iv_z_star` there.
         Catches: the budget read off the setup oracle again, a per-step refit,
         an early exit placed after the computation.
 
@@ -88,31 +93,32 @@ from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import STATUS_CATEGORIES  # noqa: E402
 from src.methods.sensitivity_models import constraint_floor  # noqa: E402
-from src.oracle import eps_iv_star, eps_iv_z_star  # noqa: E402
+from src.oracle import eps_iv_star, eps_iv_z_star, z_moment_star  # noqa: E402
 
 # the recorded infeasible-query counts per (method, grid point). Measured on this
 # tree at the fixtures leg (vii) names; a family that empties at a NEW point fails
 # (a) even where the ordering of (b) still holds
 ORDERING = {
-    # sim `iv: 0`, 51 queries: the T family is refuted at r = 0.5 alone and PI+INV
-    # nowhere (its q0.95 budget at r = 0.5 still clears the RMS defect); re-recorded
-    # 2026-09-29 on the q0.95 sweep eps* and the 1 R robustness target (it was
-    # PI+INV at the four points under r = 1, the T family at three)
+    # sim `iv: 0`, 51 queries: nothing is refuted anywhere, PI+INV (its q0.95 budget
+    # at r = 0.5 still clears the RMS defect) nor the T family (its App. D radius is
+    # that same r eps* + EPS_TOL, `iv_recalibrate`). Re-recorded 2026-09-29 twice: on
+    # the q0.95 sweep eps* and the 1 R target (was PI+INV at the four points under
+    # r = 1, the T family at three), then under App. D (was the T family, 51 at r = 0.5)
     "simulation iv: 0": {
         "PI": [0] * 9,
         "PI+INV": [0] * 9,
-        "DA+PI+IV": [51, 0, 0, 0, 0, 0, 0, 0, 0],
+        "DA+PI+IV": [0] * 9,
     },
-    # the plasmode recipe, 245 queries: the T families are refuted at r = 0.5
-    # alone and feasible above it; PI+INV, which was refuted there too before the
-    # q0.95 sweep eps*, no longer is. The boundary ratio is per-draw, so a
-    # production run can move it
+    # the plasmode recipe, 245 queries: nothing is refuted anywhere. Re-recorded
+    # 2026-09-29 under the sweeps' App. D T radius (was the T families, 245 at
+    # r = 0.5 alone; PI+INV there too before the q0.95 sweep eps*). The boundary
+    # ratio is per-draw, so a production run can move it
     "cigarettes plasmode": {
         "PI": [0] * 9,
         "PI+INV": [0] * 9,
         "PI+IV": [0] * 9,
-        "DA+PI+IV": [245, 0, 0, 0, 0, 0, 0, 0, 0],
-        "DA+PI+IV(T)": [245, 0, 0, 0, 0, 0, 0, 0, 0],
+        "DA+PI+IV": [0] * 9,
+        "DA+PI+IV(T)": [0] * 9,
         "DA+PI+IV(Z)": [0] * 9,
     },
 }
@@ -260,7 +266,8 @@ def leg_ii():
     check("(ii) the epsilon beside it still moves", len(set(epsilons)) == len(grid))
 
     # on the plasmode recipe, through the real runner: a T-mode method moves with
-    # the ratio and a (Z)-mode one does not re-solve at all
+    # the ratio, and under App. D (`iv_recalibrate`) so does a (Z)-mode one, whose
+    # DA-fit Z radius carries the swept epsilon
     cig = plasmode_sweep(methods=["PI", "DA+PI+IV(T)", "DA+PI+IV(Z)"])
     x, results, _ = cig.run("a68 (ii)")
     x = np.asarray(x, dtype=float)
@@ -270,15 +277,21 @@ def leg_ii():
         print(f"        {name:14s} {np.round(v, 4).tolist()}")
     eps_star = float(cig.get_oracle(0).epsilon_star)
     middle = int(np.argmin(np.abs(x - 1.0)))
-    # a method with no T constraint does not re-solve: every width it reports is
-    # its r = 1 width plus the padding 2 (r - 1) eps*, exactly
+    # a method that did not re-solve would report its r = 1 width plus the padding
+    # 2 (r - 1) eps*, exactly; both DA lines move beyond it
     padding = 2.0 * (x - x[middle]) * eps_star
     z_row = widths["DA+PI+IV(Z)"]
     z_gap = float(np.nanmax(np.abs(z_row - z_row[middle] - padding)))
-    check("(ii) DA+PI+IV(Z) moves by the padding and nothing else", z_gap < 1e-3, f"max |residual| {z_gap:.2e}")
+    check(
+        "(ii) DA+PI+IV(Z) re-solves too: its App. D Z radius carries the swept epsilon",
+        z_gap > 1e-3,
+        f"max |residual| {z_gap:.2e}",
+    )
     t_row = widths["DA+PI+IV(T)"]
     t_gap = float(np.nanmax(np.abs(t_row - t_row[middle] - padding)))
-    check("(ii) DA+PI+IV(T) does NOT: it re-solves at the swept T budget", t_gap > 0.1, f"max |residual| {t_gap:.4f}")
+    # the T radius carries the declared gamma_z slack in quadrature (App. D), so the
+    # ratio moves it less than it moved the bare r eps* (0.056 recorded 2026-09-30)
+    check("(ii) DA+PI+IV(T) re-solves too, at the swept T radius", t_gap > 1e-2, f"max |residual| {t_gap:.4f}")
     monotone = bool(np.all(np.diff(t_row[~np.isnan(t_row)]) > 0))
     check("(ii) and it is monotone in the ratio", monotone, f"{t_row[-1]:.4f}")
     check("(ii) PI is flat", float(np.nanmax(widths["PI"]) - np.nanmin(widths["PI"])) < 1e-9)
@@ -305,6 +318,14 @@ def leg_iii():
         for name, want in wants.items():
             got = bool(models[name].solves_on_epsilon)
             check(f"(iii) {tag}: {name} solves_on_epsilon {want}", got == want, f"{got}")
+    # the sweeps' App. D radii: a Z-only DA fit reads epsilon in its Z radius, so it
+    # re-solves as well; the non-DA methods and an empty Z are as above
+    recalibrated = {**wants, "DA+PI+IV(Z)": True, "PI&DA+PI+IV(Z)": True}
+    for tag, instrument in (("a real Z", Z), ("an empty Z", None)):
+        models = a67.built(list(wants), X, y, GX, G, instrument, iv_recalibrate=True)
+        for name, want in (recalibrated if instrument is not None else wants).items():
+            got = bool(models[name].solves_on_epsilon)
+            check(f"(iii) iv_recalibrate, {tag}: {name} solves_on_epsilon {want}", got == want, f"{got}")
 
 
 def leg_iv():
@@ -375,7 +396,7 @@ def leg_vi():
 
 
 def leg_vii():
-    print("(vii) R5.2: only a T-constrained family is refuted, and only under r = 1")
+    print("(vii) R5.2: only a T-constrained family may be refuted, only under r = 1 (none is under App. D)")
     fixtures = (
         ("simulation iv: 0", lambda: sim_runner(methods=["PI", "PI+INV", "DA+PI+IV"], iv=0)),
         (
@@ -403,7 +424,6 @@ def leg_vii():
         )
         t_families = {name for name in counts if name.startswith("DA+PI+IV") and not name.endswith("(Z)")}
         check(f"(vii) {label}: only a T-constrained family is refuted", refuted <= t_families, f"{sorted(refuted)}")
-        check(f"(vii) {label}: one is, so that is not vacuous", bool(refuted), f"{sorted(refuted)}")
 
 
 def leg_viii():
@@ -542,9 +562,8 @@ def leg_ix():
     )
     X_raw, _, y, _, _, Z = sim_runner_._base_data(0)
     base = float(
-        eps_iv_z_star(
+        z_moment_star(
             sim_runner_.sems[0],
-            sim_runner_.das[0],
             X=X_raw,
             y=y,
             Z=Z,
@@ -555,14 +574,14 @@ def leg_ix():
     setup = float(sim_runner_.get_oracle(0).eps_iv_z_star)
     print(f"      RECORDED simulation raw Z budget: base sample {base:.9f}, setup draw {setup:.9f}")
     check(
-        "(ix) simulation: the Z budget is eps_iv_z_star on the base sample + EPS_TOL",
-        all(z == base + EPS_TOL for z in sim_z),
-        f"{sim_z[0]!r} vs {base + EPS_TOL!r}",
+        "(ix) simulation: the Z budget is the leak z_moment_star on the cell's rows, no tolerance",
+        all(abs(z - base) <= 1e-12 * base for z in sim_z),
+        f"{sim_z[0]!r} vs {base!r}",
     )
     check(
         "(ix) simulation: and not the setup oracle's draw",
-        abs(sim_z[0] - (setup + EPS_TOL)) > 1e-3,
-        f"gap {abs(sim_z[0] - (setup + EPS_TOL)):.4g}",
+        abs(sim_z[0] - setup) > 1e-3,
+        f"gap {abs(sim_z[0] - setup):.4g}",
     )
     for tag, value in (("base sample", base), ("setup draw", setup)):
         recorded = Z_BUDGET_RECORDED[tag]
@@ -586,13 +605,18 @@ def leg_ix():
     import src.experiments.generic_runner as generic_runner
 
     calls = []
-    original = generic_runner.eps_iv_z_star
+    # the sweep measures the leak (`z_moment_star`), the query runner `eps_iv_z_star`
+    originals = {name: getattr(generic_runner, name) for name in ("eps_iv_z_star", "z_moment_star")}
 
-    def spy(*args, **kwargs):
-        calls.append(kwargs)
-        return original(*args, **kwargs)
+    def spying(original):
+        def spy(*args, **kwargs):
+            calls.append(kwargs)
+            return original(*args, **kwargs)
 
-    generic_runner.eps_iv_z_star = spy
+        return spy
+
+    for name, original in originals.items():
+        setattr(generic_runner, name, spying(original))
     try:
         orch = a60.orchestrator(a60.recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1))
         cig = a60.sweep_runner(orch, "gamma")
@@ -600,7 +624,8 @@ def leg_ix():
         cig_z = cig.fit_epsilon_iv_z(0, cig_data)
         cig_query = a60.query_runner(orch)
     finally:
-        generic_runner.eps_iv_z_star = original
+        for name, original in originals.items():
+            setattr(generic_runner, name, original)
     check(
         "(ix) cigarettes is declared and carries a real Z",
         cig.declared_iv and cig_query.declared_iv and np.shape(cig_data.Z)[1] > 0 and np.shape(cig_query.Z)[1] > 0,
@@ -611,7 +636,11 @@ def leg_ix():
         cig_z == 0.0 and cig_query.epsilon_iv_z == 0.0,
         f"{cig_z!r} {cig_query.epsilon_iv_z!r}",
     )
-    check("(ix) declared cigarettes: eps_iv_z_star is never called by the runners", calls == [], f"{len(calls)} calls")
+    check(
+        "(ix) declared cigarettes: z_moment_star / eps_iv_z_star never called by the runners",
+        calls == [],
+        f"{len(calls)} calls",
+    )
 
 
 if __name__ == "__main__":

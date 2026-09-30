@@ -21,27 +21,24 @@ rule. Legs:
         sigma sqrt(gamma*) = sqrt(bias^2) (sigma~ sqrt(gamma*/rho) under
         `recalibrate: true`), read off the runner's own oracle, at the RECORDED R.
         The old leg required a constant ABOVE the radius so DA+PI would leave it;
-        at 1 R the dip comes from the T-constrained lines instead, (iii). Catches:
+        at 1 R the lowest reading is read off the IV lines instead, (iii). Catches:
         a multiplier or a ruler that moved.
-  (iii) the dip, in data, on the lines the figure draws: the simulation block of
+  (iii) the lowest reading, in data, on the lines the figure draws: the simulation block of
         recipes/robustnessFig11.yaml (its d, iv, n and methods), two experiments,
         5 steps, `runner.run` under config.yaml's toggles. The old leg read plain
         DA+PI on config.yaml's block, which the recipe does not draw and which no
         longer dips at 1 R. Now: r = 1 is the grid's midpoint (the grid is centred
         on it, a68 (vi)); every DA+ line is 1.0 at r = 1; the number of
         experiments each line is feasible on, per step, is RECORDED; and so is
-        the one dip. Stated as it is: the T family (DA+PI+IV(T,Z) and its
-        intersection) is INFEASIBLE on both experiments at r = 0.5 and on one of
-        the two at r = 0.71 -- its RMS-type budget r eps_iv* falls under its floor
-        as r shrinks, while the INV budget is read in the q0.95 norm (a68 (vii)
-        records the cells) -- and the dip is that r = 0.71 cell, 0.574 on the one
-        feasible experiment, RECORDED. The Z-only lines are feasible everywhere
-        and stay at 1.0. The 0.7 floor therefore still binds the Z-only lines at
-        every r, but NO LONGER APPLIES to the T family under r = 1 at 1 R: the
-        only reading there is a one-experiment tail count below it, and the
-        cells around it are empty. Catches: a target that moves the feasible
-        counts or the dip, a curve that does not recover at eps*. Misses: the
-        10-experiment band, where the partial cell averages over more draws.
+        the lowest reading. Stated as it is: under the sweeps' App. D radii
+        (`iv_recalibrate`) the T radius is the swept r eps* + EPS_TOL itself, in
+        the q0.95 norm the INV budget reads, so every line is feasible on both
+        experiments at every r and none dips on this fixture (the lowest reading
+        is 1.0). Before it the T family's RMS-type budget r eps_iv* fell under its
+        floor as r shrank (INFEASIBLE at 0.5, one of two experiments at 0.71, a
+        0.574 dip there). The 0.7 floor binds every line at every r. Catches: a
+        target or a radius that moves the feasible counts or the dip, a curve
+        that does not recover at eps*. Misses: the 10-experiment band.
   (v)   isolation of the appended component: the optical epsilon runner's DA (read
         off the runner, `das[0]`) is config.yaml's chain plus the component of
         `ROBUSTNESS_AUGMENTATION`, so it carries gaussian-noise; every other
@@ -133,15 +130,17 @@ OPTICAL_POOLED_EPS = 0.5816
 RADIUS_ATOL = 1e-3
 # RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 0.5 .. 2 in 5 steps): the
 # experiments each DA+ line is feasible on per step, and its one dip (coverage,
-# line, r, feasible experiments behind it); the T family is empty at r = 0.5 and
-# half-feasible at 0.71, where the dip is a one-experiment reading
+# line, r, feasible experiments behind it). Re-recorded 2026-09-29 under the sweeps'
+# App. D T radius r eps* + EPS_TOL (`iv_recalibrate`): every line is feasible at
+# every step and none dips (was: the T family empty at r = 0.5, half-feasible at
+# 0.71 with a one-experiment dip of 0.5735 there, under the RMS-type r eps_iv*)
 SIM_FEASIBLE = {
     "DA+PI+IV(Z)": [2, 2, 2, 2, 2],
-    "DA+PI+IV(T,Z)": [0, 1, 2, 2, 2],
+    "DA+PI+IV(T,Z)": [2, 2, 2, 2, 2],
     "PI&DA+PI+IV(Z)": [2, 2, 2, 2, 2],
-    "PI&DA+PI+IV(T,Z)": [0, 1, 2, 2, 2],
+    "PI&DA+PI+IV(T,Z)": [2, 2, 2, 2, 2],
 }
-SIM_DIP = (0.5735, "DA+PI+IV(T,Z)", 0.7071, 1)
+SIM_DIP = (1.0, "", 0, 0)  # at coverage 1.0 the (line, r, count) are not compared
 RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 STD_RATIO_BOUND = 10.0
 POOLED_ORACLE_RTOL = 0.05
@@ -347,7 +346,8 @@ def recipe_sim(seed, **toggles):
 def leg_iii(seed, **toggles):
     orch = recipe_sim(seed, **toggles)
     print(
-        f"(iii) the dip on {N_EXPERIMENTS} sim experiments of the robustness recipe, methods {orch.kwargs['methods']}"
+        f"(iii) the lowest reading on {N_EXPERIMENTS} sim experiments of the robustness recipe,"
+        f" methods {orch.kwargs['methods']}"
     )
     runner, _ = epsilon_runner(orch)
     return dip(runner, "(iii)", SIM_FEASIBLE, SIM_DIP)

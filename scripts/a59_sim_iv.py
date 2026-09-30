@@ -48,8 +48,11 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         SEMs and the query SEM carry `iv_width` 1, Z_train and Z are (n, 1)), and on
         this SEM the two IV terms coincide to the bit (h* is exactly T-invariant, so
         `eps_iv_star` is 0 and the joint budget IS the Z piece). The Z budget is
-        `eps_iv_z_star` recomputed here on the runner's base sample (the query
-        runner: on its own draw) + the tolerance, RECORDED. Catches: an
+        the leak `z_moment_star` recomputed here on the runner's base sample (the
+        sweeps re-calibrate per App. D since working6; it equals `eps_iv_z_star`
+        to 1e-15 on this invariant DA; no tolerance, the sweeps' radii carry none
+        since working6) and `eps_iv_z_star` on the query runner's own draw + its
+        eps_tol, RECORDED. Catches: an
         interventional draw without its Z (the runner mis-slices), the key not
         forwarded, a Z that never reaches the runner, the Z budget read off the
         setup oracle's draw. Misses: the solves at the recipe's full scale, which
@@ -91,7 +94,7 @@ from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
-from src.oracle import eps_iv_z_star, gamma_star  # noqa: E402
+from src.oracle import eps_iv_z_star, gamma_star, z_moment_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
@@ -337,15 +340,13 @@ def leg_vi(seed):
     # the baseline observed-Z budget is read once on the base sample, not on the
     # setup oracle's calibration draw
     base_z = float(
-        eps_iv_z_star(
-            runner.sems[0], runner.das[0], X=X_raw, y=y, Z=Z, features=runner._features, mean_match=runner.mean_match
-        )
+        z_moment_star(runner.sems[0], X=X_raw, y=y, Z=Z, features=runner._features, mean_match=runner.mean_match)
     )
     print(f"      RECORDED raw Z budget: base sample {base_z:.9f}, setup draw {float(oracle.eps_iv_z_star):.9f}")
     check(
-        "(vi) epsilon_iv_z is eps_iv_z_star on the base sample + EPS_TOL",
-        eps_z == base_z + EPS_TOL,
-        f"{eps_z:.6f} vs {base_z + EPS_TOL:.6f}",
+        "(vi) epsilon_iv_z is the leak z_moment_star on the cell's rows, no tolerance",
+        abs(eps_z - base_z) <= 1e-12 * base_z,
+        f"{eps_z:.6f} vs {base_z:.6f}",
     )
 
     query = orchestrator.get_query_runner_cls()(
