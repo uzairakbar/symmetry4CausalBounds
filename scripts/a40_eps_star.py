@@ -53,7 +53,8 @@ rule. Legs:
         config.yaml that already names gaussian-noise, where the sweep and the
         rest legitimately share it.
   (vi)  optical, mirroring (iii): three experiments, 5 steps, the configured
-        toggles; every DA+ line is feasible on all three at every step, 1.0 at
+        toggles, all three pinned to device 8 (`sweep_devices`, patched here), the
+        device the RECORDED numbers were read on; every DA+ line is feasible on all three at every step, 1.0 at
         r = 1 and above 0.7 throughout, and the lowest DA+ coverage under r = 1 is
         the RECORDED 1.0. The device caps the
         dip: no multiple of R from 1 to 8 moved it off 1.000 (the comment at
@@ -88,6 +89,7 @@ import shutil
 import sys
 import tempfile
 import warnings
+from dataclasses import replace
 
 import numpy as np
 import yaml
@@ -96,7 +98,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments import generic_runner  # noqa: E402
+from src.experiments import generic_runner, optical_device  # noqa: E402
 from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     CIGARETTE_CONFIG,
@@ -491,6 +493,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     seed = parser.parse_args().seed
     toggles, draw, chain = configured()
+    # the optical legs read device 8's numbers; the sweeps would otherwise span devices
+    optical_device.OPTICAL_CONFIG = replace(
+        optical_device.OPTICAL_CONFIG,
+        sweep_devices=(optical_device.OPTICAL_CONFIG.dataset_index,) * N_EXPERIMENTS_OPTICAL,
+    )
     orchs = {name: build(name, draw, chain, seed, **toggles) for name in ("simulation", "optical_device")}
     runners = {name: epsilon_runner(orch) for name, orch in orchs.items()}
     leg_i(runners)

@@ -767,7 +767,7 @@ def leg_ii():
         if name == "optical_device":
             check(
                 "(ii) optical: the poly features still apply to the stripped X",
-                data.X.shape[1] == runner.poly.n_output_features_ and data.X.shape[1] == data.X_test.shape[1],
+                data.X.shape[1] == runner._poly_at(0).n_output_features_ and data.X.shape[1] == data.X_test.shape[1],
                 f"{data.X.shape[1]} features",
             )
         at = budgets(runner, data)
@@ -995,7 +995,7 @@ def base_sample_z(runner, experiment_index=0):
             X=X_raw,
             y=y,
             Z=Z,
-            features=runner._features,
+            features=runner._features_at(experiment_index),
             mean_match=runner.mean_match,
         )
     )

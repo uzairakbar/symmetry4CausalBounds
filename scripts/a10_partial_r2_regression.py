@@ -10,18 +10,24 @@ comparison at a tolerance (digests only prove bit-equality).
 
 `--mean-match false` solves the pre-2026-09 uncentred geometry, which must
 reproduce the pre-mean-match digest byte-for-byte (see PLAN v2 C7).
+
+Both sweep experiments are pinned to `dataset_index` (`sweep_devices`, where the
+side has it), so the digest stays comparable with sides that predate one device
+per sweep experiment.
 """
 
 import hashlib
 import json
 import os
 import sys
+from dataclasses import replace
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import src.methods.sensitivity_models as sm  # noqa: E402
+from src.experiments import optical_device  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 
@@ -63,7 +69,11 @@ def direct_solves():
 
 
 def optical_sweep():
-    """A real sweep record through the orchestrator, at a reduced grid."""
+    """A real sweep record through the orchestrator, at a reduced grid, both
+    experiments on `dataset_index`."""
+    config = optical_device.OPTICAL_CONFIG
+    if hasattr(config, "sweep_devices"):
+        optical_device.OPTICAL_CONFIG = replace(config, sweep_devices=(config.dataset_index,) * 2)
     set_seed(69)
     orchestrator = OpticalOrchestrator(
         seed=69,
