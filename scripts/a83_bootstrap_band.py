@@ -11,7 +11,9 @@ experiments. Legs:
         method: the drawn band, read off the axes' fill, equals the percentiles of
         `bootstrap(y)` computed here, differs from the raw percentiles, and is
         narrower than them at every step.
-        Catches: a band over the raw columns, a changed level or resample count.
+        Catches: a band over the raw columns. Misses: a changed level, resample
+        count or seed, since the band and its expectation read the same
+        constants; (iv) pins those.
   (ii)  the aggregate `sweep_grid` on a temp artifacts tree holding the same kind
         of record: its coverage cell draws the same bootstrap band.
         Catches: an aggregate that drifts from the per-recipe figure.
@@ -22,7 +24,9 @@ experiments. Legs:
         Catches: a param sweep switched to raw bands, a new unlisted call site.
   (iv)  `bootstrap` is deterministic under BOOTSTRAP_SEED (another seed moves it),
         returns BOOTSTRAP_RESAMPLES resample means per row, each inside the row's
-        range, and BAND_PERCENTILES is (2.5, 97.5).
+        range; the constants are pinned: BAND_PERCENTILES is (2.5, 97.5),
+        BOOTSTRAP_RESAMPLES 1000 and BOOTSTRAP_SEED 0.
+        Catches: a changed level, resample count or seed.
 
 Writes only into a fresh directory under `~/scratch/tmp/a83/`, removed when it
 passes.
@@ -258,6 +262,8 @@ def leg_iv():
     )
     check("(iv) every resample mean inside its row's range", inside)
     check("(iv) BAND_PERCENTILES is (2.5, 97.5)", tuple(BAND_PERCENTILES) == (2.5, 97.5), f"{BAND_PERCENTILES}")
+    check("(iv) BOOTSTRAP_RESAMPLES is 1000", BOOTSTRAP_RESAMPLES == 1000, f"{BOOTSTRAP_RESAMPLES}")
+    check("(iv) BOOTSTRAP_SEED is 0", BOOTSTRAP_SEED == 0, f"{BOOTSTRAP_SEED}")
 
 
 if __name__ == "__main__":
