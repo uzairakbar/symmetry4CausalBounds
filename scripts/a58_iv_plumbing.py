@@ -414,14 +414,10 @@ def finite_widths(results, expect_empty=()):
     """Every IV method's width finite at every step, except the families named in
     `expect_empty`, which must be EMPTY at every step.
 
-    On this fixture's n-sweep they are, and the cause is the budget: the floor
-    report measures the T CONSTRAINT'S OWN floor (SS2.6), ~1e-7 on G alone, and
-    `epsilon_iv` stays at the oracle 0.03125 (no budget is raised any more; it once
-    was, to ~0.4 off the STACKED instrument's floor of ~0.019). The
-    inflation was never the T constraint's to claim. At the honest budget the
-    program is empty here -- and so is the OLD pooled one at the pooled radius, so
-    this is a budget fact, not a decoupling one. RECORDED rather than asserted
-    away; the shipped `nEfficiencyFig13` n-sweep is unaffected."""
+    On this fixture's n-sweep the decoupled pair once was, while the observed-Z
+    budget was read on the experiment's whole sample rather than the step's 64
+    rows, whose moment is larger; read on the step's rows (`fit_epsilon_iv_z`),
+    none is. No budget is ever raised off a floor."""
     bad = [
         name
         for name in IV_NAMES
@@ -525,14 +521,12 @@ def leg_i(seed):
     check("(i) n-sweep: Z sliced to n_train beside X", data_n.Z.shape == (64, M) and data_n.X.shape[0] == 64)
     check("(i) n-sweep: the slice is the first rows of the base Z", np.array_equal(data_n.Z, base_Z[:64]))
     check_dispatch("(i) n-sweep", recorded(runner_n, data_n), data_n.Z, data_n.Z, np.asarray(data_n.G))
-    # RECORDED: on this fixture the pair is empty at both n. The block below shows
-    # why: the T budget is the oracle one, never inflated off the stacked floor
+    # RECORDED: on this fixture the pair was empty at both n while the Z budget was
+    # read on the experiment's whole sample; re-recorded 2026-09-30 with it read on the
+    # step's own rows (larger on 64 of them), where every IV method is finite
     check(
-        "(i) n-sweep runs end to end, the decoupled pair empty throughout",
-        finite_widths(
-            sweep_runner("n", lambda: sem, [64, 128], seed=seed).run("n")[1],
-            expect_empty=("DA+PI+IV", INTERSECTION),
-        ),
+        "(i) n-sweep runs end to end, the decoupled pair feasible throughout",
+        finite_widths(sweep_runner("n", lambda: sem, [64, 128], seed=seed).run("n")[1]),
     )
 
     # a FRESH runner: `recorded` above replaced the other one's method_factory
@@ -571,8 +565,8 @@ def leg_i(seed):
         budget**2 >= floor_t and floor_stacked > floor_t,
         f"r_T^2 {budget**2:.3g} vs {floor_t:.3g}",
     )
-    # and the OLD pooled program is equally empty at the pooled radius, so nothing
-    # about the PAIR is what empties it
+    # and the OLD pooled program at the pooled radius reads what the pair does:
+    # feasible at every query, now that the Z budget is the step's own
     pooled = float(np.hypot(budget, solo_runner.fit_epsilon_iv_z(0, data_solo)))
     old = IVPartialR2(
         gamma=solo_runner.fit_gamma(0),
@@ -585,8 +579,8 @@ def leg_i(seed):
         **{k: v for k, v in TOGGLES.items() if k != "pad"},
     ).fit(data_solo.GX, data_solo.y, T=np.column_stack([G_solo, data_solo.Z]))
     old.predict(data_solo.X_test)
-    old_empty = np.all(np.asarray(old.query_status) == SolveStatus.INFEASIBLE)
-    check("(i) n-sweep: the OLD pooled program is empty at the pooled radius too", old_empty, f"{statuses(old)}")
+    old_ok = np.all(np.asarray(old.query_status) == SolveStatus.OK)
+    check("(i) n-sweep: the OLD pooled program is feasible at the pooled radius too", old_ok, f"{statuses(old)}")
 
     # m-sweep: Z tiled with X, the untiled copy beside X_base
     runner_m = sweep_runner("m", lambda: sem, [1, 2], seed=seed)
