@@ -6,7 +6,8 @@ Aggregate the sweep and perf pkls under `artifacts/` into grids under `artifacts
 Reads pkls only, runs nothing, and is not called from `src/main.py`, so the grids
 can be redrawn without rerunning an experiment. Per sweep parameter found under any
 `<dataset>/sweep/`, one `<param>_grid.pdf`: rows coverage, width, worst error (the
-last two divided by the baseline PI as the sweep figures are under `normalize`),
+last two divided by the baseline PI, experiment by experiment, as the sweep
+figures are under `normalize`),
 columns the datasets in `DATASET_ORDER` that are present, x shared within a column,
 y shared across the grid on `CLAMP_YLIM`, one x-label (under the middle column when
 the column count is odd, else centred), three y-labels without the "/ PI" suffix,
@@ -16,7 +17,10 @@ intersections (`SWEEP_LEGEND_RIGHT`) in its right. A missing pkl leaves its cell
 blank. Each line is the mean over experiments and its band the 95 %
 percentile-bootstrap CI of that mean, as on the per-recipe figures:
 `BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample means (seed
-BOOTSTRAP_SEED).
+BOOTSTRAP_SEED). On the width and worst-error rows each experiment is divided by
+its own baseline before the bootstrap, so the line is the mean over experiments
+of each experiment's ratio to its own baseline, the band the CI of that mean,
+and the baseline reads exactly 1 with no band.
 The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
 columns the datasets, x shared within a column, y within a row, the same x-label
 rule, one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
@@ -569,11 +573,12 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
             if mspec.key in rec and (include_ate or name != "ATE")
         }
         if y:
-            y = bootstrap(y)
             if metric != "coverage":
-                # the same PI, else PI+IV, division the sweep figure applies under
-                # `normalize`; a rate is drawn as it is
+                # the same per-experiment PI, else PI+IV, division the sweep figure
+                # applies under `normalize`, before the bootstrap; a rate is drawn
+                # as it is
                 y, _ = normalize_sweep(y, f"{param}_{metric}")
+            y = bootstrap(y)
         return x, y, found, ticks
 
     return _metric_grid(

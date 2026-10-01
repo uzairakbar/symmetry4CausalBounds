@@ -456,7 +456,9 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z:
     order and the mean series, which alone decide the limits (the band is
     contextual and clips against the frame). The percentiles are taken across
     each row as given: over `bootstrap`'s resample means on a bootstrapped sweep
-    (a 95 % CI of the mean), over the raw columns otherwise."""
+    (a 95 % CI of the mean), over the raw columns otherwise. A normalised series
+    arrives already divided per experiment (`normalize_sweep`), so its line is the
+    mean of the per-experiment ratios and its band the CI of that mean."""
     handles, means = {}, []
     for method_name, errors in y_results.items():
         # sanitize: float64, Infs to NaNs, then the mean over what is finite
@@ -482,19 +484,22 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z:
 
 
 def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[dict[str, NDArray], str | None]:
-    """Every series divided by the baseline's per-step mean (SS10.1); returns the
-    new dict and the baseline's name, or the input untouched and None.
+    """Every experiment divided by its own baseline (SS10.1); returns the new dict
+    and the baseline's name, or the input untouched and None.
 
-    Honoured for the `_width` and `_worst_error` ids only; a `_coverage` id is a
-    rate and an `_approx_error` id a squared miss whose baseline is 0 above
-    gamma*, and both are ignored with one warning. The baseline is
-    deterministic, `NORMALIZE_BASELINES` in order, and its absence means no
-    normalisation and one warning naming the methods present. The divisor is the
-    baseline's nanmean per step (over experiments, or over the bootstrap
-    resamples once `bootstrap` has run), so the baseline's own mean reads 1.0.
-    Where that mean is exactly 0.0, which no shipped width or worst-error sweep
-    reaches, every method's ratio is NaN rather than inf: 0/0 and x/0 both read
-    as a gap, and one INFO line counts the steps.
+    Runs on the raw (n_steps, n_experiments) record, BEFORE `bootstrap`: the
+    ratio is taken elementwise, per step and experiment, so the line drawn is the
+    mean over experiments of each experiment's ratio to its own baseline and the
+    band the 95 % percentile-bootstrap CI of that mean. The baseline itself reads
+    exactly 1.0 with no band. Honoured for the `_width` and `_worst_error` ids
+    only; a `_coverage` id is a rate and an `_approx_error` id a squared miss
+    whose baseline is 0 above gamma*, and both are ignored with one warning. The
+    baseline is deterministic, `NORMALIZE_BASELINES` in order, and its absence
+    means no normalisation and one warning naming the methods present. Where an
+    experiment's baseline is not a finite positive number, which no shipped width
+    or worst-error sweep reaches, every method's ratio for that experiment and
+    step is NaN rather than inf: 0/0 and x/0 both read as a gap (the bootstrap's
+    nanmean skips them), and one INFO line counts the cells.
     """
     fname = fname or ""
     if not fname.endswith(NORMALIZED_SWEEP_SUFFIXES):
@@ -508,14 +513,16 @@ def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[d
     if baseline is None:
         logger.warning(f"{fname}: `normalize` needs one of {NORMALIZE_BASELINES} among {list(y_results)}; drawn as is.")
         return y_results, None
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
-        base = np.nanmean(np.asarray(y_results[baseline], dtype=np.float64), axis=1)
-    positive = base > 0
+    base = np.asarray(y_results[baseline], dtype=np.float64)
+    with np.errstate(invalid="ignore"):
+        positive = np.isfinite(base) & (base > 0)
     dropped = int(np.sum(~positive))
     if dropped:
-        logger.info(f"{fname}: {dropped} of {len(base)} steps have a zero {baseline} baseline and read NaN.")
-    divisor = np.where(positive, base, np.nan)[:, None]
+        logger.info(
+            f"{fname}: {dropped} of {base.size} (step, experiment) cells have no positive {baseline} baseline "
+            "and read NaN."
+        )
+    divisor = np.where(positive, base, np.nan)
     return {name: np.asarray(series, dtype=np.float64) / divisor for name, series in y_results.items()}, baseline
 
 
@@ -560,7 +567,10 @@ def create_sweep_plot(
     every param sweep's figure) its band is the 95 % percentile-bootstrap CI of
     that mean: `BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample
     means (seed BOOTSTRAP_SEED), resampling the experiments per step and method.
-    Without it the band is those percentiles of the raw columns.
+    Without it the band is those percentiles of the raw columns. On a figure
+    drawn normalised the experiments are divided first, each by its own baseline,
+    so the line is the mean of those per-experiment ratios and the band the CI
+    of that mean.
 
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold). `xticks`, when given, are the only labelled x ticks (`fix_x_ticks`).
@@ -571,10 +581,11 @@ def create_sweep_plot(
     runaway. A step where a method has no usable bound is a gap in its line; the
     feasibility figure reads the share of backends with a usable bound there.
 
-    `normalize` divides every series by the baseline's (`normalize_sweep`, SS10.1)
-    on the width and worst-error figures and appends the baseline's name to the
-    y-label; `PLOT_CONFIGS[experiment][fname]["normalize"]` overrides it
-    per figure. The pkls are written before this function runs and never move.
+    `normalize` divides every experiment by its own baseline value
+    (`normalize_sweep`, SS10.1), before the bootstrap, on the width and
+    worst-error figures and appends the baseline's name to the y-label;
+    `PLOT_CONFIGS[experiment][fname]["normalize"]` overrides it per figure. The
+    pkls are written before this function runs and never move.
 
     `subdir` is the artifacts folder the figure lands in; the default is where every
     param sweep goes. A per-query curve on a shared x grid is this function's shape
@@ -607,16 +618,16 @@ def create_sweep_plot(
             x_values = x_values[order]
             y_results = {k: np.asarray(v)[order] for k, v in y_results.items()}
 
-        if bootstrapped:
-            y_results = bootstrap(y_results)
-
-        # after the bootstrap, so the bands are divided by the same per-step
-        # number as the mean
+        # before the bootstrap: each experiment is divided by its own baseline,
+        # and the band is the CI of the mean of those ratios
         baseline = None
         if cfg.get("normalize", normalize):
             y_results, baseline = normalize_sweep(y_results, fname)
             if baseline is not None:
                 ylabel = rf"{ylabel} / {method_label(baseline, has_z)}"
+
+        if bootstrapped:
+            y_results = bootstrap(y_results)
 
         legend_items = [item for item in (legend_items or []) if item in y_results]
 

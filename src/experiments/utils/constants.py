@@ -475,11 +475,12 @@ def label_collisions(methods, has_z: bool) -> list[tuple[str, str, str]]:
 # Plotting defaults
 DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
-# `normalize` on `create_sweep_plot` (SS10.1): divide every series of a width or
-# worst-error sweep figure by the baseline's, so the baseline reads 1.0 and the
-# rest as fractions of it. Off by default, so no shipped figure
-# moves; the recipes turn it on through the global `normalize` toggle. NOT the
-# per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the zero predictor.
+# `normalize` on `create_sweep_plot` (SS10.1): divide every experiment of a width
+# or worst-error sweep figure by its own baseline value, before the bootstrap, so
+# the baseline reads 1.0 and the rest as mean fractions of it. Off by default, so
+# no shipped figure moves; the recipes turn it on through the global `normalize`
+# toggle. NOT the per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the
+# zero predictor.
 DEFAULT_NORMALIZE_SWEEP: bool = False
 # coverage figures and every figure drawn normalised: linear y, these limits,
 # over any `PLOT_CONFIGS` scale or limit
@@ -530,9 +531,9 @@ PANEL_CONFIGS = {
 #   xscale/yscale  'linear' | 'log' | 'symlog' | 'asinh'. Two keys, not
 #                  PANEL_CONFIGS' single 'scale': these plots scale both axes.
 #   linear_width   asinh only; linthresh symlog only. Default: upper limit / 40.
-#   normalize      width / worst_error sweeps only: divide every series by the
-#                  baseline's (SS10.1); a `_coverage`, `_approx_error`, `_wall_clock`,
-#                  `_seed_var` or `_feasibility` id rejects it
+#   normalize      width / worst_error sweeps only: divide every experiment by
+#                  its own baseline value (SS10.1); a `_coverage`, `_approx_error`,
+#                  `_wall_clock`, `_seed_var` or `_feasibility` id rejects it
 # Style keys, accepted by every id (and by ANNOTATE_SWEEP_PLOT):
 #   legend         False hides it, True shows it, a str or (x, y) tuple is a
 #                  matplotlib loc. Absent: the plot function's own default (on).
