@@ -5,7 +5,10 @@ Every param sweep figure, per recipe and in the aggregate grid, draws one mean l
 per method and a band of `BAND_PERCENTILES` (2.5, 97.5) taken across
 `bootstrap`'s BOOTSTRAP_RESAMPLES resample means (the experiments resampled with
 replacement per step and method, seed BOOTSTRAP_SEED), not across the raw
-experiments. Legs:
+experiments; the line is the mean of those resample means. The normalised width
+and worst-error rows (`GEOMETRIC_SWEEP_SUFFIXES`) take the geometric mean: the
+resample means are of the per-experiment log-ratios, the line is exp of their mean
+and the band exp of their percentiles. Coverage stays arithmetic. Legs:
 
   (i)   `create_sweep_plot(savefig=False)` on a synthetic (n_steps, 10) record per
         method: the drawn band, read off the axes' fill, equals the percentiles of
@@ -20,7 +23,9 @@ experiments. Legs:
   (iii) static: `create_sweep_plot` defaults to `bootstrapped=True`, every call
         in `_run_sweeps` leaves it at that, and every other call site in `src/`
         is one of the known non-sweep ones (the perf figures in `_run_perf`, the
-        cigarette per-query width ratio); `sweep_grid` calls `bootstrap`.
+        cigarette per-query width ratio); `create_sweep_plot` and `sweep_grid`
+        both draw their rows through `sweep_series`, and `sweep_series` calls
+        `bootstrap`.
         Catches: a param sweep switched to raw bands, a new unlisted call site.
   (iv)  `bootstrap` is deterministic under BOOTSTRAP_SEED (another seed moves it),
         returns BOOTSTRAP_RESAMPLES resample means per row, each inside the row's
@@ -28,16 +33,27 @@ experiments. Legs:
         BOOTSTRAP_RESAMPLES 1000 and BOOTSTRAP_SEED 0.
         Catches: a changed level, resample count or seed.
   (v)   the normalised rows (SS10.1): each experiment is divided by its own
-        baseline BEFORE the bootstrap. `create_sweep_plot(normalize=True)` on a
-        synthetic width record whose experiments differ in scale, and the
-        aggregate `sweep_grid`'s width and worst-error cells, draw the
-        `BAND_PERCENTILES` of `bootstrap` of the per-experiment ratios; the
-        baseline's line and band read exactly 1.0. Mutation: the band of the old
-        ratio of means (bootstrap first, then every resample divided by the
-        baseline's per-step mean) is computed here and must differ from the
-        expected band at some step and fail the same comparison against the drawn
-        one. Catches: a normalisation moved back after the bootstrap, a divisor
-        pooled over experiments. Misses: nothing the bands do not show.
+        baseline BEFORE the bootstrap and the ratios aggregate geometrically.
+        `create_sweep_plot(normalize=True)` on a synthetic width record whose
+        experiments differ in scale, and the aggregate `sweep_grid`'s width and
+        worst-error cells, draw the band exp(`BAND_PERCENTILES` of `bootstrap`
+        of the per-experiment log-ratios) and the line exp(mean of those
+        resample means), which is within 1e-2 relative of the exact geometric
+        mean exp(nanmean of the log-ratios); the baseline's line and band read
+        exactly 1.0. Mutations, each computed here and required to differ from
+        the expected line or band at some step and to fail the same comparison
+        against the drawn one: the arithmetic mean of the ratios (bootstrap of
+        the ratios themselves, the previous rule), and the old ratio of means
+        (bootstrap first, then every resample divided by the baseline's per-step
+        mean). Catches: a normalised row drawn arithmetically, a normalisation
+        moved back after the bootstrap, a divisor pooled over experiments.
+  (vi)  what stays arithmetic: `GEOMETRIC_SWEEP_SUFFIXES` is width and
+        worst_error; the coverage row of the normalised aggregate tree and a
+        width figure drawn unnormalised draw the line nanmean(bootstrap(y)) and
+        the band of `bootstrap(y)`, and not the geometric ones; `log_ratios`
+        reads a zero, negative, inf or NaN ratio as NaN.
+        Catches: coverage, or an unnormalised figure, gone geometric; a log of a
+        zero width drawn as -inf.
 
 Writes only into a fresh directory under `~/scratch/tmp/a83/`, removed when it
 passes.
@@ -52,6 +68,7 @@ import pickle
 import shutil
 import sys
 import tempfile
+import warnings
 
 import matplotlib
 
@@ -67,13 +84,18 @@ sys.path.insert(0, REPO)
 
 from src import aggregate  # noqa: E402
 from src.experiments.configs import METRIC_SPECS, PARAM_SPECS  # noqa: E402
-from src.experiments.utils.constants import SUBDIR_SWEEP  # noqa: E402
+from src.experiments.utils.constants import GEOMETRIC_SWEEP_SUFFIXES, SUBDIR_SWEEP  # noqa: E402
 from src.experiments.utils.data_operations import (  # noqa: E402
     BOOTSTRAP_RESAMPLES,
     BOOTSTRAP_SEED,
     bootstrap,
 )
-from src.experiments.utils.plotting import BAND_PERCENTILES, create_sweep_plot, normalize_sweep  # noqa: E402
+from src.experiments.utils.plotting import (  # noqa: E402
+    BAND_PERCENTILES,
+    create_sweep_plot,
+    log_ratios,
+    normalize_sweep,
+)
 
 N_STEPS = 6
 N_EXPERIMENTS = 10
@@ -247,8 +269,12 @@ def leg_iii():
         others <= NON_SWEEP_SITES,
         f"{sorted(others - NON_SWEEP_SITES)}",
     )
-    grid = [w for w, _ in calls_in("src/aggregate.py", "bootstrap") if w.split(".")[0] == "sweep_grid"]
-    check("(iii) the aggregate sweep grid calls bootstrap", bool(grid), f"{grid}")
+    plot = [w for w, _ in calls_in("src/experiments/utils/plotting.py", "sweep_series") if w == "create_sweep_plot"]
+    check("(iii) create_sweep_plot draws through sweep_series", bool(plot), f"{plot}")
+    grid = [w for w, _ in calls_in("src/aggregate.py", "sweep_series") if w.split(".")[0] == "sweep_grid"]
+    check("(iii) the aggregate sweep grid draws through sweep_series", bool(grid), f"{grid}")
+    series = [w for w, _ in calls_in("src/experiments/utils/plotting.py", "bootstrap") if w == "sweep_series"]
+    check("(iii) sweep_series calls bootstrap", bool(series), f"{series}")
 
 
 def leg_iv():
@@ -288,17 +314,40 @@ def scaled(seed=4, n_steps=N_STEPS):
     return {"PI": base, "DA+PI": base * share}
 
 
+def nanmean_rows(a):
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return np.nanmean(a, axis=1)
+
+
 def expected_normalized(y, fname):
-    """The per-experiment band (bootstrap of the ratios) and the old ratio-of-means
-    band (bootstrap, then divided by the baseline's per-step mean), in drawing order."""
+    """{rule: ([line per method], [band per method])} in drawing order: `geometric`
+    the expected one (bootstrap of the per-experiment log-ratios, line exp of the
+    mean of the resample means, band exp of their percentiles), and the two
+    mutations: `arithmetic` (bootstrap of the ratios themselves) and `pooled` (the
+    old ratio of means: bootstrap, then divided by the baseline's per-step mean);
+    `exact` is the geometric mean of the ratios with no resampling."""
     ratios, baseline = normalize_sweep(y, fname)
-    boot = bootstrap(ratios)
+    logs = bootstrap(log_ratios(ratios))
+    arith = bootstrap(ratios)
     raw = bootstrap(y)
     divisor = np.nanmean(raw[baseline], axis=1, keepdims=True)
-    return (
-        [tuple(np.nanpercentile(boot[m], BAND_PERCENTILES, axis=1)) for m in y],
-        [tuple(np.nanpercentile(raw[m] / divisor, BAND_PERCENTILES, axis=1)) for m in y],
-    )
+    pooled = {m: raw[m] / divisor for m in y}
+    return {
+        "geometric": (
+            [np.exp(nanmean_rows(logs[m])) for m in y],
+            [tuple(np.exp(np.nanpercentile(logs[m], BAND_PERCENTILES, axis=1))) for m in y],
+        ),
+        "arithmetic": (
+            [nanmean_rows(arith[m]) for m in y],
+            [tuple(np.nanpercentile(arith[m], BAND_PERCENTILES, axis=1)) for m in y],
+        ),
+        "pooled": (
+            [nanmean_rows(pooled[m]) for m in y],
+            [tuple(np.nanpercentile(pooled[m], BAND_PERCENTILES, axis=1)) for m in y],
+        ),
+        "exact": [np.exp(nanmean_rows(v)) for v in log_ratios(ratios).values()],
+    }
 
 
 def same_bands(drawn, want):
@@ -307,11 +356,36 @@ def same_bands(drawn, want):
     )
 
 
-def compare_normalized(leg, drawn, per_experiment, pooled):
-    check(f"({leg}) one band per method", len(drawn) == len(per_experiment), f"{len(drawn)}")
+def same_lines(drawn, want):
+    return len(drawn) == len(want) and all(np.allclose(d, w, atol=1e-9) for d, w in zip(drawn, want, strict=True))
+
+
+def lines_on(ax, x):
+    """The mean lines on `ax`, in drawing order: every line along the x grid (the
+    reference axvlines are two points tall)."""
+    return [
+        np.asarray(line.get_ydata(), dtype=float)
+        for line in ax.lines
+        if len(line.get_xdata()) == len(x) and np.allclose(line.get_xdata(), x)
+    ]
+
+
+def compare_normalized(leg, drawn_lines, drawn, want):
+    lines, bands = want["geometric"]
+    check(f"({leg}) one band per method", len(drawn) == len(bands), f"{len(drawn)}")
     check(
-        f"({leg}) the band is the {BAND_PERCENTILES} percentiles of bootstrap(per-experiment ratios)",
-        same_bands(drawn, per_experiment),
+        f"({leg}) the band is exp of the {BAND_PERCENTILES} percentiles of bootstrap(per-experiment log-ratios)",
+        same_bands(drawn, bands),
+    )
+    check(f"({leg}) the line is exp of the mean of the log resample means", same_lines(drawn_lines, lines))
+    gap = max(
+        (float(np.nanmax(np.abs(d / e - 1.0))) for d, e in zip(drawn_lines, want["exact"], strict=False)),
+        default=np.nan,
+    )
+    check(
+        f"({leg}) the line is the exact geometric mean of the ratios to 1e-2 relative",
+        len(drawn_lines) == len(want["exact"]) and gap < 1e-2,
+        f"max relative gap {gap:.2e}",
     )
     base_low, base_high = drawn[0] if drawn else (np.nan, np.nan)
     check(
@@ -319,15 +393,22 @@ def compare_normalized(leg, drawn, per_experiment, pooled):
         bool(np.all(base_low == 1.0) and np.all(base_high == 1.0)),
         f"{base_low} {base_high}",
     )
-    # the mutation: the old ratio of means is a different band, and this very
+    base_line = drawn_lines[0] if drawn_lines else np.nan
+    check(f"({leg}) the baseline's line reads exactly 1.0", bool(np.all(base_line == 1.0)), f"{base_line}")
+    # the mutations: each rule is a different line or band, and this very
     # comparison rejects it
-    parts = any(
-        not np.allclose(e, o, atol=1e-3)
-        for ee, oo in zip(per_experiment, pooled, strict=True)
-        for e, o in zip(ee, oo, strict=True)
-    )
-    check(f"({leg}) mutation: the ratio-of-means band differs from the expected one", parts)
-    check(f"({leg}) mutation: the drawn band is not the ratio-of-means band", not same_bands(drawn, pooled))
+    for rule in ("arithmetic", "pooled"):
+        other_lines, other_bands = want[rule]
+        parts = any(
+            not np.allclose(e, o, atol=1e-3)
+            for ee, oo in zip(bands, other_bands, strict=True)
+            for e, o in zip(ee, oo, strict=True)
+        ) or any(not np.allclose(e, o, atol=1e-3) for e, o in zip(lines, other_lines, strict=True))
+        check(f"({leg}) mutation: the {rule} rule differs from the expected one", parts)
+        check(
+            f"({leg}) mutation: the drawn line and band are not the {rule} rule's",
+            not (same_bands(drawn, other_bands) and same_lines(drawn_lines, other_lines)),
+        )
 
 
 def leg_v(tmp):
@@ -340,9 +421,7 @@ def leg_v(tmp):
     )
     check("(v) no plotting error swallowed", not errors, f"{[e['message'][:80] for e in errors]}")
     ax = plt.gcf().axes[0]
-    line = np.asarray(ax.lines[0].get_ydata(), dtype=float)
-    check("(v) the baseline's line reads exactly 1.0", bool(np.all(line == 1.0)), f"{line}")
-    compare_normalized("v", bands_on(ax, x), *expected_normalized(y, "a83_band_width"))
+    compare_normalized("v", lines_on(ax, x), bands_on(ax, x), expected_normalized(y, "a83_band_width"))
     plt.close("all")
 
     grid = np.asarray(PARAM_SPECS[PARAM].grid_fn("simulation", N_STEPS), dtype=float)
@@ -365,9 +444,64 @@ def leg_v(tmp):
             continue
         key = METRIC_SPECS[metric].key
         y = {name: np.asarray(rec[key])[order] for name, rec in record.items()}
-        drawn = bands_on(fig.axes[row], grid[order])
-        compare_normalized(f"v {metric}", drawn, *expected_normalized(y, f"{PARAM}_{metric}"))
+        ax = fig.axes[row]
+        compare_normalized(
+            f"v {metric}",
+            lines_on(ax, grid[order]),
+            bands_on(ax, grid[order]),
+            expected_normalized(y, f"{PARAM}_{metric}"),
+        )
+    # (vi) on the same tree: the coverage row stays arithmetic
+    key = METRIC_SPECS["coverage"].key
+    y = {name: np.asarray(rec[key])[order] for name, rec in record.items()}
+    ax = fig.axes[METRICS.index("coverage")]
+    compare_arithmetic("vi coverage row", lines_on(ax, grid[order]), bands_on(ax, grid[order]), y)
     plt.close(fig)
+
+
+def compare_arithmetic(leg, drawn_lines, drawn, y):
+    """The arithmetic rule on raw `y`: line nanmean(bootstrap(y)), band its
+    percentiles; and not the geometric one (bootstrap of log y, back through exp)."""
+    boot = bootstrap(y)
+    lines = [nanmean_rows(boot[m]) for m in y]
+    bands = [tuple(np.nanpercentile(boot[m], BAND_PERCENTILES, axis=1)) for m in y]
+    logs = bootstrap(log_ratios(y))
+    geo_lines = [np.exp(nanmean_rows(logs[m])) for m in y]
+    geo_bands = [tuple(np.exp(np.nanpercentile(logs[m], BAND_PERCENTILES, axis=1))) for m in y]
+    check(f"({leg}) the line is nanmean(bootstrap(y))", same_lines(drawn_lines, lines))
+    check(f"({leg}) the band is the {BAND_PERCENTILES} percentiles of bootstrap(y)", same_bands(drawn, bands))
+    check(
+        f"({leg}) mutation: the geometric rule differs and is not drawn",
+        not same_lines(lines, geo_lines) and not (same_bands(drawn, geo_bands) and same_lines(drawn_lines, geo_lines)),
+    )
+
+
+def leg_vi():
+    print("(vi) what stays arithmetic")
+    check(
+        "(vi) GEOMETRIC_SWEEP_SUFFIXES is width and worst_error",
+        GEOMETRIC_SWEEP_SUFFIXES == ("_width", "_worst_error"),
+        f"{GEOMETRIC_SWEEP_SUFFIXES}",
+    )
+    x = np.linspace(0.5, 2.0, N_STEPS)
+    y = scaled()
+    plt.close("all")
+    _, errors = errors_during(
+        lambda: create_sweep_plot(
+            x, y, xlabel="r", fname="a83_plain_width", savefig=False, normalize=False, has_z=False
+        )
+    )
+    check("(vi) no plotting error swallowed", not errors, f"{[e['message'][:80] for e in errors]}")
+    ax = plt.gcf().axes[0]
+    compare_arithmetic("vi unnormalised width", lines_on(ax, x), bands_on(ax, x), y)
+    plt.close("all")
+    ratios = {"PI": np.array([[1.0, 0.0, -2.0, np.inf, np.nan, 2.0]])}
+    out = log_ratios(ratios)["PI"][0]
+    check(
+        "(vi) log_ratios: a zero, negative, inf or NaN ratio reads NaN, the rest their log",
+        out[0] == 0.0 and np.all(np.isnan(out[1:5])) and np.isclose(out[5], np.log(2.0)),
+        f"{out}",
+    )
 
 
 if __name__ == "__main__":
@@ -381,6 +515,7 @@ if __name__ == "__main__":
     leg_iii()
     leg_iv()
     leg_v(tmp)
+    leg_vi()
     if not FAIL:
         shutil.rmtree(tmp, ignore_errors=True)
         print("\nA83 ALL PASS")
