@@ -57,8 +57,9 @@ interval, the raw record sits beside it (`{param}_results_raw.pkl`). Legs:
      the iid one off the fold sweep; a SKIP until re-pinned on the log-spaced grid),
      and PI, a base-group method, must read on m what it read under the iid rule (its
      CI excess within `IID_EXCESS_RTOL`).
-  7. render: the width figure of leg 6's record drawn without a swallowed error; its
-     line is the CI record's nanmean in sorted-x order.
+  7. render: the width and coverage figures of leg 6's record drawn without a
+     swallowed error, width handed the raw bounds' widths and coverage the CI's
+     (`MetricSpec.raw`); the width line is the raw record's nanmean in sorted-x order.
   8. the Slurm launcher (`sbatch_sweeps.py --dry-run`), no submission: one yaml per
      (dataset, param) and per perf block, each resolving; no two tasks share a
      (dataset, subdir, stem); only the directives asked for; the task dirs' links;
@@ -1198,25 +1199,29 @@ def leg_7(orch, record, root):
     base.create_sweep_plot = spy
     try:
         plt.close("all")
-        orch._run_sweeps(SweepSpec(param=("n",), metric=("width",)))
+        orch._run_sweeps(SweepSpec(param=("n",), metric=("width", "coverage")))
     finally:
         base.create_sweep_plot = original
         os.chdir(REPO)
         logger.remove(sink)
     check("(7) _run_sweeps draws without a swallowed error", not errors, errors[0][:120] if errors else "")
     x, ci, raw, _ = record["n"]
-    figure = drawn[0] if len(drawn) == 1 else {}
+    width, cover = drawn if len(drawn) == 2 else ({}, {})
     check(
-        "(7) the width figure is handed the CI widths, not the raw ones",
-        bool(figure)
-        and all(np.array_equal(figure[n], ci[n]["interval_width"], equal_nan=True) for n in figure)
-        and any(not np.array_equal(figure[n], raw[n]["interval_width"], equal_nan=True) for n in figure),
+        "(7) the width figure is handed the raw widths, not the CI ones",
+        bool(width)
+        and all(np.array_equal(width[n], raw[n]["interval_width"], equal_nan=True) for n in width)
+        and any(not np.array_equal(width[n], ci[n]["interval_width"], equal_nan=True) for n in width),
         f"{len(drawn)} figure(s)",
+    )
+    check(
+        "(7) the coverage figure is handed the CI coverage",
+        bool(cover) and all(np.array_equal(cover[n], ci[n]["coverage"], equal_nan=True) for n in cover),
     )
     plt.close("all")
     create_sweep_plot(
         x,
-        {name: ci[name]["interval_width"] for name in ci},
+        {name: raw[name]["interval_width"] for name in raw},
         xlabel=PARAM_SPECS["n"].xlabel,
         ylabel="w",
         experiment="simulation",
@@ -1231,9 +1236,9 @@ def leg_7(orch, record, root):
         lines = [ln for ln in ax.lines if ln.get_label() == method_label(name, False)]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            want = np.nanmean(ci[name]["interval_width"], axis=1)[order]
+            want = np.nanmean(raw[name]["interval_width"], axis=1)[order]
         ok = len(lines) == 1 and np.array_equal(np.asarray(lines[0].get_ydata(), dtype=float), want, equal_nan=True)
-        check(f"(7) the {name} width line is the CI record's nanmean in sorted-x order", ok)
+        check(f"(7) the {name} width line is the raw record's nanmean in sorted-x order", ok)
     plt.close("all")
 
 

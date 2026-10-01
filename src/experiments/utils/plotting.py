@@ -572,6 +572,10 @@ def create_sweep_plot(
     so the line is the mean of those per-experiment ratios and the band the CI
     of that mean.
 
+    `y_results` is the record the caller picked: under `im-ci` a param sweep's
+    width and worst error come from the raw point bounds and its coverage and
+    approx_error from the IM-CI (`configs.sweep_record_for`).
+
     `vlines` marks reference values on the x-axis (budget ratio 1, Prop. 2
     threshold). `xticks`, when given, are the only labelled x ticks (`fix_x_ticks`).
 

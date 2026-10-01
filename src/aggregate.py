@@ -14,7 +14,11 @@ the column count is odd, else centred), three y-labels without the "/ PI" suffix
 one legend inside the top panel of the middle column, pinned lower right, in the
 repo's legend order, the single intervals in its left column and PI+INV and the
 intersections (`SWEEP_LEGEND_RIGHT`) in its right. A missing pkl leaves its cells
-blank. Each line is the mean over experiments and its band the 95 %
+blank. Under `im-ci` the coverage row reads the IM-CI record
+(`<param>_results.pkl`) and the width and worst-error rows the raw point bounds'
+(`<param>_results_raw.pkl`), as the per-recipe figures do (`MetricSpec.raw`,
+`sweep_record_for`); without it the two records are one. Each line is the mean
+over experiments and its band the 95 %
 percentile-bootstrap CI of that mean, as on the per-recipe figures:
 `BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample means (seed
 BOOTSTRAP_SEED). On the width and worst-error rows each experiment is divided by
@@ -62,7 +66,7 @@ import seaborn as sns
 from loguru import logger
 from matplotlib.lines import Line2D
 
-from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
+from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS, sweep_record_for
 from src.experiments.do_mnist import domnist_seed_table
 from src.experiments.utils.constants import (
     CLAMP_YLIM,
@@ -544,7 +548,10 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 axis = load(axis_pkl) if os.path.exists(axis_pkl) else None
                 found = axis.get("xlabel", spec.xlabel) if axis else (spec.legacy_xlabel or spec.xlabel)
                 ticks = tuple(axis.get("xticks", ())) if axis else ()
-                loaded[dataset] = (x[order], order, load(results), found, ticks)
+                # the raw bounds' record, written beside the CI's under `im-ci`
+                raw = f"{folder}/{param}_results_raw.pkl"
+                results_raw = load(raw) if os.path.exists(raw) else None
+                loaded[dataset] = (x[order], order, load(results), found, ticks, results_raw)
         return loaded[dataset]
 
     # one x-label per figure: the current spec's meaning wins when any column carries
@@ -564,7 +571,9 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
     def load_cell(dataset, metric):
         if column(dataset) is None:
             return None
-        x, order, record, found, ticks = column(dataset)
+        x, order, results, found, ticks, results_raw = column(dataset)
+        # width and worst error off the raw bounds, coverage off the CI
+        record = sweep_record_for(metric, results, results_raw)
         mspec = METRIC_SPECS[metric]
         include_ate = spec.include_ate and mspec.include_ate
         y = {

@@ -23,6 +23,7 @@ from src.experiments.configs import (
     IM_CI_VALID_WARN,
     METRIC_SPECS,
     PARAM_SPECS,
+    sweep_record_for,
 )
 from src.experiments.perf import perf_sweeps
 from src.experiments.utils import fit_model, save, set_seed
@@ -883,20 +884,25 @@ class ExperimentOrchestrator(ABC):
             if self._sweep_axis.get(param) is not None:
                 save(self._sweep_axis[param], f"{param}_axis", self.name, "pkl", subdir=SUBDIR_SWEEP)
             # under `im-ci` the results above read the CI; the raw bounds' record and
-            # the CI diagnostics sit beside them (SS8)
+            # the CI diagnostics sit beside them (SS8), and the `raw` metrics'
+            # figures read the former (`METRIC_SPECS`)
             ci_record = self._sweep_ci.get(param)
+            results_raw = None
             if ci_record is not None:
-                save(ci_record["results_raw"], f"{param}_results_raw", self.name, "pkl", subdir=SUBDIR_SWEEP)
+                results_raw = ci_record["results_raw"]
+                save(results_raw, f"{param}_results_raw", self.name, "pkl", subdir=SUBDIR_SWEEP)
                 diagnostics = {key: value for key, value in ci_record.items() if key != "results_raw"}
                 save(diagnostics, f"{param}_im_ci", self.name, "pkl", subdir=SUBDIR_SWEEP)
 
             for metric in sweep_spec.metric:
                 metric_spec = METRIC_SPECS[metric]
+                # width and worst error off the raw bounds, coverage off the CI
+                source = sweep_record_for(metric, results, results_raw)
                 create_sweep_plot(
                     x_values,
                     {
                         name: record[metric_spec.key]
-                        for name, record in results.items()
+                        for name, record in source.items()
                         if metric_spec.include_ate or name != "ATE"
                     },
                     experiment=self.name,

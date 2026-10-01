@@ -588,12 +588,23 @@ class MetricSpec:
     # ATE is the truth: zero width, unit coverage. Plotting it on those axes
     # only drags the limits out and squashes the range the methods live in.
     include_ate: bool = True
+    # the sweep figures read it off the raw point bounds (`<param>_results_raw.pkl`),
+    # not the IM-CI around them (`sweep_record_for`)
+    raw: bool = False
 
 
+# Under `im-ci` the sweep figures draw the sharpness metrics, width and worst error,
+# off the raw point bounds and the validity ones, coverage and approx_error, off the
+# IM-CI. The CI is raw +- C SE with the budgets fixed per cell, so a method whose
+# constraints are a superset of another's (DA+PI+IV(T) over DA) has nested raw
+# bounds but can draw a wider CI through its bootstrap SE alone; sharpness is a
+# property of the bounds, coverage of the CI. approx_error is the squared miss of
+# the truth beyond the interval, zero when covered: coverage's magnitude, so it
+# reads the same interval coverage does.
 METRIC_SPECS: dict[str, MetricSpec] = {
     "approx_error": MetricSpec("approximation_error", r"average $E^-_{{\bm{x}}}$", "asinh"),
-    "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh"),
-    "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
+    "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh", raw=True),
+    "width": MetricSpec("interval_width", r"average interval width", include_ate=False, raw=True),
     "coverage": MetricSpec("coverage", r"coverage rate", include_ate=False),
     # the three perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
     # the QueryEval field the sweeps record, and its numbers are baseline-solve
@@ -602,6 +613,13 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "seed_var": MetricSpec("seed_var", r"stability", "linear", perf_only=True),
     "feasibility": MetricSpec("feasibility", r"feasible rate (over backends)", "linear", perf_only=True),
 }
+
+
+def sweep_record_for(metric: str, results: dict, results_raw: dict | None = None) -> dict:
+    """The sweep record a sweep figure reads `metric` from: the raw bounds' record
+    for a `raw` metric when the IM-CI wrote one, else `results`, which without the
+    IM-CI is itself the raw record. Shared by `_run_sweeps` and `aggregate.sweep_grid`."""
+    return results_raw if results_raw is not None and METRIC_SPECS[metric].raw else results
 
 
 # =============================================================================
