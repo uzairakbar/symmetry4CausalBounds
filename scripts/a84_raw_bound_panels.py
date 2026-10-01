@@ -31,6 +31,17 @@ Legs:
         Catches: a raw record whose nesting broke, i.e. the T-as-IV panels would
         read wider than DA's for a reason other than the CI.
 
+  (v)   a stale raw pkl: (a) `_run_sweeps` with no CI record (`im-ci` 0), into a
+        tree holding `<param>_results_raw.pkl` and `<param>_im_ci.pkl` from an
+        earlier `im-ci` run, removes both; with a CI record it writes both. (b) the
+        aggregate on a tree whose raw pkl is older than `_results.pkl`, and on one
+        whose raw pkl is newer but has another grid's shape, draws every row as the
+        results-only tree does, with one warning; a fresh matching raw pkl is
+        still read. Mutations: `_run_sweeps` with its removal disabled, the
+        aggregate reading any raw pkl that exists (the old behaviour); each must
+        fail a check. Catches: a re-run at `im-ci` 0 whose width and worst-error
+        rows silently come from the earlier run.
+
 Writes only into a fresh directory under `~/scratch/tmp/a84/`, removed when it
 passes.
 
@@ -62,7 +73,7 @@ sys.path.insert(0, REPO)
 from src import aggregate  # noqa: E402
 from src.experiments import base  # noqa: E402
 from src.experiments.configs import METRIC_SPECS, PARAM_SPECS, SweepSpec  # noqa: E402
-from src.experiments.utils.constants import SUBDIR_SWEEP  # noqa: E402
+from src.experiments.utils.constants import ARTIFACTS_DIRECTORY, SUBDIR_SWEEP  # noqa: E402
 from src.experiments.utils.data_operations import load  # noqa: E402
 
 N_STEPS = 5
@@ -259,6 +270,105 @@ def leg_iii(tmp):
         check(f"(iii) mutation: always the {which} record fails a check", bool(failed), f"{failed[:1]}")
 
 
+def stale_sweeps_ok(tmp, label):
+    """[(check name, ok)] of leg (v a): `_run_sweeps` into a tree holding an earlier
+    `im-ci` run's raw and diagnostics pkls."""
+    os.makedirs(tmp, exist_ok=True)
+    folder = f"{tmp}/{ARTIFACTS_DIRECTORY}/simulation/{SUBDIR_SWEEP}"
+    stale = [f"{folder}/{PARAM}_{stem}.pkl" for stem in ("results_raw", "im_ci")]
+    ci, raw = records()
+    run_sweeps(tmp, ci, raw)
+    out = [(f"({label}) with a CI record both pkls are written", all(map(os.path.exists, stale)))]
+    run_sweeps(tmp, ci, None)
+    out.append((f"({label}) with no CI record the stale pkls are removed", not any(map(os.path.exists, stale))))
+    out.append(
+        (f"({label}) ... and `_results.pkl` is the new record", same_record(load(f"{folder}/{PARAM}_results.pkl"), ci))
+    )
+    return out
+
+
+def same_record(a, b):
+    return set(a) == set(b) and all(
+        np.array_equal(a[n][k], b[n][k], equal_nan=True) for n in a for k in a[n].keys() | b[n].keys()
+    )
+
+
+class no_remove:
+    """`_run_sweeps` with its removal disabled: `base.os.remove` a no-op."""
+
+    def __enter__(self):
+        self.saved = base.os
+        base.os = SimpleNamespace(path=os.path, remove=lambda path: None)
+
+    def __exit__(self, *exc):
+        base.os = self.saved
+
+
+def stale_grid_ok(tmp, label):
+    """[(check name, ok)] of leg (v b): the aggregate on trees whose raw pkl is a
+    stale run's, against the results-only tree; one warning per stale tree."""
+    ci, raw = records()
+    old = {n: {k: v * 3.0 for k, v in fields.items()} for n, fields in raw.items()}
+    other_grid = records(N_STEPS - 1)[1]
+    alone = cells(write_tree(f"{tmp}/{label}/alone", raw))
+    older = write_tree(f"{tmp}/{label}/older", raw, old)
+    stamp = os.path.getmtime(f"{older}/simulation/{SUBDIR_SWEEP}/{PARAM}_results.pkl")
+    os.utime(f"{older}/simulation/{SUBDIR_SWEEP}/{PARAM}_results_raw.pkl", (stamp - 3600, stamp - 3600))
+    shaped = write_tree(f"{tmp}/{label}/shaped", raw, other_grid)
+    fresh = write_tree(f"{tmp}/{label}/fresh", ci, raw)
+    out = []
+    for name, tree in (("older", older), ("other-grid", shaped)):
+        warned = []
+        sink = logger.add(warned.append, level="WARNING", filter=lambda r: "stale" in r["message"])
+        try:
+            drawn = cells(tree)
+        except Exception as error:  # the old behaviour indexes the other grid's rows
+            drawn = {metric: [] for metric, _ in aggregate.ROWS}
+            out.append((f"({label}) the {name} raw pkl does not raise", False))
+            print(f"    ({label}) {name}: {type(error).__name__}: {error}")
+        finally:
+            logger.remove(sink)
+        for metric, _ in aggregate.ROWS:
+            out.append(
+                (
+                    f"({label}) {name} raw pkl: the {metric} row is the results-only tree's",
+                    same(drawn[metric], alone[metric]),
+                )
+            )
+        out.append((f"({label}) {name} raw pkl: one warning", len(warned) == 1))
+    both = cells(fresh)
+    out.append(
+        (
+            f"({label}) a fresh matching raw pkl is still read",
+            not same(both["width"], cells(write_tree(f"{tmp}/{label}/ci", ci))["width"]),
+        )
+    )
+    return out
+
+
+def legacy_raw(raw, results, record):
+    """The aggregate before the check: any raw pkl that exists."""
+    return load(raw) if os.path.exists(raw) else None
+
+
+def leg_v(tmp):
+    print("(v) a stale raw pkl")
+    for name, ok in stale_sweeps_ok(f"{tmp}/v", "v a"):
+        check(name, ok)
+    with no_remove():
+        failed = [name for name, ok in stale_sweeps_ok(f"{tmp}/v_mut", "v a, no removal") if not ok]
+    check("(v a) mutation: removal disabled fails a check", bool(failed), f"{failed[:1]}")
+    for name, ok in stale_grid_ok(tmp, "v b"):
+        check(name, ok)
+    saved = aggregate._raw_record
+    aggregate._raw_record = legacy_raw
+    try:
+        failed = [name for name, ok in stale_grid_ok(tmp, "v b, any raw pkl") if not ok]
+    finally:
+        aggregate._raw_record = saved
+    check("(v b) mutation: reading any raw pkl fails a check", bool(failed), f"{failed[:1]}")
+
+
 def counterpart(name):
     """The non-T method a T-as-IV one adds its constraint to: DA+PI+IV(T) -> DA+PI,
     DA+PI+IV(T,Z) -> DA+PI+IV(Z); None for a method without T among its instruments."""
@@ -317,6 +427,7 @@ if __name__ == "__main__":
     leg_i()
     leg_ii(tmp)
     leg_iii(tmp)
+    leg_v(tmp)
     leg_iv(args.artifacts and os.path.abspath(os.path.expanduser(args.artifacts)))
     skipped = f" ({len(SKIP)} SKIPPED: {', '.join(SKIP)})" if SKIP else ""
     if not FAIL:
