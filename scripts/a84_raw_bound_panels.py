@@ -26,8 +26,12 @@ Legs:
         (the raw one when written, else `_results.pkl`, which then is raw), each
         T-as-IV method's width and worst error <= its non-T counterpart's
         (DA+PI+IV(T) vs DA+PI, DA+PI+IV(T,Z) vs DA+PI+IV(Z), and the PI& forms) in
-        every (step, experiment) cell where both are finite, to a relative
-        tolerance of `NESTED_RTOL`. SKIP without `--artifacts`.
+        every (step, experiment) cell where both are finite and, when
+        `<param>_statuses.pkl` is written, both methods have the same per-query
+        status counts (the two are nanmeans over the queries with a bound, so an
+        empty PI& intersection on one more query compares different query sets;
+        such cells are counted as skipped), to a relative tolerance of
+        `NESTED_RTOL`. SKIP without `--artifacts`.
         Catches: a raw record whose nesting broke, i.e. the T-as-IV panels would
         read wider than DA's for a reason other than the CI.
 
@@ -384,7 +388,7 @@ def leg_iv(artifacts):
     if not artifacts:
         skip("(iv)", "no --artifacts")
         return
-    pairs, cells_checked = 0, 0
+    pairs, cells_checked, cells_skipped = 0, 0, 0
     found = sorted(glob.glob(f"{artifacts}/*/{SUBDIR_SWEEP}/*_results.pkl"))
     if not found:
         skip("(iv)", f"no sweep pkls under {artifacts}")
@@ -393,16 +397,28 @@ def leg_iv(artifacts):
         raw_path = path[: -len(".pkl")] + "_raw.pkl"
         record = load(raw_path if os.path.exists(raw_path) else path)
         where = os.path.relpath(path, artifacts)[: -len("_results.pkl")]
+        # the per-(step, experiment) query status counts; absent, every cell compares
+        status_path = path[: -len("_results.pkl")] + "_statuses.pkl"
+        statuses = load(status_path) if os.path.exists(status_path) else {}
         for name in record:
             other = counterpart(name)
             if other is None or other not in record:
                 continue
             pairs += 1
+            # width and worst error are nanmeans over the queries with a bound, so a
+            # pair compares only where both methods bound the same number of each
+            # status (an empty PI& intersection on one more query is no nesting break)
+            if name in statuses and other in statuses:
+                equal = np.all(np.asarray(statuses[name]) == np.asarray(statuses[other]), axis=-1)
+            else:
+                equal = True
             for metric in sorted(RAW_METRICS):
                 key = METRIC_SPECS[metric].key
                 t, d = np.asarray(record[name][key], dtype=float), np.asarray(record[other][key], dtype=float)
-                both = np.isfinite(t) & np.isfinite(d)
+                finite = np.isfinite(t) & np.isfinite(d)
+                both = finite & equal
                 cells_checked += int(both.sum())
+                cells_skipped += int((finite & ~both).sum())
                 over = both & (t > d + NESTED_RTOL * np.abs(d))
                 excess = float(np.max((t - d)[over] / np.abs(d[over]).clip(1e-300))) if over.any() else 0.0
                 check(
@@ -412,7 +428,11 @@ def leg_iv(artifacts):
                     if over.any()
                     else "",
                 )
-    check("(iv) some T-as-IV pair compared", pairs > 0, f"{pairs} pairs, {cells_checked} finite cells")
+    check(
+        "(iv) some T-as-IV pair compared",
+        pairs > 0 and cells_checked > 0,
+        f"{pairs} pairs, {cells_checked} finite cells compared, {cells_skipped} skipped (unequal query statuses)",
+    )
 
 
 if __name__ == "__main__":
