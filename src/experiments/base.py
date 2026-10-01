@@ -3,6 +3,7 @@ Base classes for experiment orchestration with unified runner logic.
 Updated to use simplified fit_model signature and OPTIMIZED LOOP ORDER.
 """
 
+import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from src.experiments.perf import perf_sweeps
 from src.experiments.utils import fit_model, save, set_seed
 from src.experiments.utils import im_ci as im_ci_helper
 from src.experiments.utils.constants import (
+    ARTIFACTS_DIRECTORY,
     SUBDIR_PERF,
     SUBDIR_QUERY,
     SUBDIR_SWEEP,
@@ -893,6 +895,17 @@ class ExperimentOrchestrator(ABC):
                 save(results_raw, f"{param}_results_raw", self.name, "pkl", subdir=SUBDIR_SWEEP)
                 diagnostics = {key: value for key, value in ci_record.items() if key != "results_raw"}
                 save(diagnostics, f"{param}_im_ci", self.name, "pkl", subdir=SUBDIR_SWEEP)
+            else:
+                # without the IM-CI `results` is the raw record: a raw pkl left by an
+                # earlier `im-ci` run in this tree would feed the aggregate's width
+                # and worst-error rows the old run, so it goes, with its diagnostics
+                folder = f"{ARTIFACTS_DIRECTORY}/{self.name}/{SUBDIR_SWEEP}"
+                stale = [f"{folder}/{param}_{stem}.pkl" for stem in ("results_raw", "im_ci")]
+                stale = [path for path in stale if os.path.exists(path)]
+                for path in stale:
+                    os.remove(path)
+                if stale:
+                    logger.info(f"{param} sweep: no IM-CI record; removed the stale {', '.join(stale)}.")
 
             for metric in sweep_spec.metric:
                 metric_spec = METRIC_SPECS[metric]

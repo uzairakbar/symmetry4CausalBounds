@@ -525,6 +525,32 @@ def _columns_has_z(artifacts: str, datasets: list[str], hz: dict[str, bool] | No
     return hz if hz is not None else {d: column_has_z(artifacts, d) for d in datasets}
 
 
+# seconds a raw pkl may predate its `_results.pkl` and still count as the same run's
+# (`_run_sweeps` writes it just after; a copy that does not keep mtimes reorders them)
+RAW_MTIME_SLACK = 5.0
+
+
+def _raw_record(raw: str, results: str, record: dict) -> dict | None:
+    """The raw bounds' record beside `results` when it is the same run's, else None
+    (the figure then reads `record`, warned): a raw pkl older than `results`, or whose
+    methods or array shapes differ from `record`'s, is a stale `im-ci` run's."""
+    if not os.path.exists(raw):
+        return None
+    if os.path.getmtime(raw) + RAW_MTIME_SLACK < os.path.getmtime(results):
+        why = f"is older than {os.path.basename(results)}"
+    else:
+        results_raw = load(raw)
+        if set(results_raw) == set(record) and all(
+            np.shape(results_raw[name][key]) == np.shape(fields[key])
+            for name, fields in record.items()
+            for key in fields.keys() & results_raw[name].keys()
+        ):
+            return results_raw
+        why = f"does not match {os.path.basename(results)}'s methods or shapes"
+    logger.warning(f"aggregate: {raw} {why}; stale, so width and worst error read the results pkl.")
+    return None
+
+
 def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None, hz=None):
     """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given.
     `hz` is {dataset: has_z}, read from each column's `labels.json` when None."""
@@ -549,9 +575,9 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 found = axis.get("xlabel", spec.xlabel) if axis else (spec.legacy_xlabel or spec.xlabel)
                 ticks = tuple(axis.get("xticks", ())) if axis else ()
                 # the raw bounds' record, written beside the CI's under `im-ci`
-                raw = f"{folder}/{param}_results_raw.pkl"
-                results_raw = load(raw) if os.path.exists(raw) else None
-                loaded[dataset] = (x[order], order, load(results), found, ticks, results_raw)
+                record = load(results)
+                results_raw = _raw_record(f"{folder}/{param}_results_raw.pkl", results, record)
+                loaded[dataset] = (x[order], order, record, found, ticks, results_raw)
         return loaded[dataset]
 
     # one x-label per figure: the current spec's meaning wins when any column carries
