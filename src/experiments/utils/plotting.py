@@ -27,6 +27,7 @@ from .constants import (
     DEFAULT_NORMALIZE_SWEEP,
     FS_LABEL,
     FS_TICK,
+    GEOMETRIC_SWEEP_SUFFIXES,
     NORMALIZE_BASELINES,
     NORMALIZED_SWEEP_SUFFIXES,
     PAGE_WIDTH,
@@ -52,7 +53,10 @@ X_MARK_MARGIN: float = 0.02
 BAND_EDGE_WIDTH: float = 1.2
 # the sweep band: these percentiles of each step's series. On a bootstrapped sweep
 # (the default) the series are `bootstrap`'s BOOTSTRAP_RESAMPLES resample means,
-# so the band is the 95 % percentile-bootstrap CI of the mean over experiments
+# so the band is the 95 % percentile-bootstrap CI of the mean over experiments; on
+# a normalised width or worst-error figure (`GEOMETRIC_SWEEP_SUFFIXES`) the means
+# are of the log-ratios and the band is exp of their percentiles, the CI of the
+# geometric mean
 BAND_PERCENTILES: tuple[float, float] = (2.5, 97.5)
 
 # clip the top tail of the pooled means, y only. Errors/widths: small is the signal,
@@ -449,16 +453,32 @@ def _mark_frame(x_values: NDArray, vlines, xscale: str, clip: bool = False) -> t
     return x_lo, x_hi, marks
 
 
-def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z: bool, merged: bool = False):
+def _draw_series(
+    ax,
+    x_values: NDArray,
+    y_results: dict[str, NDArray],
+    *,
+    has_z: bool,
+    merged: bool = False,
+    geometric: bool = False,
+):
     """One mean line and one `BAND_PERCENTILES` band per method on `ax`, in the
     method's hue and line style (`method_style(name, has_z, merged=merged)`); a method with
     no finite mean is skipped. Returns the line handles keyed by method in drawing
     order and the mean series, which alone decide the limits (the band is
-    contextual and clips against the frame). The percentiles are taken across
-    each row as given: over `bootstrap`'s resample means on a bootstrapped sweep
-    (a 95 % CI of the mean), over the raw columns otherwise. A normalised series
-    arrives already divided per experiment (`normalize_sweep`), so its line is the
-    mean of the per-experiment ratios and its band the CI of that mean."""
+    contextual and clips against the frame). The line is the nanmean of each row
+    and the band its percentiles, both taken across the row as given: over
+    `bootstrap`'s resample means on a bootstrapped sweep (the band a 95 % CI of the
+    mean, the line the mean of the resample means, which is the mean over
+    experiments up to resampling noise), over the raw columns otherwise. A
+    normalised series arrives already divided per experiment (`normalize_sweep`).
+    With `geometric` the rows are LOG values (`sweep_series`: the per-experiment
+    log-ratios, or their resample means) and line and band are computed on them as
+    above, then drawn through exp: the line exp(mean of the log resample means), the
+    geometric mean of the per-experiment ratios up to resampling noise (exactly it
+    without the bootstrap), the band exp of the `BAND_PERCENTILES` of the log
+    resample means. A baseline whose log-ratios are all 0 reads exactly 1.0 with no
+    band."""
     handles, means = {}, []
     for method_name, errors in y_results.items():
         # sanitize: float64, Infs to NaNs, then the mean over what is finite
@@ -469,6 +489,9 @@ def _draw_series(ax, x_values: NDArray, y_results: dict[str, NDArray], *, has_z:
             mean_error = np.nanmean(clean_data, axis=1)
             low = np.nanpercentile(clean_data, BAND_PERCENTILES[0], axis=1)
             high = np.nanpercentile(clean_data, BAND_PERCENTILES[1], axis=1)
+        if geometric:
+            # back to the ratio scale, after the mean and the percentiles
+            mean_error, low, high = np.exp(mean_error), np.exp(low), np.exp(high)
         if np.all(np.isnan(mean_error)):
             continue
         means.append(mean_error)
@@ -489,9 +512,10 @@ def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[d
 
     Runs on the raw (n_steps, n_experiments) record, BEFORE `bootstrap`: the
     ratio is taken elementwise, per step and experiment, so the line drawn is the
-    mean over experiments of each experiment's ratio to its own baseline and the
-    band the 95 % percentile-bootstrap CI of that mean. The baseline itself reads
-    exactly 1.0 with no band. Honoured for the `_width` and `_worst_error` ids
+    geometric mean over experiments of each experiment's ratio to its own baseline
+    and the band the 95 % percentile-bootstrap CI of that geometric mean, both via
+    the log-ratios (`sweep_series`, `GEOMETRIC_SWEEP_SUFFIXES`). The baseline itself
+    reads exactly 1.0 with no band. Honoured for the `_width` and `_worst_error` ids
     only; a `_coverage` id is a rate and an `_approx_error` id a squared miss
     whose baseline is 0 above gamma*, and both are ignored with one warning. The
     baseline is deterministic, `NORMALIZE_BASELINES` in order, and its absence
@@ -524,6 +548,40 @@ def normalize_sweep(y_results: dict[str, NDArray], fname: str | None) -> tuple[d
         )
     divisor = np.where(positive, base, np.nan)
     return {name: np.asarray(series, dtype=np.float64) / divisor for name, series in y_results.items()}, baseline
+
+
+def log_ratios(y_results: dict[str, NDArray]) -> dict[str, NDArray]:
+    """The log of every per-experiment ratio; a ratio that is not a finite positive
+    number (a zero width, a NaN cell of `normalize_sweep`) reads NaN, a gap the
+    bootstrap's nanmean skips."""
+    out = {}
+    for name, series in y_results.items():
+        series = np.asarray(series, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            usable = np.isfinite(series) & (series > 0)
+            out[name] = np.where(usable, np.log(np.where(usable, series, 1.0)), np.nan)
+    return out
+
+
+def sweep_series(
+    y_results: dict[str, NDArray], fname: str | None, *, normalize: bool, bootstrapped: bool = True
+) -> tuple[dict[str, NDArray], str | None, bool]:
+    """The rows a sweep panel draws, shared by `create_sweep_plot` and
+    `aggregate.sweep_grid`: (rows, baseline, geometric). With `normalize` every
+    experiment is divided by its own baseline (`normalize_sweep`; `baseline` its
+    name, None when nothing was divided). A normalised `GEOMETRIC_SWEEP_SUFFIXES`
+    id aggregates geometrically (`geometric`): its ratios go to `log_ratios`, and
+    `_draw_series(geometric=True)` draws them back through exp. Then, with
+    `bootstrapped`, `bootstrap`'s resample means of the rows (seed BOOTSTRAP_SEED)."""
+    baseline = None
+    if normalize:
+        y_results, baseline = normalize_sweep(y_results, fname)
+    geometric = baseline is not None and (fname or "").endswith(GEOMETRIC_SWEEP_SUFFIXES)
+    if geometric:
+        y_results = log_ratios(y_results)
+    if bootstrapped:
+        y_results = bootstrap(y_results)
+    return y_results, baseline, geometric
 
 
 def create_sweep_plot(
@@ -566,11 +624,14 @@ def create_sweep_plot(
     Each line is the mean over experiments. With `bootstrapped` (the default, and
     every param sweep's figure) its band is the 95 % percentile-bootstrap CI of
     that mean: `BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample
-    means (seed BOOTSTRAP_SEED), resampling the experiments per step and method.
-    Without it the band is those percentiles of the raw columns. On a figure
-    drawn normalised the experiments are divided first, each by its own baseline,
-    so the line is the mean of those per-experiment ratios and the band the CI
-    of that mean.
+    means (seed BOOTSTRAP_SEED), resampling the experiments per step and method,
+    and the line the mean of those resample means. Without it the band is those
+    percentiles of the raw columns. On a figure drawn normalised the experiments
+    are divided first, each by its own baseline, and the ratios aggregate
+    geometrically (`sweep_series`): the log-ratios are bootstrapped, the line is
+    exp of the mean of their resample means (the geometric mean of the
+    per-experiment ratios up to resampling noise) and the band exp of their
+    `BAND_PERCENTILES`, the CI of that geometric mean; the baseline reads 1.0.
 
     `y_results` is the record the caller picked: under `im-ci` a param sweep's
     width and worst error come from the raw point bounds and its coverage and
@@ -623,15 +684,12 @@ def create_sweep_plot(
             y_results = {k: np.asarray(v)[order] for k, v in y_results.items()}
 
         # before the bootstrap: each experiment is divided by its own baseline,
-        # and the band is the CI of the mean of those ratios
-        baseline = None
-        if cfg.get("normalize", normalize):
-            y_results, baseline = normalize_sweep(y_results, fname)
-            if baseline is not None:
-                ylabel = rf"{ylabel} / {method_label(baseline, has_z)}"
-
-        if bootstrapped:
-            y_results = bootstrap(y_results)
+        # and the band is the CI of the geometric mean of those ratios
+        y_results, baseline, geometric = sweep_series(
+            y_results, fname, normalize=cfg.get("normalize", normalize), bootstrapped=bootstrapped
+        )
+        if baseline is not None:
+            ylabel = rf"{ylabel} / {method_label(baseline, has_z)}"
 
         legend_items = [item for item in (legend_items or []) if item in y_results]
 
@@ -640,7 +698,7 @@ def create_sweep_plot(
         fig = plt.figure()
 
         # one line and band per method; the mean lines alone decide the limits
-        handles, all_means = _draw_series(plt.gca(), x_values, y_results, has_z=has_z)
+        handles, all_means = _draw_series(plt.gca(), x_values, y_results, has_z=has_z, geometric=geometric)
 
         # Formatting
         style = _style(cfg, legend=legend, x_color=x_color, y_color=y_color, title=title, title_color=title_color)

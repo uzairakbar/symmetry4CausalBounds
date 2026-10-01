@@ -477,7 +477,7 @@ DEFAULT_HILIGHT_OURS: bool = False
 DEFAULT_NORMALIZE_ERROR: bool = False
 # `normalize` on `create_sweep_plot` (SS10.1): divide every experiment of a width
 # or worst-error sweep figure by its own baseline value, before the bootstrap, so
-# the baseline reads 1.0 and the rest as mean fractions of it. Off by default, so
+# the baseline reads 1.0 and the rest as geometric-mean fractions of it. Off by default, so
 # no shipped figure moves; the recipes turn it on through the global `normalize`
 # toggle. NOT the per-query `DEFAULT_NORMALIZE_ERROR` above, which divides by the
 # zero predictor.
@@ -491,6 +491,12 @@ CLAMP_YLIM: tuple[float, float] = (-0.05, 1.05)
 NORMALIZED_SWEEP_SUFFIXES: tuple[str, ...] = ("_width", "_worst_error")
 # the baseline, in this order: PI if it ran, else PI+IV, else no normalisation
 NORMALIZE_BASELINES: tuple[str, ...] = ("PI", "PI+IV")
+# the figure ids whose per-experiment ratios, once normalised, aggregate across
+# experiments by the GEOMETRIC mean (`plotting.sweep_series`): the log-ratios are
+# bootstrapped and the line and band drawn back on the ratio scale, so a halving
+# and a doubling cancel and the baseline still reads 1.0. Coverage, approx_error and
+# every figure drawn unnormalised stay arithmetic
+GEOMETRIC_SWEEP_SUFFIXES: tuple[str, ...] = ("_width", "_worst_error")
 
 # Configuration for panel plots per experiment and per row
 # Row index mapping: 0: Worst Error, 1: Width, 2: Density, 3: Predictions

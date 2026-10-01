@@ -63,8 +63,10 @@ def bootstrap(
     the resamples are a percentile-bootstrap CI of the mean over experiments --
     the sweep band (`BAND_PERCENTILES`), not the spread of the raw experiments.
     A normalised sweep (`normalize_sweep`) is divided per experiment before it
-    gets here, so on those figures the rows are each experiment's ratio to its
-    own baseline and the CI is that of the mean ratio.
+    gets here, and its width and worst-error rows arrive as each experiment's
+    LOG-ratio to its own baseline (`plotting.sweep_series`), so the resample means
+    are of the log-ratios and, drawn back through exp, the CI is that of the
+    geometric mean ratio.
 
     Args:
         data: Dictionary of arrays or nested dictionary

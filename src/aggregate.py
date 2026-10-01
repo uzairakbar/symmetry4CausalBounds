@@ -19,12 +19,16 @@ blank. Under `im-ci` the coverage row reads the IM-CI record
 (`<param>_results_raw.pkl`), as the per-recipe figures do (`MetricSpec.raw`,
 `sweep_record_for`); without it the two records are one. Each line is the mean
 over experiments and its band the 95 %
-percentile-bootstrap CI of that mean, as on the per-recipe figures:
-`BAND_PERCENTILES` of `bootstrap`'s BOOTSTRAP_RESAMPLES resample means (seed
-BOOTSTRAP_SEED). On the width and worst-error rows each experiment is divided by
-its own baseline before the bootstrap, so the line is the mean over experiments
-of each experiment's ratio to its own baseline, the band the CI of that mean,
-and the baseline reads exactly 1 with no band.
+percentile-bootstrap CI of that mean, as on the per-recipe figures
+(`plotting.sweep_series`): `BAND_PERCENTILES` of `bootstrap`'s
+BOOTSTRAP_RESAMPLES resample means (seed BOOTSTRAP_SEED), the line the mean of
+those resample means. On the coverage row the mean is arithmetic. On the width
+and worst-error rows each experiment is divided by its own baseline before the
+bootstrap and the ratios aggregate geometrically (`GEOMETRIC_SWEEP_SUFFIXES`):
+the log-ratios are bootstrapped, the line is exp of the mean of their resample
+means (the geometric mean over experiments of each experiment's ratio to its own
+baseline, up to resampling noise), the band exp of their `BAND_PERCENTILES`, the
+CI of that geometric mean, and the baseline reads exactly 1 with no band.
 The perf sweeps against epsilon, laid out by the same grid code: rows the metrics,
 columns the datasets, x shared within a column, y within a row, the same x-label
 rule, one legend above the titles: one row of up to `LEGEND_FLAT_MAX` entries, else
@@ -100,7 +104,7 @@ from src.experiments.utils.plotting import (
     fix_x_ticks,
     fold_by_signature,
     mark_failed,
-    normalize_sweep,
+    sweep_series,
 )
 
 # the grid's rows, in order: (metric id, y-label)
@@ -456,8 +460,9 @@ def _metric_grid(
     legend_panel: bool = False,
 ):
     """The [rows] x [datasets] grid: `rows` is [(metric, row label)], `load_cell(dataset,
-    metric)` gives (x, {method: y}, x-label[, x ticks]) or None for a blank cell (an
-    empty dict blanks the cell but still offers its x-label), x shared within a column, y as
+    metric)` gives (x, {method: y}, x-label[, x ticks[, geometric]]) or None for a
+    blank cell (an empty dict blanks the cell but still offers its x-label; with
+    `geometric` the y are log values `_draw_series` draws back through exp), x shared within a column, y as
     `sharey` says, each row on `row_yscale(metric)` and, when `row_ylim(metric)` is not
     None, framed there. Titles on the first row, one x-label, one legend: above the
     titles, or with `legend_panel` inside the middle column's top panel
@@ -493,20 +498,23 @@ def _metric_grid(
             if cell is None:
                 ax.axis("off")
                 continue
-            # a fourth element, when given, is the column's fixed x ticks
-            x, y, found, *ticks = cell
+            # a fourth element, when given, is the column's fixed x ticks, a fifth
+            # whether its series are log-ratios to draw as geometric means
+            x, y, found, *extra = cell
+            ticks = extra[0] if extra else ()
+            geometric = len(extra) > 1 and bool(extra[1])
             if not labelled:
                 # one x-label per column, the first cell's
                 xlabel, labelled = _xlabel(xlabel, found, f"{dataset} {where}"), True
             if not y:
                 ax.axis("off")
                 continue
-            drawn, _ = _draw_series(ax, x, y, has_z=hz[dataset], merged=merged)
+            drawn, _ = _draw_series(ax, x, y, has_z=hz[dataset], merged=merged, geometric=geometric)
             for name, handle in drawn.items():
                 # keyed by render: one method drawn two ways in two columns keeps both
                 style = method_style(name, hz[dataset], merged=merged)
                 handles.setdefault(style.signature, (handle, style, name))
-            _frame(ax, x, xscale, vlines, ticks[0] if ticks else ())
+            _frame(ax, x, xscale, vlines, ticks)
             ax.set_yscale(row_yscale(metric))
             ylim = row_ylim(metric)
             if ylim is not None:
@@ -607,14 +615,13 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
             for name, rec in record.items()
             if mspec.key in rec and (include_ate or name != "ATE")
         }
+        geometric = False
         if y:
-            if metric != "coverage":
-                # the same per-experiment PI, else PI+IV, division the sweep figure
-                # applies under `normalize`, before the bootstrap; a rate is drawn
-                # as it is
-                y, _ = normalize_sweep(y, f"{param}_{metric}")
-            y = bootstrap(y)
-        return x, y, found, ticks
+            # the same per-experiment PI, else PI+IV, division the sweep figure
+            # applies under `normalize`, before the bootstrap, and the same
+            # geometric mean of the ratios; a rate is drawn as it is
+            y, _, geometric = sweep_series(y, f"{param}_{metric}", normalize=metric != "coverage")
+        return x, y, found, ticks, geometric
 
     return _metric_grid(
         ROWS,
