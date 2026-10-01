@@ -27,6 +27,17 @@ experiments. Legs:
         range; the constants are pinned: BAND_PERCENTILES is (2.5, 97.5),
         BOOTSTRAP_RESAMPLES 1000 and BOOTSTRAP_SEED 0.
         Catches: a changed level, resample count or seed.
+  (v)   the normalised rows (SS10.1): each experiment is divided by its own
+        baseline BEFORE the bootstrap. `create_sweep_plot(normalize=True)` on a
+        synthetic width record whose experiments differ in scale, and the
+        aggregate `sweep_grid`'s width and worst-error cells, draw the
+        `BAND_PERCENTILES` of `bootstrap` of the per-experiment ratios; the
+        baseline's line and band read exactly 1.0. Mutation: the band of the old
+        ratio of means (bootstrap first, then every resample divided by the
+        baseline's per-step mean) is computed here and must differ from the
+        expected band at some step and fail the same comparison against the drawn
+        one. Catches: a normalisation moved back after the bootstrap, a divisor
+        pooled over experiments. Misses: nothing the bands do not show.
 
 Writes only into a fresh directory under `~/scratch/tmp/a83/`, removed when it
 passes.
@@ -62,7 +73,7 @@ from src.experiments.utils.data_operations import (  # noqa: E402
     BOOTSTRAP_SEED,
     bootstrap,
 )
-from src.experiments.utils.plotting import BAND_PERCENTILES, create_sweep_plot  # noqa: E402
+from src.experiments.utils.plotting import BAND_PERCENTILES, create_sweep_plot, normalize_sweep  # noqa: E402
 
 N_STEPS = 6
 N_EXPERIMENTS = 10
@@ -266,6 +277,99 @@ def leg_iv():
     check("(iv) BOOTSTRAP_SEED is 0", BOOTSTRAP_SEED == 0, f"{BOOTSTRAP_SEED}")
 
 
+def scaled(seed=4, n_steps=N_STEPS):
+    """(n_steps, n_experiments) widths per method whose experiments differ in scale
+    and whose DA+PI ratio to PI is tied to that scale, so the mean of the ratios and
+    the ratio of the means part."""
+    rng = np.random.default_rng(seed)
+    level = np.exp(1.5 * rng.standard_normal(N_EXPERIMENTS))[None, :]
+    base = level * (1.0 + 0.1 * rng.random((n_steps, N_EXPERIMENTS)))
+    share = 0.3 + 0.6 * (level / level.max()) + 0.05 * rng.random((n_steps, N_EXPERIMENTS))
+    return {"PI": base, "DA+PI": base * share}
+
+
+def expected_normalized(y, fname):
+    """The per-experiment band (bootstrap of the ratios) and the old ratio-of-means
+    band (bootstrap, then divided by the baseline's per-step mean), in drawing order."""
+    ratios, baseline = normalize_sweep(y, fname)
+    boot = bootstrap(ratios)
+    raw = bootstrap(y)
+    divisor = np.nanmean(raw[baseline], axis=1, keepdims=True)
+    return (
+        [tuple(np.nanpercentile(boot[m], BAND_PERCENTILES, axis=1)) for m in y],
+        [tuple(np.nanpercentile(raw[m] / divisor, BAND_PERCENTILES, axis=1)) for m in y],
+    )
+
+
+def same_bands(drawn, want):
+    return len(drawn) == len(want) and all(
+        np.allclose(d, w, atol=1e-9) for dd, ww in zip(drawn, want, strict=True) for d, w in zip(dd, ww, strict=True)
+    )
+
+
+def compare_normalized(leg, drawn, per_experiment, pooled):
+    check(f"({leg}) one band per method", len(drawn) == len(per_experiment), f"{len(drawn)}")
+    check(
+        f"({leg}) the band is the {BAND_PERCENTILES} percentiles of bootstrap(per-experiment ratios)",
+        same_bands(drawn, per_experiment),
+    )
+    base_low, base_high = drawn[0] if drawn else (np.nan, np.nan)
+    check(
+        f"({leg}) the baseline's band reads exactly 1.0 (no band)",
+        bool(np.all(base_low == 1.0) and np.all(base_high == 1.0)),
+        f"{base_low} {base_high}",
+    )
+    # the mutation: the old ratio of means is a different band, and this very
+    # comparison rejects it
+    parts = any(
+        not np.allclose(e, o, atol=1e-3)
+        for ee, oo in zip(per_experiment, pooled, strict=True)
+        for e, o in zip(ee, oo, strict=True)
+    )
+    check(f"({leg}) mutation: the ratio-of-means band differs from the expected one", parts)
+    check(f"({leg}) mutation: the drawn band is not the ratio-of-means band", not same_bands(drawn, pooled))
+
+
+def leg_v(tmp):
+    print("(v) normalised rows: each experiment divided by its own baseline, then bootstrapped")
+    x = np.linspace(0.5, 2.0, N_STEPS)
+    y = scaled()
+    plt.close("all")
+    _, errors = errors_during(
+        lambda: create_sweep_plot(x, y, xlabel="r", fname="a83_band_width", savefig=False, normalize=True, has_z=False)
+    )
+    check("(v) no plotting error swallowed", not errors, f"{[e['message'][:80] for e in errors]}")
+    ax = plt.gcf().axes[0]
+    line = np.asarray(ax.lines[0].get_ydata(), dtype=float)
+    check("(v) the baseline's line reads exactly 1.0", bool(np.all(line == 1.0)), f"{line}")
+    compare_normalized("v", bands_on(ax, x), *expected_normalized(y, "a83_band_width"))
+    plt.close("all")
+
+    grid = np.asarray(PARAM_SPECS[PARAM].grid_fn("simulation", N_STEPS), dtype=float)
+    record = {
+        name: {METRIC_SPECS[m].key: scaled(seed=5 + i, n_steps=len(grid))[name] for i, m in enumerate(METRICS)}
+        for name in METHODS
+    }
+    folder = f"{tmp}/normalized/simulation/{SUBDIR_SWEEP}"
+    os.makedirs(folder, exist_ok=True)
+    for stem, obj in ((f"{PARAM}_values", grid), (f"{PARAM}_results", record)):
+        with open(f"{folder}/{stem}.pkl", "wb") as handle:
+            pickle.dump(obj, handle)
+    fig, errors = errors_during(
+        lambda: aggregate.sweep_grid(PARAM, ["simulation"], f"{tmp}/normalized", None, hz={"simulation": False})
+    )
+    check("(v) aggregate: no error logged", not errors, f"{[e['message'][:80] for e in errors]}")
+    order = np.argsort(grid, kind="stable")
+    for row, metric in enumerate(METRICS):
+        if metric == "coverage":
+            continue
+        key = METRIC_SPECS[metric].key
+        y = {name: np.asarray(rec[key])[order] for name, rec in record.items()}
+        drawn = bands_on(fig.axes[row], grid[order])
+        compare_normalized(f"v {metric}", drawn, *expected_normalized(y, f"{PARAM}_{metric}"))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -276,6 +380,7 @@ if __name__ == "__main__":
     leg_ii(tmp)
     leg_iii()
     leg_iv()
+    leg_v(tmp)
     if not FAIL:
         shutil.rmtree(tmp, ignore_errors=True)
         print("\nA83 ALL PASS")

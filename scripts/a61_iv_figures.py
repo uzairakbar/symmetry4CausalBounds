@@ -52,25 +52,28 @@ toggle) and both recipes (`normalize: true`). Legs:
         as the T radius, beside the review's numbers. The same table on
         F1's query-path models is recorded too. Catches: a moved IV or INV
         arithmetic, a wrong instrument matrix. Misses: a solver bump under 1e-6.
-  (vi)  the normalise rule (SS10.1): on a synthetic sweep the baseline reads
-        exactly 1.0 where its mean is positive and NaN, never inf and never a
-        floor, where it is exactly 0.0, every other method divided by the same
-        number; PI+IV is the baseline when PI is absent, nothing is divided
+  (vi)  the normalise rule (SS10.1): on a synthetic sweep each experiment is
+        divided by its own baseline, elementwise per step and experiment; the
+        baseline reads exactly 1.0 where it is positive and NaN, never inf and
+        never a floor, where it is 0.0 or NaN, every other method divided by the
+        same cell; PI+IV is the baseline when PI is absent, nothing is divided
         without either (one warning), a `_coverage` and an `_approx_error` id
         are left alone (the rollback itself is a63-iii's), and
         `validate_plot_keys` raises at import on `normalize` under a `_coverage`
         id; the y-label carries the baseline's name. On the recipe run's own
         gamma sweep the baseline is the FIRST `NORMALIZE_BASELINES` entry the run
         carries -- the rule itself, not merely a member of that tuple, which
-        `normalize_sweep` satisfies by construction -- and that series reads 1.0 to
-        1e-12 at every positive step and NaN at every zero step; a synthetic case
+        `normalize_sweep` satisfies by construction -- and, divided before the
+        bootstrap as the figures do, that series reads 1.0 to 1e-12 in every
+        positive cell and every method NaN in every cell whose baseline is not
+        positive; a synthetic case
         carrying BOTH `PI` and `PI+IV` pins the ORDER, which no shipped recipe run
         exercises. With the toggle on or off the sweep pkls of the shipped
         cigarette block equal leg (D)'s: the toggle is plot-only. Catches: a
         baseline other than the rule's (normalising against PI+IV while PI is
-        present), the `base > 0` guard
-        dropped (inf or 0/0 where NaN is pinned), a toggle that leaks into a
-        solver. Misses: figure bytes, which carry a timestamp.
+        present), a divisor pooled over experiments (the per-step mean), the
+        `base > 0` guard dropped (inf or 0/0 where NaN is pinned), a toggle that
+        leaks into a solver. Misses: figure bytes, which carry a timestamp.
 
     MPLBACKEND=Agg python scripts/a61_iv_figures.py [--reference JSON] [--skip-digest]
 
@@ -119,7 +122,7 @@ from src.experiments.configs import (  # noqa: E402
     parse_experiment_plan,
     resolve_dataset_block,
 )
-from src.experiments.utils import PanelBuilder, bootstrap, set_seed  # noqa: E402
+from src.experiments.utils import PanelBuilder, set_seed  # noqa: E402
 from src.experiments.utils.constants import (  # noqa: E402
     ARTIFACTS_DIRECTORY,
     NORMALIZE_BASELINES,
@@ -667,23 +670,33 @@ def leg_v():
 def leg_vi(reference):
     print("(vi) the normalise rule")
     y = {
-        "PI": np.array([[1.0, 1.0], [0.0, 0.0], [2.0, 2.0], [np.nan, np.nan]]),
-        # a POSITIVE miss on the zero-baseline step: x/0 is inf without the guard
-        "DA+PI": np.array([[0.5, 0.5], [0.3, 0.0], [1.0, 3.0], [1.0, 1.0]]),
+        # experiments of different scale on the last two steps: a per-step divisor
+        # (the mean over experiments) and the per-experiment one part there
+        "PI": np.array([[1.0, 1.0], [0.0, 0.0], [1.0, 4.0], [np.nan, np.nan], [0.0, 2.0]]),
+        # a POSITIVE miss on the zero-baseline cells: x/0 is inf without the guard
+        "DA+PI": np.array([[0.5, 0.5], [0.3, 0.0], [1.0, 3.0], [1.0, 1.0], [0.3, 1.0]]),
     }
     out, baseline = normalize_sweep(y, "gamma_width")
     check("(vi) the baseline is PI", baseline == "PI")
-    check("(vi) PI reads exactly 1.0 where its mean is positive", np.array_equal(out["PI"][[0, 2]], np.ones((2, 2))))
     check(
-        "(vi) DA+PI is divided by the same per-step number", np.allclose(out["DA+PI"][[0, 2]], [[0.5, 0.5], [0.5, 1.5]])
+        "(vi) PI reads exactly 1.0 wherever it is positive",
+        np.array_equal(out["PI"][[0, 2]], np.ones((2, 2))) and out["PI"][4, 1] == 1.0,
     )
     check(
-        "(vi) a zero baseline step reads NaN for every method, never inf (x/0 and 0/0 alike)",
-        np.all(np.isnan(out["PI"][1])) and np.all(np.isnan(out["DA+PI"][1])),
-        f"{out['DA+PI'][1]}",
+        "(vi) DA+PI is divided by its own experiment's baseline, cell by cell",
+        np.allclose(out["DA+PI"][[0, 2]], [[0.5, 0.5], [1.0, 0.75]]) and out["DA+PI"][4, 1] == 0.5,
+        f"{out['DA+PI'][[0, 2, 4]]}",
+    )
+    check(
+        "(vi) a zero baseline cell reads NaN for every method, never inf (x/0 and 0/0 alike)",
+        np.all(np.isnan(out["PI"][1]))
+        and np.all(np.isnan(out["DA+PI"][1]))
+        and np.isnan(out["PI"][4, 0])
+        and np.isnan(out["DA+PI"][4, 0]),
+        f"{out['DA+PI'][[1, 4]]}",
     )
     check("(vi) an all-NaN baseline step reads NaN too", np.all(np.isnan(out["DA+PI"][3])))
-    check("(vi) the input is left untouched", y["PI"][2, 0] == 2.0)
+    check("(vi) the input is left untouched", y["PI"][2, 1] == 4.0)
     out, baseline = normalize_sweep({"PI+IV": y["PI"], "DA+PI": y["DA+PI"]}, "gamma_worst_error")
     check("(vi) PI+IV is the baseline when PI is absent", baseline == "PI+IV" and out["PI+IV"][0, 0] == 1.0)
     # PI and PI+IV together: the ORDER in NORMALIZE_BASELINES decides, and PI wins.
@@ -710,7 +723,7 @@ def leg_vi(reference):
     check("(vi) validate_plot_keys accepts normalize under a _width id", True)
     plt.close("all")
     create_sweep_plot(
-        np.array([1.0, 2.0, 3.0, 4.0]),
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
         y,
         xlabel="x",
         ylabel="average interval width",
@@ -735,7 +748,9 @@ def leg_vi(reference):
             ("interval_width", "gamma_width"),
             ("worst_error", "gamma_worst_error"),
         ):
-            series = bootstrap({name: record[metric] for name, record in results.items()})
+            # raw, as the figures divide it: each experiment by its own baseline,
+            # before the bootstrap
+            series = {name: np.asarray(record[metric], dtype=np.float64) for name, record in results.items()}
             out, baseline = normalize_sweep(series, fname)
             # the SS10.1 RULE, not merely the output: the baseline is the FIRST entry
             # of NORMALIZE_BASELINES the run carries -- PI when it is there, PI+IV when
@@ -750,17 +765,17 @@ def leg_vi(reference):
             )
             if baseline is None or baseline not in series:
                 continue
-            base = np.nanmean(series[baseline], axis=1)
-            ratio = np.nanmean(out[baseline], axis=1)
-            positive, zero = base > 0, base == 0
-            ok_one = np.all(np.abs(ratio[positive] - 1.0) < 1e-12)
-            ok_nan = np.all(np.isnan(out[baseline][zero])) and all(np.all(np.isnan(out[name][zero])) for name in out)
+            base = series[baseline]
+            with np.errstate(invalid="ignore"):
+                positive = np.isfinite(base) & (base > 0)
+            ok_one = np.all(np.abs(out[baseline][positive] - 1.0) < 1e-12)
+            ok_nan = all(np.all(np.isnan(out[name][~positive])) for name in out)
             print(
-                f"      RECORDED {fname}: baseline {baseline}, {int(positive.sum())} positive steps, "
-                f"{int(zero.sum())} zero steps"
+                f"      RECORDED {fname}: baseline {baseline}, {int(positive.sum())} positive cells, "
+                f"{int((~positive).sum())} cells without a positive baseline"
             )
-            check(f"(vi) {fname}: {baseline} reads 1.0 to 1e-12 at every positive step", bool(ok_one))
-            check(f"(vi) {fname}: every method reads NaN at every zero step", ok_nan)
+            check(f"(vi) {fname}: {baseline} reads 1.0 to 1e-12 in every positive cell", bool(ok_one))
+            check(f"(vi) {fname}: every method reads NaN in every cell without a positive baseline", ok_nan)
 
     if reference is None:
         skip("(vi) pkl comparisons", "by --skip-digest")
