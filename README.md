@@ -61,7 +61,12 @@ simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` i
   `sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~)))`. alpha = 0.05 is split the
   same way on every method: alpha/3 to the ball, alpha/3 to the mean row, alpha/3
   shared by the IV rows. A non-DA IV row's leak `g` is the declared `gamma_z`; a DA
-  row's is App. D's post-DA `(eps / sigma~ + sqrt(gamma_z / rho))^2`. A DA fit with
+  row's is the additive post-DA `eps^2 / sigma~^2 + gamma_z / rho`, the two budgets
+  in quadrature: valid when the invariance defect's and the instrument leak's IV
+  moments are orthogonal. App. D's triangle form
+  `(eps / sigma~ + sqrt(gamma_z / rho))^2` holds without that assumption (it keeps
+  the cross term `2 eps sqrt(gamma_z / rho) / sigma~`), so this is less conservative
+  and no longer worst-case. A DA fit with
   both the translation amounts T and an observed instrument Z carries one joint row
   on span(T, Z) (`IV_LAYOUT`, chosen by a pilot). The invariance budget and the
   +-eps pad stay unpadded: eps = eps* + 2^-8 (`EPS_TOL`), eps* the q0.95 of |W| on

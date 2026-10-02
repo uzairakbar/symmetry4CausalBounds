@@ -36,13 +36,13 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         spelled method computes, which (ii) pins.
   (ii)  the three modes on fitted attributes, on the cigarette design and the
         seed-42 DA draw with a 1-column Z, `gamma_z` 2^-8 and `rho = rho_hat` of
-        the draw (the DA rows' leak (eps / s~ + sqrt(gamma_z / rho))^2 reads it),
+        the draw (the DA rows' leak eps^2 / s~^2 + gamma_z / rho reads it),
         through the registry and `fit_model`: blocks Z and T on bare and `(T,Z)`,
         Z alone on `(Z)` and `PI+IV`, the intersection's DA branch the same and
         its baseline Z alone in both modes; the rows `IV_LAYOUT` gives (the joint
         (T, Z) row on bare, `(T,Z)` and the intersection's DA branch, a Z row on
         `(Z)` and the non-DA fits); raw, `PI+IV`'s Z row at s sqrt(gamma_z) and
-        every DA row at eps + s~ sqrt(gamma_z / rho) to 1e-12, the DA leak's eps
+        every DA row at sqrt(eps^2 + s~^2 gamma_z / rho) to 1e-12, the DA leak's eps
         what separates `(Z)`'s row from PI+IV's; `(T,Z)` predicts as bare to 1e-9, `DA+ERM+IV(T,Z)`
         as `DA+ERM+IV` to 1e-12, `DA+ERM+IV(Z)` zeroes the demeaned moment and is the
         ERM optimum within it, beating a fresh 2SLS on (GX, y, Z); under an
@@ -614,8 +614,8 @@ def leg_ii(seed):
         check(f"(ii) {name} DA branch rows {want}, baseline ('z',)", ok, f"{model.augmented.rows}")
     check("(ii) DA+PI+IV(Z) carries no T constraint", not models["DA+PI+IV(Z)"]._has_t)
     check("(ii) PI&DA+PI+IV(Z) DA branch carries no T constraint", not models["PI&DA+PI+IV(Z)"].augmented._has_t)
-    # raw radii: PI+IV's Z row at s sqrt(gamma_z), every DA row at App. D's
-    # eps + s~ sqrt(gamma_z / rho); the DA leak's eps is what separates the (Z) mode
+    # raw radii: PI+IV's Z row at s sqrt(gamma_z), every DA row at the additive
+    # sqrt(eps^2 + s~^2 gamma_z / rho); the DA leak's eps is what separates the (Z) mode
     # from PI+IV
     base = models["PI+IV"]
     r_z = float(np.sqrt(base.sigma_sq * base.gamma_z))
@@ -623,9 +623,9 @@ def leg_ii(seed):
     check("(ii) PI+IV Z row is s sqrt(gamma_z)", gap < 1e-12, f"{gap:.2e}")
     for name in ("DA+PI+IV(Z)", "DA+PI+IV", "DA+PI+IV(T,Z)"):
         model = models[name]
-        want = EPS_TOL + float(np.sqrt(model.sigma_sq) * np.sqrt(model.gamma_z / model.rho))
+        want = float(np.sqrt(EPS_TOL**2 + model.sigma_sq * model.gamma_z / model.rho))
         gap = abs(model.iv_radius(model.rows[0]) - want)
-        check(f"(ii) {name} row is eps + s~ sqrt(gamma_z / rho)", gap < 1e-12, f"{gap:.2e}")
+        check(f"(ii) {name} row is sqrt(eps^2 + s~^2 gamma_z / rho)", gap < 1e-12, f"{gap:.2e}")
     without = float(np.sqrt(models["DA+PI+IV(Z)"].sigma_sq * models["DA+PI+IV(Z)"].gamma_z / models["DA+PI+IV(Z)"].rho))
     got = models["DA+PI+IV(Z)"].iv_radius("z")
     check("(ii) and the DA leak's eps is what separates it from the leak alone", got > without, f"{got:.6f}")

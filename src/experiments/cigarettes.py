@@ -717,8 +717,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             )
 
             # F2. The x-axis is the DECLARED leakiness budget gamma_z. A DA+
-            # method reads it through gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z /
-            # rho))^2, so its rows sit at a larger leak than their x-coordinate
+            # method reads it through gamma~_z(eps) = eps^2 / sigma~^2 + gamma_z / rho,
+            # so its rows sit at a larger leak than their x-coordinate
             results = {name: np.full((points, 1, 2), np.nan) for name in models}
             for name, model in models.items():
                 if not hasattr(model, "gamma_z"):

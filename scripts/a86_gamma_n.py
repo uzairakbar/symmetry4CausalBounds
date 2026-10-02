@@ -24,8 +24,8 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         either target (`iv`, `plasmode`), and the simulation toggles carry none.
         The IV rows on a fixture with an observed Z and T, gamma_z 2^-8: PI+IV,
         PI+INV+IV and the intersection's baseline carry the Z row at the declared
-        gamma_z; DA+PI+IV(Z) / (T) the one row at gamma~_z(eps) = (eps / s~ +
-        sqrt(gamma_z / rho))^2; DA+PI+IV(T,Z) and the intersection's DA branch
+        gamma_z; DA+PI+IV(Z) / (T) the one row at gamma~_z(eps) = eps^2 / s~^2 +
+        gamma_z / rho; DA+PI+IV(T,Z) and the intersection's DA branch
         the joint row alone (`IV_LAYOUT` ("tz",), d = d_T + d_Z), each at
         sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) at alpha / 3 (one row),
         raw s sqrt(g) to 1e-12; a DA row moves with a predict-time epsilon and a
@@ -50,11 +50,17 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         h* over `VALIDITY_ROWS_DRAWS` draws (the ball with delta, the mean row,
         the Z row, each against its padded radius): every row holds on at least
         1 - alpha/3 - 3 SE of the draws and all three jointly on 0.95 - 3 SE;
+        and the DA+PI+IV(T,Z) joint row's statistic at h* with a real leak on
+        both blocks (Z's direct effect sqrt(sigma^2 gamma_z) Z on y, T's through
+        the DA's out-of-kernel defect, eps = eps* + EPS_TOL), at eps* 0 and at
+        eps / sigma~ ~ sqrt(gamma_z / rho) (the dropped cross term's largest),
+        against its additive radius on 1 - alpha/3 - 3 SE, the triangle form's
+        hold rate printed beside it for comparison;
         (b) `VALIDITY_SOLVE_DRAWS` solved draws, the simultaneous coverage of h*
         at 20 fixed queries of PI, PI+IV, DA+PI and DA+PI+IV(T,Z) at least
         0.95 - 3 SE, and of PI&DA+PI+IV(T,Z) at least 0.90 - 3 SE.
         Catches: a pad too small for its level, a mis-split alpha, an IV row
-        that excludes h*.
+        that excludes h*, an additive DA leak that undercovers.
   (v)   nesting on one simulation draw (iv 1), raw and padded: PI+IV inside PI,
         PI+INV+IV inside PI+INV, every DA+PI+IV mode inside DA+PI and
         PI&DA+PI+IV inside PI&DA+PI (to 1e-6 of the width).
@@ -382,7 +388,7 @@ def iv_rows():
                 check(f"(ii) {tag} rows {rows}", ball.rows == rows, f"{ball.rows}")
                 g_tilde = ball.budget(gamma)
                 da = ball._da_fit
-                leak = (epsilon / ball.scale + np.sqrt(GAMMA_Z_SIM / ball.rho)) ** 2 if da else GAMMA_Z_SIM
+                leak = (epsilon / ball.scale) ** 2 + GAMMA_Z_SIM / ball.rho if da else GAMMA_Z_SIM
                 for row in ball.rows:
                     dof = {"z": 1, "t": 1, "tz": 2}[row]
                     if alpha:
@@ -402,8 +408,10 @@ def iv_rows():
                     check(f"(ii) {tag}: the row {'moves' if da else 'stays'} with epsilon", moved == da)
 
 
-def simulation_draw(seed, n=400, d=8, sem=None):
-    """One draw of the small iv = 1 simulation: X, y, Z, GX, G, with the SEM."""
+def simulation_draw(seed, n=400, d=8, sem=None, strength=0.0):
+    """One draw of the small iv = 1 simulation: X, y, Z, GX, G, with the SEM. A
+    `strength` > 0 gives the DA an out-of-kernel component (an invariance defect
+    W, in span(T), of RMS strength * std * |w|)."""
     from src.data_augmentors.simulation import NullSpaceTranslation
     from src.oracle import preserve_rng
     from src.sem.simulation import LinearSimulationSEM
@@ -411,7 +419,7 @@ def simulation_draw(seed, n=400, d=8, sem=None):
     with preserve_rng():
         np.random.seed(VALIDITY_SEED)
         sem = LinearSimulationSEM(treatment_dimension=d, gamma=VALIDITY_GAMMA, iv_dim=1) if sem is None else sem
-        da = NullSpaceTranslation(sem.W_XY, kernel_dim=-1)
+        da = NullSpaceTranslation(sem.W_XY, kernel_dim=-1, strength=strength)
         np.random.seed(seed)
         X, y = sem.sample(N=n)
         X, Z = sem.split_instruments(X)
@@ -441,6 +449,44 @@ def row_statistics(seed):
         delta**2 <= model.mean_radius(gamma) ** 2,
         moment <= model.iv_radius("z", gamma) ** 2,
     )
+
+
+def da_row_statistic(seed, strength):
+    """The padded DA+PI+IV(T,Z) joint row at h* on one draw with a real leak on
+    both blocks: Z leaks at its declared gamma_z (a direct effect sqrt(sigma^2
+    gamma_z) Z on y) and T through the DA's defect (`strength`), the model fitted
+    at eps = eps* + EPS_TOL. (statistic, additive radius^2, triangle radius^2,
+    eps / sigma~, sqrt(gamma_z / rho))."""
+    from src.data_augmentors.simulation import DA_STD
+    from src.experiments.configs import EPS_TOL, MethodRegistry
+    from src.experiments.utils import fit_model
+    from src.experiments.utils.metrics import rho_hat
+    from src.methods.sensitivity_models import finite_sample_budget as fsb
+
+    sem, arrays = simulation_draw(seed, strength=strength)
+    w = sem.W_XY.ravel()
+    arrays["y"] = arrays["y"] + np.sqrt(sem.sigma_sq * GAMMA_Z_SIM) * arrays["Z"][:, 0]
+    epsilon = strength * DA_STD * float(np.linalg.norm(w)) + EPS_TOL
+    rho = float(rho_hat(arrays["X"], arrays["GX"], arrays["y"], intercept=True))
+    model = MethodRegistry.build_methods(
+        ["DA+PI+IV(T,Z)"],
+        gamma=VALIDITY_GAMMA,
+        epsilon=epsilon,
+        rho=rho,
+        pad=True,
+        gamma_z=GAMMA_Z_SIM,
+        gamma_n_alpha=ALPHA,
+    )["DA+PI+IV(T,Z)"]()
+    fit_model(model=model, method_name="DA+PI+IV(T,Z)", **arrays)
+    A, b, intercept, dof = model.iv_terms_["tz"]
+    delta = float(model.mu_ @ w - model.y_offset_)
+    residual = b - A @ w - (delta * intercept if model.mean_row else 0.0)
+    statistic = float(residual @ residual) / model.N_samples
+    budget = model.budget(model.gamma)
+    level = model.row_level / len(model.rows)
+    triangle = (epsilon / model.scale + np.sqrt(GAMMA_Z_SIM / model.rho)) ** 2
+    old = model.sigma_sq * (1 + budget) * fsb(dof, triangle / (1 + budget), model.n_eff, level)
+    return statistic, model.iv_radius("tz") ** 2, old, epsilon / model.scale, np.sqrt(GAMMA_Z_SIM / model.rho)
 
 
 def coverage_draw(seed, queries):
@@ -478,6 +524,30 @@ def leg_iv():
     joint = float(np.all(held, axis=1).mean())
     se = np.sqrt(0.95 * 0.05 / len(held))
     check("(iv)(a) all three jointly on >= 0.95 - 3 SE", joint >= 0.95 - 3 * se, f"{joint:.4f}")
+    # the DA joint row, where the additive leak's orthogonality assumption bites:
+    # eps* 0 (the shipped null-space DA) and the defect at eps / sigma~ ~ sqrt(gamma_z /
+    # rho), where the dropped cross term is largest; the triangle form is reported only
+    from src.data_augmentors.simulation import DA_STD
+
+    sem, _ = simulation_draw(0)
+    crossing = np.sqrt(sem.sigma_sq * GAMMA_Z_SIM) / (DA_STD * float(np.linalg.norm(sem.W_XY)))
+    se = np.sqrt(level * (1 - level) / VALIDITY_ROWS_DRAWS)
+    for tag, strength in (("eps* 0", 0.0), ("eps / s~ ~ sqrt(gamma_z / rho)", crossing)):
+        rows = np.array(
+            Parallel(n_jobs=-1)(delayed(da_row_statistic)(seed, strength) for seed in range(VALIDITY_ROWS_DRAWS))
+        )
+        stat, new, old, ratio, leak = rows.T
+        rate, rate_old = float(np.mean(stat <= new)), float(np.mean(stat <= old))
+        check(
+            f"(iv)(a) DA+PI+IV(T,Z) joint row ({tag}) holds at h* on >= {level:.4f} - 3 SE (additive)",
+            rate >= level - 3 * se,
+            f"{rate:.4f}",
+        )
+        print(
+            f"      ({tag}) triangle form, for comparison: {rate_old:.4f}; mean eps / s~ {ratio.mean():.4f}, "
+            f"sqrt(gamma_z / rho) {leak.mean():.4f}; mean statistic {stat.mean():.5f}, radius^2 additive "
+            f"{new.mean():.5f}, triangle {old.mean():.5f}"
+        )
     sem, _ = simulation_draw(0)
     queries = np.random.default_rng(5).normal(size=(20, sem.W_XY.shape[0]))
     draws = Parallel(n_jobs=-1)(delayed(coverage_draw)(10_000 + i, queries) for i in range(VALIDITY_SOLVE_DRAWS))

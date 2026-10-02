@@ -46,8 +46,8 @@ Legs:
         (n_eff, no cap on the units); PI+IV carries one Z row at
         sqrt(s^2 (1 + gamma~) gamma_n(3; gamma_z / (1 + gamma~))) (raw: exactly
         s sqrt(gamma_z)), DA+PI+IV and the intersection's DA branch one joint
-        (T, Z) row (4 columns) at the same formula with App. D's post-DA leak
-        (eps / sigma~ + sqrt(gamma_z / rho))^2,
+        (T, Z) row (4 columns) at the same formula with the additive post-DA leak
+        eps^2 / sigma~^2 + gamma_z / rho,
         eps the fit epsilon eps* + EPS_TOL; on the runner's own 8 seeded row
         splits at gamma*(b) the coverage of b* on the four coefficient queries
         is 1.000 for PI and 1.000 for PI+IV; the same runner class forced onto
@@ -190,14 +190,10 @@ def shipped_block(**overrides):
 def iv_radius_want(model, row, columns, gamma):
     """The row radius written out: sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~)))
     at level gamma_n_alpha / (GAMMA_N_ROWS B), g the declared gamma_z on a non-DA
-    fit and (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA fit."""
+    fit and eps^2 / sigma~^2 + gamma_z / rho on a DA fit."""
     budget = model.budget(gamma)
     s_sq = model.sigma_sq
-    g = (
-        model.gamma_z
-        if not model._da_fit
-        else (model.epsilon / np.sqrt(s_sq) + np.sqrt(model.gamma_z / model.rho)) ** 2
-    )
+    g = model.gamma_z if not model._da_fit else model.epsilon**2 / s_sq + model.gamma_z / model.rho
     level = model.gamma_n_alpha / (GAMMA_N_ROWS * len(model.rows))
     return float(np.sqrt(s_sq * (1.0 + budget) * fsb(columns, g / (1.0 + budget), model.n_eff, level)))
 
@@ -441,7 +437,7 @@ def leg_v():
         want = iv_radius_want(model, "tz", 4, gamma)
         got = model.iv_radius("tz", gamma)
         check(
-            f"(v) {name}: one joint (T, Z) row of 4 columns at the post-DA leak (eps / s~ + sqrt(gamma_z / rho))^2",
+            f"(v) {name}: one joint (T, Z) row of 4 columns at the post-DA leak eps^2 / s~^2 + gamma_z / rho",
             model._da_fit
             and model.rows == ("tz",)
             and model.iv_terms_["tz"][3] == 4

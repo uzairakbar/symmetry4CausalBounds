@@ -779,9 +779,13 @@ class InstrumentalVariablePartialR2(PartialR2):
         || Q'(y - h(X)) ||^2 / N <= s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))
 
     with s^2 = `sigma_sq` of the fit, gamma~ the ball's budget, d the block's
-    columns and g its leak: the declared `gamma_z` on a non-DA fit, App. D's
-    post-DA budget gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA
-    fit (every block, T included: T is part of the joint instrument (Z, T)). The
+    columns and g its leak: the declared `gamma_z` on a non-DA fit, the additive
+    post-DA budget gamma~_z(eps) = eps^2 / sigma~^2 + gamma_z / rho on a DA fit
+    (every block, T included: T is part of the joint instrument (Z, T)). The two
+    budgets in quadrature: valid when the invariance defect's and the instrument
+    leak's IV moments are orthogonal; App. D's triangle form
+    (eps / sigma~ + sqrt(gamma_z / rho))^2 holds without that assumption, so this is
+    less conservative and no longer worst-case. The
     rows share the IV third of `gamma_n_alpha` equally; raw (alpha 0) each radius
     is the population s sqrt(g). A missing block is (n, 0) and contributes
     nothing; with both missing this is baseline PI exactly.
@@ -830,11 +834,16 @@ class InstrumentalVariablePartialR2(PartialR2):
         return self._da_fit and self._has_iv
 
     def iv_leak(self) -> float:
-        """The rows' leak g: the declared gamma_z on a non-DA fit, App. D's post-DA
-        gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA fit."""
+        """The rows' leak g: the declared gamma_z on a non-DA fit, the additive
+        post-DA gamma~_z(eps) = eps^2 / sigma~^2 + gamma_z / rho on a DA fit: the two
+        budgets in quadrature, valid when the invariance defect's and the instrument
+        leak's IV moments are orthogonal. App. D's triangle form
+        (eps / sigma~ + sqrt(gamma_z / rho))^2 holds without that assumption (it
+        keeps the cross term 2 eps sqrt(gamma_z / rho) / sigma~), so this is less
+        conservative and no longer worst-case."""
         if not self._da_fit:
             return float(self.gamma_z)
-        return float((float(self.epsilon) / self.scale + np.sqrt(self.gamma_z / self.rho)) ** 2)
+        return float((float(self.epsilon) / self.scale) ** 2 + self.gamma_z / self.rho)
 
     def iv_radius(self, row: str, gamma=None) -> float:
         """sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) of one row, at its

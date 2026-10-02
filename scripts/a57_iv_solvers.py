@@ -4,7 +4,7 @@ A DA+ IV ball takes the translation amounts as `T` and the observed instrument a
 `Z`; a fit with one block carries that block's SOC row, a fit with both the rows of
 `IV_LAYOUT` (the joint row on span(T, Z)), each at
 sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) with g the declared `gamma_z`
-(non-DA) or App. D's (eps / sigma~ + sqrt(gamma_z / rho))^2 (DA); the intersection
+(non-DA) or the additive eps^2 / sigma~^2 + gamma_z / rho (DA); the intersection
 hands its baseline branch the observed Z alone. Everything is measured on the
 cigarette design (t3, own-tax, sigma-normalised, n = 2450), four coefficient
 queries, serial solves. Legs:
@@ -39,7 +39,7 @@ queries, serial solves. Legs:
         to a direct `T=G` fit. Catches: Z reaching the DA branch only, a row
         built on the wrong block, `None` reaching column_stack.
   (vi)  the radii: raw (alpha 0) a non-DA Z row is s sqrt(gamma_z) and a DA row
-        eps + sigma~ sqrt(gamma_z / rho) (so a DA row with gamma_z 0 is eps),
+        sqrt(eps^2 + sigma~^2 gamma_z / rho) (so a DA row with gamma_z 0 is eps),
         rho-aware; padded (alpha 0.05) every row is the formula at level
         alpha / 3 (B = 1 row) on n_eff, d the row's width, and above its raw
         value; a DA row moves with a predict-time epsilon; a fitted model logs
@@ -98,14 +98,14 @@ ALPHA = 0.05
 COMMON = dict(clipy=False, mean_match=True, n_jobs=1, recalibrate=True, pad=False)
 PHASE_B = ("tax_s", "y", "cpi")
 # raw beta_pn, raw log units, one seed-0 DA draw, gamma 0.25, gamma_z 2^-8, eps
-# EPS_TOL, raw program: RECORDED on the gamma_n rows (the non-DA Z row at
-# s sqrt(gamma_z), the DA joint row at eps + sigma~ sqrt(gamma_z / rho))
+# EPS_TOL, raw program: RECORDED on the additive DA leak (the non-DA Z row at
+# s sqrt(gamma_z), the DA joint row at sqrt(eps^2 + sigma~^2 gamma_z / rho))
 RECORDED = {
     "PI+IV": (0.358594946, 1.658163776),
     "PI+INV+IV": (1.121935558, 1.658163805),
-    "DA+PI+IV": (1.088353738, 1.664074495),
+    "DA+PI+IV": (1.138617646, 1.662180106),
     "PI&DA+PI+IV baseline": (0.358594946, 1.658163776),
-    "PI&DA+PI+IV DA branch": (1.088353738, 1.664074495),
+    "PI&DA+PI+IV DA branch": (1.138617646, 1.662180106),
 }
 INTERVAL_TOL = 1e-6
 SOLVER_TOL = 1e-6
@@ -288,16 +288,16 @@ def leg_vi(design, Z, GX, G):
     want = float(np.sqrt(pi_iv.sigma_sq * GAMMA_Z))
     got = pi_iv.iv_radius("z")
     check("(vi) raw non-DA Z row: s sqrt(gamma_z)", abs(got - want) <= 1e-12 * want, f"{got:.9f} vs {want:.9f}")
-    want = EPS_TOL + da.scale * np.sqrt(GAMMA_Z / da.rho)
+    want = np.sqrt(EPS_TOL**2 + da.scale**2 * GAMMA_Z / da.rho)
     got = da.iv_radius("tz")
-    check("(vi) raw DA joint row: eps + sigma~ sqrt(gamma_z / rho)", abs(got - want) <= 1e-12 * want, f"{got:.9f}")
+    check("(vi) raw DA joint row: sqrt(eps^2 + sigma~^2 gamma_z / rho)", abs(got - want) <= 1e-12 * want, f"{got:.9f}")
     no_z = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, gamma_z=0.0, **COMMON)
     no_z.fit(X=GX, y=y, T=G, X_pre=X)
     got = no_z.iv_radius("t")
     check("(vi) raw DA T row at gamma_z 0 is eps", abs(got - EPS_TOL) <= 1e-12, f"{got!r}")
     rho_before = da.iv_radius("tz")
     da.rho = 4.0 * da.rho
-    want = EPS_TOL + da.scale * np.sqrt(GAMMA_Z / da.rho)
+    want = np.sqrt(EPS_TOL**2 + da.scale**2 * GAMMA_Z / da.rho)
     check("(vi) the DA row is rho-aware", abs(da.iv_radius("tz") - want) <= 1e-12 * want and want < rho_before)
 
     padded = models_at(design, Z, GX, G, alpha=ALPHA)
@@ -306,7 +306,7 @@ def leg_vi(design, Z, GX, G):
         (row,) = model.rows
         d = model.iv_terms_[row][3]
         budget = model.budget(GAMMA)
-        g = GAMMA_Z if not model._da_fit else (EPS_TOL / model.scale + np.sqrt(GAMMA_Z / model.rho)) ** 2
+        g = GAMMA_Z if not model._da_fit else (EPS_TOL / model.scale) ** 2 + GAMMA_Z / model.rho
         level = ALPHA / (GAMMA_N_ROWS * 1)
         want = float(np.sqrt(model.sigma_sq * (1 + budget) * fsb(d, g / (1 + budget), model.n_eff, level)))
         got = model.iv_radius(row)

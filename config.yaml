@@ -16,8 +16,8 @@ defaults:
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budgets are not toggles: every linear method's instrument rows take the
 # declared leak gamma_z (the dataset's; the simulation's `SimulationConfig.gamma_z`),
-# a non-DA row at s sqrt(gamma_z) and a DA row at App. D's post-DA leak
-# (eps / s~ + sqrt(gamma_z / rho))^2 in s~ units; a DA fit with both T and Z
+# a non-DA row at s sqrt(gamma_z) and a DA row at the additive post-DA leak
+# eps^2 / s~^2 + gamma_z / rho in s~ units; a DA fit with both T and Z
 # carries the one joint row on span(T, Z). Sweeps and query panels alike.
 # Nor is the norm of W the oracle eps* takes: every SWEEP (gamma, omega, epsilon,
 # recalibrate, n, m, and the perf sweeps on the epsilon runner) reads eps* once as
@@ -102,7 +102,7 @@ do_mnist:
                                     # The true value is 0 for this chain (+-10 deg cannot
                                     # turn a 2 into a 5, colour never causes Y); this is
                                     # finite-sample slack. INV budget eps^2 = 0.0016, IV
-                                    # budget (eps + s sqrt(gamma_z_star))^2 = eps^2 at 0
+                                    # budget eps^2 + s^2 gamma_z_star = eps^2 at 0
     erm_inv_tau: 0.0004             # the ERM+INV net's invariance target, squared scale:
                                     # E[(h(X) - h(GX))^2] <= tau, 4e-4 = 0.02^2 in epsilon
                                     # units, inside the eps^2 = 0.0016 ball

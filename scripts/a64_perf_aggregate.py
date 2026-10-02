@@ -27,7 +27,7 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
   (ii)   dispatch on fitted attributes, a63-ii's construction (the cigarette design,
          the seed-42 DA draw, a 1-column Z, two distinct IV budgets, `rho = rho_hat`):
          the (T) instrument is G alone (width `G.shape[1]` against +1 on bare's
-         joint row), its radius the raw DA one eps + sigma~ sqrt(gamma_z / rho),
+         joint row), its radius the raw DA one sqrt(eps^2 + sigma~^2 gamma_z / rho),
          the intersection's DA branch the same and its baseline's Z row the
          declared s sqrt(gamma_z), (T) predicts differently from bare and from (Z), `DA+ERM+IV(T)`
          zeroes the demeaned moment on (GX, y, G) and is the ERM optimum within it,
@@ -430,8 +430,8 @@ def width(model, k, row="z"):
 
 
 def da_radius(model):
-    """The raw DA row radius sigma~ sqrt(gamma~_z(eps)) = eps + sigma~ sqrt(gamma_z / rho)."""
-    return float(model.epsilon) + model.scale * np.sqrt(model.gamma_z / model.rho)
+    """The raw DA row radius sigma~ sqrt(gamma~_z(eps)) = sqrt(eps^2 + sigma~^2 gamma_z / rho)."""
+    return float(np.sqrt(float(model.epsilon) ** 2 + model.scale**2 * model.gamma_z / model.rho))
 
 
 def sim_block(methods, dataset="simulation", **overrides):

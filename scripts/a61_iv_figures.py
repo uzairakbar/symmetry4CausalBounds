@@ -50,8 +50,8 @@ toggle) and both recipes (`normalize: true`). Legs:
   (v)   the SS4.1 width table AT THE SHIPPED BUDGET RULE, on the seed-0 DA draw and
         the SS4.1 convention: PI to 1e-3 of p5, PI+IV and PI+INV+IV lower bounds to
         1e-6 of p8 and upper bounds to 1e-3 of p5 at the five gammas, and the
-        DA+PI+IV row RECORDED at its joint (T, Z) row's radius eps + s~ sqrt(gamma_z
-        / rho), beside the review's numbers; DA+PI+IV is tighter than PI+IV at
+        DA+PI+IV row RECORDED at its joint (T, Z) row's radius
+        sqrt(eps^2 + s~^2 gamma_z / rho), beside the review's numbers; DA+PI+IV is tighter than PI+IV at
         0.25, and the same model refit as a non-DA fit (no `X_pre`, its joint row
         at s sqrt(gamma_z)) is tighter still, so the DA leak's eps is what widens
         it. The same table on F1's query-path models is recorded too. Catches: a
@@ -152,7 +152,7 @@ from src.sem.cigarettes import CigaretteSEM, V, build_design, instrument_set  # 
 PHASE_B = ("tax_s", "y", "cpi")
 GRID_STEP = 0.005
 FLAT_FROM = 0.190  # the flat-floored regime of SS4.1
-# DA+PI+IV's at the convention: its joint (T, Z) row at eps + s~ sqrt(gamma_z / rho)
+# DA+PI+IV's at the convention: its joint (T, Z) row at sqrt(eps^2 + s~^2 gamma_z / rho)
 # (0.09375) binds between 0.205 and 0.21 (MEASURED 3b), later than the old pair did
 DA_FLAT_FROM = 0.215
 FLAT_TOL = 1e-6
@@ -636,7 +636,7 @@ def leg_v():
         widths["DA+PI+IV"] < widths["PI+IV"],
         f"{widths['DA+PI+IV']:.4f} vs {widths['PI+IV']:.4f}",
     )
-    # the DA rows read gamma~_z(eps) = (eps / s~ + sqrt(gamma_z / rho))^2, a non-DA
+    # the DA rows read gamma~_z(eps) = eps^2 / s~^2 + gamma_z / rho, a non-DA
     # fit gamma_z alone: refit the same DA+PI+IV without `X_pre` and its joint row
     # drops eps, so it is tighter, and the DA leak is what separates the two
     Z_set = instrument_set(design, PHASE_B)

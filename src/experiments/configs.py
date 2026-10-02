@@ -1002,8 +1002,8 @@ class MethodRegistry:
             gamma_z: the observed instrument's declared leak budget; 0 with no Z.
                 Every linear IV row reads it: the radius
                 sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) with g = gamma_z
-                on a non-DA fit and (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA
-                fit. partial_r2 only.
+                on a non-DA fit and eps^2 / sigma~^2 + gamma_z / rho on a DA fit.
+                partial_r2 only.
             n_jobs: query-solve workers; 1 = serial, -1 = all cores
             absorbed_rate: controls partialled out of the design per observation,
                 charged to every ball's sigma-hat as `absorbed_rate * n_obs` dof

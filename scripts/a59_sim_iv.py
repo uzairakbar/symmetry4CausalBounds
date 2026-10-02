@@ -52,7 +52,7 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         the sweep and query runners carries it, and on the gamma runner's cell
         (raw, no `gamma_n` key) PI+IV's one Z row sits at exactly sigma-hat
         sqrt(2^-8) and each DA+ IV row (the joint (T, Z) row of DA+PI+IV(T,Z), the
-        Z row of DA+PI+IV(Z)) at App. D's eps + sigma~ sqrt(gamma_z / rho).
+        Z row of DA+PI+IV(Z)) at the additive sqrt(eps^2 + sigma~^2 gamma_z / rho).
         Catches: an interventional draw without its Z (the runner mis-slices),
         the key not forwarded, a Z that never reaches the runner, a measured leak
         in place of the declared one. Misses: the solves at the recipe's full
@@ -344,10 +344,10 @@ def leg_vi(seed):
         if name not in models:
             continue
         model = models[name]
-        want = epsilon + float(np.sqrt(model.sigma_sq) * np.sqrt(GAMMA_Z / model.rho))
+        want = float(np.sqrt(epsilon**2 + model.sigma_sq * GAMMA_Z / model.rho))
         got = model.iv_radius(rows[0])
         check(
-            f"(vi) {name}: its {rows} row at eps + sigma~ sqrt(gamma_z / rho) (raw)",
+            f"(vi) {name}: its {rows} row at sqrt(eps^2 + sigma~^2 gamma_z / rho) (raw)",
             model.rows == rows and abs(got - want) < 1e-12,
             f"{model.rows} {got:.9f} vs {want:.9f}",
         )

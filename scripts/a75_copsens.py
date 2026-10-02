@@ -308,10 +308,10 @@ def leg_vi():
     eps, s2, rho = 0.1, 0.13, 1.25
     ok = abs(iv_budget(eps) - eps**2) < 1e-15 and abs(iv_budget(eps, 0.0, calibrate_sigma=True) - eps**2) < 1e-15
     check("(vi) iv_budget at gz* 0 is eps^2", ok)
-    check("(vi) iv_budget at gz* > 0, uncalibrated", abs(iv_budget(eps, 0.04) - (eps + 0.2) ** 2) < 1e-12)
+    check("(vi) iv_budget at gz* > 0, uncalibrated", abs(iv_budget(eps, 0.04) - (eps**2 + 0.04)) < 1e-12)
     s = np.sqrt(s2 / rho)
     got = iv_budget(eps, 0.04, sigma2=s2, rho=rho, calibrate_sigma=True)
-    check("(vi) iv_budget at gz* > 0, calibrated", abs(got - (eps + s * 0.2) ** 2) < 1e-12, f"{got:.4g}")
+    check("(vi) iv_budget at gz* > 0, calibrated", abs(got - (eps**2 + s**2 * 0.04)) < 1e-12, f"{got:.4g}")
     try:
         iv_budget(eps, 0.04, calibrate_sigma=True)
         check("(vi) calibrated iv_budget without rho raises", False)

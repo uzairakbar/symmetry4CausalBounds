@@ -60,9 +60,9 @@ Legs:
         is an instrument set (a default is not a request); the four IV classes built
         with `gamma_z` 2^-8 carry it, and their raw (population) radii follow the
         declared leak: a non-DA fit one Z row at s sqrt(gamma_z) (r_Z 0.0625 on the
-        intersection's baseline branch at s = 1), a DA fit its rows at App. D's
-        eps + s~ sqrt(gamma_z / rho) (the joint (T, Z) row on DA+PI+IV and on the
-        intersection's DA branch), moving with the predict-time eps.
+        intersection's baseline branch at s = 1), a DA fit its rows at the additive
+        sqrt(eps^2 + s~^2 gamma_z / rho) (the joint (T, Z) row on DA+PI+IV and on
+        the intersection's DA branch), moving with the predict-time eps.
         Catches: `PI+IV` built without the leak (its Z row at radius 0 reads
         INFEASIBLE), a silent ERM on no instrument, a fallback that trips its own
         error, `gamma_z` not forwarded by the registry, a DA row blind to eps.
@@ -538,8 +538,8 @@ def leg_vi(seed):
         if name == "PI&DA+PI+IV":
             check("(vi) PI&DA+PI+IV DA branch read the instrument", model.augmented._has_iv)
     # gamma_z reaches every IV class through the registry, and the raw radii follow
-    # the declared leak: s sqrt(gamma_z) on a non-DA row, App. D's eps + s~ sqrt(gamma_z
-    # / rho) on a DA one
+    # the declared leak: s sqrt(gamma_z) on a non-DA row, the additive
+    # sqrt(eps^2 + s~^2 gamma_z / rho) on a DA one
     declared = MethodRegistry.build_methods(
         ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
         gamma=GAMMA,
@@ -565,14 +565,16 @@ def leg_vi(seed):
         check(f"(vi) {name}: one Z row at exactly s sqrt(gamma_z)", ok, f"{model.rows} {got!r}")
     for name, rows in (("DA+PI+IV", ("tz",)), ("PI&DA+PI+IV DA branch", ("tz",))):
         model = fitted[name]
-        want = EPS_TOL + float(np.sqrt(model.sigma_sq) * np.sqrt(2**-8 / model.rho))
+        leak = model.sigma_sq * 2**-8 / model.rho
+        want = float(np.sqrt(EPS_TOL**2 + leak))
         got = model.iv_radius(rows[0])
         ok = model.rows == rows and abs(got - want) < 1e-12
-        check(f"(vi) {name}: its {rows} row at eps + s~ sqrt(gamma_z / rho)", ok, f"{model.rows} {got:.9f}")
+        check(f"(vi) {name}: its {rows} row at sqrt(eps^2 + s~^2 gamma_z / rho)", ok, f"{model.rows} {got:.9f}")
         model.epsilon = 2 * EPS_TOL
         moved = model.iv_radius(rows[0]) - got
         model.epsilon = EPS_TOL
-        check(f"(vi) {name}: the row moves with eps one for one", abs(moved - EPS_TOL) < 1e-12, f"{moved!r}")
+        want = float(np.sqrt(4 * EPS_TOL**2 + leak)) - want
+        check(f"(vi) {name}: the row moves with eps in quadrature", abs(moved - want) < 1e-12, f"{moved!r}")
     got = fitted["PI&DA+PI+IV baseline"].iv_radius("z")
     check("(vi) PI&DA+PI+IV baseline bound is r_Z = 0.0625 to 1e-6", abs(got - 0.0625) < 1e-6, f"{got:.9f}")
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))

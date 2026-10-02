@@ -130,9 +130,12 @@ LINKS = {"probit": Probit, "gaussian": Gaussian}
 
 
 def iv_budget(epsilon, gamma_z_star=0.0, sigma2=None, rho=None, calibrate_sigma=False) -> float:
-    """Absolute leaky-IV budget from App. A, Thm. 3.B.
+    """Absolute leaky-IV budget, the two budgets in quadrature:
+    t_abs := sigma~^2 gz~ = eps^2 + s^2 gz*.
 
-    sigma~ sqrt(gz~) >= eps + sigma sqrt(gz*)  =>  t_abs := sigma~^2 gz~ = (eps + s sqrt(gz*))^2.
+    Valid when the invariance defect's and the instrument leak's IV moments are
+    orthogonal; App. A / Thm. 3.B's triangle form (eps + s sqrt(gz*))^2 holds without
+    that assumption, so this is less conservative and no longer worst-case.
     s = sigma = sqrt(sigma~^2 / rho) when calibrated (sigma2 IS sigma~^2: the model is
     fit on the post-DA data), else 1. gz* = 0 (the baseline carries no IV constraint)
     gives eps^2.
@@ -146,7 +149,7 @@ def iv_budget(epsilon, gamma_z_star=0.0, sigma2=None, rho=None, calibrate_sigma=
         s = float(np.sqrt(sigma2 / max(rho, 1e-12)))
     else:
         s = 1.0
-    return float((float(epsilon) + s * np.sqrt(gz)) ** 2)
+    return float(float(epsilon) ** 2 + s**2 * gz)
 
 
 # --------------------------------------------------------------- solver plumbing
