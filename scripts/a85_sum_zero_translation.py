@@ -46,7 +46,7 @@ the sweeps' chain. The rotation / flip probability is the dataset block's
         TIV_FLIP_P=0.25 TIV_TR_SCALE=0.5 and every other TIV_* at its default
         (TIV_T raw, TIV_FRAME centred, TIV_TR_BASIS sumzero, TIV_PERM_P 1.0,
         TIV_CHAIN unset): two-experiment, two-step gamma, omega and epsilon
-        sweeps on `CHAIN` at `SWEEP_P` (`im-ci` off), every metric array but the
+        sweeps on `CHAIN` at `SWEEP_P`, every metric array but the
         wall clock, the x grids (the epsilon sweep's radii), each experiment's
         oracle gamma* / eps* and the robustness DA's tuned strength, hashed to
         `DIGEST`; the orchestrator's DA factory (robustness append included)

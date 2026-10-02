@@ -56,7 +56,7 @@ def load_block(path: str) -> tuple[dict, dict]:
         raise ValueError(f"{path} has no do_mnist block")
     # the selection never bootstraps: the CI toggle is pinned off here as every
     # yaml-reading gate pins it
-    block = {**defaults, **config["do_mnist"], "im-ci": 0}
+    block = {**defaults, **config["do_mnist"]}
     block.pop("experiment", None)
     return block, hyperparameters
 

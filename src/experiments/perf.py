@@ -65,7 +65,7 @@ def budgets(runner, data) -> dict[str, Any]:
     gamma = runner.fit_gamma(0)
     epsilon = runner.fit_epsilon(0, 0, data)
     leaks = runner.fit_iv_leaks(0, data)
-    radius = float(np.hypot(max(epsilon - runner.pad_tolerance, 0.0), leaks["leak_t"]))
+    radius = float(np.hypot(max(epsilon, 0.0), leaks["leak_t"]))
     return dict(
         gamma=gamma,
         epsilon=epsilon,

@@ -400,7 +400,7 @@ def leg_vi(sim_orch):
         "      param: [recalibrate, gamma]\n      metric: [width]\n"
     )
     defaults = recipe.pop("defaults")
-    block = {**defaults, **recipe["simulation"], "im-ci": 0}
+    block = {**defaults, **recipe["simulation"]}
     plan = parse_experiment_plan(block.get("experiment"))
     block = resolve_dataset_block("simulation", block)
     check(

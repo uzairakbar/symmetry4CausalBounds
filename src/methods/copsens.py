@@ -823,10 +823,7 @@ class IntersectedCopSens(IntersectionMixin, CopSensPI):
         )
 
     def _branch(self, key, pad, cls=CopSensPI, **extra):
-        branch = cls(**extra, **self._branch_kwargs(key, pad))
-        if pad:
-            branch.pad_tolerance = self.pad_tolerance  # the sweeps' CI setting reaches the DA branch
-        return branch
+        return cls(**extra, **self._branch_kwargs(key, pad))
 
     def _fit_branches(self, X, y, GX, G, Z=None):
         self.baseline = self._branch("X", pad=False).fit(X, y)

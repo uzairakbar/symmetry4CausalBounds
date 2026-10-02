@@ -81,13 +81,6 @@ class BoundedSA(SA):
     # the T-as-IV constraint reads `epsilon_iv`, and a plain ball only pads (the
     # perf sweep re-solves the former two and `repad`s the rest)
     solves_on_epsilon: bool = False
-    # taken off the pad, never off the constraint: the sweeps set it to EPS_TOL under
-    # the IM-CI (ParamSweepRunner), whose interval carries the sampling allowance the
-    # tolerance used to add to the pad. 0.0 everywhere else, so every other number is
-    # today's. The CopSens intersections (`copsens._branch_kwargs`) forward it to
-    # their DA branch; do-MNIST is their only caller and the config forces its
-    # `im-ci` to 0, so it never leaves 0.0 there
-    pad_tolerance: float = 0.0
 
     def __init__(
         self,
@@ -238,9 +231,8 @@ class BoundedSA(SA):
     @property
     def pad_amount(self) -> float:
         """Thm. 3.A's epsilon: `pad_epsilon` when supplied, else the constraint's
-        own (L2) epsilon -- see `__init__` for why those are not the same thing --
-        less `pad_tolerance` (0.0 unless a sweep runs under the IM-CI)."""
-        return max(float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon) - self.pad_tolerance, 0.0)
+        own (L2) epsilon -- see `__init__` for why those are not the same thing."""
+        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon)
 
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
@@ -772,12 +764,10 @@ class InstrumentalVariablePartialR2(PartialR2):
         """App. D's re-calibrated radius of a DA fit's constraint, in outcome units:
         sigma~^2 gamma~_z(eps) = eps^2 + sigma~^2 gamma_z / rho (kappa = 0, E.2)
         plus the measured noise moment `leak` of the block, in root sum square.
-        eps is the pad's own (`epsilon` less `pad_tolerance`: the q0.95 eps* under
-        the IM-CI; without it eps carries EPS_TOL, as the pad does), and no other
-        tolerance enters: at eps* = 0 the radius is exactly what admitting h# takes
+        eps is the pad's own (`epsilon`, which carries EPS_TOL, as the pad does), and
+        no other tolerance enters: at eps* = 0 the radius is exactly what admitting h# takes
         on the oracle path, so h# sits on the boundary."""
-        eps_raw = max(float(self.epsilon) - self.pad_tolerance, 0.0)
-        return float(np.sqrt(eps_raw**2 + self.sigma_sq / self.rho * self.gamma_z + leak**2))
+        return float(np.sqrt(float(self.epsilon) ** 2 + self.sigma_sq / self.rho * self.gamma_z + leak**2))
 
     @property
     def t_bound(self) -> float | None:
@@ -1057,7 +1047,7 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
     def _branch(self, pad):
         # rho = 1 at construction: the DA branch's factor is only known once
         # both branches are fitted (`_fit_branches` sets it)
-        branch = PartialR2(
+        return PartialR2(
             gamma=self.gamma,
             epsilon=self.epsilon,
             pad=pad,
@@ -1068,8 +1058,6 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
         )
-        branch.pad_tolerance = self.pad_tolerance  # the sweeps' IM-CI setting reaches the DA branch
-        return branch
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
         self.baseline = self._branch(pad=False).fit(X, y, n_obs=n_obs)
@@ -1140,7 +1128,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     def _branch(self, pad):
         # rho = 1 at construction: the DA branch's factor is only known once both
         # branches are fitted (`_fit_branches` sets it)
-        branch = InstrumentalVariablePartialR2(
+        return InstrumentalVariablePartialR2(
             gamma=self.gamma,
             gamma_z=self.gamma_z,
             epsilon=self.epsilon,
@@ -1157,8 +1145,6 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
         )
-        branch.pad_tolerance = self.pad_tolerance
-        return branch
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
         # empty is spelled (n, 0), and a branch handed it carries no constraint

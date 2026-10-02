@@ -59,7 +59,7 @@ apart from (vi). Legs:
          keyed on a column that draws nothing. Misses: the perf grid (a64 (vi)).
   (vi)   the writer: one query panel per dataset through the production path
          (`resolve_dataset_block`, the orchestrator, `.run`) in a temp cwd under
-         ~/scratch, simulation `iv: 1` and optical, tiny samples, `im-ci` 0:
+         ~/scratch, simulation `iv: 1` and optical, tiny samples:
          `artifacts/<dataset>/labels.json` holds `{has_z, methods}` with the
          orchestrator's `has_z` (true on the simulation, false on optical) beside
          `query/`. `--skip-run` keeps the property check and skips the run.
@@ -245,7 +245,7 @@ def recipes():
         config.pop("hyperparameters", None)
         columns = {}
         for dataset, block in config.items():
-            resolved = resolve_dataset_block(dataset, {**defaults, **block, "im-ci": 0})
+            resolved = resolve_dataset_block(dataset, {**defaults, **block})
             columns[dataset] = (resolved["methods"], _check_instruments(dataset, resolved))
         out[os.path.basename(path)[: -len(".yaml")]] = columns
     return out
@@ -601,7 +601,7 @@ def leg_v():
 
 
 # the production path at a toy scale: one query panel per dataset, a real Z on the simulation only
-WRITER_TOGGLES = dict(recalibrate=True, pad=True, clipy=False, mean_match=True, n_jobs=-1, **{"im-ci": 0})
+WRITER_TOGGLES = dict(recalibrate=True, pad=True, clipy=False, mean_match=True, n_jobs=-1)
 WRITER_BLOCKS = {
     "simulation": dict(
         seed=42,

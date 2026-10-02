@@ -227,7 +227,7 @@ def leg_iv():
         ("inv", ["PI", "DA+PI"], False),
     )
     for recenter, methods, expected in cases:
-        block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": methods, "inv_recenter": recenter, "im-ci": 0})
+        block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": methods, "inv_recenter": recenter})
         block.pop("experiment", None)
         orchestrator = DoMNISTOrchestrator(**block, hyperparameters=TRAIN_KW)
         check(f"(iv) train_inv is {expected} for {recenter} {methods}", orchestrator.train_inv is expected)
@@ -235,7 +235,7 @@ def leg_iv():
             f"(iv) the runner kwargs carry train_inv for {recenter} {methods}",
             orchestrator._runner_kwargs()["train_inv"] is expected,
         )
-    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "erm_inv_tau": 1e-3, "im-ci": 0})
+    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "erm_inv_tau": 1e-3})
     block.pop("experiment", None)
     check(
         "(iv) the block's erm_inv_tau reaches the runner",
@@ -248,7 +248,7 @@ def leg_v():
     from src.experiments.utils import set_seed
 
     block = resolve_dataset_block(
-        "do_mnist", {**MINIMAL, "methods": ["PI", "PI+INV"], "inv_recenter": "inv", "n_samples": 60_000, "im-ci": 0}
+        "do_mnist", {**MINIMAL, "methods": ["PI", "PI+INV"], "inv_recenter": "inv", "n_samples": 60_000}
     )
     block.pop("experiment", None)
     orchestrator = DoMNISTOrchestrator(**block, hyperparameters=TRAIN_KW)
@@ -395,10 +395,10 @@ def leg_vi():
     with torch.no_grad():
         outs = [net(x) for net in (pool, fast)]
     check("(vi) both heads map to (0, 1)", all(o.shape == (8, 1) and bool(((o > 0) & (o < 1)).all()) for o in outs))
-    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "im-ci": 0})
+    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"]})
     block.pop("experiment", None)
     check("(vi) the orchestrator defaults to the flat head", DoMNISTOrchestrator(**block).net == "domnist-fast")
-    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "net": "domnist-pool", "im-ci": 0})
+    block = resolve_dataset_block("do_mnist", {**MINIMAL, "methods": ["PI"], "net": "domnist-pool"})
     block.pop("experiment", None)
     check("(vi) the block's net reaches the orchestrator", DoMNISTOrchestrator(**block).net == "domnist-pool")
 

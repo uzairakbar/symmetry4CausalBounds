@@ -165,7 +165,7 @@ def recipe_block(**overrides):
     with open(os.path.join(REPO, "recipes", "cigarettesFig7.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
-    block = {**defaults, **config["cigarettes"], "im-ci": 0}
+    block = {**defaults, **config["cigarettes"]}
     block.pop("experiment", None)
     return resolve_dataset_block("cigarettes", {**block, **overrides})
 
@@ -397,7 +397,7 @@ def leg_v():
     )
     models = fold_keys(runner.build_models(0, 0, data))
     # App. D (`iv_recalibrate`): every DA block's radius is sqrt(eps^2 + s^2 gamma_z +
-    # leak^2), eps the pad's (the fit epsilon less the pad tolerance), T's leak measured
+    # leak^2), eps the pad's (the fit epsilon), T's leak measured
     # on the cell's rows, the declared Z's 0 (gamma_z carries it)
     budgets = runner.fit_budgets(0, 0, data)
     epsilon, leak_t = float(budgets["epsilon"]), float(budgets["leak_t"])
@@ -412,9 +412,8 @@ def leg_v():
         )
 
     def radii(model):
-        eps_raw = max(epsilon - model.pad_tolerance, 0.0)
         slack = model.sigma_sq / model.rho * GAMMA_Z_DEFAULT
-        return float(np.sqrt(eps_raw**2 + slack + leak_t**2)), float(np.sqrt(eps_raw**2 + slack))
+        return float(np.sqrt(epsilon**2 + slack + leak_t**2)), float(np.sqrt(epsilon**2 + slack))
 
     da_fits = {"DA+PI+IV": models.get("DA+PI+IV")}
     if "PI&DA+PI+IV" in gated:

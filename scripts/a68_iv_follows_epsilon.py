@@ -164,7 +164,7 @@ def plasmode_block(**overrides):
     with open(os.path.join(REPO, "recipes", "robustnessFig11.yaml")) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
-    block = {**defaults, **config["cigarettes"], "im-ci": 0, **overrides}
+    block = {**defaults, **config["cigarettes"], **overrides}
     block.pop("experiment", None)
     return resolve_dataset_block("cigarettes", block)
 

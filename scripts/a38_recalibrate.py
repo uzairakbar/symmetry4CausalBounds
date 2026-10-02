@@ -370,7 +370,7 @@ def leg_viii():
     print("(viii) config")
     check(
         "(viii) TOGGLE_KEYS",
-        {"recalibrate", "pad", "clipy", "n_jobs", "mean_match"} == TOGGLE_KEYS,
+        {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize"} == TOGGLE_KEYS,
         f"{sorted(TOGGLE_KEYS)}",
     )
     try:

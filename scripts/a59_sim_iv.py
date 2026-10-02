@@ -159,7 +159,7 @@ def recipe_block():
     with open(os.path.join(REPO, "recipes", RECIPE)) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
-    return {**defaults, **config["simulation"], "im-ci": 0}
+    return {**defaults, **config["simulation"]}
 
 
 # ------------------------------------------------------------------ legs

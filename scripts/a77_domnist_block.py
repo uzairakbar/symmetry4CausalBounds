@@ -9,7 +9,7 @@ net, no run; seconds on a CPU).
         [0, 1), a `split` without exactly A/B/C, a
         non-positive split size, `pop_seed == seed + 1`, an unknown augmentation amount,
         an instrument-mode spelling and the old `backend`/`unfrozen_layers`/`link`/
-        `solver` keys all raise; `im-ci` is forced to 0.
+        `solver` keys all raise; so does the retired `im-ci` key (unknown).
   (ii)  the shipped block of config.yaml (commented or not) and the recipe resolve, carry
         their method lists with PI+INV last (config.yaml the seven, the recipe
         RECIPE_METHODS with both intersections), carry the
@@ -113,8 +113,8 @@ def leg_i():
             missing = key in str(error)
         check(f"(i) {key} is required", missing)
     check("(i) the minimal block resolves", rejection() is None)
-    resolved = resolve_dataset_block("do_mnist", {**MINIMAL, "im-ci": 95})
-    check("(i) im-ci is forced to 0", resolved["im_ci"] == 0.0)
+    check("(i) the retired im-ci key raises (unknown)", rejection(**{"im-ci": 95}) is not None)
+    resolved = resolve_dataset_block("do_mnist", dict(MINIMAL))
     check("(i) n_samples defaults to 1.2M", resolved["n_samples"] == 1_200_000)
     for value in ("off", "on", True, False, "ON", " off "):
         block = resolve_dataset_block("do_mnist", {**MINIMAL, "inv_recenter": value})
@@ -141,12 +141,12 @@ def leg_i():
     }
     for name, block in others.items():
         try:
-            resolve_dataset_block(name, {**block, "methods": ["PI"], "im-ci": 0})
+            resolve_dataset_block(name, {**block, "methods": ["PI"]})
             baseline = True
         except ValueError:
             baseline = False
         try:
-            resolve_dataset_block(name, {**block, "methods": ["PI", "ERM+INV"], "im-ci": 0})
+            resolve_dataset_block(name, {**block, "methods": ["PI", "ERM+INV"]})
             rejected = False
         except ValueError as error:
             rejected = "ERM+INV" in str(error)
@@ -183,7 +183,7 @@ def leg_ii():
         ("config.yaml", shipped, 7, 0.04),
         ("recipe", block_r, len(RECIPE_METHODS), RECIPE_EPSILON),
     ):
-        resolved = resolve_dataset_block("do_mnist", {**block, "im-ci": 0})
+        resolved = resolve_dataset_block("do_mnist", {**block})
         check(f"(ii) {name} block resolves", resolved is not None)
         methods = resolved["methods"]
         listed = len(methods) == count and methods[-1] == "PI+INV"
@@ -235,7 +235,7 @@ def leg_ii():
     from smoke_do_mnist import BLOCK
 
     # resolved, so YAML's bare off (read as False) compares as the "off" it means
-    resolved = resolve_dataset_block("do_mnist", {**shipped, "im-ci": 0})
+    resolved = resolve_dataset_block("do_mnist", {**shipped})
     for key in ("gamma", "target_coverage", "erm_inv_tau", "inv_recenter", "epsilon", "net"):
         check(
             f"(ii) the smoke BLOCK mirrors the shipped {key}", BLOCK.get(key) == resolved.get(key), str(BLOCK.get(key))
@@ -285,7 +285,7 @@ def leg_iv():
     from src.experiments.do_mnist import DoMNISTOrchestrator, DoMNISTQuerySweep
     from src.sem.do_mnist import DoMNISTSEM
 
-    block = resolve_dataset_block("do_mnist", {**shipped_block(), "im-ci": 0})
+    block = resolve_dataset_block("do_mnist", {**shipped_block()})
     block.pop("experiment", None)
     orchestrator = DoMNISTOrchestrator(**block, hyperparameters=munchify({"epochs": 1}))
     check("(iv) the registry names the block's methods", tuple(orchestrator.methods) == tuple(block["methods"]))
@@ -377,7 +377,7 @@ def leg_v():
 
     from src.experiments.do_mnist import DoMNISTOrchestrator
 
-    block = resolve_dataset_block("do_mnist", {**shipped_block(), "im-ci": 0})
+    block = resolve_dataset_block("do_mnist", {**shipped_block()})
     block.pop("experiment", None)
     orchestrator = DoMNISTOrchestrator(**block, hyperparameters=munchify({"epochs": 1}))
     forwarded = []

@@ -22,7 +22,7 @@ load on a cluster that ships uv as a module). EXAMPLE, on Georgia Tech's PACE IC
 (one site; nothing below is a default):
 
     uv run python scripts/sbatch_sweeps.py --config recipes/nEfficiencyFig13.yaml \\
-        --out ~/scratch/runs/im-ci --partition coc-cpu --account oms-csp --qos coc-ice \\
+        --out ~/scratch/runs/<name> --partition coc-cpu --account oms-csp --qos coc-ice \\
         --env-setup "module load uv" --cpus-per-task 96 --time 02:00:00
 
     uv run python scripts/sbatch_sweeps.py --config PATH --out DIR [--dry-run] [...]
@@ -58,7 +58,7 @@ DIRECTIVES = {
 EPILOG = """\
 EXAMPLE (Georgia Tech PACE ICE, one site; nothing here is a default):
   uv run python scripts/sbatch_sweeps.py --config recipes/nEfficiencyFig13.yaml \\
-      --out ~/scratch/runs/im-ci --partition coc-cpu --account oms-csp --qos coc-ice \\
+      --out ~/scratch/runs/<name> --partition coc-cpu --account oms-csp --qos coc-ice \\
       --env-setup "module load uv" --cpus-per-task 96 --time 02:00:00
 """
 

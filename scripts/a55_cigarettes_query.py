@@ -122,7 +122,7 @@ def check(name, ok, detail=""):
 def shipped_block():
     with open(os.path.join(REPO, "config.yaml")) as handle:
         config = yaml.safe_load(handle) or {}
-    merged = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {}), "im-ci": 0}
+    merged = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
     return merged, config.get("cigarettes") or {}
 
 

@@ -67,7 +67,7 @@ def main(full: bool, methods: list[str] | None):
 
     defaults = config.pop("defaults", {}) or {}
     hyperparameters = config.pop("hyperparameters", None) or HYPERPARAMETERS
-    block = {**defaults, **BLOCK, **(config.get("do_mnist") or {}), **(FULL if full else SMALL), "im-ci": 0}
+    block = {**defaults, **BLOCK, **(config.get("do_mnist") or {}), **(FULL if full else SMALL)}
     if methods:
         block["methods"] = methods
 

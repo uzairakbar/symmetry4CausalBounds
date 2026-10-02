@@ -343,23 +343,6 @@ def percent_of(n_samples: int, percent: float) -> int:
 # Below the constraint's own floor a budget is left as is and reads INFEASIBLE; it is never
 # raised. Where that happens: PLAN v16 SS2.2 (`_floor_report` logs every such cell).
 EPS_TOL: float = 2**-5
-# Under the IM-CI (`im-ci` > 0) the sweeps pad by eps* alone and keep EPS_TOL on the
-# constraints only: the CI is the sampling allowance on the interval that the
-# tolerance used to add to the pad (a73, on config.yaml's six methods: coverage
-# unchanged in every cell without it), while an empty set has no CI to widen, so the
-# constraint's knife edge still needs it.
-
-# the Imbens-Manski CI of the `im-ci` toggle (SS3): B nonparametric bootstrap refits
-# of the base units per sweep cell, a unit being a row and, on the fold sweep, its m
-# augmented copies; the replicate spread gives s_L, s_U
-IM_CI_REPLICATES: int = 100
-# a log threshold and nothing else: a cell whose mean valid-replicate fraction is
-# under it is logged as a WARNING; with < 2 valid replicates a query keeps its raw bounds
-IM_CI_VALID_WARN: float = 0.5
-# seeds the bootstrap stream as [offset, seed, j, i]; distinct from CRN_OFFSET
-# (generic_runner.py), so a resample never coincides with a DA draw stream
-IM_CI_SEED_OFFSET: int = 20_000
-
 # the IV leakiness budget of a non-empty `iv:` (SS2.6). The observed instrument's
 # radius is s sqrt(gamma_z), a fraction of the residual sd. DECLARED on every
 # path, never oracle: listing instruments asserts they are near perfect. Read only
@@ -380,7 +363,7 @@ GAMMA_Z_DEFAULT: float = 0.0177
 # also the DA+ ball's under `recalibrate: true` (sigma~ sqrt(gamma*/rho) =
 # sigma sqrt(gamma*)), so the misstated invariance is measured against the
 # sensitivity budget it competes with. R, seed 42: sim 0.711, optical 0.635,
-# cigarettes 0.449. Scanned over 1, 2, 3, 4, 6, 8 R (2 exp, 5 steps, IM-CI 0):
+# cigarettes 0.449. Scanned over 1, 2, 3, 4, 6, 8 R (2 exp, 5 steps):
 #   - 1 is the only one with a sim dip (DA+PI+IV(T,Z) 0.57 at r = 0.71; from 2
 #     up that line is INFEASIBLE under r = 1, where the RMS-type T budget
 #     scaled by r falls under its floor), and the narrowest DA+ widths.
@@ -596,23 +579,12 @@ class MetricSpec:
     # ATE is the truth: zero width, unit coverage. Plotting it on those axes
     # only drags the limits out and squashes the range the methods live in.
     include_ate: bool = True
-    # the sweep figures read it off the raw point bounds (`<param>_results_raw.pkl`),
-    # not the IM-CI around them (`sweep_record_for`)
-    raw: bool = False
 
 
-# Under `im-ci` the sweep figures draw the sharpness metrics, width and worst error,
-# off the raw point bounds and the validity ones, coverage and approx_error, off the
-# IM-CI. The CI is raw +- C SE with the budgets fixed per cell, so a method whose
-# constraints are a superset of another's (DA+PI+IV(T) over DA) has nested raw
-# bounds but can draw a wider CI through its bootstrap SE alone; sharpness is a
-# property of the bounds, coverage of the CI. approx_error is the squared miss of
-# the truth beyond the interval, zero when covered: coverage's magnitude, so it
-# reads the same interval coverage does.
 METRIC_SPECS: dict[str, MetricSpec] = {
     "approx_error": MetricSpec("approximation_error", r"average $E^-_{{\bm{x}}}$", "asinh"),
-    "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh", raw=True),
-    "width": MetricSpec("interval_width", r"average interval width", include_ate=False, raw=True),
+    "worst_error": MetricSpec("worst_error", r"average $E^+_{{\bm{x}}}$", "asinh"),
+    "width": MetricSpec("interval_width", r"average interval width", include_ate=False),
     "coverage": MetricSpec("coverage", r"coverage rate", include_ate=False),
     # the three perf sweeps (src/experiments/perf.py); `wall_clock`'s key still names
     # the QueryEval field the sweeps record, and its numbers are baseline-solve
@@ -621,13 +593,6 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "seed_var": MetricSpec("seed_var", r"stability", "linear", perf_only=True),
     "feasibility": MetricSpec("feasibility", r"feasible rate (over backends)", "linear", perf_only=True),
 }
-
-
-def sweep_record_for(metric: str, results: dict, results_raw: dict | None = None) -> dict:
-    """The sweep record a sweep figure reads `metric` from: the raw bounds' record
-    for a `raw` metric when the IM-CI wrote one, else `results`, which without the
-    IM-CI is itself the raw record. Shared by `_run_sweeps` and `aggregate.sweep_grid`."""
-    return results_raw if results_raw is not None and METRIC_SPECS[metric].raw else results
 
 
 # =============================================================================
@@ -1274,9 +1239,8 @@ DATASET_KEYS: dict[str, set] = {
 }
 
 # `normalize` is a PLOTTING switch (SS10.1), not a solver one: nothing reads it
-# before `_run_sweeps`, and the pkls never move. `im-ci` is spelled with the hyphen
-# in the yaml and read as `im_ci` (`resolve_dataset_block`)
-TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "im-ci"}
+# before `_run_sweeps`, and the pkls never move
+TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {
@@ -1439,21 +1403,6 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"config.{name}.normalize must be a bool (divide sweep figures by the baseline); got {normalize!r}."
         )
-    # the CI level, in percent; 0 / false is the raw bounds. The yaml spells it with
-    # the hyphen and Python cannot take that as a keyword, so this is the one rename
-    # (`im_ci` in the yaml is unknown above). bool is an int subclass: `true` is no level
-    absent = "im-ci" not in block
-    im_ci = block.pop("im-ci", 0)
-    if absent and name != "do_mnist" and isinstance(experiment, dict) and experiment.get("sweep"):
-        logger.info(f"config.{name}: im-ci absent: the sweep reads the raw bounds.")
-    im_ci = 0 if im_ci is False else im_ci
-    if isinstance(im_ci, bool) or not isinstance(im_ci, int | float) or not (im_ci == 0 or 0 < im_ci < 100):
-        raise ValueError(f"config.{name}.im-ci must be 0/false or a percentage in (0, 100); got {im_ci!r}.")
-    # `defaults:` reaches every block, do-MNIST's too: its sweep never bootstraps
-    if name == "do_mnist" and im_ci:
-        logger.info(f"config.do_mnist: im-ci {im_ci:g} ignored; the do-MNIST sweep reads the raw bounds.")
-        im_ci = 0
-    block["im_ci"] = float(im_ci)
 
     # dataset-specific, unlike the two guards above: these keys exist on one block
     # only, and an unknown spec would otherwise run silently at the loader's default

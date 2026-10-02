@@ -5,7 +5,6 @@ Provides metrics, plotting, data operations, model fitting, and panels.
 
 from .constants import *
 from .data_operations import *
-from .im_ci import *
 from .metrics import *
 from .model_fitting import *
 from .panels import *
@@ -52,10 +51,6 @@ __all__ = [
     "project_onto_pc",
     # Model fitting
     "fit_model",
-    # Imbens-Manski CIs of the sweep bounds
-    "imbens_manski_critical",
-    "imbens_manski_bounds",
-    "bootstrap_bounds",
     # Panels
     "PanelBuilder",
 ]

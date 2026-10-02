@@ -74,8 +74,7 @@ beside X) and a recorded pool with a row-aligned `iv_pool`. Legs:
         not on the setup oracle's draw; PI+IV, PI+INV+IV and the intersection's
         baseline branch carry it as their Z radius, DA+PI+IV and the intersection's
         DA branch carry hypot(epsilon, leak) on T, Z and the joint (T, Z) block,
-        each with its own measured leak (no IM-CI here, so the pad's eps is
-        epsilon), and the intersection is feasible on
+        each with its own measured leak (the pad's eps is epsilon), and the intersection is feasible on
         every query under a real Z, both branches OK. Under an empty Z the term is
         exactly 0.0 (inert). Catches: `epsilon_iv_z` not forwarded or ignored
         (the baseline bound is then 0 and every query INFEASIBLE), the T-side term
@@ -388,7 +387,7 @@ def budgets(runner, data):
     with the measured leaks."""
     epsilon = runner.fit_epsilon(0, 0, data)
     leaks = runner.fit_iv_leaks(0, data)
-    radius = float(np.hypot(max(epsilon - runner.pad_tolerance, 0.0), leaks["leak_t"]))
+    radius = float(np.hypot(max(epsilon, 0.0), leaks["leak_t"]))
     return dict(
         gamma=runner.fit_gamma(0),
         epsilon=epsilon,
@@ -1009,7 +1008,7 @@ def leg_vii(seed):
     runner = sweep_runner("gamma", make_generator, GAMMA_GRID, seed=seed, strength=MISSPECIFIED_STRENGTH)
     data = runner.generate_data(0, GAMMA_GRID[0])
     oracle = runner.get_oracle(0)
-    # App. D (`iv_recalibrate`), gamma_z 0, no IM-CI: every DA block's radius is
+    # App. D (`iv_recalibrate`), gamma_z 0: every DA block's radius is
     # hypot(epsilon, its measured leak), a non-DA Z radius the leak itself; no tolerance
     eps, leaks = runner.fit_epsilon(0, 0, data), runner.fit_iv_leaks(0, data)
     want_z = base_sample_z(runner)
@@ -1099,7 +1098,7 @@ def leg_viii(seed):
     runner = sweep_runner("gamma", lambda: pooled, GAMMA_GRID, seed=seed, declared_iv=True, gamma_z=DECLARED_GAMMA_Z)
     data = runner.generate_data(0, GAMMA_GRID[0])
     check("(viii) fit_epsilon_iv_z is 0.0 on the declared path", runner.fit_epsilon_iv_z(0, data) == 0.0)
-    # App. D (`iv_recalibrate`): no IM-CI here, so the pad's eps is the fit epsilon; the
+    # App. D (`iv_recalibrate`): the pad's eps is the fit epsilon; the
     # declared gamma_z slack rides on every DA block, T's own leak on T and the joint one
     r_t, leak_t = float(runner.fit_epsilon(0, 0, data)), runner.fit_iv_leaks(0, data)["leak_t"]
     models = runner.build_models(0, 0, data)

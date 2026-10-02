@@ -14,10 +14,7 @@ the column count is odd, else centred), three y-labels without the "/ PI" suffix
 one legend inside the top panel of the middle column, pinned lower right, in the
 repo's legend order, the single intervals in its left column and PI+INV and the
 intersections (`SWEEP_LEGEND_RIGHT`) in its right. A missing pkl leaves its cells
-blank. Under `im-ci` the coverage row reads the IM-CI record
-(`<param>_results.pkl`) and the width and worst-error rows the raw point bounds'
-(`<param>_results_raw.pkl`), as the per-recipe figures do (`MetricSpec.raw`,
-`sweep_record_for`); without it the two records are one. Each line is the mean
+blank. Each line is the mean
 over experiments and its band the 95 %
 percentile-bootstrap CI of that mean, as on the per-recipe figures
 (`plotting.sweep_series`): `BAND_PERCENTILES` of `bootstrap`'s
@@ -70,7 +67,7 @@ import seaborn as sns
 from loguru import logger
 from matplotlib.lines import Line2D
 
-from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS, sweep_record_for
+from src.experiments.configs import ALL_METHODS, ANNOTATE_SWEEP_PLOT, METRIC_SPECS, PARAM_SPECS
 from src.experiments.do_mnist import domnist_seed_table
 from src.experiments.utils.constants import (
     CLAMP_YLIM,
@@ -533,32 +530,6 @@ def _columns_has_z(artifacts: str, datasets: list[str], hz: dict[str, bool] | No
     return hz if hz is not None else {d: column_has_z(artifacts, d) for d in datasets}
 
 
-# seconds a raw pkl may predate its `_results.pkl` and still count as the same run's
-# (`_run_sweeps` writes it just after; a copy that does not keep mtimes reorders them)
-RAW_MTIME_SLACK = 5.0
-
-
-def _raw_record(raw: str, results: str, record: dict) -> dict | None:
-    """The raw bounds' record beside `results` when it is the same run's, else None
-    (the figure then reads `record`, warned): a raw pkl older than `results`, or whose
-    methods or array shapes differ from `record`'s, is a stale `im-ci` run's."""
-    if not os.path.exists(raw):
-        return None
-    if os.path.getmtime(raw) + RAW_MTIME_SLACK < os.path.getmtime(results):
-        why = f"is older than {os.path.basename(results)}"
-    else:
-        results_raw = load(raw)
-        if set(results_raw) == set(record) and all(
-            np.shape(results_raw[name][key]) == np.shape(fields[key])
-            for name, fields in record.items()
-            for key in fields.keys() & results_raw[name].keys()
-        ):
-            return results_raw
-        why = f"does not match {os.path.basename(results)}'s methods or shapes"
-    logger.warning(f"aggregate: {raw} {why}; stale, so width and worst error read the results pkl.")
-    return None
-
-
 def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None = None, hz=None):
     """The 3 x [datasets] grid of one sweep parameter; saved under `out` when given.
     `hz` is {dataset: has_z}, read from each column's `labels.json` when None."""
@@ -582,10 +553,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 axis = load(axis_pkl) if os.path.exists(axis_pkl) else None
                 found = axis.get("xlabel", spec.xlabel) if axis else (spec.legacy_xlabel or spec.xlabel)
                 ticks = tuple(axis.get("xticks", ())) if axis else ()
-                # the raw bounds' record, written beside the CI's under `im-ci`
-                record = load(results)
-                results_raw = _raw_record(f"{folder}/{param}_results_raw.pkl", results, record)
-                loaded[dataset] = (x[order], order, record, found, ticks, results_raw)
+                loaded[dataset] = (x[order], order, load(results), found, ticks)
         return loaded[dataset]
 
     # one x-label per figure: the current spec's meaning wins when any column carries
@@ -605,9 +573,7 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
     def load_cell(dataset, metric):
         if column(dataset) is None:
             return None
-        x, order, results, found, ticks, results_raw = column(dataset)
-        # width and worst error off the raw bounds, coverage off the CI
-        record = sweep_record_for(metric, results, results_raw)
+        x, order, record, found, ticks = column(dataset)
         mspec = METRIC_SPECS[metric]
         include_ate = spec.include_ate and mspec.include_ate
         y = {
