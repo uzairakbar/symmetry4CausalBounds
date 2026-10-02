@@ -13,9 +13,17 @@ interval pinches to a point.
   (ii)  bias_sq/sigma_sq/gamma* are measured over span(phi, 1), the SAME class
         the solver searches, and differ from the span(phi) numbers;
   (iii) the PI+INV budget is at least the MEASURED eps*, so h_* is admitted,
-        each of the sweeps' and the query's in its own norm of W;
+        each of the sweeps' and the query's in its own norm of W: the query's
+        the RMS of |W| (pooled over `EPSILON_STAR_DRAWS` seeded draws) + EPS_TOL,
+        the sweeps' the shared q0.95 reading (`epsilon_star_q95`) + EPS_TOL; the
+        pad is that same epsilon in either setting (`pad_amount`), and |W|
+        exceeds the sweeps' pad on at most `W_QUANTILE`'s complement of the
+        pooled draws (printed per augmentation, the dev-pass diagnostic); on all
+        ten sweep devices the sweeps' budget admits h_* (it clears the RMS of W
+        of every one of the reading's draws);
   (iv)  that budget is reproducible -- it goes into published intervals;
-  (v)   h_* is inside the PI and PI+INV intervals at gamma* on real queries;
+  (v)   h_* is inside the PI and PI+INV intervals at gamma* on real queries,
+        and the DA+PI share is printed (the optical DA+ coverage flag);
   (vi)  importing the SEM does not reach for the network.
 
     python scripts/a30_optical_truth.py
@@ -40,7 +48,15 @@ from src.experiments.optical_device import (  # noqa: E402
     OpticalOrchestrator,
 )
 from src.methods.sensitivity_models import InvarianceConstrainedPartialR2, PartialR2  # noqa: E402
-from src.oracle import PAD_QUANTILE, epsilon_star, preserve_rng  # noqa: E402
+from src.oracle import (  # noqa: E402
+    W_DRAWS,
+    W_QUANTILE,
+    W_SEED,
+    _invariance_signal,
+    epsilon_star,
+    epsilon_star_q95,
+    preserve_rng,
+)
 from src.sem.optical_device import OpticalDeviceSEM as SEM  # noqa: E402
 
 # 1 SE of the level is std(y)/sqrt(n) ~ 0.039 here; the slice identity is exact
@@ -195,59 +211,94 @@ def shipped_augmentations():
     return candidates
 
 
+def pooled_w(sem, da, features):
+    """|W| concatenated over the shared reading's draws, and each draw's RMS."""
+    with preserve_rng():
+        draws = []
+        for draw in range(W_DRAWS):
+            np.random.seed(W_SEED + draw)
+            w, _, _ = _invariance_signal(sem, da, sem.X, features)
+            draws.append(w)
+    return np.abs(np.concatenate(draws)), [float(np.sqrt(np.mean(w**2))) for w in draws]
+
+
 def a30_budget():
     """(iii)+(iv) the budgets admit h_*, in the right norms, for every augmentation
     the repo can run -- and the CONFIGURED value is the one gated, not a default."""
     budgets = {}
+    sweep_q, query_q = OPTICAL_CONFIG.epsilon_quantile, OPTICAL_CONFIG.query_epsilon_quantile
     for augmentation in shipped_augmentations():
         orchestrator = OpticalOrchestrator(
             augmentation, augmentation_p=shipped_p(augmentation), methods=["PI"], n_jobs=1
         )
         eps_star = orchestrator.measured_epsilon_star()
-        eps_pad = orchestrator.measured_epsilon_pad()
 
-        # the RMS REFERENCE: `epsilon` at the RMS eps* (+ EPS_TOL), which no run
-        # budgets at (the sweeps take the q0.95, the query eps_tol) but (v) fits
-        # PI+INV at -- the tightest of the three, so it admitting h_* is the floor
+        # the RMS REFERENCE: `epsilon` at the RMS eps* (+ EPS_TOL), which (v) fits
+        # PI+INV at -- the tightest budget, so it admitting h_* is the floor
         configured = orchestrator._epsilon_budget(OPTICAL_CONFIG.epsilon)
         check(
             f"A30 (iii) [{augmentation}] the RMS reference PI+INV budget admits h_*",
             configured >= eps_star,
             f"budget {configured:.4f} vs eps* {eps_star:.4f}",
         )
-        configured_pad = orchestrator._pad_budget(OPTICAL_CONFIG.pad_epsilon)
-        check(
-            f"A30 (iii) [{augmentation}] the configured pad covers the pointwise defect",
-            configured_pad >= eps_pad,
-            f"pad {configured_pad:.4f} vs q{PAD_QUANTILE:g}|W| {eps_pad:.4f}",
-        )
-        # the two norms must not be conflated: padding by the L2 budget is the
-        # bug this separation exists to prevent, so assert they really differ
-        check(
-            f"A30 (iii) [{augmentation}] the pad budget is the POINTWISE one",
-            configured_pad > 1.5 * eps_star,
-            f"pad {configured_pad:.4f} vs L2 eps* {eps_star:.4f}",
-        )
         # the sweeps and the query each budget at eps* in their own norm of W
-        # (`epsilon_quantile`); the sweeps' q0.95 is the larger of the two
-        sweep_q, query_q = OPTICAL_CONFIG.epsilon_quantile, OPTICAL_CONFIG.query_epsilon_quantile
-        for name, configured_run, quantile, tol in (
-            ("sweeps'", OPTICAL_CONFIG.epsilon, sweep_q, EPS_TOL),
-            ("query's", OPTICAL_CONFIG.query_epsilon, query_q, OPTICAL_CONFIG.eps_tol),
+        # (`epsilon_quantile`), + EPS_TOL either way
+        for name, configured_run, quantile in (
+            ("sweeps'", OPTICAL_CONFIG.epsilon, sweep_q),
+            ("query's", OPTICAL_CONFIG.query_epsilon, query_q),
         ):
             star = orchestrator.measured_epsilon_star(quantile)
-            budget = orchestrator._epsilon_budget(configured_run, tol=tol, quantile=quantile)
+            budget = orchestrator._epsilon_budget(configured_run, quantile=quantile)
             check(
-                f"A30 (iii) [{augmentation}] the {name} PI+INV budget admits h_* (q {quantile})",
-                budget >= star,
+                f"A30 (iii) [{augmentation}] the {name} PI+INV budget is eps* + EPS_TOL and admits h_* (q {quantile})",
+                budget == star + EPS_TOL and budget >= star,
                 f"budget {budget:.4f} vs eps* {star:.4f}",
             )
+        sem, da, features = orchestrator._oracle_pieces(sweep_q)
+        reading = epsilon_star_q95(sem, da, X=sem.X, features=features)
+        check(
+            f"A30 (iii) [{augmentation}] the sweeps' eps* is the shared q0.95 reading",
+            orchestrator.measured_epsilon_star(sweep_q) == reading,
+            f"{reading:.6f}",
+        )
         check(
             f"A30 (iii) [{augmentation}] the sweeps' eps* exceeds the query's",
             orchestrator.measured_epsilon_star(sweep_q) > orchestrator.measured_epsilon_star(query_q),
             f"{orchestrator.measured_epsilon_star(sweep_q):.4f} vs {orchestrator.measured_epsilon_star(query_q):.4f}",
         )
-        budgets[augmentation] = (configured, configured_pad)
+        # the pad is the model's epsilon, in either setting
+        sweep_budget = orchestrator._epsilon_budget(OPTICAL_CONFIG.epsilon, quantile=sweep_q)
+        padded = PartialR2(gamma=1.0, epsilon=sweep_budget, pad=True)
+        check(f"A30 (iii) [{augmentation}] the pad is the epsilon", padded.pad_amount == sweep_budget)
+        # the dev-pass diagnostic: how often |W| exceeds the sweeps' pad, over the
+        # reading's own draws (below 1 - W_QUANTILE by the EPS_TOL margin)
+        w, _ = pooled_w(sem, da, features)
+        share = float(np.mean(w > sweep_budget))
+        check(
+            f"A30 (iii) [{augmentation}] |W| exceeds the sweeps' pad on <= {1 - W_QUANTILE:.0%} of the draws",
+            share <= 1 - W_QUANTILE + 1e-12,
+            f"{share:.4f} (pad {sweep_budget:.4f})",
+        )
+        budgets[augmentation] = (configured, sweep_budget)
+
+    # every sweep device: the sweeps' budget admits h_* on the shipped chain, i.e.
+    # it clears the RMS of W (the PI+INV constraint at h_*) of every draw it reads
+    block = optical_block()
+    chain = block.get("augmentation") or "all"
+    orchestrator = OpticalOrchestrator(chain, augmentation_p=shipped_p(chain), methods=["PI"], n_jobs=1)
+    devices = orchestrator.sweep_devices()
+    for device in devices:
+        sem = orchestrator._sem_factory(sweep_q, device=device)
+        da = orchestrator._da_factory()
+        features = PolynomialFeatures(sem.poly_degree, include_bias=False).fit(sem.X).transform
+        budget = epsilon_star_q95(sem, da, X=sem.X, features=features) + EPS_TOL
+        w, rms = pooled_w(sem, da, features)
+        check(
+            f"A30 (iii) device {device}: the sweeps' budget admits h_* on every draw",
+            budget >= max(rms),
+            f"budget {budget:.4f} vs max RMS(W) {max(rms):.4f}; |W| over the pad {np.mean(w > budget):.4f}",
+        )
+    check("A30 (iii) ten sweep devices", len(devices) == 10, f"{devices}")
 
     # (iv) reproducible across incoming RNG states -- it goes into published intervals
     values = []
@@ -258,7 +309,6 @@ def a30_budget():
             (
                 orchestrator.measured_epsilon_star(),
                 orchestrator.measured_epsilon_star(OPTICAL_CONFIG.epsilon_quantile),
-                orchestrator.measured_epsilon_pad(),
             )
         )
     # to a tolerance, not exactly: OpticalDeviceSEM centres its cached array in
@@ -295,7 +345,7 @@ def a30_membership(sem, poly, Phi, y, budgets):
     3.A's epsilon does its work and an unpadded run never reads it at all."""
     gamma_star = sem.bias_sq / sem.sigma_sq
     augmentation = shipped_augmentations()[1]
-    budget, pad_budget = budgets[augmentation]
+    budget, sweep_budget = budgets[augmentation]
     np.random.seed(0)
     GX_raw, _ = DA(augmentation)(sem.X)
     GX = poly.transform(GX_raw)
@@ -307,9 +357,8 @@ def a30_membership(sem, poly, Phi, y, budgets):
     for name, model in (
         ("PI", PartialR2(gamma=gamma_star, pad=False, **common)),
         ("PI+INV", InvarianceConstrainedPartialR2(gamma=gamma_star, epsilon=budget, pad=False, **common)),
-        # the DA branch padded exactly as config.yaml ships it -- the only leg in
-        # which `pad_epsilon` is read
-        ("DA+PI", PartialR2(gamma=gamma_star, pad=True, pad_epsilon=pad_budget, **common)),
+        # the DA branch padded as the sweeps pad it: by their epsilon
+        ("DA+PI", PartialR2(gamma=gamma_star, epsilon=sweep_budget, pad=True, **common)),
     ):
         design = GX if name == "DA+PI" else Phi
         fitted = model.fit(Phi, y, GX=GX) if name == "PI+INV" else model.fit(design, y)
@@ -324,8 +373,8 @@ def a30_membership(sem, poly, Phi, y, budgets):
         # Negative control: the SAME query with the intercept dropped from the
         # ground truth -- the pre-fix estimand -- must fall OUTSIDE. Without it the
         # check above is satisfied by any interval that happens to contain 0.
-        # UNPADDED methods only: Thm. 3.A's pad is +-0.69 here, four times the
-        # 0.333 defect, so a padded interval cannot discriminate and asserting it
+        # UNPADDED methods only: Thm. 3.A's pad is larger than the 0.333 defect
+        # here, so a padded interval cannot discriminate and asserting it
         # would only be asserting that the pad is small. The pinch witness is a
         # statement about Cor. 3's geometry, and the pad sits outside that.
         if not fitted.pad:

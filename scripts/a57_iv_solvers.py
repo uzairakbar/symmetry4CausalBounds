@@ -26,10 +26,10 @@ queries, serial solves. Legs:
   (iv)  the phase-b set [tax_s, y, cpi] at gamma 0.25, gamma_z 2^-8, raw: the
         beta_pn intervals of PI+IV, PI+INV+IV, DA+PI+IV (T and Z, so the joint
         row) and the intersection's two branches, RECORDED to 1e-6, every solve
-        OK (PI+IV and PI+INV+IV read the old r_Z = 0.0625 pins exactly: s = 1
-        on this panel). Catches: any change to the IV or INV arithmetic, a Z that is not the
-        FWL'd column, a branch handed the wrong block. Misses: a solver bump under
-        1e-6.
+        OK (PI+IV reads the old r_Z = 0.0625 pin exactly: s = 1 on this panel;
+        PI+INV+IV and the DA rows moved with EPS_TOL 2^-5 -> 2^-8). Catches: any
+        change to the IV or INV arithmetic, a Z that is not the FWL'd column, a
+        branch handed the wrong block. Misses: a solver bump under 1e-6.
   (v)   the rows on the fitted attributes: PI+IV carries ("z",) of width m, a T
         only DA fit ("t",) of width p, a T and Z DA fit the joint ("tz",) of
         width p + m (`IV_LAYOUT`); the intersection's baseline ("z",) and its DA
@@ -102,10 +102,10 @@ PHASE_B = ("tax_s", "y", "cpi")
 # s sqrt(gamma_z), the DA joint row at eps + sigma~ sqrt(gamma_z / rho))
 RECORDED = {
     "PI+IV": (0.358594946, 1.658163776),
-    "PI+INV+IV": (0.941185206, 1.658163802),
-    "DA+PI+IV": (0.725170893, 1.668974822),
+    "PI+INV+IV": (1.121935558, 1.658163805),
+    "DA+PI+IV": (1.088353738, 1.664074495),
     "PI&DA+PI+IV baseline": (0.358594946, 1.658163776),
-    "PI&DA+PI+IV DA branch": (0.725170893, 1.668974822),
+    "PI&DA+PI+IV DA branch": (1.088353738, 1.664074495),
 }
 INTERVAL_TOL = 1e-6
 SOLVER_TOL = 1e-6
@@ -338,7 +338,7 @@ def leg_vi(design, Z, GX, G):
     check("(vi) a fitted IV model logs its rows once over two solves", len(lines) == 1, f"{len(lines)} lines")
     message = lines[0]["message"] if lines else ""
     check("(vi) at INFO, not WARNING", bool(lines) and all(r["level"].name == "INFO" for r in lines), message)
-    printed = float(message.split("r_Z=")[1].split(" ")[0].rstrip(".")) if "r_Z=" in message else np.nan
+    printed = float(message.split("r_Z=")[1].split(" ")[0].rstrip(".:,")) if "r_Z=" in message else np.nan
     check(
         "(vi) the line names gamma_z and the Z row's radius",
         f"gamma_z={GAMMA_Z:g}" in message and abs(printed - logged.iv_radius("z")) < 1e-5,

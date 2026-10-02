@@ -195,6 +195,47 @@ class BaseExperimentRunner(ABC):
         """Run the experiment."""
         pass
 
+    def _iv_floor_report(self, name: str, model, GX, y, G, Z, gamma, n_obs=None) -> None:
+        """Log each DA IV row's radius against that row's own floor on the DA ball;
+        never change it. A radius under the floor makes every query INFEASIBLE, as
+        any empty constraint set does. The floor is taken at the mean row's
+        delta = 0 (`constraint_floor`), an upper reference for the padded program.
+        A model without a DA IV row (or an intersection's baseline) is skipped."""
+        for part in (model, getattr(model, "augmented", None)):
+            if part is None or not getattr(part, "_da_fit", False) or not getattr(part, "rows", ()):
+                continue
+            T = None if G is None else np.asarray(G, dtype=float).reshape(len(GX), -1)
+            Z = None if Z is None else np.asarray(Z, dtype=float).reshape(len(GX), -1)
+            blocks = {"t": T, "z": Z, "tz": None if T is None or Z is None else np.hstack([T, Z])}
+            for row in part.rows:
+                block = blocks[row]
+                if block is None or np.size(block) == 0:
+                    continue
+                radius = part.iv_radius(row, gamma)
+                try:
+                    floor = constraint_floor(
+                        GX,
+                        y,
+                        gamma,
+                        kind="iv",
+                        Z=np.asarray(block, dtype=float).reshape(len(GX), -1),
+                        mean_match=self.mean_match,
+                        rho=part.rho,
+                        recalibrate=self.recalibrate,
+                        n_obs=n_obs,
+                        absorbed_rate=self.absorbed_rate,
+                        gamma_n_alpha=self.gamma_n_alpha,
+                        unit_cap=self.unit_cap,
+                    )
+                except Exception as error:  # never let a diagnostic break a run
+                    logger.warning(f"{name} IV row {row}: constraint floor unavailable ({error}).")
+                    continue
+                if radius**2 < floor:
+                    logger.info(
+                        f"{name} IV row {row}: radius {radius:.6g} (r^2 {radius**2:.4g}) is BELOW the row's own "
+                        f"floor {floor:.4g}; left as is, every query will read INFEASIBLE, never raised."
+                    )
+
 
 # =============================================================================
 # QUERY SWEEP RUNNER (for visualization)
@@ -485,6 +526,9 @@ class ParamSweepRunner(BaseExperimentRunner):
                 da=self.get_da(experiment_index),
                 **data.fit_arrays,
             )
+            # the DA IV rows against their own floors, as `fit_epsilon` reports eps
+            n_obs = None if getattr(data, "X_base", None) is None else len(data.X_base)
+            self._iv_floor_report(name, model, data.GX, data.y, data.G, data.Z, budgets["gamma"], n_obs=n_obs)
             models[name] = model
         return models
 

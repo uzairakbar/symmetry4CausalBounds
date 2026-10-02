@@ -5,7 +5,7 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
 [X | Z] on both the observational and the interventional draw) and
 `src/experiments/simulation.py` (the `iv` key forwarded to the SEM factory). Legs:
 
-  (D)   the digest leg (scripts/digest_leg.py), as a56 to a58: one query panel and
+  (D)   the digest leg (scripts/digest_leg.py), as a56: one query panel and
         one gamma sweep step per dataset at the shipped configuration, no `iv` key,
         against the reference recorded on 14509db, no tolerance. Catches: any moved
         number on the shipped path, in particular an unconditional draw of `U` at

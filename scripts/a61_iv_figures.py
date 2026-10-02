@@ -35,8 +35,9 @@ toggle) and both recipes (`normalize: true`). Legs:
         1e-6 on the sub-grid gamma >= 0.190, on F1's own models (the query path)
         and at the SS4.1 convention (DA+PI+IV there from 0.215: its joint row
         binds between 0.205 and 0.21) (INV epsilon EPS_TOL, the declared leak 2^-8,
-        no pad, the seed-0 DA draw); the PI+INV+IV binding point at that convention is 0.176 to
-        within the 0.005 grid (MEASURED p8); the DA+PI+IV binding point and flat
+        no pad, the seed-0 DA draw); the PI+INV+IV binding point at that convention is
+        `BINDING_POINT` to within the 0.005 grid (p8's 0.176 at EPS_TOL 2^-5, re-measured
+        at 2^-8) and its flat value `CONVENTION_FLAT`; the DA+PI+IV binding point and flat
         value are RECORDED on both paths (the review, before the DA rows read
         gamma~_z(eps): between 0.170 and 0.175, 1.052921), never pinned. Catches: flatness
         pinned on the full grid (the spread at 0.150 is 3e-2), a lower bound that
@@ -152,20 +153,25 @@ FLAT_FROM = 0.190  # the flat-floored regime of SS4.1
 # (0.09375) binds between 0.205 and 0.21 (MEASURED 3b), later than the old pair did
 DA_FLAT_FROM = 0.215
 FLAT_TOL = 1e-6
-BINDING_POINT = 0.176  # p8, PI+INV+IV at the SS4.1 convention
+# PI+INV+IV at the SS4.1 convention: p8's 0.176 at EPS_TOL 2^-5; at 2^-8 (3b') its
+# INV row binds between 0.165 and 0.17
+BINDING_POINT = 0.1675
+# its flat lower bound there (p8's 0.941185 at EPS_TOL 2^-5)
+CONVENTION_FLAT = 1.121936
 TABLE_GAMMAS = (0.150, 0.250, 0.311, 0.37052, 0.450)  # p5's columns
 # p8 B1 lower bounds (6 decimals) on beta_pn, raw, at TABLE_GAMMAS' first three and
 # 0.371 / 0.450 (p8 ran 0.3710 where p5 ran 0.37052; the flat rows do not care)
 # re-measured on the n - K sigma: the raw ball is sqrt(n / (n - K)) = 1.0115x p8's
 P8_LOWER = {
     "PI+IV": (0.653324, 0.358595, 0.231929, None, 0.001140),
-    "PI+INV+IV": (0.967027, 0.941185, 0.941185, 0.941185, 0.941185),
+    # re-measured 3b' at EPS_TOL 2^-8 (p8's 0.967027, then 0.941185, at 2^-5)
+    "PI+INV+IV": (1.143305, 1.121936, 1.121936, 1.121936, 1.121936),
 }
 # p5 (4 decimals): PI interval and every upper bound, re-measured as P8_LOWER
 P5_PI = ((-0.1880, 1.4295), (-0.4234, 1.6648), (-0.5438, 1.7852), (-0.6504, 1.8918), (-0.7801, 2.0215))
 P5_UPPER = {
     "PI+IV": (1.3634, 1.6582, 1.7848, 1.8918, 2.0215),
-    "PI+INV+IV": (1.3608, 1.6582, 1.7848, 1.8918, 2.0215),
+    "PI+INV+IV": (1.3348, 1.6582, 1.7848, 1.8918, 2.0215),  # 1.3608 at EPS_TOL 2^-5
 }
 REVIEW_DA = {"flat": 1.052921, "binding": (0.170, 0.175), "floor": 0.1343, "width_at_0.25": 0.6004}
 BENCHMARK_PINS = {"lag_q": 0.3121, "tax_diff": 0.1502, "log_tax_s": 0.0680}
@@ -534,13 +540,13 @@ def leg_ii_iii():
         if name == "PI+INV+IV":
             inside = bracket[0] is not None and bracket[0] <= BINDING_POINT <= bracket[1] + 1e-9
             check(
-                "(iii) convention: the PI+INV+IV binding point is 0.176 within the 0.005 grid",
+                f"(iii) convention: the PI+INV+IV binding point is {BINDING_POINT} within the 0.005 grid",
                 inside,
                 f"bracket {bracket}",
             )
             check(
-                "(iii) convention: the PI+INV+IV flat value is 0.941185 to 1e-6",
-                abs(flat - 0.941185) < 1e-6,
+                f"(iii) convention: the PI+INV+IV flat value is {CONVENTION_FLAT} to 1e-6",
+                abs(flat - CONVENTION_FLAT) < 1e-6,
                 f"{flat:.6f}",
             )
         else:

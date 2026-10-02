@@ -11,10 +11,10 @@ rule. Legs:
         (`get_sweep_runner_cls("epsilon")`, the production path) carries the
         multiplier, pinned at 1.0, its per-SEM target is that multiple of the
         runner's own oracle sigma sqrt(gamma*), and the tuned DA's oracle eps*
-        lands on it: exactly on sim, whose oracle reads the tuner's draw; on
-        optical at the RECORDED pooled value, since the tuner solves on one draw
-        and the pooled oracle averages eight, and at 1 R the noise is weak enough
-        that the eight read 4% under the one (8% under the pixel permutation, 2% at the old 5.0). Catches: a
+        lands on it to 1e-6 on both: the tuner bisects the shared q0.95 reading
+        of |W| (`epsilon_star_q95`), the very reading the sweep oracle takes
+        (before it, optical's tuner solved on one draw and its pooled oracle read
+        4% under it). Catches: a
         multiplier that no longer flows, a target off the oracle, a target the
         tuner cannot reach. Misses: a sweep that never pads with it (a38/a29).
   (ii)  mechanism: the sim target IS the post-DA ball's radius in outcome units,
@@ -47,7 +47,7 @@ rule. Legs:
         gaussian-noise. Likewise the norm of W eps* is: every strategy runner's
         SEMs carry `OpticalDeviceConfig.epsilon_quantile` and budget at that eps*
         (+ EPS_TOL), the query runner's SEM `query_epsilon_quantile` (the RMS) and
-        its budget that eps* (+ eps_tol). Catches: a component set to None (no
+        its budget that eps* (+ EPS_TOL). Catches: a component set to None (no
         knob, so no dip either), a leak into any other sweep or the panel, a
         quantile that misses a sweep or leaks into the query. Misses: a chain in
         config.yaml that already names gaussian-noise, where the sweep and the
@@ -71,8 +71,9 @@ rule. Legs:
         (q0.95) and the query runner's SEM its `query_epsilon_quantile` (the
         RMS), on the sim orchestrator and on a cigarette one (the robustness
         recipe's plasmode block, one experiment); the cigarette budgets are that
-        measured eps* (+ EPS_TOL / + eps_tol), and the sim epsilon runner's tuned
-        oracle eps* is the q0.95 of its W, not the RMS. Catches: a quantile that
+        measured eps* (+ EPS_TOL, the one tolerance), and the sim epsilon runner's
+        tuned oracle eps* is the shared q0.95 reading of its W (`epsilon_star_q95`),
+        not the RMS. Catches: a quantile that
         misses a dataset or a sweep, or leaks into a query panel. Misses: do-MNIST,
         whose epsilon is declared.
   The old (iv), the pin on the inert optical 2^-1, is folded into (vii).
@@ -114,7 +115,7 @@ from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.oracle import _draw, _invariance_signal, preserve_rng  # noqa: E402
+from src.oracle import _draw, _invariance_signal, epsilon_star_q95, preserve_rng  # noqa: E402
 
 METHODS = ["PI", "DA+PI"]
 METHODS_OPTICAL = ["PI", "DA+PI", "DA+PI+IV"]
@@ -125,13 +126,10 @@ N_JOBS = 4
 COVERAGE_FLOOR = 0.7
 EPSILON_RADII = 1.0
 # RECORDED at seed 42: the confounding radius sigma sqrt(gamma*) of the sim and
-# optical robustness SEMs (the rule's targets), and the optical pooled oracle eps*
-# the tuner's one-draw 0.6345 reads as (re-recorded under the sweeps' chain
-# `rotation > hflip > vflip > translate` at p 0.25; 0.5816 under the pixel
-# permutation at p 0.5)
+# optical robustness SEMs (the rule's targets; optical under the sweeps' chain
+# `rotation > hflip > vflip > translate` at p 0.25)
 SIM_RADIUS = 0.7106
 OPTICAL_RADIUS = 0.6345
-OPTICAL_POOLED_EPS = 0.6110
 RADIUS_ATOL = 1e-3
 # RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 0.5 .. 2 in 5 steps): the
 # experiments each DA+ line is feasible on per step, and its one dip (coverage,
@@ -148,7 +146,6 @@ SIM_FEASIBLE = {
 SIM_DIP = (1.0, "", 0, 0)  # at coverage 1.0 the (line, r, count) are not compared
 RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 STD_RATIO_BOUND = 10.0
-POOLED_ORACLE_RTOL = 0.05
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
 TMPROOT = os.path.expanduser("~/scratch/tmp/a40")
 FAIL = []
@@ -261,17 +258,11 @@ def leg_i(runners):
         )
         achieved = oracle.epsilon_star
         strength = runner.das[0].strength
-        # the tuner solves on one frozen draw; a SEM with a fixed pool (optical)
-        # then reports the oracle pooled over ORACLE_POOL_DRAWS draws, which at 1 R
-        # reads 4% under the one draw, so the pooled value is RECORDED
-        pooled = getattr(sem, "pool", None) is not None
-        reference = OPTICAL_POOLED_EPS if pooled else target
-        tolerance = POOLED_ORACLE_RTOL if pooled else 1e-6
+        # the tuner and the sweep oracle read the same shared q0.95 of |W|
         check(
-            f"(i) {name}: tuned DA reaches the target" + (" (the RECORDED pooled read)" if pooled else ""),
-            strength is not None and strength > 0 and np.isclose(achieved, reference, rtol=tolerance),
-            f"eps* {achieved:.6g} vs {reference:.6g} (target {target:.6g}) "
-            f"at strength {strength!r:.6}, rtol {tolerance:g}",
+            f"(i) {name}: tuned DA reaches the target",
+            strength is not None and strength > 0 and np.isclose(achieved, target, rtol=1e-6),
+            f"eps* {achieved:.6g} vs target {target:.6g} at strength {strength!r:.6}",
         )
 
 
@@ -402,7 +393,7 @@ def leg_v(orch, opt_eps, chain):
         )
     got = getattr(query.sem, "epsilon_quantile", "unset")
     check(f"(v) query runner SEM carries query_epsilon_quantile {query_q}", got == query_q, f"{got}")
-    query_budget = orch.measured_epsilon_star(query_q) + OPTICAL_CONFIG.eps_tol
+    query_budget = orch.measured_epsilon_star(query_q) + EPS_TOL
     check(
         "(v) query runner budgets at that eps*",
         query.default_epsilon == query_budget,
@@ -478,7 +469,7 @@ def leg_viii(sim_orch, sim_eps, seed, **toggles):
         (
             "query runner",
             query_runner(cig_orch).default_epsilon,
-            cig_orch.measured_epsilon_star(None) + CIGARETTE_CONFIG.eps_tol,
+            cig_orch.measured_epsilon_star(None) + EPS_TOL,
         ),
     )
     for name, got, want in budgets:
@@ -487,13 +478,13 @@ def leg_viii(sim_orch, sim_eps, seed, **toggles):
     with preserve_rng():
         X, _, _ = _draw(sem, 2048)
         w = _invariance_signal(sem, da, X)[0]
-    rms, q95 = float(np.sqrt(np.mean(w**2))), float(np.quantile(np.abs(w), 0.95))
+    rms = float(np.sqrt(np.mean(w**2)))
+    reading = epsilon_star_q95(sem, da)
     achieved = sim_eps.get_oracle(0).epsilon_star
     check(
-        "(viii) simulation: the tuned eps* is the q0.95 of W, not its RMS",
-        # a fresh draw of the sim SEM, not the tuner's frozen one: to a few percent
-        np.isclose(achieved, q95, rtol=POOLED_ORACLE_RTOL) and not np.isclose(achieved, rms, rtol=0.2),
-        f"oracle {achieved:.4f}, q0.95 {q95:.4f}, RMS {rms:.4f}",
+        "(viii) simulation: the tuned eps* is the shared q0.95 reading of W, not its RMS",
+        achieved == reading and not np.isclose(achieved, rms, rtol=0.2),
+        f"oracle {achieved:.4f}, the q0.95 reading {reading:.4f}, RMS {rms:.4f}",
     )
 
 

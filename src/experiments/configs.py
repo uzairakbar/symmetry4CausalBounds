@@ -66,17 +66,16 @@ class SimulationConfig:
     # query sweep: a RAW squared radius (the PI radius is sqrt(gamma) = 1.0); the
     # query runner divides it by sigma-hat^2 of the draw (`raw_gamma`)
     gamma: float = 1.0
-    epsilon: float = 2**-8
-    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
-    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
-    # the RMS. Here eps* is the oracle's alone (`epsilon` above is declared), so
-    # it moves every sweep budget and the robustness sweep's tuning target, and
-    # every DA IV row's gamma~_z(eps).
+    # None = measured, on every dataset: the query panel's eps* (the RMS of |W| on
+    # its draw) + EPS_TOL, the sweeps' the shared q0.95 reading + EPS_TOL
+    epsilon: float | None = None
+    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
+    # q0.95, as on every dataset; the query keeps the RMS. It moves every sweep
+    # budget, the pad, the robustness sweep's tuning target and every DA IV row's
+    # gamma~_z(eps).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
-    # query sweep only; the sweeps use EPS_TOL (2**-5), which is
-    # the more favourable setting there
-    eps_tol: float = 2**-8
     # the observed instrument's declared IV leak budget (the radius s sqrt(gamma_z));
     # not to be confused with `CigaretteConfig.gamma_z`, the cigarette SEM's sliver
     # guard, not a radius. Read only under `iv > 0`
@@ -94,7 +93,6 @@ class SimulationConfig:
 #     gamma: float = 2**-2
 #     epsilon: float = 2**-2
 #     query_epsilon: float = 2**-1.8
-#     pad_epsilon: float | None = 0.0
 #     epsilon_true: float | None = None
 #     test_fraction: float = 0.1
 #     dataset_index: int = 8
@@ -128,25 +126,14 @@ class OpticalDeviceConfig:
     # dependence on which augmentation someone uncomments. A float pins it instead.
     epsilon: float | None = None
     query_epsilon: float | None = None
-    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
-    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
-    # the RMS. Split as `epsilon` / `query_epsilon` are. It is every DA IV row's
-    # eps too (gamma~_z(eps)).
+    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
+    # q0.95, as on every dataset; the query keeps the RMS. Split as `epsilon` /
+    # `query_epsilon` are. The +-eps pad is the same eps in either setting, and it
+    # is every DA IV row's eps too (gamma~_z(eps)).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
-    # Thm. 3.A's epsilon, a POINTWISE budget on the same defect (SS2.4 states it as
-    # a sup; SS3.1's `epsilon` above is an RMS budget on it, a q0.95 one on the
-    # sweeps). None = measured. These are NOT interchangeable: under `rotation >
-    # gaussian-noise` the query's RMS budget is 0.212 and the pointwise one 0.691
-    # (the q0.99; the raw sup is 1.23), so padding by the former understates Thm.
-    # 3.A's own requirement ~3x. The sweeps' q0.95 budget is closer but still
-    # short: ~0.55 against a pad of 0.868 under the shipped chain (mean_match
-    # true), ~1.5x. See `epsilon_pad_star`.
-    pad_epsilon: float | None = None
     epsilon_true: float | None = None
-    # query sweep only; the sweeps use EPS_TOL (2**-5), which is
-    # the more favourable setting there
-    eps_tol: float = 2**-8
     test_fraction: float = 0.1
     dataset_index: int = 8
     # the device of each sweep experiment: experiment j runs on the j-th entry.
@@ -254,20 +241,16 @@ class CigaretteConfig:
     # 0 by construction and the budget is pure knife-edge tolerance.
     epsilon: float | None = None
     query_epsilon: float | None = None
-    # which norm of W eps* is: this quantile of |W| (`oracle.epsilon_star`), None
-    # = its RMS. The SWEEPS take the q0.95, as on every dataset; the query keeps
-    # the RMS. Either is 0 on the panel, where W is; the robustness sweep's
-    # tuned DA is where the choice shows. It is every DA IV row's eps too
-    # (gamma~_z(eps)).
+    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
+    # q0.95, as on every dataset; the query keeps the RMS. Either is 0 on the
+    # panel, where W is; the robustness sweep's tuned DA is where the choice shows.
+    # The DA+ intervals are padded by `epsilon` (Thm. 3.A); with eps* = 0 that is
+    # 2 x EPS_TOL = 2^-7 of width, and there is no defect for it to repair. It is
+    # every DA IV row's eps too (gamma~_z(eps)).
     epsilon_quantile: float | None = 0.95
     query_epsilon_quantile: float | None = None
-    # None pads DA+ intervals by `epsilon` (Thm. 3.A); with eps* = 0 that is
-    # 2 x EPS_TOL of width, about 3% of the PI interval, and there is no defect
-    # for it to repair.
-    pad_epsilon: float | None = None
     epsilon_true: float | None = None
-    # query sweep only; the sweeps use EPS_TOL (2**-5)
-    eps_tol: float = 2**-8
     test_fraction: float = 0.1
     # the leaky-IV misspecification guard (SS5): FIXED, never swept. The sliver is
     # empty at every spec but t3 with the own-tax anchor, which is what makes its
@@ -343,10 +326,12 @@ def percent_of(n_samples: int, percent: float) -> int:
 # SWEEP PARAMETER / METRIC SPECS
 # =============================================================================
 
-# keeps auto-set epsilon off the PI+INV feasibility knife edge (eps=0 forces h~0)
-# Below the constraint's own floor a budget is left as is and reads INFEASIBLE; it is never
-# raised. Where that happens: PLAN v16 SS2.2 (`_floor_report` logs every such cell).
-EPS_TOL: float = 2**-5
+# the one invariance tolerance, on every dataset, sweep and query: eps = measured
+# eps* + EPS_TOL, which keeps the auto-set epsilon off the PI+INV feasibility knife
+# edge (eps = 0 forces h ~ 0) and the pad (= eps) off zero. Below the constraint's
+# own floor a budget is left as is and reads INFEASIBLE; it is never raised
+# (`_floor_report` logs every such cell).
+EPS_TOL: float = 2**-8
 # the IV leakiness budget of a non-empty `iv:` (SS2.6). The observed instrument's
 # radius is s sqrt(gamma_z), a fraction of the residual sd. DECLARED on every
 # path, never oracle: listing instruments asserts they are near perfect. Read only
@@ -965,7 +950,6 @@ class MethodRegistry:
         epsilon: float,
         recalibrate: bool = True,
         pad: bool = False,
-        pad_epsilon: float | None = None,
         clipy: bool = True,
         epsilon_iv: float | None = None,
         gamma_z: float = 0.0,
@@ -998,12 +982,10 @@ class MethodRegistry:
             method_names: List of method names to build
             gamma: Confounding budget gamma (Asm. 2), in the paper's sigma-scaled
                 units: every ball has the radius sigma-hat sqrt(gamma)
-            epsilon: Invariance error epsilon = ||W|| over the full
-                augmentation; the §3.1 CONSTRAINT budget, oracle `epsilon_star`
-            pad_epsilon: Thm. 3.A's epsilon, a POINTWISE budget on the same W
-                (§2.4 states it as a sup). None pads by `epsilon` instead, which
-                is an L2 quantity standing in for a sup -- see `BoundedSA`.
-                Oracle `epsilon_pad_star`.
+            epsilon: Invariance error epsilon of W over the full augmentation:
+                the §3.1 CONSTRAINT budget and Thm. 3.A's +-eps pad, the
+                measured eps* (the sweeps' q0.95 reading, the query's RMS) +
+                EPS_TOL
             recalibrate: solve the DA+ balls at the recalibrated budget gamma/rho
                 (SS4.2); False keeps the inherited gamma. A float in [0, 1]
                 interpolates linearly (the recalibrate sweep).
@@ -1076,7 +1058,6 @@ class MethodRegistry:
 
         common = dict(
             epsilon=epsilon,
-            pad_epsilon=pad_epsilon,
             recalibrate=recalibrate,
             clipy=clipy,
             n_jobs=n_jobs,

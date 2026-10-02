@@ -94,7 +94,6 @@ class BoundedSA(SA):
         gamma=None,
         epsilon=0.0,
         pad=False,
-        pad_epsilon=None,
         recalibrate=True,
         clipy=True,
         n_jobs=1,
@@ -109,17 +108,6 @@ class BoundedSA(SA):
 
         self.epsilon = epsilon
         self.pad = pad
-        # Thm. 3.A's epsilon and the PI+INV constraint's epsilon are DIFFERENT
-        # NORMS of the same defect W = h_*(X) - h_*(X~). SS3.1 constrains
-        # E_inv(h) = E|W|^2 <= eps^2 (an L2 budget); SS2.4 defines eps-approximate
-        # T-invariance as sup_{x,tau} |W| <= eps, and Thm. 3.A's proof uses that
-        # pointwise bound (|eta| <= eps a.s.). An L2 bound implies no pointwise
-        # one, so padding by the constraint's epsilon is NOT what Thm. 3.A asks
-        # for -- measured on the optical device, RMS 0.210 against a sup of 1.230.
-        # `pad_epsilon` carries the padding budget separately. None keeps the old
-        # behaviour (pad by `epsilon`); pass the sup-side budget to get the
-        # guarantee the theorem actually states.
-        self.pad_epsilon = pad_epsilon
         # SS4.2: the ball a DA+ method solves is gamma~ = gamma ((1 - t) + t / rho)
         # with t = `recalibrate` in [0, 1] and rho the information-loss factor
         # sigma~^2/sigma^2 of the DA it was fit on. Baselines keep rho = 1, so
@@ -205,7 +193,7 @@ class BoundedSA(SA):
     def _predict(self, X, gamma=None, epsilon=None, recalibrate=None, **kwargs):
         gamma = self.gamma if gamma is None else gamma
         if epsilon is not None:
-            self.epsilon = epsilon  # the CONSTRAINT RHS; `pad_epsilon` is separate
+            self.epsilon = epsilon  # the CONSTRAINT RHS and the pad alike
         if recalibrate is not None:
             self.recalibrate = recalibrate  # swept at predict time, like gamma
         self.raw_bounds_ = self._raw_bounds(X, gamma)
@@ -259,9 +247,11 @@ class BoundedSA(SA):
 
     @property
     def pad_amount(self) -> float:
-        """Thm. 3.A's epsilon: `pad_epsilon` when supplied, else the constraint's
-        own (L2) epsilon -- see `__init__` for why those are not the same thing."""
-        return float(self.epsilon if self.pad_epsilon is None else self.pad_epsilon)
+        """Thm. 3.A's epsilon, the pad: the model's own epsilon. On the sweeps that
+        is the q0.95 reading of |W| + EPS_TOL, which bounds |W| pointwise with
+        probability 0.95 (SS2.4 states the bound as a sup, infinite under a
+        Gaussian DA); on the query panels the RMS + EPS_TOL."""
+        return float(self.epsilon)
 
     def _finalize(self, bounds):
         """eps-padding (Thm. 3.A) then clipping to observable y limits."""
@@ -295,7 +285,6 @@ class PartialR2(BoundedSA):
         gamma=None,
         epsilon=0.0,
         pad=False,
-        pad_epsilon=None,
         recalibrate=True,
         clipy=True,
         n_jobs=1,
@@ -334,7 +323,6 @@ class PartialR2(BoundedSA):
             gamma=gamma,
             epsilon=epsilon,
             pad=pad,
-            pad_epsilon=pad_epsilon,
             recalibrate=recalibrate,
             clipy=clipy,
             n_jobs=n_jobs,
@@ -915,7 +903,7 @@ class InstrumentalVariablePartialR2(PartialR2):
             logger.info(
                 f"IV: gamma_z={self.gamma_z:g}, {'DA' if self._da_fit else 'non-DA'} leak {self.iv_leak():.6g}, "
                 + ", ".join(f"r_{row.upper()}={radius:.6g}" for row, radius in radii.items())
-                + ". One row per instrument block, never pooled."
+                + ": the IV_LAYOUT rows."
             )
 
 

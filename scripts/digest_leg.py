@@ -4,8 +4,9 @@ One query panel and one gamma sweep step per dataset (simulation, optical_device
 cigarettes) at the SHIPPED configuration of 14509db, no `iv` key anywhere,
 1 experiment, a reduced `sweep_samples` and a 2-point gamma grid. Every numeric
 artifact the run writes, the pkl and tex files under artifacts/<dataset>/{query,sweep},
-is hashed (`wall_clock` excluded) and compared against a reference JSON recorded on
-the parent commit with this same file. No tolerance: any difference is a FAIL, and
+is hashed (`wall_clock` excluded) and compared against a reference JSON recorded
+with this same file on the tree that last moved the numbers (`DEFAULT_REFERENCE`,
+re-recorded by every change that moves a digest). No tolerance: any difference is a FAIL, and
 so is an artifact that appears or disappears.
 
 The blocks are built HERE rather than read from config.yaml (they match the file at
@@ -45,7 +46,7 @@ import numpy as np
 from threadpoolctl import threadpool_limits
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_REFERENCE = os.path.expanduser("~/scratch/runs/gamma_n/digests/reference_3b.json")
+DEFAULT_REFERENCE = os.path.expanduser("~/scratch/runs/gamma_n/digests/reference_3bp.json")
 
 DATASETS = ("simulation", "optical_device", "cigarettes")
 QUERY_SAMPLES = 8  # even, so the cigarette query grids never touch the origin
@@ -231,7 +232,7 @@ def compare(repo: str = REPO, reference: str = DEFAULT_REFERENCE, datasets=DATAS
     """Rerun leg (D) in `repo` and compare with the recorded JSON. Returns one
     (label, ok, detail) per artifact on either side, for the gate to print."""
     if not os.path.isfile(reference):
-        return [("leg (D) reference", False, f"{reference} missing; record it on the parent with --record")]
+        return [("leg (D) reference", False, f"{reference} missing; record it with --record")]
     with open(reference) as handle:
         recorded = json.load(handle)
     meta = recorded["meta"]

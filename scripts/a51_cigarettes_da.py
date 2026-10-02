@@ -13,7 +13,9 @@ translation direction is v-hat itself. Legs:
         zero to machine precision, so nothing on this path is padded. Catches: a
         non-zero default strength, a direction that leaks out of ker(h_*).
   (iii) the knob: eps* is monotone and LINEAR in `strength`, and the repo's own
-        bisection (`recalibrated_da_epsilon`) lands on a target of 0.5 to 1e-6.
+        bisection (`recalibrated_da_epsilon`) lands on a target of 0.5 to 1e-6, in
+        the sweeps' norm: the SEM routed to the shared q0.95 reading of |W|
+        (`epsilon_quantile`, `epsilon_star_q95`), which the landed value re-reads.
         This is what the epsilon sweep rides. Catches: a clamped or saturating
         knob, which turns the robustness axis flat.
   (iv)  Prop. 2: over a 2^-3..2^3 amplitude grid tr(S)/k falls monotonically to the
@@ -43,7 +45,7 @@ sys.path.insert(0, REPO)
 
 from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.utils.metrics import rho_hat, trace_S_over_k  # noqa: E402
-from src.oracle import epsilon_star, recalibrated_da_epsilon  # noqa: E402
+from src.oracle import epsilon_star, epsilon_star_q95, recalibrated_da_epsilon  # noqa: E402
 from src.sem.cigarettes import V, build_design, load_panel, restricted_fit  # noqa: E402
 
 SPEC = "t3"
@@ -118,15 +120,20 @@ def leg_iii(sem, da, X):
     spread = float(np.max(slope) / np.min(slope) - 1.0)
     check("(iii) linear to 1% over [0, 2]", spread < 0.01, f"slope spread {spread:.2e}")
     da.strength = 0.0
+    # the robustness sweep's SEMs carry the sweeps' quantile, so the tuner bisects
+    # the shared q0.95 reading
+    quantile, sem.epsilon_quantile = getattr(sem, "epsilon_quantile", None), 0.95
     try:
         landed = recalibrated_da_epsilon(sem, da, EPSILON_TARGET, X=X)
     except ValueError as error:
         landed = float("nan")
         print(f"      the bisection refused the target: {error}")
+    reread = epsilon_star_q95(sem, da, X=X)
+    sem.epsilon_quantile = quantile
     check(
-        f"(iii) bisection reaches eps* = {EPSILON_TARGET}",
-        abs(landed - EPSILON_TARGET) < 1e-6,
-        f"{landed:.8f} at strength {da.strength:.6g}",
+        f"(iii) bisection reaches the shared q0.95 reading eps* = {EPSILON_TARGET}",
+        abs(landed - EPSILON_TARGET) < 1e-6 and reread == landed,
+        f"{landed:.8f} (re-read {reread:.8f}) at strength {da.strength:.6g}",
     )
     da.strength = 0.0
 

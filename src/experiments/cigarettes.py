@@ -25,7 +25,7 @@ from src.experiments.utils.constants import COEFFICIENT_LABELS, SUBDIR_QUERY, iv
 from src.experiments.utils.constants import label as method_label
 from src.experiments.utils.metrics import sigma_sq_hat
 from src.methods.sensitivity_models import constraint_floor
-from src.oracle import epsilon_star, preserve_rng
+from src.oracle import epsilon_star, epsilon_star_q95, preserve_rng
 from src.sem.cigarettes import (
     OUTCOME,
     SPECS,
@@ -442,15 +442,19 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         return self._pieces
 
     def measured_epsilon_star(self, epsilon_quantile: float | None = None) -> float:
-        """eps* for THIS (SEM, DA): the defect's RMS on the panel, or its
-        `epsilon_quantile` of |W|. Cached per quantile."""
+        """eps* for THIS (SEM, DA) on the panel: the defect's RMS (the query
+        panel), or with an `epsilon_quantile` the sweeps' shared q0.95 reading
+        (`oracle.epsilon_star_q95`). Cached per quantile."""
         if epsilon_quantile not in self._epsilon_star:
             sem, da, features = self._oracle_pieces()
             sem.epsilon_quantile = epsilon_quantile
-            with preserve_rng():
-                np.random.seed(EPSILON_STAR_SEED)
-                self._epsilon_star[epsilon_quantile] = float(epsilon_star(sem, da, X=sem.X, features=features))
-            norm = "RMS" if epsilon_quantile is None else f"q{epsilon_quantile:g}"
+            if epsilon_quantile is not None:
+                self._epsilon_star[epsilon_quantile] = epsilon_star_q95(sem, da, X=sem.X, features=features)
+            else:
+                with preserve_rng():
+                    np.random.seed(EPSILON_STAR_SEED)
+                    self._epsilon_star[epsilon_quantile] = float(epsilon_star(sem, da, X=sem.X, features=features))
+            norm = "RMS" if epsilon_quantile is None else "q0.95 reading"
             logger.info(f"Cigarette eps* ({norm} of |W|): {self._epsilon_star[epsilon_quantile]:.3e}")
         return self._epsilon_star[epsilon_quantile]
 
@@ -489,15 +493,10 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     poly_transform=None,
                     method_factory=outer.build_methods,
                     default_gamma=QUERY_GAMMA[outer.spec],
-                    default_epsilon=outer._epsilon_budget(
-                        CIGARETTE_CONFIG.query_epsilon, tol=CIGARETTE_CONFIG.eps_tol, quantile=quantile
-                    ),
-                    eps_tol=CIGARETTE_CONFIG.eps_tol,
+                    default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.query_epsilon, quantile=quantile),
                     # the panel is sigma-normalised, so gamma is already in the
                     # paper's units and sigma-hat^2 is 1: nothing to rescale
                     raw_gamma=False,
-                    # a configured set declares its budget (SS2.6): the runner
-                    # hands the solver r_T alone and never raises it
                     **kwargs,
                 )
 

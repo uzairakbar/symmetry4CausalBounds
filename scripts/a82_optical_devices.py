@@ -38,7 +38,8 @@ one-experiment runner stays on `dataset_index`. Legs:
         `random_state = seed + j`.
   (v)   setup on all ten devices: the gamma runner's oracles have finite gamma*;
         every strategy runner's SEMs carry `epsilon_quantile` (q0.95); the
-        epsilon runner's DA, retuned per device, lands its pooled oracle eps* on
+        epsilon runner's DA, retuned per device in the shared q0.95 reading of
+        |W| (`epsilon_star_q95`, which its oracle reads too), lands its oracle eps* on
         the rule's target ROBUSTNESS_EPSILON_RADII x sigma sqrt(gamma*) of that
         device within POOLED_ORACLE_RTOL wherever its zero-strength eps* is below
         the target, and is clamped at zero strength where it is not (a NOTE); the
@@ -73,7 +74,7 @@ from src.experiments.generic_runner import STRATEGIES, GenericParamSweep  # noqa
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
-from src.oracle import STRENGTH_BRACKET, epsilon_star, gamma_star  # noqa: E402
+from src.oracle import STRENGTH_BRACKET, epsilon_star_q95, gamma_star  # noqa: E402
 
 SEED = 42
 N_LOADED = 12
@@ -306,7 +307,7 @@ def leg_v():
         target = ROBUSTNESS_EPSILON_RADII * float(np.sqrt(esem.sigma_sq * gamma_star(esem)))
         da, strength = eps.das[j], eps.das[j].strength
         da.strength = STRENGTH_BRACKET[0]
-        floor = epsilon_star(esem, da, X=esem.pool[0], features=eps._features_at(j))
+        floor = epsilon_star_q95(esem, da, X=esem.pool[0], features=eps._features_at(j))
         da.strength = strength
         finite.append(bool(np.isfinite(oracle.gamma_star)))
         if floor >= target:

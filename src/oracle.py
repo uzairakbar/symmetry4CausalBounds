@@ -18,12 +18,13 @@ from src.methods.regression import LeastSquaresClosedForm as OLS
 from src.methods.regression import residual_variance
 
 CALIBRATION_SAMPLES: int = 2048
-# `epsilon_pad_star`: how many augmentation realisations to pool, which quantile of
-# |W| to take, and the stream they are drawn from. A quantile rather than the sup
-# because a DA with a Gaussian component has no finite sup; see the function.
-PAD_DRAWS: int = 20
-PAD_QUANTILE: float = 0.99
-PAD_SEED: int = 0
+# `epsilon_star_q95`, the sweeps' one reading of |W|: how many augmentation
+# realisations to concatenate, the stream they are drawn from (draw d at
+# W_SEED + d) and the quantile taken. A quantile rather than the sup because a DA
+# with a Gaussian component has no finite sup; see the function.
+W_DRAWS: int = 8
+W_SEED: int = 0
+W_QUANTILE: float = 0.95
 STRENGTH_BRACKET: tuple = (0.0, 1e3)
 STRENGTH_TOLERANCE: float = 1e-9
 STRENGTH_DOUBLINGS: int = 20  # bracket expansions before declaring the target unreachable
@@ -168,8 +169,8 @@ def _invariance_signal(
     (w, Phi, G) for ONE augmentation draw, where w = h_*(X) - h_*(X~) is the
     paper's W (C.3) over the FULL augmentation.
 
-    Sole definition of W: every invariance-error reading (`epsilon_star`, the
-    pad's quantile, the DA's tuning) builds on it, so none can drift apart.
+    Sole definition of W: every invariance-error reading (`epsilon_star`,
+    `epsilon_star_q95`, the DA's tuning) builds on it, so none can drift apart.
     """
     features = features or _identity
 
@@ -202,61 +203,52 @@ def epsilon_star(
         (Phi(GX) - Phi(X)) h_* = -w. So eps* + EPS_TOL admits h_* by construction.
     """
     w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
-    # a SEM may carry `epsilon_quantile`: eps* is then that quantile of |W| rather
-    # than its RMS, and every budget built on eps* follows it
-    quantile = getattr(sem, "epsilon_quantile", None)
-    if quantile is not None:
-        return float(np.quantile(np.abs(w), quantile))
     return float(np.sqrt(np.mean(w**2)))
 
 
-def epsilon_pad_star(
+def epsilon_star_q95(
     sem,
     da,
     X: NDArray | None = None,
     features: Callable | None = None,
     n_samples: int = CALIBRATION_SAMPLES,
-    draws: int = PAD_DRAWS,
-    quantile: float = PAD_QUANTILE,
-    seed: int | None = PAD_SEED,
     **augment_kwargs,
 ) -> float:
-    """Thm. 3.A's epsilon: a POINTWISE budget on W, not `epsilon_star`'s RMS.
+    """The sweeps' eps*: the W_QUANTILE (0.95) of |W| over W_DRAWS concatenated
+    augmentation realisations, draw d seeded W_SEED + d, under `preserve_rng`.
 
-    SS2.4 defines eps-approximate T-invariance by sup_{x,tau} |h_*(x) - h_*(tau x)|
-    <= eps, and Thm. 3.A's proof carries that bound pointwise (|eta| <= eps a.s.).
-    `epsilon_star` is the L2 norm of the same W: right for the SS3.1 constraint
-    E_inv(h) <= eps^2, and no bound at all on the sup (measured on the optical
-    device: RMS 0.210 against a sup of 1.230 over the same draws).
-
-    Returns the `quantile` of |W| pooled over `draws` augmentation realisations.
-    A quantile and not the sup, because under a DA with a Gaussian component the
-    sup is INFINITE -- X~ = X + s std(X) G is unbounded, so no finite eps makes
-    h_* eps-approximately T-invariant in the SS2.4 sense, and Thm. 3.A's a.s.
-    conclusion is unreachable. What this budget buys is the same statement with
-    "a.s." weakened to "with probability >= `quantile` per query". For a purely
-    deterministic (permutation) DA the orbit is finite and `quantile=1.0` is the
-    exact sup, so nothing is given up there.
+    One reading of the defect W = h_*(X) - h_*(X~) for everything a sweep reads
+    off it: the INV budget eps (+ EPS_TOL), the +-eps pad (= eps), the omega
+    knob's per-step eps*, the robustness DA's tuning target and the sweeps'
+    fallback budgets. SS2.4 states T-invariance as sup |W| <= eps, and Thm. 3.A's
+    pad carries that bound pointwise; a quantile and not the sup because under a
+    DA with a Gaussian component the sup is infinite, so the pad holds with
+    probability >= W_QUANTILE per query. The query panels keep the RMS
+    (`epsilon_star`).
 
     The draws are advanced explicitly: `_invariance_signal` restores the RNG on
-    exit, so a bare loop would evaluate the SAME realisation every time.
+    exit, so a bare loop would evaluate the SAME realisation every time. A SEM
+    without a fixed pool draws its rows once, at W_SEED.
     """
     features = features or _identity
     with preserve_rng():
-        if seed is not None:
-            np.random.seed(seed)
+        np.random.seed(W_SEED)
         if X is None:
             X, _, _ = _draw(sem, n_samples)
         pooled = []
-        for draw in range(max(int(draws), 1)):
-            # a fresh stream per draw, INSIDE the preserved block: the callee
-            # rolls the global state back, so distinct realisations must come
-            # from distinct seeds rather than from consecutive calls
-            if seed is not None:
-                np.random.seed(seed + draw)
+        for draw in range(W_DRAWS):
+            np.random.seed(W_SEED + draw)
             w, _, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
             pooled.append(np.abs(w))
-    return float(np.quantile(np.concatenate(pooled), quantile))
+    return float(np.quantile(np.concatenate(pooled), W_QUANTILE))
+
+
+def sweep_epsilon_star(sem, da, X: NDArray | None = None, features: Callable | None = None, **augment_kwargs) -> float:
+    """eps* in the norm the SEM is routed to: `epsilon_star_q95` on a sweep's SEM
+    (`epsilon_quantile` set), the RMS `epsilon_star` on a query panel's."""
+    if getattr(sem, "epsilon_quantile", None) is not None:
+        return epsilon_star_q95(sem, da, X=X, features=features, **augment_kwargs)
+    return epsilon_star(sem, da, X=X, features=features, **augment_kwargs)
 
 
 def recalibrated_da_epsilon(
@@ -268,8 +260,8 @@ def recalibrated_da_epsilon(
     n_samples: int = CALIBRATION_SAMPLES,
 ) -> float:
     """
-    Inverse of `epsilon_star`: set the DA strength knob so the recalibrated DA
-    achieves `epsilon_target`. Returns the achieved eps*.
+    Inverse of `sweep_epsilon_star`: set the DA strength knob so the recalibrated
+    DA achieves `epsilon_target` in the SEM's norm of W. Returns the achieved eps*.
     """
     if epsilon_target < 0.0:
         raise ValueError("`epsilon_target` must be non-negative.")
@@ -284,13 +276,13 @@ def recalibrated_da_epsilon(
 
     def error(strength: float) -> float:
         da.strength = strength
-        return epsilon_star(sem, da, X=X, features=features) - epsilon_target
+        return sweep_epsilon_star(sem, da, X=X, features=features) - epsilon_target
 
     low, high = STRENGTH_BRACKET
     if error(low) >= 0.0:
         da.strength = low
         logger.warning(
-            f"eps* floor {epsilon_star(sem, da, X=X, features=features):.6g} exceeds "
+            f"eps* floor {sweep_epsilon_star(sem, da, X=X, features=features):.6g} exceeds "
             f"target {epsilon_target:.6g}; strength clamped to {low}. The sweep "
             "will not vary the DA -- raise the target above the floor."
         )
@@ -303,7 +295,7 @@ def recalibrated_da_epsilon(
             high *= 2.0
         else:
             da.strength = high
-            achieved = epsilon_star(sem, da, X=X, features=features)
+            achieved = sweep_epsilon_star(sem, da, X=X, features=features)
             raise ValueError(
                 f"eps* target {epsilon_target:.6g} is above the reachable ceiling "
                 f"(~{achieved:.6g} at strength {high:.6g}); it saturates in strength."
@@ -318,7 +310,7 @@ def recalibrated_da_epsilon(
                 break
         da.strength = 0.5 * (low + high)
 
-    achieved = epsilon_star(sem, da, X=X, features=features)
+    achieved = sweep_epsilon_star(sem, da, X=X, features=features)
     logger.info(f"DA strength {da.strength:.6g} -> eps* {achieved:.6g} (target {epsilon_target:.6g}).")
     return achieved
 

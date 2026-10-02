@@ -7,7 +7,7 @@ from functools import partial
 
 from src.data_augmentors.simulation import NullSpaceTranslation as DA
 from src.experiments.base import ExperimentOrchestrator
-from src.experiments.configs import SIMULATION_CONFIG, MethodRegistry
+from src.experiments.configs import EPS_TOL, SIMULATION_CONFIG, MethodRegistry
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
 from src.sem.simulation import LinearSimulationSEM as SEM
 
@@ -52,9 +52,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
         class SimulationRegistry(MethodRegistry):
             @staticmethod
             def build_methods(names):
-                return MethodRegistry.build_methods(
-                    names, gamma=SIMULATION_CONFIG.gamma, epsilon=SIMULATION_CONFIG.epsilon, **toggles
-                )
+                return MethodRegistry.build_methods(names, gamma=SIMULATION_CONFIG.gamma, epsilon=EPS_TOL, **toggles)
 
         super().__init__(EXPERIMENT_NAME, SimulationRegistry(), **kwargs)
 
@@ -99,8 +97,8 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     poly_transform=None,
                     method_factory=self.build_methods,
                     default_gamma=SIMULATION_CONFIG.gamma,
+                    # None: the runner's oracle eps* (RMS) + EPS_TOL on its own draw
                     default_epsilon=SIMULATION_CONFIG.epsilon,
-                    eps_tol=SIMULATION_CONFIG.eps_tol,
                     raw_gamma=True,
                     **kwargs,
                 )
@@ -138,7 +136,8 @@ class SimulationOrchestrator(ExperimentOrchestrator):
                     poly_transform=None,
                     test_fraction=SIMULATION_CONFIG.test_fraction,
                     default_gamma=SIMULATION_CONFIG.gamma,
-                    default_epsilon=SIMULATION_CONFIG.epsilon,
+                    # the fallback where eps* is not computable (`_finite`)
+                    default_epsilon=EPS_TOL,
                     experiment_name=EXPERIMENT_NAME,
                     **kwargs,
                 )

@@ -64,7 +64,17 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         with one INFO line when absent; `true`, 100, -5 and "95" raise; every
         non-do-MNIST recipe and config.yaml resolve to `RECIPE_ALPHA`; the
         retired `im-ci` key raises; do-MNIST accepts `gamma_n` and carries no
-        `gamma_n_alpha`.
+        `gamma_n_alpha`. The one tolerance: `EPS_TOL` is 2^-8 and no dataset config
+        carries a tolerance or pad budget of its own; the optical
+        `_epsilon_budget(None)` sits exactly `EPS_TOL` over the measured eps* in
+        both norms (the query's RMS, the sweeps' q0.95 reading
+        `epsilon_star_q95`), and a built DA+ model's pad is its epsilon; the
+        optical and cigarette query budgets are bit-identical to c29af19's
+        (`QUERY_EPSILON_C29AF19`) and the simulation query's is its oracle RMS
+        eps* + 2^-8 (c29af19 declared 2^-8; within 1e-12 of it); the query
+        runners rescale the raw declared gamma by 1 / sigma-hat^2, so the fitted
+        PI radius is sqrt(gamma) (1.0 sim, 0.5 optical); the do-MNIST builders
+        hand the copsens T-as-IV cone the block epsilon.
         Catches: a level read as alpha, a bool taken as a level, a silent pad.
   (vii) one record: `_run_sweeps` writes `<param>_values`, `_results`,
         `_statuses` and `_axis` and nothing else, the aggregate's sweep grid reads
@@ -75,10 +85,11 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         unknown-key check aside, which name it to reject it).
         Catches: a second sweep record, a leftover of the bootstrap path.
   (ix)  the purge: a grep over src/, scripts/, recipes/, config.yaml, README.md
-        and scripts/README.md for every retired symbol (`RETIRED`, whole words;
-        this script and a77's unknown-key lines aside), `py_compile` on every
-        script, `ruff check --select F` on src/ and scripts/, and every script
-        with a command line (argparse) exits 0 on `--help`.
+        and scripts/README.md for every retired symbol (`RETIRED`, whole words,
+        case-sensitive; this script and a77's unknown-key lines aside),
+        `py_compile` on every script, `ruff check --select F` on src/ and
+        scripts/, and every script with a command line (argparse) exits 0 on
+        `--help`.
         Catches: a leftover of the old machinery, a script that no longer loads.
   (x)   grids: the m grid off `sweep_samples` (1..16 at 16, 1..8 at 8, 32 points
         at 32), the n grid `geomspace(10, 100, count)` at every count; the sim n
@@ -143,6 +154,9 @@ RECIPE_ALPHA = 0.0
 # the cigarette panel's states, the pads' units on `target: iv`
 CIGARETTE_STATES = 49
 GAMMA_Z_SIM = 2**-8
+# the query panels' budgets at c29af19 (`_epsilon_budget(query_epsilon, tol=eps,
+# quantile=None)` on opticalDeviceFig6's and cigarettesFig7's blocks)
+QUERY_EPSILON_C29AF19 = {"optical_device": 0.3335209199891572, "cigarettes": 0.003906250000000246}
 GAMMA_Z_CIGARETTES = 0.0177
 VALIDITY_ROWS_DRAWS = 400
 VALIDITY_SOLVE_DRAWS = 250
@@ -150,11 +164,13 @@ VALIDITY_GAMMA = 0.25
 VALIDITY_SEED = 20_000
 # every retired symbol of the IM-CI, the pad tolerance and the old IV budgets
 RETIRED = (
-    "im-ci", "im_ci", "IM_CI", "imbens", "bootstrap_bounds", "results_raw", "_raw_record", "RAW_MTIME_SLACK",
+    "im-ci", "im_ci", "IM_CI", "imbens", "Imbens", "bootstrap_bounds", "results_raw", "_raw_record", "RAW_MTIME_SLACK",
     "sweep_record_for", "pad_tolerance", "iv_recalibrate", "leak_t", "leak_tz", "epsilon_iv_z", "eps_iv_star",
     "eps_iv_z_star", "z_moment_star", "eps_rms", "_declared_allowance", "_z_allowance", "_recalibrated", "t_bound",
     "tz_bound", "z_bound", "declared_iv", "fit_iv_leaks", "fit_epsilon_iv", "fit_epsilon_iv_z",
     "_baseline_epsilon_iv_z", "_step_epsilon_iv", "epsilon_star_pointwise", "invariance_error",
+    "eps_tol", "sweep_eps_tol", "PAD_QUANTILE", "epsilon_pad_star", "measured_epsilon_pad", "_pad_budget",
+    "pad_epsilon", "epsilon_q95",
 )  # fmt: skip
 # the retired Imbens-Manski CI's symbols (the yaml key, its parsed name, the
 # constants, the helpers, the raw record and its reader, the pad tolerance)
@@ -637,6 +653,99 @@ def leg_vi():
     }
     resolved = resolve_dataset_block("do_mnist", domnist)
     check("(vi) do-MNIST accepts gamma_n and carries no gamma_n_alpha", "gamma_n_alpha" not in resolved)
+    one_tolerance()
+
+
+def raw_gamma(tag, runner, declared):
+    """The declared gamma is a raw squared radius: rescaled by 1/sigma-hat^2 of the
+    draw, so the PI ball's radius comes back to sqrt(declared)."""
+    from src.experiments.utils import fit_model
+    from src.experiments.utils.metrics import sigma_sq_hat
+
+    sigma_sq = sigma_sq_hat(runner.X, runner.y, intercept=runner.mean_match)
+    check(
+        f"(vi) {tag}: runner.default_gamma == declared gamma / sigma-hat^2",
+        runner.raw_gamma and np.isclose(runner.default_gamma, declared / sigma_sq, rtol=1e-12),
+        f"{runner.default_gamma:.6g} vs {declared:.6g} / {sigma_sq:.6g}",
+    )
+    model = runner.methods["PI"]()
+    fit_model(model=model, method_name="PI", X=runner.X, y=runner.y, GX=runner.GX, G=runner.G)
+    radius = model.scale * np.sqrt(model.budget(model.gamma))
+    check(f"(vi) {tag}: fitted PI radius == sqrt(declared gamma)", np.isclose(radius, np.sqrt(declared), rtol=1e-6))
+
+
+def recipe_block(recipe, dataset):
+    from src.experiments.configs import resolve_dataset_block
+
+    with open(os.path.join(REPO, "recipes", f"{recipe}.yaml")) as handle:
+        config = yaml.safe_load(handle)
+    block = {**config["defaults"], **config[dataset], "n_jobs": 1, "n_experiments": 1}
+    block.pop("experiment", None)
+    return resolve_dataset_block(dataset, block)
+
+
+def one_tolerance():
+    import dataclasses
+
+    from src.experiments import configs
+    from src.experiments.cigarettes import CigaretteOrchestrator
+    from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, SIMULATION_CONFIG
+    from src.experiments.do_mnist import DoMNISTOrchestrator, DoMNISTQuerySweep
+    from src.experiments.optical_device import OpticalOrchestrator
+    from src.experiments.simulation import SimulationOrchestrator
+    from src.experiments.utils import fit_model, set_seed
+    from src.oracle import epsilon_star_q95
+
+    check("(vi) EPS_TOL is 2^-8", EPS_TOL == 2**-8, f"{EPS_TOL!r}")
+    owned = [
+        f"{config.__name__}.{field.name}"
+        for config in (configs.SimulationConfig, configs.OpticalDeviceConfig, configs.CigaretteConfig)
+        for field in dataclasses.fields(config)
+        if "tol" in field.name or field.name.startswith("pad")
+    ]
+    check("(vi) no dataset config carries a tolerance or a pad budget of its own", not owned, f"{owned}")
+    set_seed(42)
+    optical = OpticalOrchestrator(**recipe_block("opticalDeviceFig6", "optical_device"), hyperparameters={})
+    rms = optical.measured_epsilon_star(None)
+    check("(vi) optical _epsilon_budget(None) == RMS eps* + EPS_TOL", optical._epsilon_budget(None) == rms + EPS_TOL)
+    sem, da, features = optical._oracle_pieces(0.95)
+    q95 = epsilon_star_q95(sem, da, X=sem.X, features=features)
+    check(
+        "(vi) optical _epsilon_budget(None, q 0.95) == the q0.95 reading + EPS_TOL",
+        optical._epsilon_budget(None, quantile=0.95) == q95 + EPS_TOL,
+        f"{q95:.6f} + 2^-8",
+    )
+    got = optical._epsilon_budget(OPTICAL_CONFIG.query_epsilon, quantile=OPTICAL_CONFIG.query_epsilon_quantile)
+    check(
+        "(vi) optical query budget bit-identical to c29af19", got == QUERY_EPSILON_C29AF19["optical_device"], f"{got!r}"
+    )
+    runner = optical.get_query_runner_cls()(methods=optical.methods, **optical._get_clean_kwargs())
+    raw_gamma("optical query", runner, OPTICAL_CONFIG.gamma)
+    model = runner.methods["DA+PI"]()
+    fit_model(model=model, method_name="DA+PI", X=runner.X, y=runner.y, GX=runner.GX, G=runner.G)
+    check("(vi) optical DA+PI: the pad is its epsilon", model.pad and model.pad_amount == float(model.epsilon))
+    cigarettes = CigaretteOrchestrator(**recipe_block("cigarettesFig7", "cigarettes"), hyperparameters={})
+    got = cigarettes._epsilon_budget(None, quantile=None)
+    check(
+        "(vi) cigarette query budget bit-identical to c29af19", got == QUERY_EPSILON_C29AF19["cigarettes"], f"{got!r}"
+    )
+    set_seed(42)
+    block = {**recipe_block("ivSimulationFig5", "simulation"), "methods": ["PI", "PI+IV", "DA+PI+IV(T,Z)"]}
+    sim = SimulationOrchestrator(**block, hyperparameters={})
+    runner = sim.get_query_runner_cls()(methods=sim.methods, **sim._get_clean_kwargs())
+    want = float(runner.oracle.epsilon_star) + EPS_TOL
+    check(
+        "(vi) simulation query eps == its oracle RMS eps* + 2^-8 (c29af19's declared 2^-8 to 1e-12)",
+        SIMULATION_CONFIG.epsilon is None and runner.default_epsilon == want and abs(want - 2**-8) < 1e-12,
+        f"{runner.default_epsilon!r}",
+    )
+    raw_gamma("simulation query", runner, SIMULATION_CONFIG.gamma)
+    source = inspect.getsource(DoMNISTOrchestrator.build_methods) + inspect.getsource(DoMNISTQuerySweep.__init__)
+    check(
+        "(vi) do-MNIST: the copsens T-as-IV cone takes the block epsilon",
+        "epsilon_iv=self.epsilon if epsilon_iv is None else epsilon_iv" in source
+        and "epsilon_iv=self.default_epsilon" in source,
+    )
 
 
 def leg_vii():
@@ -740,9 +849,8 @@ def leg_x():
 
 def leg_ix():
     print("(ix) the purge: no retired symbol, every script loads")
-    pattern = re.compile(
-        r"(?<![\w-])(" + "|".join(re.escape(token) for token in RETIRED) + r")(?![\w-])", re.IGNORECASE
-    )
+    # case-sensitive, whole words: `EPS_TOL`, the one tolerance, is not `eps_tol`
+    pattern = re.compile(r"(?<![\w-])(" + "|".join(re.escape(token) for token in RETIRED) + r")(?![\w-])")
     paths = glob.glob(os.path.join(REPO, "src", "**", "*.py"), recursive=True)
     paths += glob.glob(os.path.join(REPO, "scripts", "*.py")) + glob.glob(os.path.join(REPO, "recipes", "*.yaml"))
     paths += [os.path.join(REPO, name) for name in ("config.yaml", "README.md", os.path.join("scripts", "README.md"))]

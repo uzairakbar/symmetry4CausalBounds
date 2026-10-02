@@ -132,11 +132,16 @@ OPTICAL_POOL = 1000
 # optical one only caught up -- it was already stale on working5, moved to
 # 70b891f331420cd8 by 1389769 (q95 epsilon on optical sweeps; 9f411eb before it
 # reads 474d52137cef167c, itself already off the pin). The query ones stay.
+# 2026-10-02 (3b'): both gamma digests re-recorded on the shared q0.95 reading of
+# |W| and EPS_TOL 2^-8 (the optical one was bd78a645cf5ab711 since c29af19, the
+# same on every node tried), and the simulation query on its measured eps (RMS
+# eps* + 2^-8 instead of the declared 2^-8). The optical query stays: queries keep
+# today's RMS.
 PARENT_DIGESTS: dict[str, str] = {
-    "optical_device/gamma": "70b891f331420cd8",
+    "optical_device/gamma": "d360faed49c3d7c2",
     "optical_device/query": "f2acb071110c9bb8",
-    "simulation/gamma": "5bc02bf14d17a075",
-    "simulation/query": "76cf8869fc112140",
+    "simulation/gamma": "f689146334139601",
+    "simulation/query": "95447e763dc50ff7",
 }
 
 # leg (iii)
@@ -157,11 +162,11 @@ EPSILON_GRID = (2.0**-6, 2.0**-3, 1.0)
 COVERAGE_FLOOR = 0.7
 # leg (v): DA+PI+IV's coverage per ratio, RECORDED 2026-10-02 under the declared
 # IV rows: no instrument here (gamma_z 0), so the T row's radius is the swept eps
-# itself; INFEASIBLE at r = 2^-6, a dip to 0.212 at 2^-3, 1.0 at r = 1. It was
-# [nan, nan, 1.0] under the RMS-type T budget and 0.327 at 2^-3 under the
-# measured-leak App. D radii; the 0.7 floor binds DA+PI alone, the line with no IV
-# constraint
-IV_COVERAGE_RECORDED = (np.nan, 0.2122, 1.0)
+# itself; INFEASIBLE at r = 2^-6 and 2^-3, 1.0 at r = 1 (3b': EPS_TOL 2^-8; at
+# 2^-5 it read 0.212 at 2^-3). It was [nan, nan, 1.0] under the RMS-type T budget
+# too and 0.327 at 2^-3 under the measured-leak App. D radii; the 0.7 floor binds
+# DA+PI alone, the line with no IV constraint
+IV_COVERAGE_RECORDED = (np.nan, np.nan, 1.0)
 IV_COVERAGE_ATOL = 1e-3
 EPS_STAR_RTOL = 0.05
 MICRO_SAMPLES = 500

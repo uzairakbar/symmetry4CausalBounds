@@ -14,12 +14,13 @@ from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, MethodRegistry
 from src.experiments.generic_runner import STRATEGIES, GenericQuerySweep
-from src.oracle import PAD_QUANTILE, epsilon_pad_star, epsilon_star, preserve_rng
+from src.oracle import epsilon_star, epsilon_star_q95, preserve_rng
 from src.sem.optical_device import OpticalDeviceSEM as SEM
 
 EXPERIMENT_NAME = "optical_device"
 
-# eps* is an RMS over one DA draw, so it carries draw noise; pool this many draws
+# the query panel's eps* is an RMS over one DA draw, so it carries draw noise; pool
+# this many draws
 # (in the SQUARE, which is what an RMS averages) so the budget does not wobble
 # between runs. The X it is evaluated on is the WHOLE pool, not a resample of it:
 # the optical pool has 1000 rows and `CALIBRATION_SAMPLES` is 2048, so the default
@@ -70,7 +71,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         self.augmentation = augmentation
         self.augmentation_p = float(augmentation_p)
         self._epsilon_star = {}  # epsilon_quantile -> eps*
-        self._epsilon_pad = None
         self.toggles = dict(
             recalibrate=kwargs.get("recalibrate", True),
             pad=kwargs.get("pad", False),
@@ -81,15 +81,12 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         )
         toggles = self.toggles
         epsilon = self._epsilon_budget(OPTICAL_CONFIG.epsilon, quantile=OPTICAL_CONFIG.epsilon_quantile)
-        pad_epsilon = self._pad_budget(OPTICAL_CONFIG.pad_epsilon)
 
         # Create registry with optical-specific parameters
         class OpticalRegistry(MethodRegistry):
             @staticmethod
             def build_methods(names):
-                return MethodRegistry.build_methods(
-                    names, gamma=OPTICAL_CONFIG.gamma, epsilon=epsilon, pad_epsilon=pad_epsilon, **toggles
-                )
+                return MethodRegistry.build_methods(names, gamma=OPTICAL_CONFIG.gamma, epsilon=epsilon, **toggles)
 
         super().__init__(EXPERIMENT_NAME, OpticalRegistry(), **kwargs)
 
@@ -122,33 +119,26 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         return sem, da, self._poly_factory().fit(sem.X).transform
 
     def measured_epsilon_star(self, epsilon_quantile: float | None = None) -> float:
-        """eps* for THIS (SEM, DA, features): the defect's RMS, or its
-        `epsilon_quantile` of |W|, pooled over `EPSILON_STAR_DRAWS` independent
-        draws on the full pool. Cached per quantile."""
+        """eps* for THIS (SEM, DA, features) on the full pool: the defect's RMS
+        pooled over `EPSILON_STAR_DRAWS` independent draws (the query panel), or
+        with an `epsilon_quantile` the sweeps' shared q0.95 reading
+        (`oracle.epsilon_star_q95`). Cached per quantile."""
         if epsilon_quantile not in self._epsilon_star:
             sem, da, features = self._oracle_pieces(epsilon_quantile)
+            if epsilon_quantile is not None:
+                self._epsilon_star[epsilon_quantile] = epsilon_star_q95(sem, da, X=sem.X, features=features)
+                logger.info(f"Optical eps* (the q0.95 reading of |W|): {self._epsilon_star[epsilon_quantile]:.6f}")
+                return self._epsilon_star[epsilon_quantile]
             with preserve_rng():
                 squares = []
                 for draw in range(EPSILON_STAR_DRAWS):
                     np.random.seed(EPSILON_STAR_SEED + draw)  # per draw; see the constant
                     squares.append(epsilon_star(sem, da, X=sem.X, features=features) ** 2)
             self._epsilon_star[epsilon_quantile] = float(np.sqrt(np.mean(squares)))
-            norm = "RMS" if epsilon_quantile is None else f"q{epsilon_quantile:g}"
             logger.info(
-                f"Optical eps* ({norm} of |W|) over {EPSILON_STAR_DRAWS} draws: "
-                f"{self._epsilon_star[epsilon_quantile]:.6f}"
+                f"Optical eps* (RMS of |W|) over {EPSILON_STAR_DRAWS} draws: {self._epsilon_star[epsilon_quantile]:.6f}"
             )
         return self._epsilon_star[epsilon_quantile]
-
-    def measured_epsilon_pad(self) -> float:
-        """Thm. 3.A's epsilon for this pair: the POINTWISE defect, not the L2 one.
-        See `oracle.epsilon_pad_star` for why it is a high quantile of |W| and not
-        a sup. Cached."""
-        if self._epsilon_pad is None:
-            sem, da, features = self._oracle_pieces()
-            self._epsilon_pad = float(epsilon_pad_star(sem, da, X=sem.X, features=features))
-            logger.info(f"Optical padding eps (q{PAD_QUANTILE:g} of |W|): {self._epsilon_pad:.6f}")
-        return self._epsilon_pad
 
     def _epsilon_budget(
         self, configured: float | None, tol: float = EPS_TOL, *, quantile: float | None = None
@@ -157,7 +147,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
 
         `None` means take the measured one. SS3.1 constrains E_inv(h) <= eps^2, and
         `epsilon_star` is exactly that functional evaluated at h_*, so eps* +
-        `tol` admits h_* by construction while any smaller budget excludes it --
+        `tol` (EPS_TOL) admits h_* by construction while any smaller budget excludes it --
         an invalid interval, not a tight one. Whether the published 2**-2 was
         smaller depends on the augmentation in force (measured: 0.2121 for
         `rotation > gaussian-noise`, which config.yaml ships, but 0.2600 for
@@ -169,19 +159,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         if configured is not None:
             return float(configured)
         return self.measured_epsilon_star(quantile) + tol
-
-    def _pad_budget(self, configured: float | None) -> float:
-        """Thm. 3.A's epsilon. `None` takes the measured pointwise budget; a float
-        pins it. NOTE this is ~3x the query's RMS constraint budget on this
-        device (0.691 vs 0.212 under `rotation > gaussian-noise`) and ~1.5x the
-        sweeps' q0.95 one (0.848 vs 0.526 under the shipped
-        `rotation > hflip > vflip > translate` at p 0.25, mean_match true; 0.868 vs
-        ~0.55 under the pixel-permutation chain before it): they are different
-        norms of the same W, and padding by either constraint budget is not the
-        guarantee Thm. 3.A states."""
-        if configured is not None:
-            return float(configured)
-        return self.measured_epsilon_pad() + EPS_TOL
 
     def _da_factory(self, sem=None, append: str | None = None):
         """Factory for creating DA instances. `append` adds one component to the
@@ -209,10 +186,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
                     epsilon_true=OPTICAL_CONFIG.epsilon_true,
                     method_factory=self.build_methods,
                     default_gamma=OPTICAL_CONFIG.gamma,
-                    default_epsilon=self._epsilon_budget(
-                        OPTICAL_CONFIG.query_epsilon, tol=OPTICAL_CONFIG.eps_tol, quantile=quantile
-                    ),
-                    eps_tol=OPTICAL_CONFIG.eps_tol,
+                    default_epsilon=self._epsilon_budget(OPTICAL_CONFIG.query_epsilon, quantile=quantile),
                     raw_gamma=True,
                     **kwargs,
                 )

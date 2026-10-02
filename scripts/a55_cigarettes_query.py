@@ -90,12 +90,12 @@ COSINES = (0.028, 0.306, 0.100, 0.772)
 COSINE_TOL = 5e-4
 LAW_TOL = 1e-12
 # the solver against the eps = 0 law. It is not exact and is not meant to be: the
-# SOCP solves to its own tolerance and the INV budget is eps* + eps_tol > 0.
+# SOCP solves to its own tolerance and the INV budget is eps* + EPS_TOL > 0.
 SOLVER_TOL = 0.01
 # leg (0) and (iv). The log-CPI trim at the declared budget with eps* = 0: the
 # analytic eps = 0 limit is sqrt(1 - 0.772^2) = 0.636 and the measured value sits
-# just above it. SS0.7's 0.664 was measured at the LOOSER EPS_TOL (2^-5) slack;
-# `CigaretteConfig.eps_tol` is 2^-8, which is sharper -- see the batch C report.
+# just above it. SS0.7's 0.664 was measured at a looser 2^-5 slack; `EPS_TOL` is
+# 2^-8, which is sharper -- see the batch C report.
 CPI_RATIO = (0.63, 0.66)
 CPI_CEILING = 0.70
 PRICE_RATIO = 1.000
@@ -317,7 +317,7 @@ def leg_iv():
     price = float(np.max(np.abs(trims["dim_p"] - PRICE_RATIO)))
     check("(iv) the log p grid is 1.000 +- 0.005", price < PRICE_TOL, f"{float(np.mean(trims['dim_p'])):.4f}")
     ray = float(np.max(trims[RAY_ID]))
-    # not 0 to machine precision: the INV budget is eps* + eps_tol > 0, so the
+    # not 0 to machine precision: the INV budget is eps* + EPS_TOL > 0, so the
     # constraint admits a sliver of non-homogeneous h. It IS 0 at eps = 0.
     check("(iv) the ray along v-hat collapses", ray < RAY_CEILING, f"{ray:.2e}")
     check("(iv) the ray is two orders under the CPI grid", ray * 100 < cpi, f"{ray:.2e} vs {cpi:.4f}")

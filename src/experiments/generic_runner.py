@@ -4,6 +4,7 @@ Eliminates duplication between simulation and optical device experiments.
 """
 
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -26,7 +27,7 @@ from src.experiments.utils.model_fitting import instrument_columns
 from src.methods.sensitivity_models import recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
-    epsilon_star,
+    epsilon_star_q95,
     gamma_star,
     pool_oracles,
     preserve_rng,
@@ -94,6 +95,11 @@ class OracleMixin:
                     )
                 )
         oracle = pool_oracles(oracles)
+        # a sweep's SEM (`epsilon_quantile` set) reads eps* once per (SEM, DA), as
+        # the shared q0.95 of |W| over `W_DRAWS` concatenated draws; the query
+        # panel's SEM keeps the pooled RMS above
+        if getattr(sem, "epsilon_quantile", None) is not None:
+            oracle = replace(oracle, epsilon_star=epsilon_star_q95(sem, da, X=X, features=features))
         logger.info(f"Oracle parameters: {oracle}")
         return oracle
 
@@ -116,15 +122,11 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         epsilon_true: float | None = None,
         method_factory: Callable | None = None,
         default_gamma: float = 1.0,
-        default_epsilon: float = 2**-8,
-        eps_tol: float = EPS_TOL,
+        default_epsilon: float | None = 2**-8,
         raw_gamma: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # knife-edge tolerance on the oracle IV budget; the dataset configs set
-        # it for the query sweep, the param sweeps keep EPS_TOL
-        self.eps_tol = float(eps_tol)
         # `raw_gamma`: the declared gamma is a RAW squared radius, the units the
         # query panels were drawn in before sigma-hat entered every ball: the PI
         # radius is sqrt(gamma), not sigma-hat sqrt(gamma). It is rescaled by
@@ -143,8 +145,13 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
         # Subclasses must FORWARD their budgets here rather than assigning before
-        # super().__init__, or these defaults silently overwrite them.
+        # super().__init__, or these defaults silently overwrite them. A None
+        # epsilon is the panel's own measured budget: the oracle's eps* (the RMS
+        # of |W|, the query SEM's norm) + EPS_TOL.
         self.default_gamma = default_gamma
+        if default_epsilon is None:
+            default_epsilon = float(self.oracle.epsilon_star) + EPS_TOL
+            logger.info(f"query eps = eps* {self.oracle.epsilon_star:.6g} + EPS_TOL = {default_epsilon:.6g}")
         self.default_epsilon = default_epsilon
 
         # Data FIRST, methods second: rho and the raw gamma's sigma-hat are
@@ -196,6 +203,11 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         X_raw, Z = self.sem.split_instruments(X_raw)
         GX_raw, G = self.da(X_raw)
         return X_raw, GX_raw, y, G, Z
+
+    def after_fit(self, name: str, model) -> None:
+        """The DA IV rows against their own floors on this draw, as the sweeps
+        report them (`_iv_floor_report`); never raised."""
+        self._iv_floor_report(name, model, self.GX, self.y, self.G, self.Z, self.default_gamma)
 
     def fit_rho(self) -> float:
         """rho_hat of the one draw, as `ParamSweepRunner.fit_rho` (SS4.2)."""
@@ -554,7 +566,7 @@ class ExpansionStrategy(GenericParamSweep):
         X_raw = self._base_data(experiment_index)[0]
         augment_kwargs = self.augment_kwargs_fn(param)
         self._step_epsilon[experiment_index] = (
-            epsilon_star(
+            epsilon_star_q95(
                 self.sems[experiment_index],
                 self.das[experiment_index],
                 X=X_raw,
@@ -563,9 +575,7 @@ class ExpansionStrategy(GenericParamSweep):
             )
             + EPS_TOL
         )
-        # On a recorded SEM the setup oracle pools ORACLE_POOL_DRAWS seeded
-        # draws while this is a single one, so the per-step budget carries
-        # sampling noise the setup numbers do not.
+        # the shared q0.95 reading, as the setup oracle's: same draws, same stream
 
         return data
 
