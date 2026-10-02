@@ -11,7 +11,7 @@ simulation:
     n_samples: 2_048
     n_experiments: 10   # 10 freshly drawn SEMs (new W_XXi, W_XY each)
     sweep_samples: 16
-    m_sweep_n_percent: 15 # the m sweep draws this % of n_samples
+    m_sweep_n_percent: 10 # the m sweep draws this % of n_samples
     kernel_dim: 0
     treatment_dim: 64
     iv: 1
@@ -32,7 +32,7 @@ optical_device:
     n_samples: 1_000
     n_experiments: 10   # 10 distinct devices, `sweep_devices()`: 8 first, 6 and 11 excluded
     sweep_samples: 16
-    m_sweep_n_percent: 15 # the m sweep draws this % of n_samples
+    m_sweep_n_percent: 10 # the m sweep draws this % of n_samples
     methods:
         - PI+INV
         - PI
@@ -58,7 +58,7 @@ cigarettes:
     n_samples: 2_450
     n_experiments: 10   # 10 plasmode resimulations of the one panel, split seed + j
     sweep_samples: 16
-    m_sweep_n_percent: 15 # the m sweep draws this % of n_samples
+    m_sweep_n_percent: 10 # the m sweep draws this % of n_samples
     da_amplitude: 2.0
     sliver: false
     methods:

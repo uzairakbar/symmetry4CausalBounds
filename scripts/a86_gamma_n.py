@@ -86,7 +86,7 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
   (viii) a sanity report, not a pass/fail: cigarette plasmode coverage at the
         rows the pads count (`n_obs`), over `PLASMODE_DRAWS` resimulations of the
         nEfficiencyFig13 / mEfficiencyFig14 blocks at gamma_n 95: the n sweep's
-        10% and 100% cells (220 and 2205 fit rows) and the m sweep's base (331
+        10% and 100% cells (220 and 2205 fit rows) and the m sweep's base (220
         rows, m = 4). Printed per method: the mean per-query coverage, the
         simultaneous coverage (every test query covered), each against 0.95 -
         3 SE (0.90 for an intersection), and the per-query minimum; a reading under
