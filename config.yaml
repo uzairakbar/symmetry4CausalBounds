@@ -177,7 +177,9 @@ optical_device:
         - PI&DA+PI+IV
     # augmentation: all
     # augmentation: rotation > gaussian-noise # rotation > gaussian
-    augmentation: rotation > hflip > vflip > random-permutation
+    # translate (sum-zero pixel translation, x -> x + B t) linearises the pixel-permutation
+    # symmetry it replaces; T is informative because E[GX | t] = B t
+    augmentation: rotation > hflip > vflip > translate
     experiment:
         # query: true                 # query sweep; panel ALWAYS generated
         sweep:

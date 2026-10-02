@@ -38,7 +38,9 @@ optical_device:
         - DA+PI+IV(T)
         - PI&DA+PI
         - PI&DA+PI+IV(T)
-    augmentation: rotation > hflip > vflip > random-permutation
+    # translate (sum-zero pixel translation, x -> x + B t) linearises the pixel-permutation
+    # symmetry it replaces; T is informative because E[GX | t] = B t
+    augmentation: rotation > hflip > vflip > translate
     experiment:
         sweep:
             param:  [omega]

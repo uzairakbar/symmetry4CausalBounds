@@ -8,7 +8,9 @@ from numpy.typing import NDArray
 from src.data_augmentors.abstract import DataAugmenter as DA
 from src.data_augmentors.utils import BernoulliStandardScaler
 
-P = 0.5
+# the rotation / flip probability: lopsided (was 0.5) in the paper's chain
+# `rotation > hflip > vflip > translate`
+P = 0.25
 # random-permutation's own default. 1.0 keeps the shipped chain bit-identical:
 # every row was permuted before this class honoured p.
 P_RANDOM_PERMUTATION = 1.0
@@ -20,8 +22,9 @@ TRANSLATION_SCALE = 0.5
 class Permutation(DA):
     """Base class for permutation-based augmentations. Assumed exactly invariant."""
 
-    def __init__(self, p=P):
-        self.p = p
+    def __init__(self, p=None):
+        # `P` read at construction, so a gate can pin the old 0.5 by setting it
+        self.p = P if p is None else p
         super().__init__()
 
     @property
