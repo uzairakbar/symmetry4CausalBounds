@@ -38,7 +38,8 @@ def _knob_to_augment_kwargs(strength: float) -> dict[str, float]:
     """Map the [0, 1] strength knob onto the optical DA's own parameters.
 
     s is the permutation probability of every component (flips, rotation and
-    random-permutation alike) and the multiple of translate's step.
+    random-permutation alike), overriding the block's `augmentation_p`, and the
+    multiple of translate's step (0.5 s std(X)).
     `noise_coeff` reaches a chain that still names gaussian-noise and is inert
     otherwise."""
     return {
@@ -172,9 +173,11 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         """Thm. 3.A's epsilon. `None` takes the measured pointwise budget; a float
         pins it. NOTE this is ~3x the query's RMS constraint budget on this
         device (0.691 vs 0.212 under `rotation > gaussian-noise`) and ~1.5x the
-        sweeps' q0.95 one (0.868 vs ~0.55 under the shipped chain, mean_match
-        true): they are different norms of the same W, and padding by either
-        constraint budget is not the guarantee Thm. 3.A states."""
+        sweeps' q0.95 one (0.848 vs 0.526 under the shipped
+        `rotation > hflip > vflip > translate` at p 0.25, mean_match true; 0.868 vs
+        ~0.55 under the pixel-permutation chain before it): they are different
+        norms of the same W, and padding by either constraint budget is not the
+        guarantee Thm. 3.A states."""
         if configured is not None:
             return float(configured)
         return self.measured_epsilon_pad() + EPS_TOL

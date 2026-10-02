@@ -398,7 +398,9 @@ ROBUSTNESS_EPSILON_RADII: float = 1.0
 
 # The component the robustness sweep APPENDS to the configured DA chain, where
 # that chain has no strength knob. None = the configured chain as is. Optical:
-# config.yaml ships a permutation-only chain (eps* pinned at 0.254, every DA+
+# config.yaml ships `rotation > hflip > vflip > translate` at `augmentation_p`
+# 0.25, every component assumed exactly invariant and none with a strength knob
+# (the pixel-permutation chain before it pinned eps* at 0.254 and every DA+
 # coverage line flat at 1.0), so the sweep, and ONLY it, runs config.yaml's
 # chain plus gaussian-noise (skipped when the chain already carries it, `all`
 # included) and retunes its strength to the rule above; the query panel and
@@ -523,15 +525,21 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         xlabel=OMEGA_XLABEL[False],
         # sim: tuned to the informative range: past it both DAs saturate and the
         # measured x moves by less than the across-seed SD (PLAN 5.3).
-        # optical: s is the permutation probability of every component
-        # (_knob_to_augment_kwargs). Measured on the shipped chain (seed 42):
-        # tr(S)/k 0.79 -> 1.09 and rho 1.55 -> 1.67 from s = 0.2 to 0.99, both
-        # monotone, so the recalibrated axis tr(S)/k crosses Prop. 2's 1.0 and
-        # the inherited-gamma axis rho tr(S)/k (1.23 -> 1.82) sits above it. Below 0.2
-        # tr(S)/k folds back (0.94 at s = 0.01, minimum at 0.2 on every seed
-        # measured), which would put two knobs on one x and zigzag the sorted
-        # line, so the grid starts at 0.2. p = 1 is excluded: the Bernoulli
-        # scaler divides by sqrt(p(1-p)) = 0 there (NaN instrument for DA+PI+IV).
+        # optical: s is the rotation / flip probability of every component (it
+        # OVERRIDES the block's `augmentation_p`) and the multiple of translate's
+        # step, 0.5 s std(X) (_knob_to_augment_kwargs). The grid was chosen on the
+        # earlier `rotation > hflip > vflip > random-permutation` chain (seed 42,
+        # device 8): tr(S)/k 0.79 -> 1.09 and rho 1.55 -> 1.67 from s = 0.2 to
+        # 0.99, both monotone; below 0.2 tr(S)/k folded back (0.94 at s = 0.01,
+        # minimum at 0.2 on every seed measured), so the grid starts at 0.2.
+        # Re-measured on the shipped translate chain (seed 42, mean_match true,
+        # one device each, s = 0.2 -> 0.99): tr(S)/k 0.83 -> 2.39 on device 0 and
+        # 0.75 -> 1.46 on device 1, monotone past their minimum at s = 0.2 (0.90
+        # and 0.90 at s = 0.01); device 8 stays flat, 0.89 -> 1.01, its tr(S)/k
+        # within 0.02 of 0.90 from s = 0.2 to 0.9 and not monotone; rho between
+        # 1.04 and 1.59 across the three. The two-device two-step cell of a85 reads 0.86 ->
+        # 1.57. p = 1 is excluded: the Bernoulli scaler divides by sqrt(p(1-p)) = 0
+        # there (NaN instrument for DA+PI+IV).
         # cigarettes: s multiplies the DA amplitude along v, whose unit is
         # sd(X . v-hat) after FWL, so the grid is the decades either side of it.
         grid_fn=lambda dataset, n: (
@@ -1464,10 +1472,12 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(block.get("sliver", False), bool):
             raise ValueError(f"config.cigarettes.sliver must be a bool; got {block.get('sliver')!r}.")
     if name == "optical_device":
-        # the chain's rotation / flip probability; absent is the DA's own `P`
+        # the chain's rotation / flip probability; absent is the DA's own `P`. Open
+        # at both ends: the Bernoulli scaler divides by sqrt(p (1 - p)), so p = 0 or
+        # 1 hands the IV methods a NaN / inf instrument column
         p = block.get("augmentation_p", ...)
-        if p is not ... and (isinstance(p, bool) or not isinstance(p, int | float) or not 0.0 < p <= 1.0):
-            raise ValueError(f"config.optical_device.augmentation_p must be a probability in (0, 1]; got {p!r}.")
+        if p is not ... and (isinstance(p, bool) or not isinstance(p, int | float) or not 0.0 < p < 1.0):
+            raise ValueError(f"config.optical_device.augmentation_p must be a probability in (0, 1); got {p!r}.")
     if name == "do_mnist":
         _check_domnist(block)
 

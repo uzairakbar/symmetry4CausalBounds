@@ -117,6 +117,7 @@ N_JOBS = 4
 # a timer and differs between two runs of identical code
 HASHED_METRICS = ("approximation_error", "coverage", "interval_width", "worst_error")
 SHIPPED_CHAIN = "rotation > hflip > vflip > random-permutation"
+QUERY_RECIPE = "opticalDeviceFig6"
 OPTICAL_POOL = 1000
 
 # leg (i) digests, RECORDED ON THE PARENT COMMIT 5b7965a with this file's own
@@ -212,12 +213,26 @@ def shipped_p():
         return float(((yaml.safe_load(handle) or {}).get("optical_device") or {}).get("augmentation_p", P))
 
 
-def build(experiment, draw, chain, seed, **toggles):
+def query_block():
+    """The optical block of the query recipe (`QUERY_RECIPE`): production's query
+    panel runs its chain at its own probability, not config.yaml's."""
+    with open(os.path.join(REPO, "recipes", f"{QUERY_RECIPE}.yaml")) as handle:
+        return (yaml.safe_load(handle) or {}).get("optical_device") or {}
+
+
+def build(experiment, draw, chain, seed, query=False, **toggles):
+    """`query` builds the optical orchestrator on the query recipe's chain and
+    probability (the DA's `P` when it names none) instead of config.yaml's."""
     common = dict(seed=seed, sweep_samples=SWEEP_SAMPLES, hyperparameters={}, n_jobs=N_JOBS, methods=METHODS, **toggles)
     if experiment == "simulation":
         return SimulationOrchestrator(kernel_dim=0, n_experiments=1, **draw, **common)
+    if query:
+        block = query_block()
+        chain, augmentation_p = str(block.get("augmentation", SHIPPED_CHAIN)), float(block.get("augmentation_p", P))
+    else:
+        augmentation_p = shipped_p()
     return OpticalOrchestrator(
-        n_samples=OPTICAL_POOL, augmentation=chain, augmentation_p=shipped_p(), n_experiments=1, **common
+        n_samples=OPTICAL_POOL, augmentation=chain, augmentation_p=augmentation_p, n_experiments=1, **common
     )
 
 
@@ -253,9 +268,15 @@ def regression_digests(draw, chain, seed, **toggles) -> dict[str, str]:
     for name in ("simulation", "optical_device"):
         set_seed(seed)
         orch = build(name, draw, chain, seed, **toggles)
+        # optical's query panel runs the query recipe's chain, not config.yaml's
+        if name == "optical_device":
+            set_seed(seed)
+            panel = build(name, draw, chain, seed, query=True, **toggles)
+        else:
+            panel = orch
 
         set_seed(seed)
-        query = orch.get_query_runner_cls()(methods=orch.methods, **{**orch._get_clean_kwargs(), "n_experiments": 1})
+        query = panel.get_query_runner_cls()(methods=panel.methods, **{**panel._get_clean_kwargs(), "n_experiments": 1})
         set_seed(seed)
         queries, results = query.run(f"a53 {name} query")
         digests[f"{name}/query"] = _digest([queries] + [results[m] for m in sorted(results)])

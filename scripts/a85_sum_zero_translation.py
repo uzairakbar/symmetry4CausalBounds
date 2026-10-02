@@ -20,7 +20,8 @@ the sweeps' chain. The rotation / flip probability is the dataset block's
         hflip, vflip at `P` 0.5 and random-permutation at its own 1.0
         (`P_RANDOM_PERMUTATION`, which `p` never reaches). translate is not in
         "all" and carries no invariance error (the robustness sweep's appended
-        gaussian-noise is the only knob). `augmentation_p` outside (0, 1], a bool
+        gaussian-noise is the only knob). `augmentation_p` outside (0, 1) (the Bernoulli scaler divides by
+        sqrt(p (1 - p))), a bool
         or a string is a config error, and the key is unknown on every other
         block.
         Catches: a recipe left on the old chain, a probability leaking into the
@@ -40,8 +41,11 @@ the sweeps' chain. The rotation / flip probability is the dataset block's
         multiple of std(X).
         Catches: a T that does not inform GX (the reason it is an instrument).
   (v)   bit for bit against the experimental implementation the full-scale
-        optical run used (scratch o12tiv at 5ae6726, env TIV_FLIP_P=0.25
-        TIV_TR_SCALE=0.5): two-experiment, two-step gamma, omega and epsilon
+        optical run used: scratch o12tiv at 5ae6726 plus its uncommitted
+        edits, frozen as `DIGEST_PATCH` (sha1 `DIGEST_PATCH_SHA1`), env
+        TIV_FLIP_P=0.25 TIV_TR_SCALE=0.5 and every other TIV_* at its default
+        (TIV_T raw, TIV_FRAME centred, TIV_TR_BASIS sumzero, TIV_PERM_P 1.0,
+        TIV_CHAIN unset): two-experiment, two-step gamma, omega and epsilon
         sweeps on `CHAIN` at `SWEEP_P` (`im-ci` off), every metric array but the
         wall clock, the x grids (the epsilon sweep's radii), each experiment's
         oracle gamma* / eps* and the robustness DA's tuned strength, hashed to
@@ -93,8 +97,11 @@ N_DRAWS = 40
 SLOPE_ATOL = 0.05
 RATE_ATOL = 0.03  # ~ 3.5 binomial sd on the 1000-row pool at p 0.5
 PARAMS = ("gamma", "omega", "epsilon")
-# recorded off the experimental tree (scratch o12tiv at 5ae6726, TIV_FLIP_P=0.25
-# TIV_TR_SCALE=0.5) with `--src <tree> --record`, on DIGEST_NODE
+# recorded off the experimental tree (scratch o12tiv = 5ae6726 + DIGEST_PATCH, env
+# TIV_FLIP_P=0.25 TIV_TR_SCALE=0.5, every other TIV_* at its default) with
+# `--src <tree> --record`, on DIGEST_NODE
+DIGEST_PATCH = "~/scratch/runs/o12/eq_tr/o12tiv.patch"  # `git -C <tree> diff`; = tiv2.patch
+DIGEST_PATCH_SHA1 = "8e912244146e15b40b713c4ee10f4d689cf03371"
 DIGEST = "510fa1321fdb41eb8c0a97590184e558890606c4"
 DIGEST_NODE = "atl1-1-01-005-11-0"
 FAIL = []
@@ -183,9 +190,9 @@ def leg_ii():
     check("(ii) p never reaches random-permutation", ps == [SWEEP_P] * 3 + [1.0], f"{ps}")
 
     base = {"seed": 42, "augmentation": CHAIN}
-    for bad in (0, 0.0, 1.5, -0.1, True, "0.25", None):
+    for bad in (0, 0.0, 1, 1.0, 1.5, -0.1, True, "0.25", None):
         check(f"(ii) augmentation_p {bad!r} rejected", _rejects({**base, "augmentation_p": bad}))
-    for good in (1, 0.25):
+    for good in (0.25, 0.99):
         check(f"(ii) augmentation_p {good!r} resolves", not _rejects({**base, "augmentation_p": good}))
     check("(ii) absent resolves", "augmentation_p" not in resolve_dataset_block("optical_device", base))
     check(
