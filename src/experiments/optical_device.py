@@ -9,7 +9,7 @@ import numpy as np
 from loguru import logger
 from sklearn.preprocessing import PolynomialFeatures
 
-from src.data_augmentors.optical_device import ALL_AUGMENTATIONS
+from src.data_augmentors.optical_device import ALL_AUGMENTATIONS, P
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA
 from src.experiments.base import ExperimentOrchestrator
 from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, MethodRegistry
@@ -61,11 +61,13 @@ def _with_component(chain: str, component: str) -> str:
 class OpticalOrchestrator(ExperimentOrchestrator):
     """Orchestrator for optical device experiments."""
 
-    def __init__(self, augmentation: str, **kwargs):
+    def __init__(self, augmentation: str, augmentation_p: float = P, **kwargs):
         """
-        Initialize optical orchestrator.
+        Initialize optical orchestrator. `augmentation_p` is the chain's rotation /
+        flip probability (the dataset block's key; `P` when omitted).
         """
         self.augmentation = augmentation
+        self.augmentation_p = float(augmentation_p)
         self._epsilon_star = {}  # epsilon_quantile -> eps*
         self._epsilon_pad = None
         self.toggles = dict(
@@ -181,7 +183,8 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         """Factory for creating DA instances. `append` adds one component to the
         configured chain unless it is already there (`all` carries every one);
         only the robustness sweep passes it."""
-        return DA(self.augmentation if append is None else _with_component(self.augmentation, append))
+        chain = self.augmentation if append is None else _with_component(self.augmentation, append)
+        return DA(chain, p=self.augmentation_p)
 
     def _poly_factory(self):
         """Factory for creating polynomial transformer."""

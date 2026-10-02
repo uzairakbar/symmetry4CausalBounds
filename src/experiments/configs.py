@@ -1220,6 +1220,7 @@ DATASET_KEYS: dict[str, set] = {
         "m_sweep_n_percent",
         "methods",
         "augmentation",
+        "augmentation_p",
     },
     "cigarettes": {
         "seed",
@@ -1462,6 +1463,11 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"config.cigarettes.da_amplitude must be a positive float; got {amplitude!r}.")
         if not isinstance(block.get("sliver", False), bool):
             raise ValueError(f"config.cigarettes.sliver must be a bool; got {block.get('sliver')!r}.")
+    if name == "optical_device":
+        # the chain's rotation / flip probability; absent is the DA's own `P`
+        p = block.get("augmentation_p", ...)
+        if p is not ... and (isinstance(p, bool) or not isinstance(p, int | float) or not 0.0 < p <= 1.0):
+            raise ValueError(f"config.optical_device.augmentation_p must be a probability in (0, 1]; got {p!r}.")
     if name == "do_mnist":
         _check_domnist(block)
 

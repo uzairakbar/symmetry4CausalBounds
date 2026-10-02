@@ -8,9 +8,9 @@ from numpy.typing import NDArray
 from src.data_augmentors.abstract import DataAugmenter as DA
 from src.data_augmentors.utils import BernoulliStandardScaler
 
-# the rotation / flip probability: lopsided (was 0.5) in the paper's chain
-# `rotation > hflip > vflip > translate`
-P = 0.25
+# the rotation / flip probability unless the chain names its own
+# (`OpticalDeviceDA(p=...)`, the dataset block's `augmentation_p`)
+P = 0.5
 # random-permutation's own default. 1.0 keeps the shipped chain bit-identical:
 # every row was permuted before this class honoured p.
 P_RANDOM_PERMUTATION = 1.0
@@ -22,9 +22,8 @@ TRANSLATION_SCALE = 0.5
 class Permutation(DA):
     """Base class for permutation-based augmentations. Assumed exactly invariant."""
 
-    def __init__(self, p=None):
-        # `P` read at construction, so a gate can pin the old 0.5 by setting it
-        self.p = P if p is None else p
+    def __init__(self, p=P):
+        self.p = p
         super().__init__()
 
     @property
@@ -240,6 +239,9 @@ ALL_AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {
 # every name a chain may carry; translate stays out of "all", which keeps its
 # historical meaning
 AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {**ALL_AUGMENTATIONS, "translate": SumZeroTranslation}
+# the components the chain's `p` reaches; random-permutation keeps its own
+# `P_RANDOM_PERMUTATION`
+FLIPS: frozenset[Augmentation] = frozenset({"rotation", "hflip", "vflip"})
 
 
 class OpticalDeviceDA(DA):
@@ -247,14 +249,19 @@ class OpticalDeviceDA(DA):
 
     exact_invariance = False
 
-    def __init__(self, augmentations: str | None = "all"):
+    def __init__(self, augmentations: str | None = "all", p: float = P):
+        """`p` is the rotation / flip probability (`FLIPS`); the omega knob's
+        call-time `p` still overrides it."""
         if augmentations == "all":
             augmentations: list[Augmentation] = list(ALL_AUGMENTATIONS.keys())
         elif augmentations:
             augmentations: list[Augmentation] = augmentations.replace(" ", "").split(">")
 
         if augmentations:
-            self._augmentations: list[DA] = [AUGMENTATIONS[augmentation]() for augmentation in augmentations]
+            self._augmentations: list[DA] = [
+                AUGMENTATIONS[augmentation](p=p) if augmentation in FLIPS else AUGMENTATIONS[augmentation]()
+                for augmentation in augmentations
+            ]
         else:
             self._augmentations: list[DA] = [Identity()]
 

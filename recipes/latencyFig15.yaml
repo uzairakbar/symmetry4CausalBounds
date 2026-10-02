@@ -40,6 +40,7 @@ optical_device:
     # translate (sum-zero pixel translation, x -> x + B t) linearises the pixel-permutation
     # symmetry it replaces; T is informative because E[GX | t] = B t
     augmentation: rotation > hflip > vflip > translate
+    augmentation_p: 0.25  # rotation / flip probability (default 0.5, the query panel's)
     experiment:
         perf:
             metric: [wall_clock]
