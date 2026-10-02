@@ -163,7 +163,6 @@ class BaseExperimentRunner(ABC):
         clipy: bool = True,
         mean_match: bool = True,
         gamma_n_alpha: float = 0.0,
-        unit_cap: int | None = None,
         n_jobs: int = 1,
         **kwargs,
     ):
@@ -187,7 +186,6 @@ class BaseExperimentRunner(ABC):
         # the finite-sample pads the models solve with (`PartialR2.ball_budget`),
         # explicit for the floor reports' sake as the toggles above: 0.0 is raw
         self.gamma_n_alpha = float(gamma_n_alpha)
-        self.unit_cap = unit_cap
         self.n_jobs = n_jobs
 
     @abstractmethod
@@ -225,7 +223,6 @@ class BaseExperimentRunner(ABC):
                         n_obs=n_obs,
                         absorbed_rate=self.absorbed_rate,
                         gamma_n_alpha=self.gamma_n_alpha,
-                        unit_cap=self.unit_cap,
                     )
                 except Exception as error:  # never let a diagnostic break a run
                     logger.warning(f"{name} IV row {row}: constraint floor unavailable ({error}).")
@@ -475,7 +472,6 @@ class ParamSweepRunner(BaseExperimentRunner):
                 n_obs=None if getattr(data, "X_base", None) is None else len(data.X_base),
                 absorbed_rate=self.absorbed_rate,
                 gamma_n_alpha=self.gamma_n_alpha,
-                unit_cap=self.unit_cap,
                 **extra,
             )
         except Exception as error:  # never let a diagnostic break a run

@@ -3,15 +3,15 @@
 refactor5 touches `src/sem/cigarettes.py` (`instrument_set`, `restricted_fit` against
 a configured set, `iv_columns` / `iv_width` / `iv_pool` on the SEM, `[X | Z]` draws
 in both replicate modes) and `src/experiments/cigarettes.py` (`iv` and `gamma_z`
-from the block, `gamma_z` forwarded into the registry, the pads' `unit_cap`, the
-replicate rule of decision 9), plus `gamma_z > 0` under a non-empty set in
-`configs.py` (a56 gains the case). The direct-splat legs (`shipped_block`, the
-digest blocks) drop `gamma_n` and stay on the raw program after the recipes go to
-`gamma_n: 95`; the recipe legs read whatever the recipe sets, and every radius
-check reads the row formula at the model's own `gamma_n_alpha` (raw: exactly
-s sqrt(g)). (v)'s replicate coverage leg runs the recipe raw (`gamma_n: 0`): the
-padded PI+IV covers every replicate, so its "resampling rate under 1" is a reading
-of the raw program. Legs:
+from the block, `gamma_z` forwarded into the registry, the replicate rule of
+decision 9), plus `gamma_z > 0` under a non-empty set in `configs.py` (a56 gains
+the case). The direct-splat legs (`shipped_block`, the digest blocks) drop
+`gamma_n` and stay on the raw program after the recipes go to `gamma_n: 95`; the
+recipe legs read whatever the recipe sets, and every radius check reads the row
+formula at the model's own `gamma_n_alpha` (raw: exactly s sqrt(g)). (v)'s
+replicate coverage leg runs the recipe raw (`gamma_n: 0`): the padded PI+IV covers
+every replicate, so its "resampling rate under 1" is a reading of the raw program.
+Legs:
 
   (D)   the digest leg (scripts/digest_leg.py), as a56 to a59: the shipped blocks,
         no `iv` key, against the reference recorded on 14509db, no tolerance.
@@ -42,12 +42,12 @@ of the raw program. Legs:
   (v)   the replicate mechanism follows decision 9 and the declared leak reaches
         the solver: with a non-empty `iv:` the sweep runner's SEMs carry
         `bootstrap` False (90% row splits); the orchestrator reads the block's
-        `gamma_z` (0.0177) and, on `target: iv`, `unit_cap` = the panel's 49
-        states (None on `target: plasmode`), which every padded row's n_eff
-        takes; PI+IV carries one Z row at sqrt(s^2 (1 + gamma~) gamma_n(3;
-        gamma_z / (1 + gamma~))) (raw: exactly s sqrt(gamma_z)), DA+PI+IV and the
-        intersection's DA branch one joint (T, Z) row (4 columns) at the same
-        formula with App. D's post-DA leak (eps / sigma~ + sqrt(gamma_z / rho))^2,
+        `gamma_z` (0.0177); every padded row is sized on the fit's n_obs
+        (n_eff, no cap on the units); PI+IV carries one Z row at
+        sqrt(s^2 (1 + gamma~) gamma_n(3; gamma_z / (1 + gamma~))) (raw: exactly
+        s sqrt(gamma_z)), DA+PI+IV and the intersection's DA branch one joint
+        (T, Z) row (4 columns) at the same formula with App. D's post-DA leak
+        (eps / sigma~ + sqrt(gamma_z / rho))^2,
         eps the fit epsilon eps* + EPS_TOL; on the runner's own 8 seeded row
         splits at gamma*(b) the coverage of b* on the four coefficient queries
         is 1.000 for PI and 1.000 for PI+IV; the same runner class forced onto
@@ -55,7 +55,7 @@ of the raw program. Legs:
         beside p10's 0.500 / 0.375); the query panel's +IV models project on
         the real Z; with `iv: []` the runner is built with `bootstrap` True.
         Catches: `bootstrap` forced True under a configured set (the coverage
-        then reads a resampling rate), `gamma_z` or `unit_cap` not forwarded, a
+        then reads a resampling rate), `gamma_z` not forwarded, a unit cap, a
         DA row at the non-DA leak. Misses: the production 8-experiment mean over
         a full sweep (SS14).
   (vi)  the SS6.3 spec table: abs(v'd) and gamma*(b) to 1e-3 at every spec, the
@@ -115,7 +115,6 @@ SPEC_TABLE = {
 }
 P10_BOOTSTRAP_COVERAGE = {"PI": 0.500, "PI+IV": 0.375}
 REPLICATES = 8
-STATES = 49  # the panel's states, the pads' units on `target: iv`
 FAIL = []
 
 
@@ -398,21 +397,10 @@ def leg_v():
         orch.iv_columns == PHASE_B and orch.gamma_z == gamma_z == GAMMA_Z_DEFAULT,
         f"{orch.gamma_z!r}",
     )
-    check(
-        f"(v) target iv: unit_cap is the panel's {STATES} states on the toggles and the runners",
-        orch.toggles["unit_cap"] == STATES and orch.kwargs["unit_cap"] == STATES,
-        f"{orch.toggles['unit_cap']!r}",
-    )
-    plasmode = orchestrator(recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1, target="plasmode"))
-    check(
-        "(v) target plasmode: unit_cap None (the rows count)",
-        plasmode.toggles["unit_cap"] is None and plasmode.kwargs["unit_cap"] is None,
-    )
     runner = sweep_runner(orch)
     check(
         "(v) every sweep SEM is on 90% row splits (bootstrap False)", all(sem.bootstrap is False for sem in runner.sems)
     )
-    check("(v) the sweep runner carries unit_cap", runner.unit_cap == STATES, f"{runner.unit_cap!r}")
     target = runner.sems[0].solution.ravel()
     data = runner.generate_data(0, 1.0)
     n_train = int(round(0.9 * runner.sems[0].design.n))
@@ -430,10 +418,10 @@ def leg_v():
         raw = float(np.sqrt(pi_iv.sigma_sq * gamma_z))
         got = pi_iv.iv_radius("z", gamma)
         check(
-            "(v) PI+IV: gamma_z declared, one Z row, at the row formula on n_eff = min(n, 49)",
+            "(v) PI+IV: gamma_z declared, one Z row, at the row formula on n_eff = n_obs",
             pi_iv.gamma_z == gamma_z
             and pi_iv.rows == ("z",)
-            and pi_iv.n_eff == min(pi_iv.n_obs_, STATES)
+            and pi_iv.n_eff == pi_iv.n_obs_
             and abs(got - want) <= 1e-12 * want,
             f"{got:.6f} (want {want:.6f}, raw s sqrt(gamma_z) {raw:.6f}, n_eff {pi_iv.n_eff})",
         )

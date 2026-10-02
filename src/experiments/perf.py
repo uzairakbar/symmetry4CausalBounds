@@ -84,7 +84,6 @@ def baseline_pi(runner, data, b=None) -> PartialR2:
         n_jobs=1,
         mean_match=runner.mean_match,
         gamma_n_alpha=runner.gamma_n_alpha,
-        unit_cap=runner.unit_cap,
     )
 
 

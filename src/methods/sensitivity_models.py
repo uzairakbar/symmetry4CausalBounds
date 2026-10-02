@@ -101,7 +101,6 @@ class BoundedSA(SA):
         rho=1.0,
         absorbed_rate=0.0,
         gamma_n_alpha=0.0,
-        unit_cap=None,
     ):
         if gamma is None:
             raise ValueError("gamma must be explicitly provided")
@@ -125,11 +124,10 @@ class BoundedSA(SA):
         # cigarette FWL controls, prorated to the rows fitted); 0 everywhere else
         self.absorbed_rate = absorbed_rate
         # the finite-sample pads (`finite_sample_budget`): every padded row at
-        # level gamma_n_alpha / GAMMA_N_ROWS on n_eff = min(n_obs, unit_cap) units,
-        # the original samples (also on the m sweep, whose rows are m copies of
-        # them); 0.0 is the raw program, the population budgets with no pad
+        # level gamma_n_alpha / GAMMA_N_ROWS on n_eff = n_obs units, the original
+        # samples (also on the m sweep, whose rows are m copies of them); 0.0 is
+        # the raw program, the population budgets with no pad
         self.gamma_n_alpha = float(gamma_n_alpha)
-        self.unit_cap = unit_cap
         self.n_obs_ = None  # the distinct observations behind the fitted rows
         self.query_status = None  # per-query SolveStatus, set on every predict
         self.query_diagnostics = None  # optional per-query extras, set on predict
@@ -177,11 +175,10 @@ class BoundedSA(SA):
 
     @property
     def n_eff(self) -> int:
-        """The units every padded row is sized on: the fit's distinct observations,
-        capped at `unit_cap` (the cigarette panel's 49 states on `target: iv`)."""
+        """The units every padded row is sized on: the fit's distinct observations."""
         if self.n_obs_ is None:
             raise ValueError("n_eff is read after fit: the units are the fit's distinct observations")
-        return self.n_obs_ if self.unit_cap is None else min(self.n_obs_, int(self.unit_cap))
+        return self.n_obs_
 
     @property
     def row_level(self) -> float:
@@ -292,7 +289,6 @@ class PartialR2(BoundedSA):
         rho=1.0,
         absorbed_rate=0.0,
         gamma_n_alpha=0.0,
-        unit_cap=None,
     ):
         self._supports_closed_form = True
 
@@ -330,7 +326,6 @@ class PartialR2(BoundedSA):
             rho=rho,
             absorbed_rate=absorbed_rate,
             gamma_n_alpha=gamma_n_alpha,
-            unit_cap=unit_cap,
         )
 
     # ------------------------------------------------------------------ fit
@@ -596,7 +591,6 @@ def constraint_floor(
     n_obs=None,
     absorbed_rate=0.0,
     gamma_n_alpha=0.0,
-    unit_cap=None,
 ):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
@@ -629,9 +623,9 @@ def constraint_floor(
         n_obs, absorbed_rate: the sigma-hat dof of the ball, as `PartialR2._fit`
             takes them: the distinct observations behind `design`'s rows and the
             controls partialled out per observation.
-        gamma_n_alpha, unit_cap: the finite-sample pads, as the model takes them
+        gamma_n_alpha: the finite-sample pads, as the model takes them
             (`PartialR2.ball_budget`): the ball is gamma_n(k; gamma~) at level
-            gamma_n_alpha / GAMMA_N_ROWS on min(n_obs, unit_cap) units. The floor is
+            gamma_n_alpha / GAMMA_N_ROWS on n_obs units. The floor is
             taken at delta = 0: with the mean row an IV block sees delta too, so
             the padded program's own floor can sit lower, and this one is then an
             upper reference for it.
@@ -653,9 +647,8 @@ def constraint_floor(
     residuals = np.asarray(y).flatten() - design @ h_erm
     n_obs = N if n_obs is None else int(n_obs)
     scale = float(np.sqrt(residual_variance(residuals, M + int(mean_match) + absorbed_rate * n_obs, n_obs)))
-    n_eff = n_obs if unit_cap is None else min(n_obs, int(unit_cap))
     ball = finite_sample_budget(
-        M + int(mean_match), recalibrated_gamma(gamma, rho, recalibrate), n_eff, gamma_n_alpha / GAMMA_N_ROWS
+        M + int(mean_match), recalibrated_gamma(gamma, rho, recalibrate), n_obs, gamma_n_alpha / GAMMA_N_ROWS
     )
     delta = np.sqrt(N) * scale * np.sqrt(max(ball, 0.0))
 
@@ -1020,7 +1013,6 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
             gamma_n_alpha=self.gamma_n_alpha,
-            unit_cap=self.unit_cap,
         )
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
@@ -1086,7 +1078,6 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
             gamma_n_alpha=self.gamma_n_alpha,
-            unit_cap=self.unit_cap,
         )
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):

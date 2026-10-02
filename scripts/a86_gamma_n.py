@@ -9,8 +9,8 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         and a's complement (1 - a), decreasing in n towards g; and the reference
         values at the fixed split a = alpha / 3: sim k 33, n 1843, gamma 1 ->
         1.1194; optical k 55, n 900, gamma 0.66 -> 0.8428; cigarettes k 5, gamma
-        0.25 at n 2205 -> 0.2993 and at n 49 -> 0.7493; the mean row (1 + gamma)
-        gamma_n(1; 0) at n 1843, gamma 1 -> 0.0062 (each within 1e-4).
+        0.25 at n 2205 -> 0.2993; the mean row (1 + gamma) gamma_n(1; 0) at
+        n 1843, gamma 1 -> 0.0062 (each within 1e-4).
         Catches: a quantile at the wrong level, a dropped 1/n, a noncentrality
         not scaled by n, a raw mode that pads.
   (ii)  the ERM ball and the mean row off the cvx parameters, through
@@ -18,11 +18,10 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         for PI, PI+INV, PI+IV (empty Z), DA+PI and PI&DA+PI (both branches):
         the ball s sqrt(gamma_n(k; gamma~)) at a = alpha / 3 with k = d + 1 (the
         slice's intercept) and n = n_eff, the mean row s sqrt((1 + gamma~)
-        gamma_n(1; 0)); n_eff the original samples on an m = 4 tiling (`X_base`)
-        and `unit_cap` when set; raw (alpha 0) the population ball s sqrt(gamma~)
-        bit for bit and no mean row; the cigarette orchestrator's `unit_cap` is
-        the panel's 49 states on `target: iv` and None on `plasmode`, and the
-        simulation and optical toggles carry none.
+        gamma_n(1; 0)); n_eff the fit's n_obs, the original samples on an m = 4
+        tiling (`X_base`); raw (alpha 0) the population ball s sqrt(gamma~) bit
+        for bit and no mean row; the cigarette orchestrator caps no units on
+        either target (`iv`, `plasmode`), and the simulation toggles carry none.
         The IV rows on a fixture with an observed Z and T, gamma_z 2^-8: PI+IV,
         PI+INV+IV and the intersection's baseline carry the Z row at the declared
         gamma_z; DA+PI+IV(Z) / (T) the one row at gamma~_z(eps) = (eps / s~ +
@@ -32,7 +31,7 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         raw s sqrt(g) to 1e-12; a DA row moves with a predict-time epsilon and a
         non-DA one does not.
         Catches: a ball at the wrong level, dof or n, the m sweep counting its
-        copies, a cap leaking onto the plasmode sweeps, a raw run that pads, an IV
+        copies, a cap on the units, a raw run that pads, an IV
         row at the wrong leak, level or layout, a DA row frozen at fit.
   (iii) the mean row: at a query at the design mean the padded PI interval is
         ybar +- the mean radius exactly (delta binds; raw: the point ybar); on
@@ -152,15 +151,12 @@ REFERENCES = (
     ("sim ball", 33, 1.0, 1843, SPLIT, 1.1194),
     ("optical ball", 55, 0.66, 900, SPLIT, 0.8428),
     ("cigarettes ball n 2205", 5, 0.25, 2205, SPLIT, 0.2993),
-    ("cigarettes ball n 49", 5, 0.25, 49, SPLIT, 0.7493),
 )
 MEAN_ROW = (1843, 1.0, 0.0062)  # n, gamma, (1 + gamma) gamma_n(1; 0)
 TMPROOT = os.environ.get("A86_TMPROOT", os.path.expanduser("~/scratch/tmp/a86"))
 DATASETS = ("simulation", "optical_device", "cigarettes")
 # what config.yaml and every non-do-MNIST recipe resolve `gamma_n` to
 RECIPE_ALPHA = 0.05
-# the cigarette panel's states, the pads' units on `target: iv`
-CIGARETTE_STATES = 49
 GAMMA_Z_SIM = 2**-8
 # the query panels' budgets at c29af19 (`_epsilon_budget(query_epsilon, tol=eps,
 # quantile=None)` on opticalDeviceFig6's and cigarettesFig7's blocks)
@@ -171,7 +167,7 @@ VALIDITY_ROWS_DRAWS = 400
 VALIDITY_SOLVE_DRAWS = 250
 VALIDITY_GAMMA = 0.25
 VALIDITY_SEED = 20_000
-# every retired symbol of the IM-CI, the pad tolerance and the old IV budgets
+# every retired symbol of the IM-CI, the pad tolerance, the old IV budgets and the unit cap
 RETIRED = (
     "im-ci", "im_ci", "IM_CI", "imbens", "Imbens", "bootstrap_bounds", "results_raw", "_raw_record", "RAW_MTIME_SLACK",
     "sweep_record_for", "pad_tolerance", "iv_recalibrate", "leak_t", "leak_tz", "epsilon_iv_z", "eps_iv_star",
@@ -179,7 +175,7 @@ RETIRED = (
     "tz_bound", "z_bound", "declared_iv", "fit_iv_leaks", "fit_epsilon_iv", "fit_epsilon_iv_z",
     "_baseline_epsilon_iv_z", "_step_epsilon_iv", "epsilon_star_pointwise", "invariance_error",
     "eps_tol", "sweep_eps_tol", "PAD_QUANTILE", "epsilon_pad_star", "measured_epsilon_pad", "_pad_budget",
-    "pad_epsilon", "epsilon_q95",
+    "pad_epsilon", "epsilon_q95", "unit_cap",
 )  # fmt: skip
 # the retired Imbens-Manski CI's symbols (the yaml key, its parsed name, the
 # constants, the helpers, the raw record and its reader, the pad tolerance)
@@ -292,25 +288,22 @@ def leg_ii():
     print("(ii) the ERM ball and the mean row off the cvx parameters")
     names = ["PI", "PI+INV", "PI+IV", "DA+PI", "PI&DA+PI"]
     gamma, d, n = 0.5, 8, 400
-    for alpha, m, cap in ((0.0, 1, None), (ALPHA, 1, None), (ALPHA, 4, None), (ALPHA, 1, 100), (0.0, 4, 100)):
+    for alpha, m in ((0.0, 1), (ALPHA, 1), (ALPHA, 4), (0.0, 4)):
         arrays, queries = fixture(n=n, d=d, m=m)
-        builders = MethodRegistry.build_methods(
-            names, gamma=gamma, epsilon=1.0, rho=1.3, pad=True, gamma_n_alpha=alpha, unit_cap=cap
-        )
-        n_eff = n if cap is None else min(n, cap)
-        tag = f"alpha {alpha:g}, m {m}, cap {cap}"
+        builders = MethodRegistry.build_methods(names, gamma=gamma, epsilon=1.0, rho=1.3, pad=True, gamma_n_alpha=alpha)
+        tag = f"alpha {alpha:g}, m {m}"
         for name in names:
             model = builders[name]()
             fit_model(model=model, method_name=name, **arrays)
             model.predict(queries)
             for ball in balls(model):
                 g = ball.budget(gamma)
-                want = ball.scale * np.sqrt(fsb(d + 1, g, n_eff, alpha / 3))
+                want = ball.scale * np.sqrt(fsb(d + 1, g, n, alpha / 3))
                 got = ball.radius_param.value
                 exact = got == ball.scale * np.sqrt(g) if alpha == 0.0 else abs(got - want) <= 1e-12 * want
-                check(f"(ii) {tag}: {name} ball", ball.n_eff == n_eff and exact, f"{got:.6g} (want {want:.6g})")
+                check(f"(ii) {tag}: {name} ball", ball.n_eff == n and exact, f"{got:.6g} (want {want:.6g})")
                 if alpha:
-                    mean = ball.scale * np.sqrt((1 + g) * fsb(1, 0.0, n_eff, alpha / 3))
+                    mean = ball.scale * np.sqrt((1 + g) * fsb(1, 0.0, n, alpha / 3))
                     got = ball.mean_param.value
                     check(f"(ii) {tag}: {name} mean row", abs(got - mean) <= 1e-12 * mean, f"{got:.6g}")
                 else:
@@ -323,13 +316,12 @@ def leg_ii():
         config = yaml.safe_load(handle) or {}
     block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
     block.pop("experiment", None)
-    for target, want in (("iv", CIGARETTE_STATES), ("plasmode", None)):
+    for target in ("iv", "plasmode"):
         resolved = resolve_dataset_block("cigarettes", {**block, "target": target})
         orch = CigaretteOrchestrator(**{**resolved, "n_jobs": 1}, hyperparameters={})
         check(
-            f"(ii) cigarettes target {target}: unit_cap {want}",
-            orch.toggles["unit_cap"] == want and orch.kwargs["unit_cap"] == want,
-            f"{orch.toggles['unit_cap']}",
+            f"(ii) cigarettes target {target}: no unit cap (the pads count the fit's rows)",
+            "unit_cap" not in orch.toggles and "unit_cap" not in orch.kwargs,
         )
     sim = SimulationOrchestrator(seed=42, kernel_dim=0, treatment_dim=32, methods=["PI"], gamma_n_alpha=ALPHA)
     check(

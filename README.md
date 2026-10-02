@@ -73,9 +73,8 @@ simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` i
   `gamma_n_alpha`) is raw.
 - **n per dataset.** Every padded row counts the fit's original samples (the m
   sweep's rows are m copies of them): the simulation and optical rows, the
-  cigarette plasmode rows (220 to 2205; its errors are independent given X), and on
-  the real-panel query `cigarettesFig7` the 49 states (`unit_cap`), whose
-  state-years are dependent.
+  cigarette plasmode rows (220 to 2205; its errors are independent given X), and
+  the real-panel query `cigarettesFig7`'s state-year rows, counted the same way.
 - **Intersections.** PI & DA+... intersects two simultaneous 95% sets, so its band
   is 90%.
 - **Declared instrument leaks.** The cigarettes declare `gamma_z: 0.0177`; the

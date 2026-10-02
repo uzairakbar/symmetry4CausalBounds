@@ -958,7 +958,6 @@ class MethodRegistry:
         rho: float = 1.0,
         absorbed_rate: float = 0.0,
         gamma_n_alpha: float = 0.0,
-        unit_cap: int | None = None,
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
@@ -1006,12 +1005,9 @@ class MethodRegistry:
                 (the cigarette FWL); 0 is none. partial_r2 only.
             gamma_n_alpha: the finite-sample pads' alpha (the yaml's `gamma_n`, 95
                 -> 0.05): every PI ball at gamma_n(k; gamma~) and, on the slice, a
-                mean row, each at level alpha / 3 on min(n_obs, unit_cap) units;
+                mean row, each at level alpha / 3 on the fit's n_obs units;
                 0.0, the default and every direct constructor, is the raw program
                 (the population budgets). partial_r2 only.
-            unit_cap: the units the pads are sized on at most (the cigarette
-                panel's states on `target: iv`); None is the fit's n_obs.
-                partial_r2 only.
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
@@ -1064,7 +1060,6 @@ class MethodRegistry:
             mean_match=mean_match,
             absorbed_rate=absorbed_rate,
             gamma_n_alpha=gamma_n_alpha,
-            unit_cap=unit_cap,
         )
         # which IV rows a ball ends up with follows from the instrument blocks it
         # is FITTED with (`fit_model`), so one kwarg set serves the non-DA
