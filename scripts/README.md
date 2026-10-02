@@ -75,10 +75,14 @@ covariance ball of Lem. 2. `mean_match: false` in `config.yaml`'s `defaults:`
 restores the pre-2026-09 uncentred, intercept-free ball; `a10 --mean-match false`
 reproduces the pre-change digest byte-for-byte, which is what pins the old path.
 
-The linear backend enforces the slice EXACTLY (it eliminates the intercept by
-centring). The copsens backend (do-MNIST) has no mean-matched slice: its ball lives on
-the latent factor scores of a prefit net, so `mean_match` is accepted for the uniform
-signature and logged as inert (A75 pins that).
+The linear backend enforces the slice EXACTLY on the raw program (it eliminates the
+intercept by centring). Under the finite-sample pads (`gamma_n`, `defaults:` of
+every shipped recipe) the slice gets its own padded row: the mean may sit off
+`E_n[Y]` by delta, inside the ERM ball and within `s sqrt((1 + gamma~) gamma_n(1;
+0))`, and the IV rows see delta too (the instruments are not centred). A86
+(ii)/(iii) pin it. The copsens backend (do-MNIST) has no mean-matched slice: its
+ball lives on the latent factor scores of a prefit net, so `mean_match` is accepted
+for the uniform signature and logged as inert (A75 pins that).
 
 The do-MNIST estimand is analytic since the copsens port (`sem.ate_of`,
 `sem.h_star`); the fitted target net and its gates (A4 to A9, A21, A24, A27) went with

@@ -20,9 +20,11 @@ defaults:
 # (eps / s~ + sqrt(gamma_z / rho))^2 in s~ units; a DA fit with both T and Z
 # carries the one joint row on span(T, Z). Sweeps and query panels alike.
 # Nor is the norm of W the oracle eps* takes: every SWEEP (gamma, omega, epsilon,
-# recalibrate, n, m, and the perf sweeps on the epsilon runner) reads eps* as the
-# q0.95 of |W|, every query panel as its RMS (`epsilon_quantile` /
-# `query_epsilon_quantile` in configs.py). do-MNIST declares its epsilon.
+# recalibrate, n, m, and the perf sweeps on the epsilon runner) reads eps* once as
+# the q0.95 of |W| over 8 seeded augmentation draws (`oracle.epsilon_star_q95`),
+# every query panel as its RMS (`epsilon_quantile` / `query_epsilon_quantile` in
+# configs.py). Either way eps = eps* + EPS_TOL (2^-8) is both the invariance
+# budget and the +-eps pad. do-MNIST declares its epsilon.
 
 # `experiment:` selects what to run. Omitted n_samples/n_experiments/
 # sweep_samples fall back to DatasetDefaults, omitted `methods` to the full

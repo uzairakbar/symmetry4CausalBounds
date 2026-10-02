@@ -243,10 +243,21 @@ def epsilon_star_q95(
     return float(np.quantile(np.concatenate(pooled), W_QUANTILE))
 
 
+def sweep_sem(sem) -> bool:
+    """Whether a SEM is a sweep's, i.e. reads eps* as the shared q0.95 reading.
+    `epsilon_quantile` is a routing marker: W_QUANTILE (a sweep) or None (a query
+    panel, the RMS); any other value is a config error, since no other quantile is
+    ever read."""
+    quantile = getattr(sem, "epsilon_quantile", None)
+    if quantile not in (None, W_QUANTILE):
+        raise ValueError(f"epsilon_quantile is a marker, None or {W_QUANTILE}; got {quantile!r}.")
+    return quantile is not None
+
+
 def sweep_epsilon_star(sem, da, X: NDArray | None = None, features: Callable | None = None, **augment_kwargs) -> float:
     """eps* in the norm the SEM is routed to: `epsilon_star_q95` on a sweep's SEM
-    (`epsilon_quantile` set), the RMS `epsilon_star` on a query panel's."""
-    if getattr(sem, "epsilon_quantile", None) is not None:
+    (`sweep_sem`), the RMS `epsilon_star` on a query panel's."""
+    if sweep_sem(sem):
         return epsilon_star_q95(sem, da, X=X, features=features, **augment_kwargs)
     return epsilon_star(sem, da, X=X, features=features, **augment_kwargs)
 

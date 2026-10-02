@@ -32,6 +32,7 @@ from src.oracle import (
     pool_oracles,
     preserve_rng,
     recalibrated_da_epsilon,
+    sweep_sem,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -98,7 +99,7 @@ class OracleMixin:
         # a sweep's SEM (`epsilon_quantile` set) reads eps* once per (SEM, DA), as
         # the shared q0.95 of |W| over `W_DRAWS` concatenated draws; the query
         # panel's SEM keeps the pooled RMS above
-        if getattr(sem, "epsilon_quantile", None) is not None:
+        if sweep_sem(sem):
             oracle = replace(oracle, epsilon_star=epsilon_star_q95(sem, da, X=X, features=features))
         logger.info(f"Oracle parameters: {oracle}")
         return oracle

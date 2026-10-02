@@ -69,7 +69,7 @@ class SimulationConfig:
     # None = measured, on every dataset: the query panel's eps* (the RMS of |W| on
     # its draw) + EPS_TOL, the sweeps' the shared q0.95 reading + EPS_TOL
     epsilon: float | None = None
-    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # which norm of W eps* is, a marker (`oracle.sweep_sem`): 0.95 routes a SEM to the q0.95 reading of
     # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
     # q0.95, as on every dataset; the query keeps the RMS. It moves every sweep
     # budget, the pad, the robustness sweep's tuning target and every DA IV row's
@@ -126,7 +126,7 @@ class OpticalDeviceConfig:
     # dependence on which augmentation someone uncomments. A float pins it instead.
     epsilon: float | None = None
     query_epsilon: float | None = None
-    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # which norm of W eps* is, a marker (`oracle.sweep_sem`): 0.95 routes a SEM to the q0.95 reading of
     # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
     # q0.95, as on every dataset; the query keeps the RMS. Split as `epsilon` /
     # `query_epsilon` are. The +-eps pad is the same eps in either setting, and it
@@ -241,7 +241,7 @@ class CigaretteConfig:
     # 0 by construction and the budget is pure knife-edge tolerance.
     epsilon: float | None = None
     query_epsilon: float | None = None
-    # which norm of W eps* is: set routes a SEM to the shared q0.95 reading of
+    # which norm of W eps* is, a marker (`oracle.sweep_sem`): 0.95 routes a SEM to the q0.95 reading of
     # |W| (`oracle.epsilon_star_q95`), None keeps its RMS. The SWEEPS take the
     # q0.95, as on every dataset; the query keeps the RMS. Either is 0 on the
     # panel, where W is; the robustness sweep's tuned DA is where the choice shows.

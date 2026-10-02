@@ -48,6 +48,46 @@ Comment out (or remove) the experiemnts from `./config.yaml` that you are not in
 
 The generated figures and artifacts are saved in the `./artifacts/` directory after the experiments finish execution.
 
+## Finite-sample tolerance (gamma_n)
+Every linear PI program carries finite-sample pads, so one solve gives a
+simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` in
+`config.yaml`'s `defaults:` and in every recipe.
+
+- **The pads.** With `gamma_n(d; g) = F^-1_{chi2_d(n g)}(1 - a) / n`
+  (`sensitivity_models.finite_sample_budget`), the ERM ball is
+  `sigma-hat sqrt(gamma_n(k; gamma~))`, the mean-matched slice gets a mean row
+  `|delta| <= sigma-hat sqrt((1 + gamma~) gamma_n(1; 0))` (delta inside the ball;
+  none with `mean_match: false`), and every IV row is
+  `sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~)))`. alpha = 0.05 is split the
+  same way on every method: alpha/3 to the ball, alpha/3 to the mean row, alpha/3
+  shared by the IV rows. A non-DA IV row's leak `g` is the declared `gamma_z`; a DA
+  row's is App. D's post-DA `(eps / sigma~ + sqrt(gamma_z / rho))^2`. A DA fit with
+  both the translation amounts T and an observed instrument Z carries one joint row
+  on span(T, Z) (`IV_LAYOUT`, chosen by a pilot). The invariance budget and the
+  +-eps pad stay unpadded: eps = eps* + 2^-8 (`EPS_TOL`), eps* the q0.95 of |W| on
+  the sweeps and its RMS on the query panels.
+- **Raw mode.** Without the key (or `gamma_n: 0` / `false`) the programs use the
+  population budgets: the ball `sigma-hat sqrt(gamma~)`, the exact mean match and
+  the IV rows `s sqrt(g)`. A genuine but optimistic band. Every model built
+  directly (`PartialR2(...)`, `MethodRegistry.build_methods(...)` without
+  `gamma_n_alpha`) is raw.
+- **n per dataset.** Every padded row counts the fit's original samples (the m
+  sweep's rows are m copies of them): the simulation and optical rows, the
+  cigarette plasmode rows (220 to 2205; its errors are independent given X), and on
+  the real-panel query `cigarettesFig7` the 49 states (`unit_cap`), whose
+  state-years are dependent.
+- **Intersections.** PI & DA+... intersects two simultaneous 95% sets, so its band
+  is 90%.
+- **Declared instrument leaks.** The cigarettes declare `gamma_z: 0.0177`; the
+  simulation declares `SimulationConfig.gamma_z = 2^-8` for its generated
+  instrument (not to be confused with `CigaretteConfig.gamma_z`, a sliver guard);
+  optical has no observed instrument.
+- **No nesting of (T,Z) in (Z).** Under the pads the joint (T,Z) row has more
+  columns than the Z row at the same level, so a `(T,Z)` interval need not sit
+  inside the `(Z)` one; raw, it does. Every +IV interval still sits inside its
+  non-IV counterpart.
+- do-MNIST accepts the key and ignores it: its CopSens balls are oracle-calibrated.
+
 ## do-MNIST
 The `do_mnist:` block runs the query path on the CopSens latent-factor ball around
 prefit nets. The main knobs:

@@ -85,8 +85,8 @@ class BoundedSA(SA):
     """
 
     # the fitted program reads a predict-time budget: the INV cone reads epsilon,
-    # the T-as-IV constraint reads `epsilon_iv`, and a plain ball only pads (the
-    # perf sweep re-solves the former two and `repad`s the rest)
+    # a DA IV row reads epsilon through gamma~_z(eps), and a plain ball only pads
+    # (the perf sweep re-solves the former two and `repad`s the rest)
     solves_on_epsilon: bool = False
 
     def __init__(
