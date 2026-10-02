@@ -35,21 +35,21 @@ alone and `DA+PI+IV(T,Z)` for both constraints
         entry (a KeyError at plot time), a registry that reorders. Misses: what a
         spelled method computes, which (ii) pins.
   (ii)  the three modes on fitted attributes, on the cigarette design and the
-        seed-42 DA draw with a 1-column Z, `epsilon_iv` 2^-5 and `epsilon_iv_z`
-        2^-6 (distinct on purpose), `gamma_z` 2^-8 and `rho = rho_hat` of the draw
-        (the bound pin depends on it: `s^2` is `sigma_sq(GX) / rho` and with the
-        registry default 1.0 the two bounds differ by 4e-5), through the registry
-        and `fit_model`: instrument width 2 on bare and `(T,Z)`, 1 on `(Z)` and
-        `PI+IV`, the intersection's DA branch the same and its baseline 1 in both
-        modes; `epsilon_iv` 2^-5 on bare and `(T,Z)`, 2^-6 on `(Z)`, `(Z)`'s bound
-        equal to `PI+IV`'s to 1e-12; `(T,Z)` predicts as bare to 1e-9, `DA+ERM+IV(T,Z)`
+        seed-42 DA draw with a 1-column Z, `gamma_z` 2^-8 and `rho = rho_hat` of
+        the draw (the DA rows' leak (eps / s~ + sqrt(gamma_z / rho))^2 reads it),
+        through the registry and `fit_model`: blocks Z and T on bare and `(T,Z)`,
+        Z alone on `(Z)` and `PI+IV`, the intersection's DA branch the same and
+        its baseline Z alone in both modes; the rows `IV_LAYOUT` gives (the joint
+        (T, Z) row on bare, `(T,Z)` and the intersection's DA branch, a Z row on
+        `(Z)` and the non-DA fits); raw, `PI+IV`'s Z row at s sqrt(gamma_z) and
+        every DA row at eps + s~ sqrt(gamma_z / rho) to 1e-12, the DA leak's eps
+        what separates `(Z)`'s row from PI+IV's; `(T,Z)` predicts as bare to 1e-9, `DA+ERM+IV(T,Z)`
         as `DA+ERM+IV` to 1e-12, `DA+ERM+IV(Z)` zeroes the demeaned moment and is the
         ERM optimum within it, beating a fresh 2SLS on (GX, y, Z); under an
         empty Z `DA+PI+IV(Z)` is `DA+PI` and `PI&DA+PI+IV(Z)` is `PI&DA+PI` to
         exactly 0.0, and `fit_model` on `DA+ERM+IV(Z)` raises. Catches: G stacked in
-        the Z mode (width 2), the Z variant built from `da_iv_common` (the T-side
-        term in its bound), the intersection ignoring `instrument`. Misses: a wrong
-        `gamma_z` compensated by a wrong `epsilon_iv_z`, which nothing produces.
+        the Z mode (a T block), a DA row blind to eps, the intersection ignoring
+        `instrument`. Misses: the padded radii, which a86 (ii) pins.
   (iii) the rollback: `NORMALIZED_SWEEP_SUFFIXES` is width and worst_error,
         `normalize_sweep` returns an `_approx_error` input untouched with one
         warning, `validate_plot_keys` raises on `normalize` under `_approx_error`
@@ -425,8 +425,6 @@ def fitted(names, X, y, GX, G, da, Z, rho):
         list(names),
         gamma=GAMMA,
         epsilon=EPS_TOL,
-        epsilon_iv=2**-5,
-        epsilon_iv_z=2**-6,
         gamma_z=2**-8,
         rho=rho,
         pad=False,
@@ -441,10 +439,9 @@ def fitted(names, X, y, GX, G, da, Z, rho):
 
 
 def width(model, k, block="Z"):
-    """Instrument columns of one block on a fitted IV ball: the jitter block adds
-    k rows, and an absent block is 0 columns."""
-    arr = model.Z_projector_R if block == "Z" else model.T_projector_R
-    return 0 if arr is None else arr.shape[0] - k
+    """Instrument columns of one block on a fitted IV ball (1-column Z and T here):
+    1 when the ball was fitted with the block, 0 when it was not."""
+    return int(model._has_z if block == "Z" else model._has_t)
 
 
 def synthetic(top):
@@ -565,9 +562,7 @@ def leg_i():
         check(f"(i) without a Z, {z} draws as {family}", method_style(z, False) == method_style(family, False))
     check("(i) DA+ERM+IV(Z) is a point estimate", is_point_estimate("DA+ERM+IV(Z)"))
     order = ["PI&DA+PI+IV(Z)", "PI", "DA+PI+IV(T,Z)", "DA+PI+IV", "DA+ERM+IV(Z)", "ATE"]
-    built = MethodRegistry.build_methods(
-        order, gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=2**-8, **TOGGLES
-    )
+    built = MethodRegistry.build_methods(order, gamma=GAMMA, epsilon=EPS_TOL, gamma_z=2**-8, **TOGGLES)
     check("(i) build_methods returns the requested spellings in order", list(built) == order, f"{list(built)}")
 
 
@@ -596,25 +591,37 @@ def leg_ii(seed):
             got == (1, t_want) and base == (1, 0),
             f"DA {got}, baseline {base}",
         )
-    # every IV ball carries BOTH radii; what tells the modes apart is which blocks
-    # they were FITTED with, so the (Z) spellings have no T constraint at all
-    for name in ("DA+PI+IV", "DA+PI+IV(T,Z)"):
-        check(f"(ii) {name} T radius is 2^-5", models[name].t_bound == 2**-5, f"{models[name].t_bound!r}")
+    # what tells the modes apart is which blocks they were FITTED with, so the (Z)
+    # spellings have no T block, and the rows follow `IV_LAYOUT`
+    rows = {
+        "PI+IV": ("z",),
+        "DA+PI+IV": ("tz",),
+        "DA+PI+IV(T,Z)": ("tz",),
+        "DA+PI+IV(Z)": ("z",),
+    }
+    for name, want in rows.items():
+        check(f"(ii) {name} carries the rows {want}", models[name].rows == want, f"{models[name].rows}")
+    for name, want in (("PI&DA+PI+IV", ("tz",)), ("PI&DA+PI+IV(Z)", ("z",))):
+        model = models[name]
+        ok = model.augmented.rows == want and model.baseline.rows == ("z",)
+        check(f"(ii) {name} DA branch rows {want}, baseline ('z',)", ok, f"{model.augmented.rows}")
     check("(ii) DA+PI+IV(Z) carries no T constraint", not models["DA+PI+IV(Z)"]._has_t)
     check("(ii) PI&DA+PI+IV(Z) DA branch carries no T constraint", not models["PI&DA+PI+IV(Z)"].augmented._has_t)
-    check("(ii) PI&DA+PI+IV DA branch T radius is 2^-5", models["PI&DA+PI+IV"].augmented.t_bound == 2**-5)
-    # a DA+ method solves on the AUGMENTED design, so its declared radius carries
-    # the DA-side allowance (SS2.6) and PI+IV's does not; the two are otherwise the
-    # same number, which is what this pins
-    for name in ("DA+PI+IV(Z)", "DA+PI+IV"):
+    # raw radii: PI+IV's Z row at s sqrt(gamma_z), every DA row at App. D's
+    # eps + s~ sqrt(gamma_z / rho); the DA leak's eps is what separates the (Z) mode
+    # from PI+IV
+    base = models["PI+IV"]
+    r_z = float(np.sqrt(base.sigma_sq * base.gamma_z))
+    gap = abs(base.iv_radius("z") - r_z)
+    check("(ii) PI+IV Z row is s sqrt(gamma_z)", gap < 1e-12, f"{gap:.2e}")
+    for name in ("DA+PI+IV(Z)", "DA+PI+IV", "DA+PI+IV(T,Z)"):
         model = models[name]
-        declared = np.sqrt(model.sigma_sq / model.rho * model.gamma_z)
-        base = models["PI+IV"].epsilon_iv_z
-        want = float(np.hypot(base, declared + model._z_allowance))
-        without = float(np.hypot(base, declared))
-        gap = abs(model.z_bound - want)
-        check(f"(ii) {name} Z radius is PI+IV's plus the DA-side allowance", gap < 1e-12, f"{gap:.2e}")
-        check("(ii) and the allowance is what separates them", model.z_bound > without, f"{model.z_bound:.6f}")
+        want = EPS_TOL + float(np.sqrt(model.sigma_sq) * np.sqrt(model.gamma_z / model.rho))
+        gap = abs(model.iv_radius(model.rows[0]) - want)
+        check(f"(ii) {name} row is eps + s~ sqrt(gamma_z / rho)", gap < 1e-12, f"{gap:.2e}")
+    without = float(np.sqrt(models["DA+PI+IV(Z)"].sigma_sq * models["DA+PI+IV(Z)"].gamma_z / models["DA+PI+IV(Z)"].rho))
+    got = models["DA+PI+IV(Z)"].iv_radius("z")
+    check("(ii) and the DA leak's eps is what separates it from the leak alone", got > without, f"{got:.6f}")
     check(
         "(ii) the T constraint is what tells bare DA+PI+IV from DA+PI+IV(Z)",
         models["DA+PI+IV"]._has_t and not models["DA+PI+IV(Z)"]._has_t,
@@ -648,9 +655,7 @@ def leg_ii(seed):
         b = np.asarray(reduced[f"{base}+IV(Z)"].predict(queries, gamma=GAMMA), dtype=float)
         gap = float(np.nanmax(np.abs(a - b)))
         check(f"(ii) {base}+IV(Z) under an empty Z is {base} to exactly 0.0", gap == 0.0, f"{gap:.2e}")
-    builders = MethodRegistry.build_methods(
-        ["DA+ERM+IV(Z)"], gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, **TOGGLES
-    )
+    builders = MethodRegistry.build_methods(["DA+ERM+IV(Z)"], gamma=GAMMA, epsilon=EPS_TOL, **TOGGLES)
     try:
         fit_model(model=builders["DA+ERM+IV(Z)"](), method_name="DA+ERM+IV(Z)", X=X, y=y, GX=GX, G=G, Z=empty)
         check("(ii) fit_model on DA+ERM+IV(Z) with an empty Z raises", False, "fitted")

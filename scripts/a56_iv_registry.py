@@ -58,12 +58,15 @@ Legs:
         `methods` falls back to ALL_METHODS without the non-DA `+IV` methods
         (`ERM+IV`; `PI+IV` and `PI+INV+IV` are PI and PI+INV without a Z) unless there
         is an instrument set (a default is not a request); the four IV classes built
-        with `gamma_z` 2^-8 carry it, and their bounds follow SS2.6 (the joint
-        0.069877 on the non-DA classes at s = 1, the joint at its own s on a DA class,
-        r_Z 0.0625 on the intersection's baseline branch). Catches: `PI+IV` built from
-        `common` (no `epsilon_iv`, so the class raises on the first real Z), a silent
-        ERM on no instrument, a fallback that trips its own error, `gamma_z` not
-        forwarded by the registry. Misses: the numbers the fits produce (a57).
+        with `gamma_z` 2^-8 carry it, and their raw (population) radii follow the
+        declared leak: a non-DA fit one Z row at s sqrt(gamma_z) (r_Z 0.0625 on the
+        intersection's baseline branch at s = 1), a DA fit its rows at App. D's
+        eps + s~ sqrt(gamma_z / rho) (the joint (T, Z) row on DA+PI+IV and on the
+        intersection's DA branch), moving with the predict-time eps.
+        Catches: `PI+IV` built without the leak (its Z row at radius 0 reads
+        INFEASIBLE), a silent ERM on no instrument, a fallback that trips its own
+        error, `gamma_z` not forwarded by the registry, a DA row blind to eps.
+        Misses: the numbers the fits produce (a57).
 
     MPLBACKEND=Agg python scripts/a56_iv_registry.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -426,7 +429,7 @@ def leg_iii():
 def leg_iv():
     print("(iv) the registry is ALL_METHODS and the do-MNIST backend is untouched")
     check("(iv) ALL_METHODS is the plan's tuple, in order", ALL_METHODS == PLAN_METHODS, repr(ALL_METHODS))
-    built = MethodRegistry.build_methods(list(ALL_METHODS), gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL)
+    built = MethodRegistry.build_methods(list(ALL_METHODS), gamma=GAMMA, epsilon=EPS_TOL)
     check("(iv) build_methods returns every name, in order", tuple(built) == ALL_METHODS, repr(tuple(built)))
     check("(iv) COPSENS_METHODS is the pinned ten", COPSENS_METHODS == NET_METHODS, repr(COPSENS_METHODS))
     net = _copsens_builders(
@@ -494,15 +497,13 @@ def leg_vi(seed):
     z = design.Z[:, :1]
     np.random.seed(seed)
     GX, G = ScaleTranslation(V, std=float(np.std(X @ (V / np.linalg.norm(V)))))(X)
-    # two budgets (batch B's ruling): the DA classes carry `epsilon_iv`, the non-DA
-    # ones and the intersection's baseline `epsilon_iv_z`; both positive here, or
-    # the non-DA bound would be exactly 0 and INFEASIBLE (SS3.3)
+    # a declared leak, or the non-DA Z row would sit at radius 0 and read
+    # INFEASIBLE (SS3.3)
     builders = MethodRegistry.build_methods(
         list(IV_METHODS),
         gamma=GAMMA,
         epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
-        epsilon_iv_z=EPS_TOL,
+        gamma_z=2**-8,
         recalibrate=True,
         pad=False,
         clipy=False,
@@ -514,9 +515,11 @@ def leg_vi(seed):
         "DA+ERM+IV": dict(X=GX, y=y, Z=z),
         "PI+IV": dict(X=X, y=y, Z=z),
         "PI+INV+IV": dict(X=X, y=y, GX=GX, Z=z),
-        "DA+PI+IV": dict(X=GX, y=y, Z=z),
-        # the intersection's DA branch takes its instrument as G (a57 gives it Z too)
-        "PI&DA+PI+IV": dict(X=X, y=y, GX=GX, G=z),
+        # a DA fit: the augmented design with both blocks, `X_pre` marking it
+        "DA+PI+IV": dict(X=GX, y=y, Z=z, T=G, X_pre=X),
+        # the intersection splits its own branches: Z to the baseline, T and Z to
+        # the DA branch
+        "PI&DA+PI+IV": dict(X=X, y=y, GX=GX, G=G, Z=z),
     }
     for name in IV_METHODS:
         model = builders[name]()
@@ -534,15 +537,13 @@ def leg_vi(seed):
             check(f"(vi) {name} read the instrument", model._has_iv)
         if name == "PI&DA+PI+IV":
             check("(vi) PI&DA+PI+IV DA branch read the instrument", model.augmented._has_iv)
-    # gamma_z reaches every IV class through the registry, and the bound follows
-    # SS2.6 per row: the non-DA classes and the intersection's baseline carry
-    # `epsilon_iv_z` (default 0.0, the declared path) so their bound is exactly
-    # r_Z = s sqrt(gamma_z); the DA classes carry `epsilon_iv` and read the joint
+    # gamma_z reaches every IV class through the registry, and the raw radii follow
+    # the declared leak: s sqrt(gamma_z) on a non-DA row, App. D's eps + s~ sqrt(gamma_z
+    # / rho) on a DA one
     declared = MethodRegistry.build_methods(
         ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
         gamma=GAMMA,
         epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
         gamma_z=2**-8,
         recalibrate=True,
         pad=False,
@@ -558,46 +559,22 @@ def leg_vi(seed):
         check(f"(vi) {name} built with gamma_z 2^-8 carries it", model.gamma_z == 2**-8, repr(model.gamma_z))
     for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
         model = fitted[name]
-        r_z = float(np.sqrt(model.sigma_sq / model.rho * 2**-8))
-        exact = model.t_bound == EPS_TOL and model.z_bound == r_z
-        check(f"(vi) {name}: epsilon_iv inert and the Z radius exactly r_Z", exact, f"{model.z_bound!r}")
-    for name in ("DA+PI+IV", "PI&DA+PI+IV DA branch"):
+        r_z = float(np.sqrt(model.sigma_sq * 2**-8))
+        got = model.iv_radius("z")
+        ok = model.rows == ("z",) and abs(got - r_z) < 1e-12
+        check(f"(vi) {name}: one Z row at exactly s sqrt(gamma_z)", ok, f"{model.rows} {got!r}")
+    for name, rows in (("DA+PI+IV", ("tz",)), ("PI&DA+PI+IV DA branch", ("tz",))):
         model = fitted[name]
-        want = float(np.sqrt(model.sigma_sq / model.rho * 2**-8))
-        check(f"(vi) {name} Z radius is r_Z at its own s", abs(model.z_bound - want) < 1e-12, f"{model.z_bound:.9f}")
-        check(f"(vi) {name} T radius is epsilon_iv alone", model.t_bound == EPS_TOL, f"{model.t_bound!r}")
-    got = fitted["PI&DA+PI+IV baseline"].z_bound
+        want = EPS_TOL + float(np.sqrt(model.sigma_sq) * np.sqrt(2**-8 / model.rho))
+        got = model.iv_radius(rows[0])
+        ok = model.rows == rows and abs(got - want) < 1e-12
+        check(f"(vi) {name}: its {rows} row at eps + s~ sqrt(gamma_z / rho)", ok, f"{model.rows} {got:.9f}")
+        model.epsilon = 2 * EPS_TOL
+        moved = model.iv_radius(rows[0]) - got
+        model.epsilon = EPS_TOL
+        check(f"(vi) {name}: the row moves with eps one for one", abs(moved - EPS_TOL) < 1e-12, f"{moved!r}")
+    got = fitted["PI&DA+PI+IV baseline"].iv_radius("z")
     check("(vi) PI&DA+PI+IV baseline bound is r_Z = 0.0625 to 1e-6", abs(got - 0.0625) < 1e-6, f"{got:.9f}")
-    # with a positive `epsilon_iv_z` every Z constraint reads the same radius
-    # 0.069877 on this panel (s = 1), and the T radius never moves
-    both = MethodRegistry.build_methods(
-        ["PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV"],
-        gamma=GAMMA,
-        epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
-        epsilon_iv_z=EPS_TOL,
-        gamma_z=2**-8,
-        recalibrate=True,
-        pad=False,
-        clipy=False,
-        n_jobs=1,
-        mean_match=True,
-        absorbed_rate=absorbed_rate(design),
-    )
-    fitted = {name: both[name]().fit(**calls[name]) for name in both}
-    fitted["PI&DA+PI+IV baseline"] = fitted["PI&DA+PI+IV"].baseline
-    joint = float(np.hypot(EPS_TOL, np.sqrt(2**-8)))
-    for name in ("PI+IV", "PI+INV+IV", "PI&DA+PI+IV baseline"):
-        got = fitted[name].z_bound
-        ok = abs(got - joint) < 1e-6
-        check(f"(vi) {name} with epsilon_iv_z 2^-5: the Z radius is 0.069877 to 1e-6", ok, f"{got:.9f}")
-    model = fitted["DA+PI+IV"]
-    want = float(np.hypot(EPS_TOL, np.sqrt(model.sigma_sq / model.rho) * np.sqrt(2**-8)))
-    check(
-        "(vi) DA+PI+IV with epsilon_iv_z 2^-5: the same Z radius at its own s, the T radius unmoved",
-        abs(model.z_bound - want) < 1e-12 and model.t_bound == EPS_TOL,
-        f"{model.z_bound:.9f}",
-    )
     empty = (("cigarettes", {}), ("cigarettes", dict(iv=[])), ("simulation", {}), ("simulation", dict(iv=0)))
     for name, extra in empty:
         message = rejection(name, methods=["PI", "ERM+IV"], **extra) or ""

@@ -223,13 +223,8 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         self,
         gamma: float,
         epsilon: float,
-        epsilon_iv=None,
         n_jobs=None,
         rho=1.0,
-        epsilon_iv_z=0.0,
-        iv_recalibrate=False,
-        leak_t=0.0,
-        leak_tz=0.0,
     ):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
         toggle -- perf needs serial models to time methods, not the harness."""
@@ -238,11 +233,6 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             self.kwargs["methods"],
             gamma=gamma,
             epsilon=epsilon,
-            epsilon_iv=epsilon_iv,
-            epsilon_iv_z=epsilon_iv_z,
-            iv_recalibrate=iv_recalibrate,
-            leak_t=leak_t,
-            leak_tz=leak_tz,
             rho=rho,
             **toggles,
         )

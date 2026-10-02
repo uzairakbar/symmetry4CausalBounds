@@ -39,22 +39,12 @@ class OracleParameters:
     bias_sq: float
     sigma_sq: float
     rho: float | None
-    # IV budgets (Thm. 3.B, exact at gamma_z* = 0), one per instrument and never
-    # pooled: the T-as-IV piece on span(T), the observed instrument's piece on
-    # span(Z) (SS2.6), plus RMS(W#) and eta
-    eps_iv_star: float | None = None
-    eps_iv_z_star: float | None = None
-    eps_rms: float | None = None
-    eta: float | None = None
-    # SHELVED: eps* under the perturb convention (exactly-invariant components
-    # excluded). Recorded, never consumed -- lets the padding choice be revisited.
-    epsilon_star_pointwise: float | None = None
 
 
 # Draw-pooled fields and how they pool: a NORM pools in the square (an RMS of RMSs),
 # a ratio pools as a plain mean. The rest are functions of the SEM alone.
-_ORACLE_RMS_FIELDS = ("epsilon_star", "eps_iv_star", "eps_iv_z_star", "eps_rms", "epsilon_star_pointwise")
-_ORACLE_MEAN_FIELDS = ("rho", "eta", "gamma_z_star")
+_ORACLE_RMS_FIELDS = ("epsilon_star",)
+_ORACLE_MEAN_FIELDS = ("rho", "gamma_z_star")
 
 
 def pool_oracles(oracles: list[OracleParameters]) -> OracleParameters:
@@ -178,9 +168,8 @@ def _invariance_signal(
     (w, Phi, G) for ONE augmentation draw, where w = h_*(X) - h_*(X~) is the
     paper's W (C.3) over the FULL augmentation.
 
-    Sole definition of W: both `epsilon_star` (Thm. 3.A, needs ||W||) and
-    `eps_iv_star` (Thm. 3.B, needs the residual W# = W - E[W|X~]) build on it,
-    so the two can never drift apart.
+    Sole definition of W: every invariance-error reading (`epsilon_star`, the
+    pad's quantile, the DA's tuning) builds on it, so none can drift apart.
     """
     features = features or _identity
 
@@ -270,34 +259,6 @@ def epsilon_pad_star(
     return float(np.quantile(np.concatenate(pooled), quantile))
 
 
-def invariance_error(
-    sem,
-    da,
-    X: NDArray | None = None,
-    features: Callable | None = None,
-    n_samples: int = CALIBRATION_SAMPLES,
-) -> float:
-    """
-    SHELVED -- not wired into the pipeline; kept for comparison and recorded on
-    `OracleParameters.epsilon_star_pointwise`.
-
-    Same functional as `epsilon_star` but over `da.perturb`, i.e. only the DA
-    components not assumed exactly invariant. Retained so the padding decision
-    (RMS on the full augmentation vs this) can be revisited once the
-    epsilon/epsilon* sweep results are in.
-    """
-    features = features or _identity
-
-    with preserve_rng():
-        if X is None:
-            X, _, _ = _draw(sem, n_samples)
-        GX = da.perturb(X)
-
-        residuals = sem.f(features(X)) - sem.f(features(GX))
-
-    return float(np.sqrt(np.mean(residuals**2)))
-
-
 def recalibrated_da_epsilon(
     sem,
     da,
@@ -360,173 +321,6 @@ def recalibrated_da_epsilon(
     achieved = epsilon_star(sem, da, X=X, features=features)
     logger.info(f"DA strength {da.strength:.6g} -> eps* {achieved:.6g} (target {epsilon_target:.6g}).")
     return achieved
-
-
-# =============================================================================
-# Thm. 3.B diagnostics
-# =============================================================================
-
-
-def eps_iv_star(
-    sem,
-    da,
-    X: NDArray | None = None,
-    features: Callable | None = None,
-    n_samples: int = CALIBRATION_SAMPLES,
-    mean_match: bool = False,
-    **augment_kwargs,
-) -> tuple:
-    """
-    The T-as-IV budget: || E-hat[W# | T] || / sqrt(N).
-
-    Exact expansion of C.3 Part (B) at gamma_z* = 0. Every experiment here uses
-    T as an instrument with T independent of (U, xi) by construction, so
-    E[U + xi | T] = 0, the Minkowski cross-term vanishes identically, and this IS
-    the budget h# requires -- no correlation (r) assumption anywhere. It is the
-    radius of the T constraint and of nothing else: the observed instrument has
-    its own constraint and `eps_iv_z_star` is its budget, measured at the same
-    two elements, h_* and h#.
-
-        w    = f(Phi(X)) - f(Phi(GX))
-        W#   = w - OLS fit of w on Phi(GX)
-        eps_iv_star = RMS of the projection of W# onto span(T)
-
-    Returns:
-        (eps_iv_star, eps_rms, eta) -- eps_rms = RMS(W#) and eta =
-        eps_iv_star / eps_rms are free byproducts, logged for the record.
-
-    `augment_kwargs` go straight to the DA call, exactly as `epsilon_star`
-    forwards them: a sweep whose knob IS the DA strength has to measure this
-    budget at the step's augmentation, not at the DA's default.
-    """
-    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
-
-    # W#: what the augmented design cannot explain. The -f(Phi(GX)) term is
-    # exactly linear in Phi(GX), so OLS absorbs it and this is the part of
-    # f(Phi(X)) unreachable from the augmented data. Under `mean_match` the
-    # class carries an intercept, so the constant is part of what the design
-    # explains and W# is the residual AFTER removing it (Lem. 2's H_X).
-    if mean_match:
-        Phi = Phi - Phi.mean(axis=0)
-        w = w - np.mean(w)
-    W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
-    eps_rms = float(np.sqrt(np.mean(W_sharp**2)))
-
-    # project onto span(G): same QR geometry as the IV constraint itself
-    Q, _ = np.linalg.qr(G)
-    budget = float(np.sqrt(np.mean((Q @ (Q.T @ W_sharp)) ** 2)))
-
-    eta = float(budget / eps_rms) if eps_rms > 0.0 else 0.0
-    return budget, eps_rms, eta
-
-
-def _instrument_basis(X: NDArray, Z: NDArray | None) -> NDArray | None:
-    """Orthonormal basis Q of span(Z), or None for an empty Z. The emptiness test
-    comes first and reads Z alone, so an empty Z touches neither X nor any RNG."""
-    if Z is None or np.size(Z) == 0:
-        return None
-    Q, _ = np.linalg.qr(np.asarray(Z, dtype=float).reshape(len(X), -1))
-    return Q
-
-
-def _z_moment(Q: NDArray, r: NDArray, mean_match: bool) -> float:
-    """|| Q' r || / sqrt(N), with r centred under `mean_match` as the solver centres y."""
-    r = r - np.mean(r) if mean_match else r
-    return float(np.linalg.norm(Q.T @ r) / np.sqrt(len(r)))
-
-
-def _outcome_residual(sem, X: NDArray, y: NDArray | None, features: Callable) -> NDArray:
-    """r_* = y - h_*(Phi(X)) on the original design."""
-    if y is None:
-        raise ValueError("eps_iv_z_star needs y beside X: the residual is y - h_*(Phi(X)).")
-    return np.asarray(y, dtype=float).ravel() - np.asarray(sem.f(features(X)), dtype=float).ravel()
-
-
-def z_moment_star(
-    sem,
-    X: NDArray,
-    y: NDArray | None,
-    Z: NDArray | None,
-    features: Callable | None = None,
-    mean_match: bool = False,
-) -> float:
-    """
-    The baseline observed-Z moment, || Q_Z' r_* || / sqrt(N) with r_* = y - h_*(Phi(X)):
-    the Z moment of the residual at h_* on the ORIGINAL design, the element the
-    PI+IV and PI+INV+IV programs have to admit. A pre-DA quantity (no DA enters),
-    and the `on_x` half of `eps_iv_z_star`, which calls this, so the two share one
-    definition. Exactly 0.0 for an empty Z, returned before `sem` or `X` is touched.
-    """
-    Q = _instrument_basis(X, Z)
-    if Q is None:
-        return 0.0
-    return _z_moment(Q, _outcome_residual(sem, X, y, features or _identity), mean_match)
-
-
-def eps_iv_z_star(
-    sem,
-    da,
-    X: NDArray,
-    y: NDArray | None,
-    Z: NDArray | None,
-    features: Callable | None = None,
-    n_samples: int = CALIBRATION_SAMPLES,
-    mean_match: bool = False,
-    **augment_kwargs,
-) -> float:
-    """
-    The observed instrument's budget (SS2.6), the radius of the Z constraint:
-
-        eps_iv_z_star = max( || Q_Z' r_* ||, || Q_Z' (r_* + W#) || ) / sqrt(N),
-        r_* = y - h_*(Phi(X)),   W# as in `eps_iv_star`
-
-    the Z moment of the residual at the element each Z constraint has to admit:
-    h_* in the PI+IV and PI+INV+IV programs, which solve on the original design,
-    and h# = h_* + OLS(w | Phi(GX)) in a DA+ method's, which solves on the
-    augmented one. There
-
-        y - Phi(GX) h# = (y - Phi(X) h_*) + w - P_GX w = r_* + W#,
-
-    since y - Phi(GX) h_* = r_* + w by the definition of w. Same element, same
-    residual, same convention as `eps_iv_star`, which is the T moment of W#
-    itself, and the same displacement `_declared_allowance` bounds on the
-    declared path.
-
-    ONE number serves every Z constraint (SS2.6), hence the max: the budget has to
-    admit both. They differ only by the DA's own misspecification. MEASURED on the
-    simulation at `iv: 1` (d 32, m 1, n 2048): 0.026391 and 0.026391 under the
-    shipped, exactly invariant DA, 0.026391 and 0.155385 under the epsilon
-    sweep's retuned one. No orthogonalisation against the translation amounts:
-    the T constraint is a separate constraint with a separate budget, and nothing
-    is added in quadrature any more.
-
-    Under `mean_match` the residuals are centred, as the solver centres y and the
-    design. Exactly 0.0 for an empty Z: nothing is computed, so today's budget is
-    untouched to the bit. `augment_kwargs` go straight to the DA call, exactly as
-    `epsilon_star` and `eps_iv_star` forward them.
-    """
-    Q = _instrument_basis(X, Z)
-    if Q is None:
-        return 0.0
-    features = features or _identity
-    on_x = z_moment_star(sem, X, y, Z, features=features, mean_match=mean_match)
-    w, Phi, _ = _invariance_signal(sem, da, X, features, n_samples, **augment_kwargs)
-    if mean_match:
-        Phi = Phi - Phi.mean(axis=0)
-        w = w - np.mean(w)
-    W_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
-    residual = _outcome_residual(sem, X, y, features)
-    on_gx = _z_moment(Q, residual + W_sharp, mean_match)
-    if on_gx > 3.0 * on_x:
-        # the DA-side term is what the budget becomes, and at this ratio the Z
-        # constraint has stopped binding on the un-augmented design: the only
-        # signal anyone gets that PI+IV is now the plain ball
-        logger.info(
-            f"eps_iv_z_star: the augmented design's Z moment {on_gx:.6g} is more than 3x the "
-            f"original design's {on_x:.6g}; the shared budget is the larger and the Z constraint "
-            "is slack on the non-DA methods."
-        )
-    return max(on_x, on_gx)
 
 
 # =============================================================================
@@ -617,10 +411,9 @@ def gamma_z_star(sem, da, X=None, features=None) -> float | None:
     """
     Oracle IV leakiness (Asm. 3): Var(E[Y - h_*(X) | Z]) <= sigma^2 gamma_z.
 
-    None on purpose. The real-Z radius s sqrt(gamma_z) is DECLARED from the
-    dataset block (SS2.6, `GAMMA_Z_DEFAULT`), never estimated: a non-empty `iv:`
-    asserts the instruments are near perfect. The oracle piece of the IV budget
-    on the simulation is `eps_iv_z_star`, a norm, not a gamma. The slot stays so
+    None on purpose. The real-Z leak gamma_z is DECLARED (SS2.6: the cigarette
+    block's `gamma_z`, `SimulationConfig.gamma_z`), never estimated: a non-empty
+    `iv:` asserts the instruments are near perfect. The slot stays so
     `OracleParameters` keeps its shape.
     """
     return None
@@ -666,24 +459,13 @@ def compute_oracle_parameters(
     n_samples: int = CALIBRATION_SAMPLES,
     strategy: GammaStarStrategy = DEFAULT_GAMMA_STAR,
     mean_match: bool = False,
-    Z: NDArray | None = None,
 ) -> OracleParameters:
-    """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units.
-
-    `Z` is the observed instrument row-aligned with `X` (a recorded SEM's `iv_pool`);
-    when X is drawn here, the draw's own trailing columns are it. It reaches
-    `eps_iv_z_star` only, so `eps_iv_star` stays the T-as-IV piece; the two are the
-    radii of two separate constraints and are never combined."""
+    """Oracle parameters for one (SEM, DA) pair; budgets in the paper's units."""
     features = features or _identity
 
     if X is None:
         with preserve_rng():
-            X, y, drawn = _draw(sem, n_samples)
-        if Z is None:
-            Z = drawn
-
-    t_piece, eps_rms, eta = eps_iv_star(sem, da, X=X, features=features, n_samples=n_samples, mean_match=mean_match)
-    iv_z = eps_iv_z_star(sem, da, X=X, y=y, Z=Z, features=features, n_samples=n_samples, mean_match=mean_match)
+            X, y, _ = _draw(sem, n_samples)
 
     return OracleParameters(
         gamma_star=gamma_star(sem, strategy=strategy),
@@ -692,9 +474,4 @@ def compute_oracle_parameters(
         bias_sq=float(sem.bias_sq),
         sigma_sq=float(sem.sigma_sq),
         rho=_noise_ratio(sem, da, X, y, features, n_samples, mean_match=mean_match),
-        eps_iv_star=t_piece,
-        eps_iv_z_star=iv_z,
-        eps_rms=eps_rms,
-        eta=eta,
-        epsilon_star_pointwise=invariance_error(sem, da, X=X, features=features),
     )

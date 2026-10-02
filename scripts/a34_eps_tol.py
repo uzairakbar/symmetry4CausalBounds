@@ -6,11 +6,7 @@ legs:
 
   (i)   the configured values: both `eps_tol` fields are 2**-8, `EPS_TOL` is 2**-5;
   (ii)  sim, through the orchestrator's own query runner class (1 experiment,
-        n = 256): `runner.eps_tol` is the config's, and `runner.epsilon_iv` is
-        eps_iv* + 2**-8 whether or not that clears the IV floor (no budget is ever
-        raised; the leg prints which side it is on); the PARAM sweep runner on the
-        same orchestrator keeps EPS_TOL, so their budgets differ by exactly
-        2**-5 - 2**-8;
+        n = 256): `runner.eps_tol` is the config's;
   (iii) optical: `_epsilon_budget(None, tol=eps_tol)` sits 2**-8 over the measured
         eps*, the default call 2**-5 over it, and the query runner's
         `default_epsilon` is the former.
@@ -32,14 +28,12 @@ import numpy as np
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG, SIMULATION_CONFIG  # noqa: E402
 from src.experiments.optical_device import OpticalOrchestrator  # noqa: E402
 from src.experiments.simulation import SimulationOrchestrator  # noqa: E402
 from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.metrics import sigma_sq_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
-from src.methods.sensitivity_models import constraint_floor  # noqa: E402
 
 QUERY_TOL = 2**-8
 FAIL = []
@@ -109,41 +103,6 @@ def leg_ii():
     runner = query_runner(orch)
     check("(ii) runner.eps_tol == SIMULATION_CONFIG.eps_tol", runner.eps_tol == SIMULATION_CONFIG.eps_tol)
     check_raw_gamma("(ii)", runner, SIMULATION_CONFIG.gamma)
-
-    eps_iv_star = float(runner.oracle.eps_iv_star)
-    floor = constraint_floor(
-        runner.GX,
-        runner.y,
-        runner.default_gamma,
-        kind="iv",
-        Z=runner.G,
-        mean_match=runner.mean_match,
-        rho=runner.fit_rho(),
-        recalibrate=runner.recalibrate,
-    )
-    query_budget = eps_iv_star + QUERY_TOL
-    side = "above" if query_budget**2 >= floor else "BELOW"
-    print(f"      eps_iv* {eps_iv_star:.4g}, floor {floor:.4g}, query budget {query_budget:.6g} ({side} the floor)")
-    check(
-        "(ii) runner.epsilon_iv == eps_iv* + 2**-8",
-        np.isclose(runner.epsilon_iv, query_budget, rtol=1e-9),
-        f"{runner.epsilon_iv:.6g} vs {query_budget:.6g}",
-    )
-
-    sweep = orch.get_sweep_runner_cls("gamma")(
-        methods=orch.methods, method_factory=orch.build_methods, **orch._get_clean_kwargs()
-    )
-    knob = sweep.get_param_range()[0]
-    data = SweepData.coerce(sweep.generate_data(0, knob))
-    sweep_budget = sweep.fit_epsilon_iv(0, 0, data)
-    sweep_star = float(sweep.get_oracle(0).eps_iv_star)
-    print(f"      sweep eps_iv* {sweep_star:.4g}, sweep budget {sweep_budget:.6g}")
-    check("(ii) sweep runner budget == eps_iv* + EPS_TOL", np.isclose(sweep_budget, sweep_star + EPS_TOL, rtol=1e-9))
-    check(
-        "(ii) sweep - query == 2**-5 - 2**-8",
-        np.isclose(sweep_budget - runner.epsilon_iv, EPS_TOL - QUERY_TOL, rtol=1e-9),
-        f"{sweep_budget - runner.epsilon_iv:.6g} vs {EPS_TOL - QUERY_TOL:.6g}",
-    )
 
 
 def leg_iii():

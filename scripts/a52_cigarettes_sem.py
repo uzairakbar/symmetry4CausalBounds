@@ -316,7 +316,6 @@ def leg_v(sem):
         ["DA+PI+IV", "PI&DA+PI+IV"],
         gamma=gamma_star(sem),
         epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
         rho=1.0,
         recalibrate=True,
         pad=False,
@@ -331,7 +330,8 @@ def leg_v(sem):
         model = builders[name]()
         fit_model(model=model, method_name=name, X=X, y=y, GX=GX, G=G)
         # DA+PI+IV IS the IV method; the intersection holds it on `.augmented`
-        built = model.augmented.T_projector_R if name.startswith("PI&") else model.T_projector_R
+        ball = model.augmented if name.startswith("PI&") else model
+        built = ball.iv_terms_["t"][0]
         difference = float(np.abs(np.asarray(built) - want).max())
         check(f"(v) {name}: the IV constraint is built from G", difference < 1e-12, f"max |diff| {difference:.2e}")
 

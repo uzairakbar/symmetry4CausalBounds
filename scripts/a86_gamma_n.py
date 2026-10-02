@@ -23,8 +23,17 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         bit for bit and no mean row; the cigarette orchestrator's `unit_cap` is
         the panel's 49 states on `target: iv` and None on `plasmode`, and the
         simulation and optical toggles carry none.
+        The IV rows on a fixture with an observed Z and T, gamma_z 2^-8: PI+IV,
+        PI+INV+IV and the intersection's baseline carry the Z row at the declared
+        gamma_z; DA+PI+IV(Z) / (T) the one row at gamma~_z(eps) = (eps / s~ +
+        sqrt(gamma_z / rho))^2; DA+PI+IV(T,Z) and the intersection's DA branch
+        the joint row alone (`IV_LAYOUT` ("tz",), d = d_T + d_Z), each at
+        sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) at alpha / 3 (one row),
+        raw s sqrt(g) to 1e-12; a DA row moves with a predict-time epsilon and a
+        non-DA one does not.
         Catches: a ball at the wrong level, dof or n, the m sweep counting its
-        copies, a cap leaking onto the plasmode sweeps, a raw run that pads.
+        copies, a cap leaking onto the plasmode sweeps, a raw run that pads, an IV
+        row at the wrong leak, level or layout, a DA row frozen at fit.
   (iii) the mean row: at a query at the design mean the padded PI interval is
         ybar +- the mean radius exactly (delta binds; raw: the point ybar); on
         20 queries the padded interval contains the raw one for PI and DA+PI;
@@ -37,6 +46,20 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         breaks that at some query.
         Catches: a delta outside the ball, a cost that drops delta at the
         design mean, a closed form off the program, an IV row blind to delta.
+  (iv)  validity on a small `LinearSimulationSEM` (d 8, iv 1, n 400, gamma =
+        gamma* = 0.25, gamma_z 2^-8, padded): (a) the PI+IV rows' statistics at
+        h* over `VALIDITY_ROWS_DRAWS` draws (the ball with delta, the mean row,
+        the Z row, each against its padded radius): every row holds on at least
+        1 - alpha/3 - 3 SE of the draws and all three jointly on 0.95 - 3 SE;
+        (b) `VALIDITY_SOLVE_DRAWS` solved draws, the simultaneous coverage of h*
+        at 20 fixed queries of PI, PI+IV, DA+PI and DA+PI+IV(T,Z) at least
+        0.95 - 3 SE, and of PI&DA+PI+IV(T,Z) at least 0.90 - 3 SE.
+        Catches: a pad too small for its level, a mis-split alpha, an IV row
+        that excludes h*.
+  (v)   nesting on one simulation draw (iv 1), raw and padded: PI+IV inside PI,
+        PI+INV+IV inside PI+INV, every DA+PI+IV mode inside DA+PI and
+        PI&DA+PI+IV inside PI&DA+PI (to 1e-6 of the width).
+        Catches: a row that widens an interval (a split that is not fixed).
   (vi)  config: `gamma_n` 95 -> `gamma_n_alpha` 0.05, absent / 0 / false -> 0.0
         with one INFO line when absent; `true`, 100, -5 and "95" raise; every
         non-do-MNIST recipe and config.yaml resolve to `RECIPE_ALPHA`; the
@@ -51,6 +74,12 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         config.yaml, README.md or scripts/README.md (this script and a77's
         unknown-key check aside, which name it to reject it).
         Catches: a second sweep record, a leftover of the bootstrap path.
+  (ix)  the purge: a grep over src/, scripts/, recipes/, config.yaml, README.md
+        and scripts/README.md for every retired symbol (`RETIRED`, whole words;
+        this script and a77's unknown-key lines aside), `py_compile` on every
+        script, `ruff check --select F` on src/ and scripts/, and every script
+        with a command line (argparse) exits 0 on `--help`.
+        Catches: a leftover of the old machinery, a script that no longer loads.
   (x)   grids: the m grid off `sweep_samples` (1..16 at 16, 1..8 at 8, 32 points
         at 32), the n grid `geomspace(10, 100, count)` at every count; the sim n
         strategy takes its 8 row counts (205 .. 2048 of 2048) at sweep_samples 8,
@@ -62,6 +91,13 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         links; a do_mnist block never fanned out; no NEW machine-specific value in
         src/, config.yaml, the recipes or the launcher outside its `EPILOG` /
         docstring.
+  (xii) no exact-zero budget: on every non-do-MNIST recipe block and
+        config.yaml (one experiment, the block's sweep params' runners and its
+        query runner), every built interval model's epsilon, ball budget, IV leak
+        g and IV radius is > 0; the simulation's gamma_z resolves to 2^-8 under
+        `iv: 1`, the cigarettes' to 0.0177; optical has no Z, so its gamma_z 0 is
+        exempt and its DA T rows are positive through eps.
+        Catches: a budget that silently degenerates to an exact constraint.
 
     uv run python scripts/a86_gamma_n.py [--only LEG]
 
@@ -75,6 +111,7 @@ import glob
 import importlib.util
 import inspect
 import os
+import py_compile
 import re
 import shutil
 import subprocess
@@ -105,6 +142,20 @@ DATASETS = ("simulation", "optical_device", "cigarettes")
 RECIPE_ALPHA = 0.0
 # the cigarette panel's states, the pads' units on `target: iv`
 CIGARETTE_STATES = 49
+GAMMA_Z_SIM = 2**-8
+GAMMA_Z_CIGARETTES = 0.0177
+VALIDITY_ROWS_DRAWS = 400
+VALIDITY_SOLVE_DRAWS = 250
+VALIDITY_GAMMA = 0.25
+VALIDITY_SEED = 20_000
+# every retired symbol of the IM-CI, the pad tolerance and the old IV budgets
+RETIRED = (
+    "im-ci", "im_ci", "IM_CI", "imbens", "bootstrap_bounds", "results_raw", "_raw_record", "RAW_MTIME_SLACK",
+    "sweep_record_for", "pad_tolerance", "iv_recalibrate", "leak_t", "leak_tz", "epsilon_iv_z", "eps_iv_star",
+    "eps_iv_z_star", "z_moment_star", "eps_rms", "_declared_allowance", "_z_allowance", "_recalibrated", "t_bound",
+    "tz_bound", "z_bound", "declared_iv", "fit_iv_leaks", "fit_epsilon_iv", "fit_epsilon_iv_z",
+    "_baseline_epsilon_iv_z", "_step_epsilon_iv", "epsilon_star_pointwise", "invariance_error",
+)  # fmt: skip
 # the retired Imbens-Manski CI's symbols (the yaml key, its parsed name, the
 # constants, the helpers, the raw record and its reader, the pad tolerance)
 IM_CI_SYMBOLS = re.compile(
@@ -260,6 +311,180 @@ def leg_ii():
         "(ii) the simulation toggles carry gamma_n_alpha and no unit_cap",
         sim.toggles["gamma_n_alpha"] == ALPHA and "unit_cap" not in sim.toggles,
     )
+    iv_rows()
+
+
+def iv_rows():
+    import src.methods.sensitivity_models as sm
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+    from src.methods.sensitivity_models import finite_sample_budget as fsb
+
+    check("(ii) IV_LAYOUT is the joint row alone", sm.IV_LAYOUT == ("tz",), f"{sm.IV_LAYOUT}")
+    arrays, queries = fixture(seed=3)
+    rng = np.random.default_rng(4)
+    arrays["Z"] = arrays["X"][:, :1] + 0.5 * rng.normal(size=(len(arrays["X"]), 1)) + 1.0
+    gamma, epsilon, n = 0.5, 0.1, len(arrays["X"])
+    names = ["PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(T,Z)"]
+    want_rows = {"PI+IV": ("z",), "PI+INV+IV": ("z",), "DA+PI+IV(Z)": ("z",), "DA+PI+IV(T)": ("t",)}
+    want_rows["DA+PI+IV(T,Z)"] = ("tz",)
+    for alpha in (0.0, ALPHA):
+        builders = MethodRegistry.build_methods(
+            names, gamma=gamma, epsilon=epsilon, rho=1.3, pad=True, gamma_z=GAMMA_Z_SIM, gamma_n_alpha=alpha
+        )
+        for name in names:
+            model = builders[name]()
+            fit_model(model=model, method_name=name, **arrays)
+            model.predict(queries)
+            parts = balls(model)
+            if name.startswith("PI&"):
+                labels = [(f"{name} baseline", parts[0], ("z",)), (f"{name} DA branch", parts[1], ("tz",))]
+            else:
+                labels = [(name, parts[0], want_rows[name])]
+            for label, ball, rows in labels:
+                tag = f"alpha {alpha:g}: {label}"
+                check(f"(ii) {tag} rows {rows}", ball.rows == rows, f"{ball.rows}")
+                g_tilde = ball.budget(gamma)
+                da = ball._da_fit
+                leak = (epsilon / ball.scale + np.sqrt(GAMMA_Z_SIM / ball.rho)) ** 2 if da else GAMMA_Z_SIM
+                for row in ball.rows:
+                    dof = {"z": 1, "t": 1, "tz": 2}[row]
+                    if alpha:
+                        want = np.sqrt(ball.sigma_sq * (1 + g_tilde) * fsb(dof, leak / (1 + g_tilde), n, alpha / 3))
+                    else:
+                        want = ball.scale * np.sqrt(leak)
+                    got = ball.iv_threshold_params[row].value / np.sqrt(ball.N_samples)
+                    check(
+                        f"(ii) {tag} row {row} radius", abs(got - want) <= 1e-12 * want, f"{got:.6g} (want {want:.6g})"
+                    )
+                if alpha and ball.rows:
+                    row = ball.rows[0]
+                    before = ball.iv_threshold_params[row].value
+                    ball.predict(queries, epsilon=2 * epsilon)
+                    moved = ball.iv_threshold_params[row].value != before
+                    ball.predict(queries, epsilon=epsilon)
+                    check(f"(ii) {tag}: the row {'moves' if da else 'stays'} with epsilon", moved == da)
+
+
+def simulation_draw(seed, n=400, d=8, sem=None):
+    """One draw of the small iv = 1 simulation: X, y, Z, GX, G, with the SEM."""
+    from src.data_augmentors.simulation import NullSpaceTranslation
+    from src.oracle import preserve_rng
+    from src.sem.simulation import LinearSimulationSEM
+
+    with preserve_rng():
+        np.random.seed(VALIDITY_SEED)
+        sem = LinearSimulationSEM(treatment_dimension=d, gamma=VALIDITY_GAMMA, iv_dim=1) if sem is None else sem
+        da = NullSpaceTranslation(sem.W_XY, kernel_dim=-1)
+        np.random.seed(seed)
+        X, y = sem.sample(N=n)
+        X, Z = sem.split_instruments(X)
+        GX, G = da(X)
+    return sem, dict(X=X, y=np.asarray(y).ravel(), Z=Z, GX=GX, G=G)
+
+
+def row_statistics(seed):
+    """The padded PI+IV rows at h* on one draw: (ball, mean, Z) held."""
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+
+    sem, arrays = simulation_draw(seed)
+    model = MethodRegistry.build_methods(
+        ["PI+IV"], gamma=VALIDITY_GAMMA, epsilon=0.0, gamma_z=GAMMA_Z_SIM, gamma_n_alpha=ALPHA
+    )["PI+IV"]()
+    fit_model(model=model, method_name="PI+IV", **arrays)
+    w = sem.W_XY.ravel()
+    X, y, Z = arrays["X"], arrays["y"], arrays["Z"]
+    delta = float(model.mu_ @ w - model.y_offset_)
+    ball = float(np.mean(((X - model.mu_) @ (w - model.h_erm)) ** 2) + delta**2)
+    Q, _ = np.linalg.qr(Z)
+    moment = float(np.sum((Q.T @ (y - X @ w)) ** 2) / len(X))
+    gamma = model.gamma
+    return (
+        ball <= model.ball_radius(gamma) ** 2,
+        delta**2 <= model.mean_radius(gamma) ** 2,
+        moment <= model.iv_radius("z", gamma) ** 2,
+    )
+
+
+def coverage_draw(seed, queries):
+    """Simultaneous coverage of h* at `queries` per method on one solved draw."""
+    from src.experiments.configs import EPS_TOL, MethodRegistry
+    from src.experiments.utils import fit_model
+    from src.experiments.utils.metrics import rho_hat
+
+    sem, arrays = simulation_draw(seed)
+    names = ["PI", "PI+IV", "DA+PI", "DA+PI+IV(T,Z)", "PI&DA+PI+IV(T,Z)"]
+    rho = float(rho_hat(arrays["X"], arrays["GX"], arrays["y"], intercept=True))
+    builders = MethodRegistry.build_methods(
+        names, gamma=VALIDITY_GAMMA, epsilon=EPS_TOL, rho=rho, pad=True, gamma_z=GAMMA_Z_SIM, gamma_n_alpha=ALPHA
+    )
+    truth = queries @ sem.W_XY.ravel()
+    covered = {}
+    for name in names:
+        model = builders[name]()
+        fit_model(model=model, method_name=name, **arrays)
+        bounds = model.predict(queries)
+        covered[name] = bool(np.all((bounds[:, 0] <= truth + 1e-9) & (truth <= bounds[:, 1] + 1e-9)))
+    return covered
+
+
+def leg_iv():
+    from joblib import Parallel, delayed
+
+    print("(iv) validity on the small iv = 1 simulation")
+    held = np.array(Parallel(n_jobs=-1)(delayed(row_statistics)(seed) for seed in range(VALIDITY_ROWS_DRAWS)))
+    level = 1 - ALPHA / 3
+    se = np.sqrt(level * (1 - level) / len(held))
+    for k, row in enumerate(("ball", "mean row", "Z row")):
+        rate = float(held[:, k].mean())
+        check(f"(iv)(a) {row} holds at h* on >= {level:.4f} - 3 SE", rate >= level - 3 * se, f"{rate:.4f}")
+    joint = float(np.all(held, axis=1).mean())
+    se = np.sqrt(0.95 * 0.05 / len(held))
+    check("(iv)(a) all three jointly on >= 0.95 - 3 SE", joint >= 0.95 - 3 * se, f"{joint:.4f}")
+    sem, _ = simulation_draw(0)
+    queries = np.random.default_rng(5).normal(size=(20, sem.W_XY.shape[0]))
+    draws = Parallel(n_jobs=-1)(delayed(coverage_draw)(10_000 + i, queries) for i in range(VALIDITY_SOLVE_DRAWS))
+    for name in draws[0]:
+        rate = float(np.mean([draw[name] for draw in draws]))
+        nominal = 0.90 if name.startswith("PI&") else 0.95
+        se = np.sqrt(nominal * (1 - nominal) / len(draws))
+        check(f"(iv)(b) {name}: simultaneous coverage >= {nominal} - 3 SE", rate >= nominal - 3 * se, f"{rate:.3f}")
+
+
+def leg_v():
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+
+    print("(v) nesting: every +IV inside its non-IV counterpart")
+    sem, arrays = simulation_draw(77)
+    queries = np.random.default_rng(6).normal(size=(20, sem.W_XY.shape[0]))
+    pairs = [
+        ("PI+IV", "PI"),
+        ("PI+INV+IV", "PI+INV"),
+        ("DA+PI+IV(T,Z)", "DA+PI"),
+        ("DA+PI+IV(Z)", "DA+PI"),
+        ("DA+PI+IV(T)", "DA+PI"),
+        ("PI&DA+PI+IV(T,Z)", "PI&DA+PI"),
+    ]
+    names = sorted({name for pair in pairs for name in pair})
+    for alpha in (0.0, ALPHA):
+        builders = MethodRegistry.build_methods(
+            names, gamma=VALIDITY_GAMMA, epsilon=0.5, rho=1.2, pad=True, gamma_z=GAMMA_Z_SIM, gamma_n_alpha=alpha
+        )
+        bounds = {}
+        for name in names:
+            model = builders[name]()
+            fit_model(model=model, method_name=name, **arrays)
+            bounds[name] = model.predict(queries)
+        for inner, outer in pairs:
+            a, b = bounds[inner], bounds[outer]
+            tol = 1e-6 * float(np.nanmax(b[:, 1] - b[:, 0]))
+            finite = np.all(np.isfinite(a), axis=1)
+            inside = np.all(a[finite, 0] >= b[finite, 0] - tol) and np.all(a[finite, 1] <= b[finite, 1] + tol)
+            check(
+                f"(v) alpha {alpha:g}: {inner} inside {outer}", bool(inside) and finite.any(), f"{finite.sum()} finite"
+            )
 
 
 def leg_iii():
@@ -320,11 +545,11 @@ def iv_violation(model, X, y, Z):
     """The excess of the Z block's data residual over its threshold at the (h, delta)
     of the problem just solved."""
     Q, _ = np.linalg.qr(Z)
-    A = model.Z_projector_R  # (Q' X_c; sqrt(jitter) I)
+    A = model.iv_terms_["z"][0]  # (Q' X_c; sqrt(jitter) I)
     jitter = A[Q.shape[1] :]
     h, delta = model.h_var.value, float(model.delta_var.value[0])
     residual = np.concatenate([Q.T @ (y - model.y_offset_ - (X - model.mu_) @ h - delta), -jitter @ h])
-    return float(np.linalg.norm(residual) - model.z_threshold_param.value)
+    return float(np.linalg.norm(residual) - model.iv_threshold_params["z"].value)
 
 
 def iv_sees_delta():
@@ -343,7 +568,7 @@ def iv_sees_delta():
         model = builders["PI+IV"]()
         fit_model(model=model, method_name="PI+IV", X=X, y=y, Z=Z)
         if dropped:
-            model.iv_intercept_ = {k: np.zeros_like(v) for k, v in model.iv_intercept_.items()}
+            model.iv_terms_ = {k: (A, b, np.zeros_like(q), d) for k, (A, b, q, d) in model.iv_terms_.items()}
             model._setup_cvx_problems()
         model._set_solver_parameters(model.gamma)
         excess = []
@@ -513,6 +738,118 @@ def leg_x():
     check("(x) no 16 / 17 literal left in either", not any(literals.values()), f"{literals}")
 
 
+def leg_ix():
+    print("(ix) the purge: no retired symbol, every script loads")
+    pattern = re.compile(
+        r"(?<![\w-])(" + "|".join(re.escape(token) for token in RETIRED) + r")(?![\w-])", re.IGNORECASE
+    )
+    paths = glob.glob(os.path.join(REPO, "src", "**", "*.py"), recursive=True)
+    paths += glob.glob(os.path.join(REPO, "scripts", "*.py")) + glob.glob(os.path.join(REPO, "recipes", "*.yaml"))
+    paths += [os.path.join(REPO, name) for name in ("config.yaml", "README.md", os.path.join("scripts", "README.md"))]
+    hits = []
+    for path in paths:
+        rel = os.path.relpath(path, REPO)
+        if rel == os.path.join("scripts", os.path.basename(__file__)):
+            continue
+        for number, line in enumerate(read(path).splitlines(), start=1):
+            if pattern.search(line) and not any(rel == where and text in line for where, text in IM_CI_ALLOWED):
+                hits.append(f"{rel}:{number}:{pattern.search(line).group(0)}")
+    check("(ix) no retired symbol left", not hits, f"{hits[:8]}")
+    scripts = sorted(glob.glob(os.path.join(REPO, "scripts", "*.py")))
+    broken = []
+    for path in scripts:
+        try:
+            py_compile.compile(path, doraise=True, cfile=os.path.join(tempfile.gettempdir(), "a86_pyc"))
+        except py_compile.PyCompileError as error:
+            broken.append(f"{os.path.basename(path)}: {error.msg[:80]}")
+    check(f"(ix) py_compile on all {len(scripts)} scripts", not broken, f"{broken}")
+    ruff = subprocess.run(  # noqa: S603 - the repo's own linter
+        [sys.executable, "-m", "ruff", "check", "--select", "F", "src", "scripts"],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+    )
+    check("(ix) ruff check --select F", ruff.returncode == 0, ruff.stdout[-300:])
+    failed = []
+    # a script without a command line runs itself whatever its arguments, so its
+    # load check is `py_compile` above
+    for path in [path for path in scripts if "argparse" in read(path)]:
+        done = subprocess.run(  # noqa: S603 - our own scripts
+            [sys.executable, path, "--help"], capture_output=True, text=True, cwd=REPO, timeout=300
+        )
+        if done.returncode != 0:
+            failed.append(os.path.basename(path))
+    check("(ix) every script with a command line exits 0 on --help", not failed, f"{failed}")
+
+
+def leg_xii():
+    from munch import munchify
+
+    from src.experiments.base import SweepData
+    from src.experiments.configs import PARAM_SPECS, resolve_dataset_block
+    from src.experiments.utils import fit_model
+    from src.main import ORCHESTRATORS
+
+    print("(xii) no exact-zero budget on the production configs")
+    sources = ["config.yaml", *sorted(glob.glob(os.path.join(REPO, "recipes", "*.yaml")))]
+    seen = set()
+    for source in sources:
+        with open(os.path.join(REPO, source)) as handle:
+            config = yaml.safe_load(handle) or {}
+        defaults = config.get("defaults") or {}
+        for dataset in DATASETS:
+            if dataset not in config:
+                continue
+            raw = {**defaults, **config[dataset]}
+            experiment = raw.pop("experiment", None) or {}
+            sweep = (experiment.get("sweep") or {}).get("param", [])
+            params = [p for p in sweep if p in PARAM_SPECS] + (["query"] if experiment.get("query") else [])
+            block = resolve_dataset_block(dataset, {**raw, "n_experiments": 1, "sweep_samples": 3, "n_jobs": 4})
+            key = (dataset, repr(sorted((k, repr(v)) for k, v in block.items())), tuple(params))
+            if key in seen:
+                continue
+            seen.add(key)
+            orch = ORCHESTRATORS[dataset](**block, hyperparameters=munchify({}))
+            want_z = {"simulation": GAMMA_Z_SIM if block.get("iv", 0) else 0.0, "cigarettes": GAMMA_Z_CIGARETTES}
+            gamma_z = orch.toggles.get("gamma_z", getattr(orch, "gamma_z", 0.0))
+            if dataset in want_z and (dataset == "simulation" or block.get("iv")):
+                check(
+                    f"(xii) {os.path.basename(source)} {dataset}: gamma_z {want_z[dataset]:g}",
+                    gamma_z == want_z[dataset],
+                    f"{gamma_z}",
+                )
+            for param in params:
+                tag = f"{os.path.basename(source)} {dataset} {param}"
+                if param == "query":
+                    runner = orch.get_query_runner_cls()(methods=orch.methods, **orch._get_clean_kwargs())
+                    models = {}
+                    for name, builder in runner.methods.items():
+                        model = builder()
+                        if model is None or not hasattr(model, "epsilon"):
+                            continue
+                        fit_model(
+                            model=model, method_name=name, X=runner.X, y=runner.y, GX=runner.GX, G=runner.G, Z=runner.Z
+                        )
+                        models[name] = model
+                else:
+                    runner = orch.get_sweep_runner_cls(param)(
+                        methods=orch.methods, method_factory=orch.build_methods, **orch._get_clean_kwargs()
+                    )
+                    first = runner.get_param_range()[0]
+                    data = runner.generate_data(0, first)
+                    models = runner.build_models(0, 0, SweepData.coerce(data))
+                    models = {name: model for name, model in models.items() if hasattr(model, "epsilon")}
+                bad = []
+                for name, model in models.items():
+                    for part in balls(model):
+                        values = {"epsilon": float(part.epsilon), "ball": part.ball_budget(part.gamma)}
+                        for row in getattr(part, "rows", ()):
+                            values[f"g_{row}"] = part.iv_leak()
+                            values[f"r_{row}"] = part.iv_radius(row, part.gamma)
+                        bad += [f"{name}:{k}={v:.3g}" for k, v in values.items() if not v > 0.0]
+                check(f"(xii) {tag}: every epsilon, ball, IV leak and radius > 0", not bad, f"{bad[:6]}")
+
+
 def example_lines(path):
     """The launcher's lines inside its module docstring or its `EPILOG` string, the
     one place a labelled PACE example may appear."""
@@ -640,7 +977,19 @@ def leg_xi():
     check("(xi) no NEW machine-specific value outside the launcher's labelled example", not hits, f"{hits[:6]}")
 
 
-LEGS = {"i": leg_i, "ii": leg_ii, "iii": leg_iii, "vi": leg_vi, "vii": leg_vii, "x": leg_x, "xi": leg_xi}
+LEGS = {
+    "i": leg_i,
+    "ii": leg_ii,
+    "iii": leg_iii,
+    "iv": leg_iv,
+    "v": leg_v,
+    "vi": leg_vi,
+    "vii": leg_vii,
+    "ix": leg_ix,
+    "x": leg_x,
+    "xi": leg_xi,
+    "xii": leg_xii,
+}
 
 
 if __name__ == "__main__":

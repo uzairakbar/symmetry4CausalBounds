@@ -54,7 +54,8 @@ def direct_solves():
     cases = {
         "PI": lambda nj: sm.PartialR2(n_jobs=nj, **common).fit(X, y),
         "PI+INV": lambda nj: sm.InvarianceConstrainedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX),
-        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(epsilon_iv=0.2, n_jobs=nj, **common).fit(GX, y, T=GX),
+        # a DA fit (`X_pre`): the T row's radius is App. D's, from the model's epsilon
+        "DA+PI+IV": lambda nj: sm.InstrumentalVariablePartialR2(n_jobs=nj, **common).fit(GX, y, T=GX, X_pre=X),
         "PI&DA+PI": lambda nj: sm.IntersectedPartialR2(n_jobs=nj, **common).fit(X, y, GX=GX, G=GX),
     }
     out = {}

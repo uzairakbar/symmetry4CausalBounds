@@ -33,11 +33,12 @@ toggle) and both recipes (`normalize: true`). Legs:
         Misses: the other coefficients, which T1 solves at one budget only.
   (iii) the lower bounds of PI+INV+IV and DA+PI+IV on beta_pn vary by less than
         1e-6 on the sub-grid gamma >= 0.190, on F1's own models (the query path)
-        and at the SS4.1 convention (INV epsilon and r_T at EPS_TOL, no pad, the
-        seed-0 DA draw); the PI+INV+IV binding point at that convention is 0.176 to
+        and at the SS4.1 convention (DA+PI+IV there from 0.215: its joint row
+        binds between 0.205 and 0.21) (INV epsilon EPS_TOL, the declared leak 2^-8,
+        no pad, the seed-0 DA draw); the PI+INV+IV binding point at that convention is 0.176 to
         within the 0.005 grid (MEASURED p8); the DA+PI+IV binding point and flat
-        value are RECORDED on both paths (the review: between 0.170 and 0.175,
-        1.052921 at the joint bound 0.069877), never pinned. Catches: flatness
+        value are RECORDED on both paths (the review, before the DA rows read
+        gamma~_z(eps): between 0.170 and 0.175, 1.052921), never pinned. Catches: flatness
         pinned on the full grid (the spread at 0.150 is 3e-2), a lower bound that
         keeps moving with the budget. Misses: the upper end, which does move.
   (iv)  the SS6.2 benchmark table: 0.3121 (lag q), 0.1502 (tax differential) and
@@ -48,10 +49,13 @@ toggle) and both recipes (`normalize: true`). Legs:
   (v)   the SS4.1 width table AT THE SHIPPED BUDGET RULE, on the seed-0 DA draw and
         the SS4.1 convention: PI to 1e-3 of p5, PI+IV and PI+INV+IV lower bounds to
         1e-6 of p8 and upper bounds to 1e-3 of p5 at the five gammas, and the
-        DA+PI+IV row RECORDED at its two radii, 0.0625 as the Z radius and 0.03125
-        as the T radius, beside the review's numbers. The same table on
-        F1's query-path models is recorded too. Catches: a moved IV or INV
-        arithmetic, a wrong instrument matrix. Misses: a solver bump under 1e-6.
+        DA+PI+IV row RECORDED at its joint (T, Z) row's radius eps + s~ sqrt(gamma_z
+        / rho), beside the review's numbers; DA+PI+IV is tighter than PI+IV at
+        0.25, and the same model refit as a non-DA fit (no `X_pre`, its joint row
+        at s sqrt(gamma_z)) is tighter still, so the DA leak's eps is what widens
+        it. The same table on F1's query-path models is recorded too. Catches: a
+        moved IV or INV arithmetic, a wrong instrument matrix, a DA row that drops
+        eps. Misses: a solver bump under 1e-6.
   (vi)  the normalise rule (SS10.1): on a synthetic sweep each experiment is
         divided by its own baseline, elementwise per step and experiment; the
         baseline reads exactly 1.0 where it is positive and NaN, never inf and
@@ -144,6 +148,9 @@ from src.sem.cigarettes import CigaretteSEM, V, build_design, instrument_set  # 
 PHASE_B = ("tax_s", "y", "cpi")
 GRID_STEP = 0.005
 FLAT_FROM = 0.190  # the flat-floored regime of SS4.1
+# DA+PI+IV's at the convention: its joint (T, Z) row at eps + s~ sqrt(gamma_z / rho)
+# (0.09375) binds between 0.205 and 0.21 (MEASURED 3b), later than the old pair did
+DA_FLAT_FROM = 0.215
 FLAT_TOL = 1e-6
 BINDING_POINT = 0.176  # p8, PI+INV+IV at the SS4.1 convention
 TABLE_GAMMAS = (0.150, 0.250, 0.311, 0.37052, 0.450)  # p5's columns
@@ -308,8 +315,8 @@ def panel_models(orch):
 
 
 def convention_models(design, Z):
-    """The SS4.1 convention on the seed-0 DA draw: INV epsilon and r_T at EPS_TOL,
-    no pad, r_Z declared at `GATE_GAMMA_Z` (2^-8, the radius p5 and p8 measured at),
+    """The SS4.1 convention on the seed-0 DA draw: INV epsilon at EPS_TOL, no pad,
+    the leak declared at `GATE_GAMMA_Z` (2^-8, the radius p5 and p8 measured at),
     rho_hat of the draw; through the registry and
     `fit_model` as the runners fit."""
     np.random.seed(0)
@@ -320,8 +327,6 @@ def convention_models(design, Z):
         list(HEADLINE_METHODS),
         gamma=0.25,
         epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
-        epsilon_iv_z=0.0,
         gamma_z=GATE_GAMMA_Z,
         rho=rho,
         pad=False,
@@ -362,11 +367,11 @@ def raw_statuses(model, gamma):
     return [model.min_problem.status, model.max_problem.status]
 
 
-def flatness(gammas, lower):
-    """(spread on gamma >= FLAT_FROM, flat value, binding bracket): the bracket is
+def flatness(gammas, lower, flat_from=FLAT_FROM):
+    """(spread on gamma >= flat_from, flat value, binding bracket): the bracket is
     the last grid point still off the flat value by more than FLAT_TOL and the
     next one; (None, None) when the whole grid is flat."""
-    flat_mask = gammas >= FLAT_FROM
+    flat_mask = gammas >= flat_from
     flat = float(lower[flat_mask][-1])
     spread = float(np.nanmax(np.abs(lower[flat_mask] - flat)))
     moving = np.flatnonzero(np.abs(lower - flat) > FLAT_TOL)
@@ -494,9 +499,7 @@ def leg_ii_iii():
         )
 
     intervals = beta_pn(models, gammas, design.sigma)
-    print(
-        "      RECORDED (iii) on F1's models (query path: tolerance 2^-8 on the INV cone and r_T, pad as configured):"
-    )
+    print("      RECORDED (iii) on F1's models (query path: tolerance 2^-8 on the INV cone, pad as configured):")
     flat_names = tuple(name for name in ("PI+INV+IV", "DA+PI+IV") if name in intervals)
     check(
         "(iii) F1 carries at least one of PI+INV+IV, DA+PI+IV to read the flat bound off",
@@ -515,15 +518,16 @@ def leg_ii_iii():
     Z = instrument_set(design, PHASE_B)
     conv = convention_models(design, Z)
     conv_intervals = beta_pn({n: conv[n] for n in ("PI+INV+IV", "DA+PI+IV")}, gammas, design.sigma)
-    print("      RECORDED (iii) at the SS4.1 convention (seed-0 DA draw, epsilon and r_T at EPS_TOL, no pad):")
+    print("      RECORDED (iii) at the SS4.1 convention (seed-0 DA draw, epsilon at EPS_TOL, gamma_z 2^-8, no pad):")
     for name in ("PI+INV+IV", "DA+PI+IV"):
-        spread, flat, bracket = flatness(gammas, conv_intervals[name][:, 0])
+        flat_from = FLAT_FROM if name == "PI+INV+IV" else DA_FLAT_FROM
+        spread, flat, bracket = flatness(gammas, conv_intervals[name][:, 0], flat_from)
         print(
-            f"        {name}: flat lower bound {flat:.6f} from gamma >= {FLAT_FROM}, spread {spread:.2e}, "
+            f"        {name}: flat lower bound {flat:.6f} from gamma >= {flat_from}, spread {spread:.2e}, "
             f"binding bracket {bracket}"
         )
         check(
-            f"(iii) convention: {name} lower bound varies by < 1e-6 on gamma >= 0.190",
+            f"(iii) convention: {name} lower bound varies by < 1e-6 on gamma >= {flat_from}",
             spread < FLAT_TOL,
             f"{spread:.2e}",
         )
@@ -542,7 +546,7 @@ def leg_ii_iii():
         else:
             print(
                 f"        (review: DA+PI+IV flat {REVIEW_DA['flat']}, binding between {REVIEW_DA['binding']}, "
-                f"at r_T {conv[name].t_bound:.6f}, r_Z {conv[name].z_bound:.6f})"
+                f"at its {conv[name].rows} row's radius {conv[name].iv_radius(conv[name].rows[0]):.6f})"
             )
     leg_ii_iii.convention = conv
 
@@ -609,7 +613,8 @@ def leg_v():
     da = table["DA+PI+IV"]
     width = da[1, 1] - da[1, 0]
     print(
-        f"      RECORDED DA+PI+IV at r_T {conv['DA+PI+IV'].t_bound:.6f}, r_Z {conv['DA+PI+IV'].z_bound:.6f}: "
+        f"      RECORDED DA+PI+IV at its {conv['DA+PI+IV'].rows} row's radius "
+        f"{conv['DA+PI+IV'].iv_radius(conv['DA+PI+IV'].rows[0]):.6f}: "
         f"width at 0.25 {width:.4f} "
         f"(review {REVIEW_DA['width_at_0.25']}), lower bounds {np.round(da[:, 0], 6).tolist()}"
     )
@@ -620,42 +625,37 @@ def leg_v():
         widths["DA+PI+IV"] < widths["PI+IV"],
         f"{widths['DA+PI+IV']:.4f} vs {widths['PI+IV']:.4f}",
     )
-    # it is NOT tighter than PI+INV+IV any more, and that is the decoupling, not a
-    # defect: the DA branch solves on the augmented design, so its declared Z radius
-    # carries the D20 allowance that a non-DA method does not pay. The leg records
-    # the gap rather than asserting an ordering the two radii no longer support
-    # It is NO LONGER tighter than PI+INV+IV, and the leg pins WHY rather than
-    # dropping the claim: refit the same DA+PI+IV with no `X_pre`, i.e. decoupled
-    # but paying no DA-side allowance. That model IS tighter, so the flip is the
-    # allowance alone and not the decoupling. A future change that made the
-    # allowance vanish, or that made the decoupling itself lose the ordering, fails
-    # here instead of passing quietly
+    # the DA rows read gamma~_z(eps) = (eps / s~ + sqrt(gamma_z / rho))^2, a non-DA
+    # fit gamma_z alone: refit the same DA+PI+IV without `X_pre` and its joint row
+    # drops eps, so it is tighter, and the DA leak is what separates the two
     Z_set = instrument_set(design, PHASE_B)
     np.random.seed(0)
     da = ScaleTranslation(V, std=float(np.std(design.X @ (V / np.linalg.norm(V)))))
     GX, G = da(design.X)
-    no_allowance = InstrumentalVariablePartialR2(
+    no_eps = InstrumentalVariablePartialR2(
         gamma=0.25,
         epsilon=EPS_TOL,
-        epsilon_iv=EPS_TOL,
-        epsilon_iv_z=0.0,
         gamma_z=GATE_GAMMA_Z,
         rho=conv["DA+PI+IV"].rho,
         pad=False,
         absorbed_rate=absorbed_rate(design),
         **TOGGLES,
     ).fit(GX, design.y, T=np.reshape(G, (len(design.X), -1)), Z=Z_set)
-    bare = beta_pn({"bare": no_allowance}, np.array([0.25]), design.sigma)["bare"][0]
+    bare = beta_pn({"bare": no_eps}, np.array([0.25]), design.sigma)["bare"][0]
     bare_width = float(bare[1] - bare[0])
-    check("(v) and that refit really carries no allowance", no_allowance._z_allowance == 0.0)
+    check(
+        "(v) and that refit is a non-DA fit: its joint row at s sqrt(gamma_z)",
+        not no_eps._da_fit and no_eps.rows == ("tz",),
+        f"{no_eps.rows}",
+    )
     print(
-        f"      RECORDED the flip: with the D20 allowance {widths['DA+PI+IV']:.4f}, without it "
-        f"{bare_width:.4f}, PI+INV+IV {widths['PI+INV+IV']:.4f} (allowance {conv['DA+PI+IV']._z_allowance:.6f})"
+        f"      RECORDED the DA leak: DA+PI+IV {widths['DA+PI+IV']:.4f}, refit without X_pre "
+        f"{bare_width:.4f}, PI+INV+IV {widths['PI+INV+IV']:.4f}"
     )
     check(
-        "(v) it is no longer the tightest, and the DA-side allowance is why",
-        widths["DA+PI+IV"] > widths["PI+INV+IV"] > bare_width,
-        f"{widths['DA+PI+IV']:.4f} > {widths['PI+INV+IV']:.4f} > {bare_width:.4f}",
+        "(v) the DA leak's eps is what widens DA+PI+IV",
+        widths["DA+PI+IV"] > bare_width,
+        f"{widths['DA+PI+IV']:.4f} > {bare_width:.4f}",
     )
     query_path = getattr(leg_ii_iii, "query_path", None)
     if query_path is not None:

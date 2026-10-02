@@ -1,16 +1,16 @@
 """A25: the constraint floor, and no budget is ever raised to it.
 
-The file keeps its name (a28 imports `cvxpy_floor` from it; a68 imports
-`omega_recipe_runner`), but there is no floor guard any more: a budget under the
+The file keeps its name (a28 imports `cvxpy_floor` from it), but there is no floor guard any more: a budget under the
 constraint's own floor is left as is and every query reads INFEASIBLE, the rule
 PI+INV has always followed on the epsilon sweep (PLAN v16 SS2.2, SS5.9). Four legs:
   1. the closed-form floor equals a cvxpy reference solve;
   2. never raised: on the simulation m fixture and the optical gamma fixture, the
-     fitted budgets WITH data equal the raw `oracle + EPS_TOL` bit for bit on
+     fitted INV budget WITH data equals the raw `oracle + EPS_TOL` bit for bit on
      feasible and infeasible cells alike, and an infeasible cell logs exactly one
      INFO BELOW line naming its floor (a feasible one logs none);
-  3. empty reads INFEASIBLE: on the omega recipe fixture every knob with
-     r_T^2 < floor gives all-INFEASIBLE statuses and a NaN width at RECORDED knob
+  3. empty reads INFEASIBLE: on the omega recipe fixture every knob whose DA+PI+IV
+     IV row radius r^2 sits under that row's own floor (`constraint_floor` on its
+     instrument block) gives all-INFEASIBLE statuses and a NaN width at RECORDED knob
      indices, its coverage is whatever `evaluate_queries` gives an all-NaN interval
      (NaN under the empty-cell rule, 0 without it), and the rendered width line has
      a gap there;
@@ -55,12 +55,13 @@ from src.methods.sensitivity_models import (  # noqa: E402
 )
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# the omega figure's recipe, named ONCE: a68 leg (ix) fits the same fixture
+# the omega figure's recipe, named ONCE
 OMEGA_RECIPE = "sharpnessInformativenessFig10.yaml"
 METHODS = ["PI", "DA+PI", "PI+INV", "DA+PI+IV"]
 # leg 3, MEASURED on this fixture (simulation block, n 512, 8 knobs, one
-# experiment): the knob indices where the per-step r_T^2 sits under the T floor.
-# The floor guard used to raise the budget there; now those knobs read INFEASIBLE
+# experiment): the knob indices where DA+PI+IV's IV row radius r^2 sits under the
+# row's own floor. The floor guard used to raise the budget there; now those knobs
+# read INFEASIBLE
 EMPTY_KNOBS = [0, 1, 2]
 # the two sentences allowed to name the floor guard (leg 4): do-MNIST's query
 # comment, left alone, and the docstring that says it is gone
@@ -163,7 +164,7 @@ def recipe_runner(dataset, param, n_experiments=1, steps=8, methods=None, **over
     if not os.path.exists(path):
         available = sorted(f for f in os.listdir(os.path.join(REPO, "recipes")) if f.endswith(".yaml"))
         raise FileNotFoundError(
-            f"recipes/{OMEGA_RECIPE} is gone; a25 legs 2 and 3 and a68 leg (ix) fit their "
+            f"recipes/{OMEGA_RECIPE} is gone; a25 legs 2 and 3 fit their "
             f"fixtures on it. recipes/ carries {available}. Re-point OMEGA_RECIPE."
         )
     with open(path) as handle:
@@ -191,9 +192,8 @@ def omega_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides
     """An omega runner on the omega figure's own block, cut to gate scale (n 512,
     one experiment).
 
-    The one definition of that fixture: a68 leg (ix) imports this rather than
-    keeping a second copy, so `OMEGA_RECIPE` is the only place the file name
-    appears. A rename must land as a named FAIL, never as a traceback out of a
+    The one definition of that fixture, so `OMEGA_RECIPE` is the only place the
+    file name appears. A rename must land as a named FAIL, never as a traceback out of a
     gate that then looks merely broken.
 
     `sim_runner` above is a hand-rolled orchestrator with no instrument, no
@@ -204,10 +204,16 @@ def omega_recipe_runner(dataset="simulation", steps=8, methods=None, **overrides
     return recipe_runner(dataset, "omega", steps=steps, methods=methods, **{"n_samples": 512, **overrides})
 
 
-def cell_floor(runner, e, data, kind):
+def row_block(data, row):
+    """The instrument block of a DA IV row: T alone, or (T, Z) for the joint row."""
+    T = np.asarray(data.G, dtype=float).reshape(len(data.GX), -1)
+    return T if row == "t" else np.hstack([T, np.asarray(data.Z, dtype=float).reshape(len(data.GX), -1)])
+
+
+def cell_floor(runner, e, data, kind, block=None):
     """The floor `_floor_report` measures, restated: 'inv' on (X, GX) at the plain
-    ball, 'iv' on the T constraint alone (GX, G) at the recalibrated one."""
-    kw = dict(GX=data.GX) if kind == "inv" else dict(Z=data.G)
+    ball, 'iv' on (GX, `block`) at the recalibrated one (`block` defaults to T)."""
+    kw = dict(GX=data.GX) if kind == "inv" else dict(Z=data.G if block is None else block)
     design = data.X if kind == "inv" else data.GX
     if kind == "iv":  # the DA ball is recalibrated, as in `_floor_report`
         kw.update(rho=runner.fit_rho(e, data), recalibrate=runner.recalibrate)
@@ -286,10 +292,7 @@ def never_raised(label, runner, steps):
             oracle = runner.get_oracle(e)
             for i in steps:
                 data = SweepData.coerce(runner.generate_data(e, grid[i]))
-                for kind, attr, fit in (
-                    ("inv", "epsilon_star", runner.fit_epsilon),
-                    ("iv", "eps_iv_star", runner.fit_epsilon_iv),
-                ):
+                for kind, attr, fit in (("inv", "epsilon_star", runner.fit_epsilon),):
                     raw = getattr(oracle, attr, None)
                     if raw is None or not np.isfinite(raw):
                         continue
@@ -361,16 +364,18 @@ def a25_empty_reads_infeasible():
     widths, under = np.full((len(grid), 1), np.nan), []
     for index, knob in enumerate(grid):
         data = SweepData.coerce(runner.generate_data(0, knob))
-        floor = cell_floor(runner, 0, data, "iv")
-        budget = runner.fit_epsilon_iv(0, index, data)
         models = runner.build_models(0, index, data)
         model = models["DA+PI+IV"]
         estimate = model.predict(data.X_test, **runner.get_predict_kwargs(knob, 0))
+        # the model's IV row (T, or the joint (T, Z) row with an instrument) and its own floor
+        row = model.rows[0]
+        budget = model.iv_radius(row, runner.fit_gamma(0))
+        floor = cell_floor(runner, 0, data, "iv", block=row_block(data, row))
         status = np.asarray(getattr(model, "query_status", None))
         record = evaluate_queries(data.estimand, estimate, status, 0.0, extent=data.metric_extent)
         widths[index, 0] = record.interval_width
         print(
-            f"      knob {index} ({knob:.4g}): r_T^2 {budget**2:.4g} vs floor {floor:.4g}, "
+            f"      knob {index} ({knob:.4g}): r_{row.upper()}^2 {budget**2:.4g} vs floor {floor:.4g}, "
             f"W {record.interval_width:.4f} C {record.coverage:.3f}"
         )
         if budget**2 >= floor:
@@ -393,7 +398,7 @@ def a25_empty_reads_infeasible():
         check(f"A25 knob {index}: the width is NaN", np.isnan(record.interval_width), f"{record.interval_width}")
         check(f"A25 knob {index}: coverage reads as an all-NaN cell does", same, f"{record.coverage} vs {empty}")
 
-    print(f"      MEASURED knobs under the T floor: {under}")
+    print(f"      MEASURED knobs under the IV row's floor: {under}")
     check("A25 the knobs under the floor are the RECORDED ones", under == EMPTY_KNOBS, f"{under} vs {EMPTY_KNOBS}")
     check("A25 the fixture has a knob under the floor and one above it", 0 < len(under) < len(grid), f"{under}")
     fig, ax = plt.subplots()
@@ -415,7 +420,7 @@ def a25_empty_reads_infeasible():
 def a25_no_guard_left():
     """`git grep -i` for the guard's names over `src` and `scripts`, any case,
     spaced or hyphenated. This file is excluded (it names them to look for them)
-    and so is its own module name, `a25_floor_guard`, which a28 and a68 import."""
+    and so is its own module name, `a25_floor_guard`, which a28 imports."""
     done = subprocess.run(
         [
             "git",

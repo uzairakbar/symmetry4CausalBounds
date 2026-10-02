@@ -3,9 +3,13 @@
 refactor5 touches `src/sem/cigarettes.py` (`instrument_set`, `restricted_fit` against
 a configured set, `iv_columns` / `iv_width` / `iv_pool` on the SEM, `[X | Z]` draws
 in both replicate modes) and `src/experiments/cigarettes.py` (`iv` and `gamma_z`
-from the block, `declared_iv` on both runners, `gamma_z` forwarded into the
-registry, the replicate rule of decision 9), plus `gamma_z > 0` under a non-empty
-set in `configs.py` (a56 gains the case). Legs:
+from the block, `gamma_z` forwarded into the registry, the pads' `unit_cap`, the
+replicate rule of decision 9), plus `gamma_z > 0` under a non-empty set in
+`configs.py` (a56 gains the case). The direct-splat legs (`shipped_block`, the
+digest blocks) drop `gamma_n` and stay on the raw program after the recipes go to
+`gamma_n: 95`; the recipe legs read whatever the recipe sets, and every radius
+check reads the row formula at the model's own `gamma_n_alpha` (raw: exactly
+s sqrt(g)). Legs:
 
   (D)   the digest leg (scripts/digest_leg.py), as a56 to a59: the shipped blocks,
         no `iv` key, against the reference recorded on 14509db, no tolerance.
@@ -14,11 +18,11 @@ set in `configs.py` (a56 gains the case). Legs:
   (i)   with `iv: []` (the shipped block) the target is b_r, the anchor-set
         restricted fit: raw (-1.992, 0.507, 1.237, 0.249) to 5e-4 (SS1 fact 5, the
         plan's digits) and an independent anchor-set fit to 1e-10; the SEM has
-        `iv_width` 0, no `iv_pool`, a k-column draw; both runners read
-        `declared_iv` False and the registry hands `gamma_z` 0. Catches: a
-        fallback that reads the configured-set code with an empty set, a
-        `declared_iv` or `gamma_z` that leaks onto the shipped path. Misses: the
-        numbers downstream, which (D) has.
+        `iv_width` 0, no `iv_pool`, a k-column draw; the registry hands `gamma_z`
+        0, DA+PI+IV carries the one T row and the query runner a (n, 0) Z.
+        Catches: a fallback that reads the configured-set code with an empty
+        set, a `gamma_z` that leaks onto the shipped path. Misses: the numbers
+        downstream, which (D) has.
   (ii)  the shipped set [tax_s, y, cpi] at t3 / own-tax gives p1's singular values
         (3.142, 2.475, 1.504) to 1e-3 and abs(v'd) = 0.407190 to 1e-6 (never the
         signed value, SS3.2), d_pn 0.940 to 1e-3; the SEM's `iv_pool` is that matrix
@@ -30,32 +34,35 @@ set in `configs.py` (a56 gains the case). Legs:
         (MEASURED p5: 2.3e-16). Catches: a target off the wrong set or off a raw
         column. Misses: nothing about its coverage, which (v) has.
   (iv)  gamma*(b) = 0.3621 to 1e-4, on the SEM and through the runner's oracle
-        (MEASURED p4, p5: 0.37052, 0.36205 on the n - K sigma). Catches: the target built from the anchor set
-        under a configured one (gamma* then reads 0.1878). Misses: nothing else.
-  (v)   the replicate mechanism follows decision 9: with a non-empty `iv:` the
-        sweep runner's SEMs carry `bootstrap` False (90% row splits) and both
-        runners `declared_iv` True, the solver reads `gamma_z` 2^-8 with
-        `epsilon_iv` 0 on PI+IV (bound exactly s sqrt(gamma_z)) and, on DA+PI+IV
-        and the intersection's DA branch, App. D's radii (`iv_recalibrate`, since
-        working6): r_Z = sqrt(eps^2 + s^2 gamma_z) and, with T's measured leak,
-        r_T = r_TZ = sqrt(eps^2 + s^2 gamma_z + leak_t^2), eps the pad's; on the
-        runner's own 8 seeded row splits at gamma*(b) the coverage of b* on the
-        four coefficient queries is 1.000 for PI and 1.000 for PI+IV; the same
-        runner class forced onto the state-cluster bootstrap reads PI+IV coverage
-        under 1 (RECORDED beside p10's 0.500 / 0.375); with
-        `iv: []` the runner is built with `bootstrap` True. Catches: `bootstrap`
-        forced True under a configured set (the coverage then reads a resampling
-        rate), `declared_iv` or `gamma_z` not forwarded. Misses: the production
-        8-experiment mean over a full sweep (SS14).
+        (MEASURED p4, p5: 0.37052, 0.36205 on the n - K sigma). Catches: the
+        target built from the anchor set under a configured one (gamma* then
+        reads 0.1878). Misses: nothing else.
+  (v)   the replicate mechanism follows decision 9 and the declared leak reaches
+        the solver: with a non-empty `iv:` the sweep runner's SEMs carry
+        `bootstrap` False (90% row splits); the orchestrator reads the block's
+        `gamma_z` (0.0177) and, on `target: iv`, `unit_cap` = the panel's 49
+        states (None on `target: plasmode`), which every padded row's n_eff
+        takes; PI+IV carries one Z row at sqrt(s^2 (1 + gamma~) gamma_n(3;
+        gamma_z / (1 + gamma~))) (raw: exactly s sqrt(gamma_z)), DA+PI+IV and the
+        intersection's DA branch one joint (T, Z) row (4 columns) at the same
+        formula with App. D's post-DA leak (eps / sigma~ + sqrt(gamma_z / rho))^2,
+        eps the fit epsilon eps* + EPS_TOL; on the runner's own 8 seeded row
+        splits at gamma*(b) the coverage of b* on the four coefficient queries
+        is 1.000 for PI and 1.000 for PI+IV; the same runner class forced onto
+        the state-cluster bootstrap reads PI+IV coverage under 1 (RECORDED
+        beside p10's 0.500 / 0.375); the query panel's +IV models project on
+        the real Z; with `iv: []` the runner is built with `bootstrap` True.
+        Catches: `bootstrap` forced True under a configured set (the coverage
+        then reads a resampling rate), `gamma_z` or `unit_cap` not forwarded, a
+        DA row at the non-DA leak. Misses: the production 8-experiment mean over
+        a full sweep (SS14).
   (vi)  the SS6.3 spec table: abs(v'd) and gamma*(b) to 1e-3 at every spec, the
         signed v'd at `s` to 1e-3 (-0.0243, under d_pn > 0), and the PI+IV
         feasibility floor at bound 0.0625 to 1e-3 (p8's column), so `s` is seen
         to degenerate. Catches: a spec-dependent slip in the controls or the set.
         Misses: the other anchor (SS14).
-  Two hand-off items ride along: the query panel's fitted +IV models see the real
-  Z (`PanelBuilder` forwards it, batch B ruling 2), and the overlap number of the
-  batch A ruling, the oracle's `eps_iv_z_star` at the phase-b target, is RECORDED
-  as the RMS over the 8 pooled DA draws beside p10's one-draw 0.000460.
+  One hand-off item rides along: the query panel's fitted +IV models see the
+  real Z (`PanelBuilder` forwards it, batch B ruling 2).
 
     MPLBACKEND=Agg python scripts/a60_cigarettes_iv.py [--reference JSON] [--skip-digest]
 
@@ -85,7 +92,8 @@ from src.experiments.configs import EPS_TOL, GAMMA_Z_DEFAULT, resolve_dataset_bl
 from src.experiments.generic_runner import STRATEGIES  # noqa: E402
 from src.experiments.utils import PanelBuilder, set_seed  # noqa: E402
 from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
-from src.methods.sensitivity_models import SolveStatus, constraint_floor  # noqa: E402
+from src.methods.sensitivity_models import GAMMA_N_ROWS, SolveStatus, constraint_floor  # noqa: E402
+from src.methods.sensitivity_models import finite_sample_budget as fsb  # noqa: E402
 from src.sem.cigarettes import TREATMENTS, CigaretteSEM, build_design, instrument_set, null_basis  # noqa: E402
 
 PHASE_B = ("tax_s", "y", "cpi")
@@ -105,6 +113,7 @@ SPEC_TABLE = {
 }
 P10_BOOTSTRAP_COVERAGE = {"PI": 0.500, "PI+IV": 0.375}
 REPLICATES = 8
+STATES = 49  # the panel's states, the pads' units on `target: iv`
 FAIL = []
 
 
@@ -171,8 +180,25 @@ def recipe_block(**overrides):
 
 
 def shipped_block(**overrides):
+    # the direct splat stays on the raw program whatever the digest toggles carry
     block = {**digest_leg.TOGGLES, **digest_leg.BLOCKS["cigarettes"], **overrides}
+    block.pop("gamma_n", None)
     return resolve_dataset_block("cigarettes", block)
+
+
+def iv_radius_want(model, row, columns, gamma):
+    """The row radius written out: sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~)))
+    at level gamma_n_alpha / (GAMMA_N_ROWS B), g the declared gamma_z on a non-DA
+    fit and (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA fit."""
+    budget = model.budget(gamma)
+    s_sq = model.sigma_sq
+    g = (
+        model.gamma_z
+        if not model._da_fit
+        else (model.epsilon / np.sqrt(s_sq) + np.sqrt(model.gamma_z / model.rho)) ** 2
+    )
+    level = model.gamma_n_alpha / (GAMMA_N_ROWS * len(model.rows))
+    return float(np.sqrt(s_sq * (1.0 + budget) * fsb(columns, g / (1.0 + budget), model.n_eff, level)))
 
 
 def orchestrator(block):
@@ -275,18 +301,15 @@ def leg_i():
     check("(i) the draw has k columns", X.shape == (design.n, design.k), f"{X.shape}")
     check("(i) iv_columns is empty and gamma_z 0 on the orchestrator", orch.iv_columns == () and orch.gamma_z == 0.0)
     runner = sweep_runner(orch)
-    check("(i) the sweep runner reads declared_iv False", runner.declared_iv is False)
     check("(i) the sweep runner's SEM is on the cluster bootstrap", runner.sems[0].bootstrap is True)
     data = runner.generate_data(0, 1.0)
     models = runner.build_models(0, 0, data)
     da_iv = models["DA+PI+IV"]
-    on_t_only = da_iv.gamma_z == 0.0 and not da_iv._has_z and da_iv.T_projector_R.shape[0] == 1 + design.k
-    check("(i) DA+PI+IV carries gamma_z 0 and one T constraint, no Z one", on_t_only, f"{da_iv.T_projector_R.shape}")
+    shape = da_iv.iv_terms_["t"][0].shape if "t" in da_iv.iv_terms_ else None
+    on_t_only = da_iv.gamma_z == 0.0 and da_iv.rows == ("t",) and shape is not None and shape[0] == 1 + design.k
+    check("(i) DA+PI+IV carries gamma_z 0 and one T row, no Z one", on_t_only, f"{da_iv.rows} {shape}")
     query = query_runner(orch)
-    check(
-        "(i) the query runner reads declared_iv False and Z (n, 0)",
-        query.declared_iv is False and query.Z.shape[1] == 0,
-    )
+    check("(i) the query runner reads Z (n, 0)", query.Z.shape[1] == 0)
 
 
 def leg_ii():
@@ -359,35 +382,33 @@ def leg_iv():
         abs(oracle.gamma_star - GAMMA_STAR_B) < 1e-4,
         f"{oracle.gamma_star:.6f}",
     )
-    print(
-        f"      RECORDED overlap (batch A ruling 1): eps_iv_z_star at the phase-b target, RMS over the "
-        f"{runner_draws()} pooled DA draws = {oracle.eps_iv_z_star:.6f} (p10, one draw at seed 0: 0.000460); "
-        f"eps_iv_star = {oracle.eps_iv_star:.2e}"
-    )
-    check(
-        "(iv) the overlap is a small fraction of the declared radius 0.0625 (recorded, not pinned)",
-        oracle.eps_iv_z_star < 0.1 * IV_BOUND,
-    )
-
-
-def runner_draws():
-    from src.experiments.generic_runner import ORACLE_POOL_DRAWS
-
-    return ORACLE_POOL_DRAWS
 
 
 def leg_v():
     print("(v) the replicate mechanism of decision 9, and the declared budget in the solver")
     block_methods = recipe_methods()
     orch = orchestrator(recipe_block(n_experiments=REPLICATES, sweep_samples=4, n_jobs=1))
+    gamma_z = float(recipe_block()["gamma_z"])
     check(
-        "(v) the orchestrator reads iv and gamma_z 2^-8", orch.iv_columns == PHASE_B and orch.gamma_z == GAMMA_Z_DEFAULT
+        f"(v) the orchestrator reads iv and the block's gamma_z {gamma_z:g}",
+        orch.iv_columns == PHASE_B and orch.gamma_z == gamma_z == GAMMA_Z_DEFAULT,
+        f"{orch.gamma_z!r}",
+    )
+    check(
+        f"(v) target iv: unit_cap is the panel's {STATES} states on the toggles and the runners",
+        orch.toggles["unit_cap"] == STATES and orch.kwargs["unit_cap"] == STATES,
+        f"{orch.toggles['unit_cap']!r}",
+    )
+    plasmode = orchestrator(recipe_block(n_experiments=1, sweep_samples=4, n_jobs=1, target="plasmode"))
+    check(
+        "(v) target plasmode: unit_cap None (the rows count)",
+        plasmode.toggles["unit_cap"] is None and plasmode.kwargs["unit_cap"] is None,
     )
     runner = sweep_runner(orch)
     check(
         "(v) every sweep SEM is on 90% row splits (bootstrap False)", all(sem.bootstrap is False for sem in runner.sems)
     )
-    check("(v) the sweep runner reads declared_iv True", runner.declared_iv is True)
+    check("(v) the sweep runner carries unit_cap", runner.unit_cap == STATES, f"{runner.unit_cap!r}")
     target = runner.sems[0].solution.ravel()
     data = runner.generate_data(0, 1.0)
     n_train = int(round(0.9 * runner.sems[0].design.n))
@@ -396,40 +417,45 @@ def leg_v():
         len(data.X) == n_train and data.Z.shape == (n_train, 3),
     )
     models = fold_keys(runner.build_models(0, 0, data))
-    # App. D (`iv_recalibrate`): every DA block's radius is sqrt(eps^2 + s^2 gamma_z +
-    # leak^2), eps the pad's (the fit epsilon), T's leak measured
-    # on the cell's rows, the declared Z's 0 (gamma_z carries it)
     budgets = runner.fit_budgets(0, 0, data)
-    epsilon, leak_t = float(budgets["epsilon"]), float(budgets["leak_t"])
+    epsilon, gamma = float(budgets["epsilon"]), float(budgets["gamma"])
     gated = listed(("PI+IV", "DA+PI+IV", "PI&DA+PI+IV"), block_methods, models, "(v) the declared budget")
     if "PI+IV" in gated:
         pi_iv = models["PI+IV"]
-        r_z = np.sqrt(pi_iv.sigma_sq / pi_iv.rho * GAMMA_Z_DEFAULT)
+        want = iv_radius_want(pi_iv, "z", 3, gamma)
+        raw = float(np.sqrt(pi_iv.sigma_sq * gamma_z))
+        got = pi_iv.iv_radius("z", gamma)
         check(
-            "(v) PI+IV: gamma_z declared, no T block, Z radius exactly s sqrt(gamma_z)",
-            pi_iv.gamma_z == GAMMA_Z_DEFAULT and not pi_iv._has_t and pi_iv.z_bound == r_z,
-            f"{pi_iv.z_bound:.6f}",
+            "(v) PI+IV: gamma_z declared, one Z row, at the row formula on n_eff = min(n, 49)",
+            pi_iv.gamma_z == gamma_z
+            and pi_iv.rows == ("z",)
+            and pi_iv.n_eff == min(pi_iv.n_obs_, STATES)
+            and abs(got - want) <= 1e-12 * want,
+            f"{got:.6f} (want {want:.6f}, raw s sqrt(gamma_z) {raw:.6f}, n_eff {pi_iv.n_eff})",
         )
-
-    def radii(model):
-        slack = model.sigma_sq / model.rho * GAMMA_Z_DEFAULT
-        return float(np.sqrt(epsilon**2 + slack + leak_t**2)), float(np.sqrt(epsilon**2 + slack))
+        if pi_iv.gamma_n_alpha == 0.0:
+            check("(v) PI+IV raw: the Z radius is s sqrt(gamma_z)", abs(got - raw) <= 1e-12 * raw, f"{got!r}")
 
     da_fits = {"DA+PI+IV": models.get("DA+PI+IV")}
     if "PI&DA+PI+IV" in gated:
         da_fits["the intersection's DA branch"] = models["PI&DA+PI+IV"].augmented
-        check("(v) the intersection's baseline carries no T block", not models["PI&DA+PI+IV"].baseline._has_t)
+        check(
+            "(v) the intersection's baseline carries the one Z row, no T",
+            models["PI&DA+PI+IV"].baseline.rows == ("z",),
+        )
     for name, model in da_fits.items():
         if model is None or (name == "DA+PI+IV" and name not in gated):
             continue
-        r_t, r_z = radii(model)
+        want = iv_radius_want(model, "tz", 4, gamma)
+        got = model.iv_radius("tz", gamma)
         check(
-            f"(v) {name}: r_T = r_TZ = sqrt(eps^2 + s^2 gamma_z + leak_t^2), r_Z = sqrt(eps^2 + s^2 gamma_z)",
-            abs(model.t_bound - r_t) < 1e-12
-            and abs(model.z_bound - r_z) < 1e-12
-            and model._has_tz
-            and abs(model.tz_bound - r_t) < 1e-12,
-            f"r_T {model.t_bound:.6f}, r_Z {model.z_bound:.6f}, r_TZ {model.tz_bound!r}",
+            f"(v) {name}: one joint (T, Z) row of 4 columns at the post-DA leak (eps / s~ + sqrt(gamma_z / rho))^2",
+            model._da_fit
+            and model.rows == ("tz",)
+            and model.iv_terms_["tz"][3] == 4
+            and model.epsilon == epsilon
+            and abs(got - want) <= 1e-12 * want,
+            f"r_TZ {got:.6f} (want {want:.6f})",
         )
     eps_star = float(runner.get_oracle(0).epsilon_star)
     check(
@@ -451,7 +477,6 @@ def leg_v():
         default_gamma=orch.gamma,
         default_epsilon=orch._epsilon_budget(None),
         experiment_name="cigarettes",
-        declared_iv=True,
         methods=orch.methods,
         method_factory=orch.build_methods,
         **orch._get_clean_kwargs(),
@@ -470,10 +495,7 @@ def leg_v():
         )
 
     query = query_runner(orch)
-    check(
-        "(v) the query runner reads declared_iv True and a 3-column Z",
-        query.declared_iv is True and query.Z.shape[1] == 3,
-    )
+    check("(v) the query runner reads a 3-column Z", query.Z.shape[1] == 3)
     panel = PanelBuilder(query, "cigarettes", False, has_z=orch.has_z)
     panel._fit_all_models()
     fitted = fold_keys(panel.fitted_models)
@@ -482,21 +504,18 @@ def leg_v():
     if "PI&DA+PI+IV" in fitted:
         on_z = on_z and fitted["PI&DA+PI+IV"].baseline._has_iv
     check("(v) the query panel's +IV models are fitted on the real Z (batch B ruling 2)", on_z, f"{plain_iv}")
-    # 3 declared Z moments and 1 T moment, each beside the 4 mean-match rows
-    want = {"PI+IV": (3 + 4,), "PI+INV+IV": (3 + 4,), "DA+PI+IV": (3 + 4, 1 + 4)}
+    # 3 declared Z moments, and on the DA fit the joint (T, Z) row's 1 + 3, each
+    # beside the 4 jitter rows
+    want = {"PI+IV": {"z": 3 + 4}, "PI+INV+IV": {"z": 3 + 4}, "DA+PI+IV": {"tz": 1 + 3 + 4}}
     for name in plain_iv:
-        rows = (fitted[name].Z_projector_R.shape[0],)
-        if name == "DA+PI+IV":
-            rows = (*rows, fitted[name].T_projector_R.shape[0])
+        rows = {row: terms[0].shape[0] for row, terms in fitted[name].iv_terms_.items()}
         check(f"(v) {name} projects on {want[name]} moment rows", rows == want[name], f"{rows}")
     print(
         "      RECORDED query-path radii: "
         + ", ".join(
-            f"{name} r_Z {fitted[name].z_bound:.6f}"
-            + (f" r_T {fitted[name].t_bound:.6f}" if name == "DA+PI+IV" else "")
+            f"{name} " + " ".join(f"r_{row.upper()} {fitted[name].iv_radius(row):.6f}" for row in fitted[name].rows)
             for name in plain_iv
         )
-        + f" (r_T there is the query tolerance {query.eps_tol:g})"
     )
 
     plain = orchestrator(shipped_block(n_experiments=1, sweep_samples=4))

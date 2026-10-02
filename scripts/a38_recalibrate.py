@@ -64,7 +64,7 @@ from src.sem.simulation import LinearSimulationSEM  # noqa: E402
 
 # built at runtime so this file passes its own grep
 OLD = "".join(("cali", "brate"))
-GAMMA, EPSILON, EPSILON_IV = 0.5, 0.3, 0.2
+GAMMA, EPSILON = 0.5, 0.3
 METHODS = ["PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
 N_QUERIES = 32
 N_JOBS = 4
@@ -180,9 +180,7 @@ def leg_ii():
     check("(ii) recalibrated_gamma(g, 0.5, 1) == g", recalibrated_gamma(GAMMA, 0.5, 1.0) == GAMMA)
 
     names = ["PI", "PI+INV", "PI+IV", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
-    built = MethodRegistry.build_methods(
-        names, gamma=GAMMA, epsilon=EPSILON, epsilon_iv=EPSILON_IV, rho=1.7, recalibrate=True, n_jobs=1
-    )
+    built = MethodRegistry.build_methods(names, gamma=GAMMA, epsilon=EPSILON, rho=1.7, recalibrate=True, n_jobs=1)
     models = {name: build() for name, build in built.items()}
     for name in ("PI", "PI+INV", "PI+IV"):
         check(f"(ii) registry: {name}.rho == 1.0", models[name].rho == 1.0, f"{models[name].rho}")

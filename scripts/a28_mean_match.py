@@ -183,15 +183,15 @@ def leg_i():
                 dict(design=X, y=y, kind="inv", GX=GX, epsilon=EPSILON),
             ),
             "PI+IV(null Z)": (
-                lambda nj, c=common, X=X, y=y: sm.InstrumentalVariablePartialR2(
-                    epsilon_iv=EPSILON_IV, n_jobs=nj, **c
-                ).fit(X, y, Z=None),
+                lambda nj, c=common, X=X, y=y: sm.InstrumentalVariablePartialR2(n_jobs=nj, **c).fit(X, y, Z=None),
                 dict(design=X, y=y),
             ),
+            # a DA fit (`X_pre`), raw and gamma_z 0: its T row's radius is the
+            # model's epsilon itself, sqrt(s^2 (eps / s)^2)
             "DA+PI+IV": (
-                lambda nj, c=common, y=y, GX=GX: sm.InstrumentalVariablePartialR2(
-                    epsilon_iv=EPSILON_IV, n_jobs=nj, **c
-                ).fit(GX, y, T=GX),
+                lambda nj, c=common, X=X, y=y, GX=GX: sm.InstrumentalVariablePartialR2(
+                    n_jobs=nj, **{**c, "epsilon": EPSILON_IV}
+                ).fit(GX, y, T=GX, X_pre=X),
                 dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV),
             ),
         }
@@ -216,7 +216,7 @@ def leg_i():
             ),
             (
                 "PI&DA+PI+IV",
-                sm.IntersectedInstrumentalVariablePartialR2(epsilon_iv=EPSILON_IV, n_jobs=1, **common).fit(
+                sm.IntersectedInstrumentalVariablePartialR2(n_jobs=1, **{**common, "epsilon": EPSILON_IV}).fit(
                     X, y, GX=GX, G=GX
                 ),
                 (dict(design=X, y=y), dict(design=GX, y=y, kind="iv", Z=GX, epsilon=EPSILON_IV)),

@@ -62,20 +62,7 @@ def installed_backends() -> list[tuple[str, dict[str, float | int]]]:
 
 def budgets(runner, data) -> dict[str, Any]:
     """The builder kwargs `ParamSweepRunner.build_models` computes at experiment 0."""
-    gamma = runner.fit_gamma(0)
-    epsilon = runner.fit_epsilon(0, 0, data)
-    leaks = runner.fit_iv_leaks(0, data)
-    radius = float(np.hypot(max(epsilon, 0.0), leaks["leak_t"]))
-    return dict(
-        gamma=gamma,
-        epsilon=epsilon,
-        epsilon_iv=runner.fit_epsilon_iv(0, 0, data, radius=radius),
-        epsilon_iv_z=runner.fit_epsilon_iv_z(0, data),
-        rho=runner.fit_rho(0, data),
-        iv_recalibrate=True,
-        **leaks,
-        **runner.method_kwargs(0),
-    )
+    return runner.fit_budgets(0, 0, data)
 
 
 def builders(runner, data, b=None) -> dict[str, Any]:
@@ -96,6 +83,8 @@ def baseline_pi(runner, data, b=None) -> PartialR2:
         clipy=runner.clipy,
         n_jobs=1,
         mean_match=runner.mean_match,
+        gamma_n_alpha=runner.gamma_n_alpha,
+        unit_cap=runner.unit_cap,
     )
 
 

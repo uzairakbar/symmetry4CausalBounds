@@ -380,7 +380,7 @@ def leg_v(orch, runner):
 
     design = runner.sem.design
     b_r = runner.sem.solution.ravel()
-    results, _ = _coefficient_bounds(runner, orch.has_z)
+    results, _ = _coefficient_intervals(runner, orch.has_z)
     inside = True
     for bounds in results.values():
         if bounds.ndim != 3:
@@ -390,7 +390,7 @@ def leg_v(orch, runner):
     check("(v) every interval contains b_r", inside, f"b_r {np.round(design.sigma * b_r, 3)}")
 
 
-def _coefficient_bounds(runner, has_z):
+def _coefficient_intervals(runner, has_z):
     """The fitted methods' intervals at the four coefficient queries; `has_z` the
     orchestrator's."""
     from src.experiments.utils import PanelBuilder

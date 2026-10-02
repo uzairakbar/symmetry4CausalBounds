@@ -11,15 +11,11 @@ defaults:
                         # false = the pre-2026-09 uncentred, intercept-free ball.
     n_jobs: 16          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
-# The IV budgets are not toggles: an observed instrument gets its own
-# constraint at its own radius. Every linear SWEEP re-calibrates the radii per
-# App. D (kappa = 0) with the q0.95 eps* of E.2 and no tolerance: a DA+ method's
-# T, Z and joint (T, Z) constraints each take sqrt(eps^2 + s^2 gamma_z + leak^2),
-# the leak the block's measured noise moment ||Q' r*|| / sqrt(N) (Z: 0 when
-# gamma_z is declared); a non-DA method's Z radius is sqrt(leak^2 + s^2 gamma_z)
-# (`iv_recalibrate`). Every query panel keeps its radii: T the oracle
-# ||E[W#|T]|| (`eps_iv_star`), Z `eps_iv_z_star` or, declared, s sqrt(gamma_z)
-# plus the DA-side allowance, each + the query's eps_tol.
+# The IV budgets are not toggles: every linear method's instrument rows take the
+# declared leak gamma_z (the dataset's; the simulation's `SimulationConfig.gamma_z`),
+# a non-DA row at s sqrt(gamma_z) and a DA row at App. D's post-DA leak
+# (eps / s~ + sqrt(gamma_z / rho))^2 in s~ units; a DA fit with both T and Z
+# carries the one joint row on span(T, Z). Sweeps and query panels alike.
 # Nor is the norm of W the oracle eps* takes: every SWEEP (gamma, omega, epsilon,
 # recalibrate, n, m, and the perf sweeps on the epsilon runner) reads eps* as the
 # q0.95 of |W|, every query panel as its RMS (`epsilon_quantile` /

@@ -59,7 +59,7 @@ def main():
 
     header = (
         f"{'knob':>9} {'rho':>8} {'tr(S)/k@1':>10} {'tr(S)/k@.999':>12} "
-        f"{'x=rho*tr/k':>10} {'runner x':>10} " + " ".join(f"{m:>10}" for m in METHODS) + f" {'eps_iv':>9}"
+        f"{'x=rho*tr/k':>10} {'runner x':>10} " + " ".join(f"{m:>10}" for m in METHODS) + f" {'r_IV':>9}"
     )
     print(header)
     print("-" * len(header))
@@ -81,11 +81,13 @@ def main():
             record = evaluate_queries(data.estimand, estimate, getattr(models[name], "query_status", None), 0.0)
             widths[name] = record.interval_width
 
-        eps_iv = runner.fit_epsilon_iv(0)
-        rows.append((knob, rho, trace_full, trace_trunc, x, widths, eps_iv))
+        # the DA+PI+IV row's radius as solved at this knob (the T row: no instrument here)
+        iv_model = models["DA+PI+IV"]
+        r_iv = iv_model.iv_radius(iv_model.rows[0], runner.fit_gamma(0))
+        rows.append((knob, rho, trace_full, trace_trunc, x, widths, r_iv))
         print(
             f"{knob:9.4g} {rho:8.4f} {trace_full:10.5f} {trace_trunc:12.5f} "
-            f"{x:10.5f} {runner_x:10.5f} " + " ".join(f"{widths[m]:10.5f}" for m in METHODS) + f" {eps_iv:9.6f}"
+            f"{x:10.5f} {runner_x:10.5f} " + " ".join(f"{widths[m]:10.5f}" for m in METHODS) + f" {r_iv:9.6f}"
         )
 
     # --------------------------------------------------------------- verdicts
@@ -94,7 +96,7 @@ def main():
     trace_full = np.array([r[2] for r in rows])
     trace_trunc = np.array([r[3] for r in rows])
     rhos = np.array([r[1] for r in rows])
-    eps_ivs = np.array([r[6] for r in rows])
+    r_ivs = np.array([r[6] for r in rows])
 
     print("\n--- monotonicity ---")
     for label, values in (("rho vs knob", rhos), ("tr(S)/k vs knob", trace_full), ("x vs knob", x_values)):
@@ -132,7 +134,7 @@ def main():
         print(f"  {name:10s} vs knob: {shape(w):16s} vs plotted x: {shape(w[order])}")
 
     print("\n--- is the IV budget constant across the sweep? ---")
-    print(f"  eps_iv range: {eps_ivs.min():.9f} .. {eps_ivs.max():.9f}  (spread {np.ptp(eps_ivs):.3g})")
+    print(f"  r_IV range: {r_ivs.min():.9f} .. {r_ivs.max():.9f}  (spread {np.ptp(r_ivs):.3g})")
     w_da = np.array([r[5]["DA+PI"] for r in rows])
     w_iv = np.array([r[5]["DA+PI+IV"] for r in rows])
     print(f"  max|width(DA+PI+IV) - width(DA+PI)| = {np.nanmax(np.abs(w_iv - w_da)):.3g}")

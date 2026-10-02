@@ -300,9 +300,7 @@ def leg_vii():
         set(perf.CONIC_FITS) == {"ERM+IV", "DA+ERM+IV"},
         f"{perf.CONIC_FITS}",
     )
-    built = MethodRegistry.build_methods(
-        list(perf.CONIC_FITS), gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, **TOGGLES
-    )
+    built = MethodRegistry.build_methods(list(perf.CONIC_FITS), gamma=GAMMA, epsilon=EPS_TOL, **TOGGLES)
     for name in perf.CONIC_FITS:
         model = built[name]()
         check(f"(vii) {name} builds with backend unset", model.backend is None, f"{model.backend!r}")

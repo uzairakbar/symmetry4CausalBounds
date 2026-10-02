@@ -34,7 +34,7 @@ equivalent one. So the gate is half regression and half interface. Legs:
         (`CigaretteConfig.epsilon_quantile`), within 5%, DA+PI dips under the PI
         baseline at the smallest ratio, climbs back to it by r = 1 and never goes
         under 0.7; DA+PI+IV recovers by r = 1 and reads its RECORDED coverage per
-        ratio (INFEASIBLE, then a dip below 0.7, under the sweeps' App. D radii). The
+        ratio (INFEASIBLE, then a dip below 0.7, under the declared IV rows). The
         baseline is PI's own coverage (0.963 measured), not 1.0: the sweep fits
         bootstrap replicates against a pool oracle, so nothing covers 1.000 here.
         Catches: a target that is too small (a flat line) or too large (a cliff).
@@ -155,11 +155,13 @@ METHODS_IV = ["PI", "DA+PI", "DA+PI+IV"]
 CIGARETTE_SAMPLES = 2450
 EPSILON_GRID = (2.0**-6, 2.0**-3, 1.0)
 COVERAGE_FLOOR = 0.7
-# leg (v): DA+PI+IV's coverage per ratio, RECORDED 2026-09-30 under the sweeps' App. D
-# radii (`iv_recalibrate`): INFEASIBLE at r = 2^-6, a dip to 0.327 at 2^-3, 1.0 at r = 1.
-# It was [nan, nan, 1.0] under the RMS-type T budget, and 0.212 at 2^-3 under the bare
-# r eps* T radius; the 0.7 floor binds DA+PI alone, the line with no IV constraint
-IV_COVERAGE_RECORDED = (np.nan, 0.3265, 1.0)
+# leg (v): DA+PI+IV's coverage per ratio, RECORDED 2026-10-02 under the declared
+# IV rows: no instrument here (gamma_z 0), so the T row's radius is the swept eps
+# itself; INFEASIBLE at r = 2^-6, a dip to 0.212 at 2^-3, 1.0 at r = 1. It was
+# [nan, nan, 1.0] under the RMS-type T budget and 0.327 at 2^-3 under the
+# measured-leak App. D radii; the 0.7 floor binds DA+PI alone, the line with no IV
+# constraint
+IV_COVERAGE_RECORDED = (np.nan, 0.2122, 1.0)
 IV_COVERAGE_ATOL = 1e-3
 EPS_STAR_RTOL = 0.05
 MICRO_SAMPLES = 500
@@ -431,24 +433,15 @@ def cigarette_epsilon_runner(seed, n_samples, **toggles):
     def da_factory(sem=None, append=None):
         return ScaleTranslation(V, std=amplitude)
 
-    def method_factory(
-        gamma, epsilon, epsilon_iv=None, rho=1.0, epsilon_iv_z=0.0, iv_recalibrate=False, leak_t=0.0, leak_tz=0.0
-    ):
-        # the runner hands every factory `epsilon_iv_z` (the non-DA +IV term) since
-        # e4fb1a5; inert here, the SEM carries no real instrument under this design.
-        # `iv_recalibrate` (App. D) and its measured leaks since working6, forwarded
-        # as the sweeps' factories do
+    def method_factory(gamma, epsilon, rho=1.0):
+        # the runner hands every factory (gamma, epsilon, rho); the SEM carries no
+        # real instrument under this design, so DA+PI+IV has its T row alone
         from src.experiments.configs import MethodRegistry
 
         return MethodRegistry.build_methods(
             METHODS_IV,
             gamma=gamma,
             epsilon=epsilon,
-            epsilon_iv=epsilon_iv,
-            epsilon_iv_z=epsilon_iv_z,
-            iv_recalibrate=iv_recalibrate,
-            leak_t=leak_t,
-            leak_tz=leak_tz,
             rho=rho,
             n_jobs=N_JOBS,
             **toggles,

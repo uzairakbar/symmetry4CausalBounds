@@ -771,85 +771,60 @@ class InvarianceConstrainedPartialR2(PartialR2):
         self.eps_param.value = float(self.epsilon)
 
 
+def iv_blocks(has_t: bool, has_z: bool) -> tuple[str, ...]:
+    """The IV rows of a fit with these instrument blocks: its one block's row, and
+    with both T and Z the rows of `IV_LAYOUT`."""
+    if has_t and has_z:
+        return IV_LAYOUT
+    return ("t",) if has_t else ("z",) if has_z else ()
+
+
+# the rows of a fit with both T and Z, chosen once for every dataset by the P0
+# pilot under the fixed split: the joint row on span(T, Z) alone, at the whole IV
+# third, gave the smallest pooled geometric-mean width (1.8% under the separate
+# pair or all three, on simulation, cigarettes and the IV query alike) and was
+# never wider than the Z row alone
+IV_LAYOUT: tuple[str, ...] = ("tz",)
+
+
 class InstrumentalVariablePartialR2(PartialR2):
-    """PI + leaky IV constraints (Asm. 3), ONE PER INSTRUMENT.
+    """PI + leaky IV constraints (Asm. 3).
 
     Two instrument blocks reach `fit` by their own keyword: `T`, the DA
-    translation amounts of SS4.3, and `Z`, the observed instrument. Every block
-    that is present gets its own SOC constraint at its own radius -- `t_bound`
-    from `epsilon_iv`, `z_bound` from `epsilon_iv_z` and `gamma_z` (the query
-    radii; under `iv_recalibrate`, the sweeps', see `t_bound` / `z_bound`) -- so
-    one instrument's budget is never spent by the other. Under `iv_recalibrate` a
-    DA fit with both blocks also carries App. B / D's joint constraint on
-    span(T, Z) at `tz_bound`: each of the three admits h# at its own radius, so
-    their intersection does, and it is at least as tight as either the
-    separate pair or the joint one alone (MEASURED: the pair wins where the
-    leaks are lopsided, sim; the joint where eps and gamma_z dominate,
-    cigarettes). A missing block is (n, 0) and contributes nothing; with both
-    missing this is baseline PI exactly.
+    translation amounts of SS4.3, and `Z`, the observed instrument. A fit with
+    one block gets that block's SOC row, a fit with both the rows of `IV_LAYOUT`,
+    the joint row on span(T, Z) (`iv_blocks`). Each row is
 
-    Each constraint is valid on its own by the contraction step of Thm. 3.B's
-    proof (E[U + xi | .] is conserved, T independent of (xi, U, Z)). The pair is
-    NOT in general inside the single constraint on Z-tilde = (T, Z) the paper
-    writes: that one admits every h whose joint moment norm is under
-    sqrt(r_T^2 + r_Z^2), which on the T side is looser than r_T. The two can also
-    be jointly infeasible where each alone is feasible, and no floor predicts
-    where: the binding quantity is the smallest Z moment on the ball intersected
-    with the T constraint. That reads INFEASIBLE per query, as any empty
-    constraint set does, and nothing is inflated to hide it.
+        || Q'(y - h(X)) ||^2 / N <= s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))
+
+    with s^2 = `sigma_sq` of the fit, gamma~ the ball's budget, d the block's
+    columns and g its leak: the declared `gamma_z` on a non-DA fit, App. D's
+    post-DA budget gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA
+    fit (every block, T included: T is part of the joint instrument (Z, T)). The
+    rows share the IV third of `gamma_n_alpha` equally; raw (alpha 0) each radius
+    is the population s sqrt(g). A missing block is (n, 0) and contributes
+    nothing; with both missing this is baseline PI exactly.
+
+    Each row is valid on its own by the contraction step of Thm. 3.B's proof
+    (E[U + xi | .] is conserved, T independent of (xi, U, Z)), so their
+    intersection is. The rows can be jointly infeasible where each alone is
+    feasible; that reads INFEASIBLE per query, as any empty constraint set does,
+    and nothing is inflated to hide it.
     """
 
-    def __init__(
-        self,
-        gamma=None,
-        gamma_z=0.0,
-        epsilon_iv=None,
-        epsilon_iv_z=0.0,
-        iv_recalibrate=False,
-        leak_t=0.0,
-        leak_tz=0.0,
-        **kwargs,
-    ):
+    def __init__(self, gamma=None, gamma_z=0.0, **kwargs):
+        # the observed instrument's declared leak budget (SS2.6); 0 with no Z
         self.gamma_z = gamma_z
-        # epsilon_iv: the T-as-IV budget ||E[W#|T]|| (oracle `eps_iv_star`), the
-        # radius of the T constraint and of nothing else. Distinct from
-        # `epsilon`, whose only role in this class is the +/-eps padding: padding
-        # validity is pointwise (Thm. 3.A Jensen step), an IV budget is a
-        # projection norm. One attribute per role, one consumer each. Under
-        # `iv_recalibrate` (the sweeps) `epsilon` is both radii's eps as well and
-        # this one is not read (App. D, `t_bound` / `z_bound`).
-        self.epsilon_iv = epsilon_iv
-        # epsilon_iv_z: the observed instrument's measured piece, beside the
-        # declared radius s sqrt(gamma_z) it is combined with (SS2.6)
-        self.epsilon_iv_z = epsilon_iv_z
-        # the sweeps' App. D budget re-calibration of the radii (`t_bound`,
-        # `z_bound`, `tz_bound`); False, every query path, keeps the radii above
-        self.iv_recalibrate = iv_recalibrate
-        # under `iv_recalibrate`: the measured noise moments || Q' r* || / sqrt(N)
-        # of the residual at h_* on span(T) and on span(T, Z), the T and joint
-        # counterparts of `epsilon_iv_z` (the runner's `fit_iv_leaks`)
-        self.leak_t = leak_t
-        self.leak_tz = leak_tz
         super().__init__(gamma=gamma, **kwargs)
-        self.T_projector_R = None
-        self.t_residual_base = None
-        self.Z_projector_R = None
-        self.z_residual_base = None
-        self.t_threshold_param = None
-        self.z_threshold_param = None
-        # under `iv_recalibrate` a DA fit with both blocks also carries the joint
-        # constraint on span(T, Z), App. B / D's joint instrument (Z, T), beside the two
-        self.TZ_projector_R = None
-        self.tz_residual_base = None
-        self.tz_threshold_param = None
+        # per row ("t", "z", "tz"): (Q'X, jitter) and (Q'y, 0), the intercept's
+        # column for the padded mean row, the block width d and the threshold
+        self.iv_terms_ = {}
+        self.iv_threshold_params = {}
         self._has_t = False
         self._has_z = False
-        self._has_tz = False
         # fitted on an augmented design (handed `X_pre`): a DA+ ball or an
         # intersection's DA branch; set at fit
         self._da_fit = False
-        # how far the augmentation can move a DECLARED Z moment; set at fit
-        self._z_allowance = 0.0
         self._budget_logged = False
         self._supports_closed_form = False
 
@@ -859,210 +834,95 @@ class InstrumentalVariablePartialR2(PartialR2):
         return self._has_t or self._has_z
 
     @property
+    def rows(self) -> tuple[str, ...]:
+        """The IV rows this fit carries, in the order the cvx problem holds them."""
+        return iv_blocks(self._has_t, self._has_z)
+
+    @property
     def solves_on_epsilon(self) -> bool:
-        """The T threshold is read at predict time (the epsilon sweep moves the T
-        budget with the ratio), so a model with a T constraint re-solves per grid
-        point; one without it only pads. Under `iv_recalibrate` a DA fit's Z radius
-        reads epsilon too, so a Z-only DA+ ball re-solves as well. `PI+INV` and
-        `PI+INV+IV` keep the class attribute, which shadows this."""
-        return self._has_t or (self.iv_recalibrate and self._has_z and self._da_fit)
+        """A DA fit's every IV radius reads epsilon (gamma~_z(eps)), so it re-solves
+        per epsilon; a non-DA one only pads. `PI+INV+IV` keeps the class attribute,
+        which shadows this."""
+        return self._da_fit and self._has_iv
 
-    def _recalibrated(self, leak: float) -> float:
-        """App. D's re-calibrated radius of a DA fit's constraint, in outcome units:
-        sigma~^2 gamma~_z(eps) = eps^2 + sigma~^2 gamma_z / rho (kappa = 0, E.2)
-        plus the measured noise moment `leak` of the block, in root sum square.
-        eps is the pad's own (`epsilon`, which carries EPS_TOL, as the pad does), and
-        no other tolerance enters: at eps* = 0 the radius is exactly what admitting h# takes
-        on the oracle path, so h# sits on the boundary."""
-        return float(np.sqrt(float(self.epsilon) ** 2 + self.sigma_sq / self.rho * self.gamma_z + leak**2))
+    def iv_leak(self) -> float:
+        """The rows' leak g: the declared gamma_z on a non-DA fit, App. D's post-DA
+        gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z / rho))^2 on a DA fit."""
+        if not self._da_fit:
+            return float(self.gamma_z)
+        return float((float(self.epsilon) / self.scale + np.sqrt(self.gamma_z / self.rho)) ** 2)
 
-    @property
-    def t_bound(self) -> float | None:
-        """Radius of the T constraint: the T-as-IV budget, alone. None when the
-        model was built without one (it then carries no T block either).
-
-        Under `iv_recalibrate` (the sweeps) it is App. D's re-calibrated radius
-        (`_recalibrated`) with T's own noise moment `leak_t`: T is part of the
-        paper's joint instrument (Z, T), so it takes the declared gamma_z slack
-        too. `epsilon_iv` is then not read."""
-        if self.iv_recalibrate:
-            return self._recalibrated(self.leak_t)
-        return None if self.epsilon_iv is None else float(self.epsilon_iv)
-
-    @property
-    def tz_bound(self) -> float | None:
-        """Radius of the joint constraint on span(T, Z), a DA fit's third one under
-        `iv_recalibrate`: App. D's re-calibrated radius with the joint noise moment
-        `leak_tz`, so eps and the gamma_z slack are counted once for both blocks.
-        None without the joint block."""
-        return self._recalibrated(self.leak_tz) if self._has_tz else None
-
-    @property
-    def z_bound(self) -> float:
-        """Radius of the Z constraint: the measured piece `epsilon_iv_z` and the
-        declared one in root sum square, s = sigma-hat of the PRE-DA data.
-
-        The declared piece is `s sqrt(gamma_z) + _z_allowance`. The first term is
-        the leak the config declares, a statement about the instrument's moment on
-        the ORIGINAL design; the second pays for the Z moment the augmentation adds
-        to the element this design's program must admit (`_declared_allowance`).
-        Without that term the DA branch's constraint excludes h#, the element it
-        has to admit, however large gamma_z is -- measured, and it is what emptied
-        the decoupled pair on the plasmode sweep. `_z_allowance` is 0 for a model
-        fitted with no `X_pre` (every non-DA method) and at gamma_z = 0, so the
-        radius is then exactly what it was.
-
-        Exactly s sqrt(gamma_z) on a declared non-DA method, and exactly
-        `epsilon_iv_z` at gamma_z = 0.
-
-        Under `iv_recalibrate` (the sweeps) it is App. D's re-calibrated budget
-        eps^2 / sigma~^2 + gamma_z / rho (kappa = 0, E.2), in outcome units, with
-        the measured Z noise moment `epsilon_iv_z` (0 on the declared path, where
-        gamma_z carries it): sqrt(epsilon_iv_z^2 + s^2 gamma_z) alone on a non-DA
-        fit, `_recalibrated(epsilon_iv_z)` on a DA fit (optical's q0.99
-        `pad_epsilon` never enters, it has no Z); `_z_allowance` is not read.
-        """
-        s_sq = self.sigma_sq / self.rho
-        if self.iv_recalibrate:
-            if self._da_fit:
-                return self._recalibrated(self.epsilon_iv_z)
-            return float(np.sqrt(self.epsilon_iv_z**2 + s_sq * self.gamma_z))
-        # the allowance rides with a DECLARED leak and disappears with it: the F2
-        # figure sweeps `gamma_z` on a fitted model down to 0, and there the radius
-        # must be exactly `epsilon_iv_z` again, not the fit-time allowance
-        allowance = self._z_allowance if self.gamma_z else 0.0
-        declared = np.sqrt(s_sq * self.gamma_z) + allowance
-        return float(np.sqrt(self.epsilon_iv_z**2 + declared**2))
+    def iv_radius(self, row: str, gamma=None) -> float:
+        """sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) of one row, at its
+        level gamma_n_alpha / (GAMMA_N_ROWS B) on n_eff units, B the fit's rows;
+        raw it is s sqrt(g)."""
+        if row not in self.rows:
+            raise KeyError(f"no IV row {row!r} on this fit; its rows are {self.rows}")
+        budget = self.budget(self.gamma if gamma is None else gamma)
+        level = self.row_level / len(self.rows)
+        dof = self.iv_terms_[row][3]
+        return float(
+            np.sqrt(
+                self.sigma_sq
+                * (1.0 + budget)
+                * finite_sample_budget(dof, self.iv_leak() / (1.0 + budget), self.n_eff, level)
+            )
+        )
 
     def _precompute_matrices(self, X, y, Z=None, T=None, X_pre=None, **kwargs):
         T, Z = _instrument_columns(T, len(X)), _instrument_columns(Z, len(X))
         self._has_t, self._has_z = T.shape[1] > 0, Z.shape[1] > 0
         self._da_fit = X_pre is not None
-        if self._has_t and self.epsilon_iv is None and not self.iv_recalibrate:
-            raise ValueError("epsilon_iv is required with T-as-IV; pass the oracle `eps_iv_star` (+ EPS_TOL).")
-        # the padded mean row's delta enters every block through its intercept column
-        intercept = {}
-        if self._has_t:
-            self.T_projector_R, self.t_residual_base = iv_constraint_terms(X, y, T)
-            intercept["t"] = iv_intercept_terms(T, X.shape[1])
-        if self._has_z:
-            self.Z_projector_R, self.z_residual_base = iv_constraint_terms(X, y, Z)
-            intercept["z"] = iv_intercept_terms(Z, X.shape[1])
-            # unused under `iv_recalibrate`, which adds eps in quadrature instead
-            self._z_allowance = 0.0 if self.iv_recalibrate else self._declared_allowance(X, Z, X_pre)
-        self._has_tz = self.iv_recalibrate and self._da_fit and self._has_t and self._has_z
-        if self._has_tz:
-            self.TZ_projector_R, self.tz_residual_base = iv_constraint_terms(X, y, np.hstack([T, Z]))
-            intercept["tz"] = iv_intercept_terms(np.hstack([T, Z]), X.shape[1])
-        self.iv_intercept_ = intercept
-        if self._has_z and self.z_bound == 0.0:
-            # the usual cause is a caller handing the translation amounts as `Z`:
-            # T-as-IV goes in the `T` block, and the Z block's radius is 0 until
-            # `epsilon_iv_z` or `gamma_z` says otherwise
+        blocks = {"t": T, "z": Z, "tz": np.hstack([T, Z])}
+        self.iv_terms_ = {}
+        for row in self.rows:
+            A, b = iv_constraint_terms(X, y, blocks[row])
+            # the padded mean row's delta enters every row through its intercept column
+            self.iv_terms_[row] = (A, b, iv_intercept_terms(blocks[row], X.shape[1]), blocks[row].shape[1])
+        if self._has_z and not self._da_fit and self.gamma_z == 0.0:
             logger.warning(
-                "IV: an observed instrument with a zero radius (epsilon_iv_z 0, gamma_z 0) "
-                "forces its moment to hold exactly; every query will read INFEASIBLE."
+                "IV: an observed instrument with a zero declared leak (gamma_z 0) forces its moment "
+                "to hold exactly; every query will read INFEASIBLE."
             )
 
-    def _declared_allowance(self, X, Z, X_pre) -> float:
-        """How much of the DECLARED Z radius the augmentation itself can consume.
-
-        The element this program must admit is not the target but h#, the target
-        plus what this design can absorb of the invariance signal w, and h# carries
-        w's residual Z moment || Q_Z' (I - P_X) w || / sqrt(N). Two facts bound it:
-        || w || <= sqrt(N) epsilon by the definition of the invariance budget, and w
-        lies in the span of what the augmentation moved, X - X_pre. So the worst
-        case over THAT subspace, after the projection the residual already carries,
-        is `|| Q_Z' (I - P_X) Q_D ||_2 * epsilon`. Bounding it over every direction
-        of norm epsilon instead (dropping Q_D) is also valid and measurably useless:
-        it takes the radius far enough that the constraint stops binding at all.
-
-        Without this term the DA branch's constraint excludes h# however large
-        gamma_z is, which is what a pooled radius used to hide (SS9.6 of the
-        round-14 plan). `epsilon` is the one this model was FITTED at, so the radius
-        does not move with the swept ratio (R2). Zero without a pre-augmentation
-        design, without a declared leak, or when the augmentation moved nothing.
-        """
-        if X_pre is None or not self.gamma_z:
-            return 0.0
-        X = np.asarray(X, dtype=float)
-        difference = X - np.asarray(X_pre, dtype=float).reshape(len(X), -1)
-        if not np.any(difference):
-            return 0.0
-        # an orthonormal basis of the SPAN of the shift, truncated: a plain QR of a
-        # rank deficient shift completes the basis arbitrarily, and those made-up
-        # directions would inflate kappa
-        left, singular, _ = np.linalg.svd(difference, full_matrices=False)
-        keep = singular > max(float(singular[0]), 1.0) * 1e-12
-        if not keep.any():
-            return 0.0
-        Q_Z, _ = np.linalg.qr(Z)
-        Q_X, _ = np.linalg.qr(X)
-        Q_D = left[:, keep]
-        residual_basis = Q_D - Q_X @ (Q_X.T @ Q_D)
-        kappa = float(np.linalg.svd(Q_Z.T @ residual_basis, compute_uv=False)[0])
-        return kappa * float(self.epsilon)
-
-    def _iv_residual(self, block, base, projector):
-        """One block's residual b - A h, less delta (Q' 1, 0) under the mean row."""
-        residual = cp.Constant(base) - cp.Constant(projector) @ self.h_var
+    def _iv_residual(self, row):
+        """One row's residual b - A h, less delta (Q' 1, 0) under the mean row."""
+        A, b, intercept, _ = self.iv_terms_[row]
+        residual = cp.Constant(b) - cp.Constant(A) @ self.h_var
         if self.mean_row:
-            residual = residual - cp.Constant(self.iv_intercept_[block]) * self.delta_var[0]
+            residual = residual - cp.Constant(intercept) * self.delta_var[0]
         return residual
 
     def _get_constraints(self):
         constraints = super()._get_constraints()
-        # one SOC per non-empty block, T first: the order the cvx problem carries
-        # is the ball, then the instrument blocks, then an INV cone on top
-        if self._has_t:
-            self.t_threshold_param = cp.Parameter(nonneg=True)
-            residual = self._iv_residual("t", self.t_residual_base, self.T_projector_R)
-            constraints.append(cp.norm(residual, 2) <= self.t_threshold_param)
-        if self._has_z:
-            self.z_threshold_param = cp.Parameter(nonneg=True)
-            residual = self._iv_residual("z", self.z_residual_base, self.Z_projector_R)
-            constraints.append(cp.norm(residual, 2) <= self.z_threshold_param)
-        if self._has_tz:
-            self.tz_threshold_param = cp.Parameter(nonneg=True)
-            residual = self._iv_residual("tz", self.tz_residual_base, self.TZ_projector_R)
-            constraints.append(cp.norm(residual, 2) <= self.tz_threshold_param)
+        # one SOC per row, T first: the order the cvx problem carries is the ball,
+        # then the IV rows, then an INV cone on top
+        self.iv_threshold_params = {}
+        for row in self.rows:
+            self.iv_threshold_params[row] = cp.Parameter(nonneg=True)
+            constraints.append(cp.norm(self._iv_residual(row), 2) <= self.iv_threshold_params[row])
         return constraints
 
     def _set_solver_parameters(self, gamma):
         super()._set_solver_parameters(gamma)
-        if self._has_t:
-            self.t_threshold_param.value = np.sqrt(self.N_samples) * self.t_bound
-        if self._has_tz:
-            self.tz_threshold_param.value = np.sqrt(self.N_samples) * self.tz_bound
-        if self._has_z:
-            self.z_threshold_param.value = np.sqrt(self.N_samples) * self.z_bound
-            if self.gamma_z != 0.0 and not self._budget_logged:
-                # once per fitted model, at the first solve: rho is final here (an
-                # intersection sets its DA branch's after fit), so s is too
-                self._budget_logged = True
-                allowance = "App. D re-calibrated" if self.iv_recalibrate else f"{self._z_allowance:.6g}"
-                logger.info(
-                    f"IV: gamma_z={self.gamma_z:g}, s={np.sqrt(self.sigma_sq / self.rho):.6g}, "
-                    f"DA-side allowance {allowance}; r_Z={self.z_bound:.6g}, "
-                    f"r_T={'none' if self.t_bound is None else format(self.t_bound, '.6g')}"
-                    + ("" if self.tz_bound is None else f", r_TZ={self.tz_bound:.6g}")
-                    + ". One radius per instrument block, never pooled."
-                )
-
-    def _predict(self, X, epsilon_iv=None, **kwargs):
-        """`epsilon_iv` is the T budget at predict time; it reaches the T threshold
-        and nothing else, and a model without a T constraint ignores it (so does
-        one under `iv_recalibrate`, whose T radius is `_recalibrated(leak_t)`). The program
-        is unchanged, so this re-solves without re-canonicalising."""
-        if epsilon_iv is not None and self._has_t:
-            self.epsilon_iv = float(epsilon_iv)
-        return super()._predict(X, **kwargs)
+        radii = {row: self.iv_radius(row, gamma) for row in self.rows}
+        for row, radius in radii.items():
+            self.iv_threshold_params[row].value = np.sqrt(self.N_samples) * radius
+        if radii and not self._budget_logged:
+            # once per fitted model, at the first solve: rho is final here (an
+            # intersection sets its DA branch's after fit), so s is too
+            self._budget_logged = True
+            logger.info(
+                f"IV: gamma_z={self.gamma_z:g}, {'DA' if self._da_fit else 'non-DA'} leak {self.iv_leak():.6g}, "
+                + ", ".join(f"r_{row.upper()}={radius:.6g}" for row, radius in radii.items())
+                + ". One row per instrument block, never pooled."
+            )
 
 
 class InvarianceConstrainedInstrumentalVariablePartialR2(InstrumentalVariablePartialR2):
     """PI + INV + IV on the ORIGINAL design: the Lem. 2 ball, the invariance cone
     of SS3.1 (`epsilon` on ||(GX - X) h||) and the leaky IV constraint of Asm. 3
-    on the observed instrument at `z_bound`. It is a non-DA method, so it carries
+    on the observed instrument at its declared gamma_z. It is a non-DA method, so it carries
     no T-as-IV moment: that condition holds on the augmented design, not on X.
     An empty Z reduces it to PI+INV exactly."""
 
@@ -1208,36 +1068,18 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     """Baseline PI+IV on the observed Z intersected with DA+PI+IV on the
     augmented design (Cor. 1).
 
-    Each branch carries one constraint per instrument block it is handed. The
-    baseline only ever sees Z: no T-as-IV moment holds on the un-augmented
-    design. `instrument` says what the DA branch sees -- "T,Z" both (the
-    default), "Z" the observed instrument alone, "T" the translation amounts
-    alone. Both radii travel to both branches and each uses the ones its blocks
-    ask for: `epsilon_iv` is r_T, `epsilon_iv_z` with `gamma_z` is r_Z (0.0 under
-    a declared budget makes it exactly s sqrt(gamma_z)); under `iv_recalibrate`
-    (the sweeps) both branches get it and read App. D's radii instead, the DA
-    branch with the joint (T, Z) constraint beside the two. An empty
-    Z makes the baseline plain PI and the DA branch T-only, which is today's run."""
+    Each branch carries one row per instrument block it is handed. The baseline
+    only ever sees Z: no T-as-IV moment holds on the un-augmented design.
+    `instrument` says what the DA branch sees -- "T,Z" both (the default), "Z"
+    the observed instrument alone, "T" the translation amounts alone. Both
+    branches take the declared `gamma_z`; the DA branch reads it through
+    gamma~_z(eps). An empty Z makes the baseline plain PI and the DA branch
+    T-only."""
 
-    def __init__(
-        self,
-        gamma_z=0.0,
-        epsilon_iv=None,
-        epsilon_iv_z=0.0,
-        instrument="T,Z",
-        iv_recalibrate=False,
-        leak_t=0.0,
-        leak_tz=0.0,
-        **kwargs,
-    ):
+    def __init__(self, gamma_z=0.0, instrument="T,Z", **kwargs):
         if instrument not in ("T,Z", "Z", "T"):
             raise ValueError(f"instrument must be 'T,Z', 'Z' or 'T'; got {instrument!r}")
         self.gamma_z = gamma_z
-        self.epsilon_iv = epsilon_iv
-        self.epsilon_iv_z = epsilon_iv_z
-        self.iv_recalibrate = iv_recalibrate
-        self.leak_t = leak_t
-        self.leak_tz = leak_tz
         self.instrument = instrument
         super().__init__(**kwargs)
 
@@ -1248,11 +1090,6 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             gamma=self.gamma,
             gamma_z=self.gamma_z,
             epsilon=self.epsilon,
-            epsilon_iv=self.epsilon_iv,
-            epsilon_iv_z=self.epsilon_iv_z,
-            iv_recalibrate=self.iv_recalibrate,
-            leak_t=self.leak_t,
-            leak_tz=self.leak_tz,
             pad=pad,
             recalibrate=self.recalibrate,
             rho=1.0,
@@ -1269,8 +1106,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         Z = _instrument_columns(Z, len(X))
         T = _instrument_columns(G, len(X))
         self.baseline = self._branch(pad=False).fit(X, y, Z=Z, n_obs=n_obs)
-        # `X_pre` is the design before augmentation: the DA branch's declared Z
-        # radius needs it to carry the declaration across (D20)
+        # `X_pre` marks the DA branch: its rows read gamma~_z(eps)
         self.augmented = self._branch(pad=self.pad).fit(
             GX,
             y,
@@ -1279,6 +1115,6 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             X_pre=X,
             n_obs=n_obs,
         )
-        # rho known once both noise levels are: the ball and both IV thresholds
+        # rho known once both noise levels are: the ball and the IV thresholds
         # are cvx Parameters, set at predict
         self.augmented.rho = self.rho

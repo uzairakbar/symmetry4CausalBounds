@@ -26,15 +26,15 @@ backends and drops the failure markers); `python -m src.aggregate` draws the
          Misses: what (T) computes.
   (ii)   dispatch on fitted attributes, a63-ii's construction (the cigarette design,
          the seed-42 DA draw, a 1-column Z, two distinct IV budgets, `rho = rho_hat`):
-         the (T) instrument is G alone (width `G.shape[1]` against +1 on bare), its
-         budget the T-side `epsilon_iv` with `gamma_z` 0 so `iv_bound` is exactly
-         `epsilon_iv`, the intersection's DA branch the same and its baseline
-         untouched, (T) predicts differently from bare and from (Z), `DA+ERM+IV(T)`
+         the (T) instrument is G alone (width `G.shape[1]` against +1 on bare's
+         joint row), its radius the raw DA one eps + sigma~ sqrt(gamma_z / rho),
+         the intersection's DA branch the same and its baseline's Z row the
+         declared s sqrt(gamma_z), (T) predicts differently from bare and from (Z), `DA+ERM+IV(T)`
          zeroes the demeaned moment on (GX, y, G) and is the ERM optimum within it,
          beating a fresh 2SLS; under an empty Z and gamma_z 0 (the runner's values
          there) `(T)` equals `(T,Z)` to exactly 0.0 in bounds and statuses on both
          classes and `DA+ERM+IV(T)` equals `DA+ERM+IV`. Catches: Z stacked into the T
-         branch (width), the real-Z radius left on the T builder (`iv_bound`).
+         branch (width), a T row at a non-DA radius.
          Misses: a wrong budget compensated by a wrong instrument.
   (iii)  the cumulation table on fitted call counts, not timings: a spy on
          `PartialR2._prepare` (one call per solve, on every branch too) under
@@ -409,8 +409,6 @@ def fitted(names, X, y, GX, G, da, Z, rho, gamma_z=2**-8):
         list(names),
         gamma=GAMMA,
         epsilon=EPS_TOL,
-        epsilon_iv=2**-5,
-        epsilon_iv_z=2**-6,
         gamma_z=gamma_z,
         rho=rho,
         pad=False,
@@ -424,11 +422,16 @@ def fitted(names, X, y, GX, G, da, Z, rho, gamma_z=2**-8):
     return models
 
 
-def width(model, k, block="Z"):
-    """Instrument columns of one block on a fitted IV ball: the jitter block adds
-    k rows, and an absent block is 0 columns."""
-    arr = model.Z_projector_R if block == "Z" else model.T_projector_R
-    return 0 if arr is None else arr.shape[0] - k
+def width(model, k, row="z"):
+    """Instrument columns of one IV row on a fitted IV ball: the jitter block adds
+    k rows, and an absent row is 0 columns."""
+    terms = model.iv_terms_.get(row)
+    return 0 if terms is None else terms[0].shape[0] - k
+
+
+def da_radius(model):
+    """The raw DA row radius sigma~ sqrt(gamma~_z(eps)) = eps + sigma~ sqrt(gamma_z / rho)."""
+    return float(model.epsilon) + model.scale * np.sqrt(model.gamma_z / model.rho)
 
 
 def sim_block(methods, dataset="simulation", **overrides):
@@ -627,9 +630,7 @@ def leg_i():
         and line_style("DA+PI+IV(Z)", True) == PARTIAL_IDENTIFICATION_STYLE,
     )
     order = ["PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)", "DA+ERM+IV(T)"]
-    built = MethodRegistry.build_methods(
-        order, gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=2**-8, **TOGGLES
-    )
+    built = MethodRegistry.build_methods(order, gamma=GAMMA, epsilon=EPS_TOL, gamma_z=2**-8, **TOGGLES)
     check("(i) build_methods returns the (T) spellings in order", list(built) == order, f"{list(built)}")
     # a non-DA method fits with no translation amounts at all, as before the (T) mode
     rng = np.random.default_rng(0)
@@ -652,29 +653,34 @@ def leg_ii(seed):
     names = ("DA+PI+IV", "DA+PI+IV(Z)", "DA+PI+IV(T)", "PI&DA+PI+IV(T)", "DA+ERM+IV", "DA+ERM+IV(T)")
     models = fitted(names, X, y, GX, G, da, Z, rho)
     t = models["DA+PI+IV(T)"]
-    check(f"(ii) DA+PI+IV(T) T width {n_g} (G alone), no Z block", width(t, k, block="T") == n_g and not t._has_z)
+    check(
+        f"(ii) DA+PI+IV(T) T width {n_g} (G alone), no Z block",
+        t.rows == ("t",) and width(t, k, row="t") == n_g and not t._has_z,
+    )
     bare = models["DA+PI+IV"]
     check(
-        f"(ii) bare DA+PI+IV carries Z 1 and T {n_g}",
-        (width(bare, k), width(bare, k, block="T")) == (1, n_g),
-        f"{(width(bare, k), width(bare, k, block='T'))}",
+        f"(ii) bare DA+PI+IV carries the joint row, width {n_g} + 1",
+        bare.rows == ("tz",) and width(bare, k, row="tz") == n_g + 1,
+        f"{bare.rows} {width(bare, k, row='tz')}",
     )
-    check("(ii) DA+PI+IV(T) t_bound exactly 2^-5", t.t_bound == 2**-5, f"{t.t_bound!r}")
+    got = t.iv_radius("t")
+    check("(ii) DA+PI+IV(T) T radius is the raw DA one", abs(got - da_radius(t)) < 1e-12, f"{got!r}")
     inter = models["PI&DA+PI+IV(T)"]
+    aug = inter.augmented
     check(
-        f"(ii) PI&DA+PI+IV(T) DA branch: T width {n_g}, no Z block, t_bound 2^-5",
-        width(inter.augmented, k, block="T") == n_g and not inter.augmented._has_z and inter.augmented.t_bound == 2**-5,
+        f"(ii) PI&DA+PI+IV(T) DA branch: T width {n_g}, no Z block, the raw DA radius",
+        width(aug, k, row="t") == n_g and not aug._has_z and abs(aug.iv_radius("t") - da_radius(aug)) < 1e-12,
     )
     base = inter.baseline
-    want = float(np.hypot(2**-6, np.sqrt(base.sigma_sq / base.rho * 2**-8)))
+    want = float(np.sqrt(base.sigma_sq * 2**-8))
     check(
-        "(ii) PI&DA+PI+IV(T) baseline: Z width 1, epsilon_iv_z 2^-6, no T block",
-        width(base, k) == 1 and base.epsilon_iv_z == 2**-6 and not base._has_t,
+        "(ii) PI&DA+PI+IV(T) baseline: Z width 1, no T block",
+        base.rows == ("z",) and width(base, k) == 1 and not base._has_t,
     )
     check(
-        "(ii) and its Z radius is the declared one at its own s",
-        abs(base.z_bound - want) < 1e-12,
-        f"{base.z_bound:.9f}",
+        "(ii) and its Z radius is the declared s sqrt(gamma_z) at its own s",
+        abs(base.iv_radius("z") - want) < 1e-12,
+        f"{base.iv_radius('z'):.9f}",
     )
     queries = np.eye(k)
     t_pred = np.asarray(t.predict(queries, gamma=GAMMA), dtype=float)
@@ -739,22 +745,22 @@ def leg_iii():
             )
         if len(methods) == 1 and methods[0] == "PI":
             # the oracle budgets are the runner's, fitted once outside the timer
-            budget_spy = call_counter(runner.fit_epsilon_iv)
-            runner.fit_epsilon_iv = budget_spy
+            budget_spy = call_counter(runner.fit_budgets)
+            runner.fit_budgets = budget_spy
             try:
                 with prepare_spy() as spy:
                     seconds, per_solve = perf.normaliser(runner, data, repeats=3)
             finally:
-                del runner.fit_epsilon_iv
+                del runner.fit_budgets
             calls = budget_spy.calls
             check(
                 "(iii) the normaliser records 4 seconds and 4 solves",
                 len(seconds) == 4 and spy.count == 4,
                 f"{spy.count}",
             )
-            # twice now: once for the fitted budgets and once for the predict
-            # kwargs, both OUTSIDE the timed block (`perf.normaliser`)
-            check("(iii) and fits the T budget twice, both outside the timed block", len(calls) == 2, f"{len(calls)}")
+            # once, for the cell's budgets (`fit_budgets`), OUTSIDE the timed block
+            # (`perf.normaliser`); the predict kwargs read the oracle directly
+            check("(iii) and fits the budgets once, outside the timed block", len(calls) == 1, f"{len(calls)}")
             check("(iii) and keeps the median of the last 3", per_solve == float(np.median(seconds[1:])))
             # the unit is one baseline PI solve, so PI's own step 0 reads 1 up to timing
             # noise: on the simulation (oracle budgets, 0.1 s of quadrature that must

@@ -36,7 +36,8 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
   (iv)  `gamma* == gamma_true` to 1e-12 with and without the instrument, read off
         the oracle. Catches: an `iv` branch that touches kappa, bias_sq or
         sigma_sq. Misses: nothing else.
-  (v)   the SS5.2 ordering on one tiny draw, through the registry and `fit_model`:
+  (v)   the SS5.2 ordering on one tiny draw, through the registry and `fit_model`
+        at the declared leak `gamma_z` 2^-8:
         on `u in range(A)` PI+INV+IV is no wider than PI+IV and than PI+INV (within
         1e-6), and the whole width table is recorded beside p6's. Catches: the IV
         cone not reaching PI+INV+IV, an instrument that identifies nothing. Misses:
@@ -45,18 +46,17 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
         has k + m columns, `f` sees k columns through the sweep runner's own
         `_draw_base` and the query runner's `_load_data`, the recipe `validityFig9.yaml`
         resolves and its orchestrator hands the SEM factory `iv_dim` 1 (the sweep
-        SEMs and the query SEM carry `iv_width` 1, Z_train and Z are (n, 1)), and on
-        this SEM the two IV terms coincide to the bit (h* is exactly T-invariant, so
-        `eps_iv_star` is 0 and the joint budget IS the Z piece). The Z budget is
-        the leak `z_moment_star` recomputed here on the runner's base sample (the
-        sweeps re-calibrate per App. D since working6; it equals `eps_iv_z_star`
-        to 1e-15 on this invariant DA; no tolerance, the sweeps' radii carry none
-        since working6) and `eps_iv_z_star` on the query runner's own draw + its
-        eps_tol, RECORDED. Catches: an
-        interventional draw without its Z (the runner mis-slices), the key not
-        forwarded, a Z that never reaches the runner, the Z budget read off the
-        setup oracle's draw. Misses: the solves at the recipe's full scale, which
-        the recipe run is for.
+        SEMs and the query SEM carry `iv_width` 1, Z_train and Z are (n, 1)). The
+        Z leak is DECLARED, `SimulationConfig.gamma_z` 2^-8: the orchestrator's
+        toggles carry it under `iv: 1` and 0 under `iv: 0`, every +IV builder of
+        the sweep and query runners carries it, and on the gamma runner's cell
+        (raw, no `gamma_n` key) PI+IV's one Z row sits at exactly sigma-hat
+        sqrt(2^-8) and each DA+ IV row (the joint (T, Z) row of DA+PI+IV(T,Z), the
+        Z row of DA+PI+IV(Z)) at App. D's eps + sigma~ sqrt(gamma_z / rho).
+        Catches: an interventional draw without its Z (the runner mis-slices),
+        the key not forwarded, a Z that never reaches the runner, a measured leak
+        in place of the declared one. Misses: the solves at the recipe's full
+        scale, which the recipe run is for.
 
     MPLBACKEND=Agg python scripts/a59_sim_iv.py [--seed 42] [--reference JSON] [--skip-digest]
 
@@ -94,7 +94,7 @@ from src.experiments.utils import set_seed  # noqa: E402
 from src.experiments.utils.constants import iv_mode, parse_method  # noqa: E402
 from src.experiments.utils.metrics import rho_hat  # noqa: E402
 from src.experiments.utils.model_fitting import fit_model  # noqa: E402
-from src.oracle import eps_iv_z_star, gamma_star, z_moment_star  # noqa: E402
+from src.oracle import gamma_star  # noqa: E402
 from src.sem.simulation import IV_ALPHA, LinearSimulationSEM  # noqa: E402
 
 D, M, N = 32, 4, 2048
@@ -105,10 +105,9 @@ D, M, N = 32, 4, 2048
 RECIPE = "validityFig9.yaml"
 RECIPE_IV = 1
 TOGGLES = dict(recalibrate=True, pad=False, clipy=False, mean_match=True, n_jobs=1)
-IV_BOUND = 0.05  # p6's evi
 NAMES = ["PI", "PI+IV", "PI+INV", "PI+INV+IV", "DA+PI+IV"]
-# p6, seed 42, d 32, m 4, n 2048, kernel_dim 0: widths (ratio to PI) on the four
-# query directions, recorded beside the reproduction, never pinned
+# p6, seed 42, d 32, m 4, n 2048, kernel_dim 0 (its IV radius 0.05): widths (ratio
+# to PI) on the four query directions, recorded beside the reproduction, never pinned
 P6_WIDTHS = {
     "PI": (1.3847, 1.3991, 1.4183, 1.4672),
     "PI+IV": (0.2792, 1.3991, 1.3675, 1.4040),
@@ -116,10 +115,8 @@ P6_WIDTHS = {
     "PI+INV+IV": (0.1125, 0.0824, 0.6156, 0.3264),
     "DA+PI+IV": (0.1351, 0.1221, 1.0198, 0.5939),
 }
-# (vi): the raw observed-Z budget eps_iv_z_star on the gamma runner's base sample
-# and on the query runner's own draw (MEASURED at n 512, experiment 0; re-measured
-# for the recipe's iv 1, iv 2 gave 0.024615979 and 0.048542323)
-Z_BUDGET_RECORDED = {"base sample": 0.001548225, "query draw": 0.019727476}
+# the simulation's declared Z leak (`SimulationConfig.gamma_z`)
+GAMMA_Z = 2**-8
 FAIL = []
 SKIPPED = []
 
@@ -253,9 +250,7 @@ def leg_v(seed):
     GX, G = da(X)
     gamma = float(sem.bias_sq / sem.sigma_sq)
     rho = float(rho_hat(X, GX, y, intercept=True))
-    builders = MethodRegistry.build_methods(
-        NAMES, gamma=gamma, epsilon=EPS_TOL, epsilon_iv=IV_BOUND, epsilon_iv_z=IV_BOUND, rho=rho, **TOGGLES
-    )
+    builders = MethodRegistry.build_methods(NAMES, gamma=gamma, epsilon=EPS_TOL, gamma_z=GAMMA_Z, rho=rho, **TOGGLES)
     f = sem.W_XY.ravel()
     u1 = sem.U[:, 0]
     kernel = da.W_ZXtilde
@@ -318,36 +313,39 @@ def leg_vi(seed):
     )
     data = runner.generate_data(0, 1.0)
     check(f"(vi) SweepData.Z is (n, {RECIPE_IV})", data.Z.shape == (len(data.X), RECIPE_IV))
-    eps_da, eps_z = runner.fit_epsilon_iv(0, 0, data), runner.fit_epsilon_iv_z(0, data)
-    oracle = runner.get_oracle(0)
-    check("(vi) declared_iv is False on the sim sweep runner", runner.declared_iv is False)
+    check("(vi) SimulationConfig.gamma_z is 2^-8", SIMULATION_CONFIG.gamma_z == GAMMA_Z)
     check(
-        "(vi) eps_iv_star is 0 on the sim (h* is T-invariant)",
-        abs(oracle.eps_iv_star) < 1e-12,
-        f"{oracle.eps_iv_star:.2e}",
+        "(vi) the orchestrator's toggles carry gamma_z 2^-8 under iv: 1",
+        orchestrator.toggles["gamma_z"] == GAMMA_Z,
+        f"{orchestrator.toggles['gamma_z']!r}",
     )
-    check(
-        "(vi) eps_iv_z_star > 0 on the sim (a real Z, sampling noise)",
-        oracle.eps_iv_z_star > 0.01,
-        f"{oracle.eps_iv_z_star:.5f}",
-    )
-    print(f"      RECORDED: epsilon_iv (T budget) {eps_da:.6f}, epsilon_iv_z (Z budget) {eps_z:.6f}")
-    # the two no longer coincide: the T budget is `eps_iv_star` alone and the Z one
-    # is `eps_iv_z_star`, each the radius of its own constraint
-    # never raised: a T budget under its floor is left as is and reads INFEASIBLE
-    raw_t = float(oracle.eps_iv_star) + EPS_TOL
-    check("(vi) epsilon_iv is the T piece + EPS_TOL", eps_da == raw_t, f"{eps_da:.6f} vs raw {raw_t:.6f}")
-    # the baseline observed-Z budget is read once on the base sample, not on the
-    # setup oracle's calibration draw
-    base_z = float(
-        z_moment_star(runner.sems[0], X=X_raw, y=y, Z=Z, features=runner._features, mean_match=runner.mean_match)
-    )
-    print(f"      RECORDED raw Z budget: base sample {base_z:.9f}, setup draw {float(oracle.eps_iv_z_star):.9f}")
-    check(
-        "(vi) epsilon_iv_z is the leak z_moment_star on the cell's rows, no tolerance",
-        abs(eps_z - base_z) <= 1e-12 * base_z,
-        f"{eps_z:.6f} vs {base_z:.6f}",
-    )
+    set_seed(reduced["seed"])
+    none = SimulationOrchestrator(**{**reduced, "iv": 0}, hyperparameters=munchify(digest_leg.HYPERPARAMETERS))
+    check("(vi) ... and 0 under iv: 0", none.toggles["gamma_z"] == 0.0, f"{none.toggles['gamma_z']!r}")
+    models = runner.build_models(0, 0, data)
+    epsilon = runner.fit_budgets(0, 0, data)["epsilon"]
+    for name, model in models.items():
+        if hasattr(model, "gamma_z"):
+            check(f"(vi) the sweep's {name} carries gamma_z 2^-8", model.gamma_z == GAMMA_Z, f"{model.gamma_z!r}")
+    if "PI+IV" in models:
+        model = models["PI+IV"]
+        want, got = float(np.sqrt(model.sigma_sq * GAMMA_Z)), model.iv_radius("z")
+        check(
+            "(vi) PI+IV: one Z row at exactly sigma-hat sqrt(2^-8) (raw)",
+            model.rows == ("z",) and abs(got - want) < 1e-12,
+            f"{model.rows} {got:.9f} vs {want:.9f}",
+        )
+    for name, rows in (("DA+PI+IV(T,Z)", ("tz",)), ("DA+PI+IV(Z)", ("z",))):
+        if name not in models:
+            continue
+        model = models[name]
+        want = epsilon + float(np.sqrt(model.sigma_sq) * np.sqrt(GAMMA_Z / model.rho))
+        got = model.iv_radius(rows[0])
+        check(
+            f"(vi) {name}: its {rows} row at eps + sigma~ sqrt(gamma_z / rho) (raw)",
+            model.rows == rows and abs(got - want) < 1e-12,
+            f"{model.rows} {got:.9f} vs {want:.9f}",
+        )
 
     query = orchestrator.get_query_runner_cls()(
         methods=orchestrator.methods, **{**orchestrator._get_clean_kwargs(), "n_experiments": 1}
@@ -356,30 +354,10 @@ def leg_vi(seed):
         f"(vi) the query runner's Z is (n, {RECIPE_IV}) and X_raw has k columns",
         query.Z.shape == (len(query.X_raw), RECIPE_IV) and query.X_raw.shape[1] == D,
     )
-    query_z = float(
-        eps_iv_z_star(
-            query.sem,
-            query.da,
-            X=query.X_raw,
-            y=query.y,
-            Z=query.Z,
-            features=query._features,
-            mean_match=query.mean_match,
-        )
-    )
-    print(f"      RECORDED raw Z budget: query draw {query_z:.9f}")
-    check(
-        "(vi) the query runner's epsilon_iv_z is eps_iv_z_star on its own draw + eps_tol",
-        query.epsilon_iv_z == query_z + query.eps_tol,
-        f"{query.epsilon_iv_z:.6f} vs {query_z + query.eps_tol:.6f}",
-    )
-    for tag, value in (("base sample", base_z), ("query draw", query_z)):
-        recorded = Z_BUDGET_RECORDED[tag]
-        check(
-            f"(vi) the {tag} Z budget matches the RECORDED one",
-            recorded is not None and abs(value - recorded) < 1e-6,
-            f"{value:.6f} vs {recorded}",
-        )
+    for name, builder in query.methods.items():
+        model = builder()
+        if hasattr(model, "gamma_z"):
+            check(f"(vi) the query's {name} carries gamma_z 2^-8", model.gamma_z == GAMMA_Z, f"{model.gamma_z!r}")
     fixture = iv_fixture(block["methods"], "(vi)")
     if fixture is None:
         return
@@ -401,7 +379,7 @@ def leg_vi(seed):
     )
     check(
         f"(vi) {fixture} fitted through the query context sees a {RECIPE_IV}-column Z",
-        model._has_iv and model.Z_projector_R.shape[0] == RECIPE_IV + D,
+        model._has_z and model.iv_terms_[model.rows[0]][3] >= RECIPE_IV,
     )
 
 

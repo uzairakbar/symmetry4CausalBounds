@@ -40,22 +40,16 @@ the sweeps' chain. The rotation / flip probability is the dataset block's
         and the intercept is the pool's mean (zero, centred) within the same
         multiple of std(X).
         Catches: a T that does not inform GX (the reason it is an instrument).
-  (v)   bit for bit against the experimental implementation the full-scale
-        optical run used: scratch o12tiv at 5ae6726 plus its uncommitted
-        edits, frozen as `DIGEST_PATCH` (sha1 `DIGEST_PATCH_SHA1`), env
-        TIV_FLIP_P=0.25 TIV_TR_SCALE=0.5 and every other TIV_* at its default
-        (TIV_T raw, TIV_FRAME centred, TIV_TR_BASIS sumzero, TIV_PERM_P 1.0,
-        TIV_CHAIN unset): two-experiment, two-step gamma, omega and epsilon
-        sweeps on `CHAIN` at `SWEEP_P`, every metric array but the
-        wall clock, the x grids (the epsilon sweep's radii), each experiment's
-        oracle gamma* / eps* and the robustness DA's tuned strength, hashed to
-        `DIGEST`; the orchestrator's DA factory (robustness append included)
-        builds the rotation / flips at `SWEEP_P`. The experimental tree
-        reads `--src DIR --record` (with its env knobs) to print its digest, and
-        `--dump FILE` saves the hashed arrays for a direct comparison. One BLAS
-        thread, as in `digest_leg`: the thread count moves gamma* at the last
-        ulp. Record and compare on the same node (`DIGEST_NODE`): CPU models
-        differ at the last ulp too.
+  (v)   a self-regression digest: two-experiment, two-step gamma, omega and
+        epsilon sweeps on `CHAIN` at `SWEEP_P`, every metric array but the wall
+        clock, the x grids (the epsilon sweep's radii), each experiment's oracle
+        gamma* / eps* and the robustness DA's tuned strength, hashed to `DIGEST`
+        (recorded off this leg's own computation, re-pinned by every change that
+        moves it); the orchestrator's DA factory (robustness append included)
+        builds the rotation / flips at `SWEEP_P`. `--dump FILE` saves the hashed
+        arrays for a direct comparison. One BLAS thread, as in `digest_leg`: the
+        thread count moves gamma* at the last ulp. Record and compare on the same
+        node (`DIGEST_NODE`): CPU models differ at the last ulp too.
         Catches: any change of the RNG draw order or streams.
 
     uv run python scripts/a85_sum_zero_translation.py [--only LEG]
@@ -97,12 +91,8 @@ N_DRAWS = 40
 SLOPE_ATOL = 0.05
 RATE_ATOL = 0.03  # ~ 3.5 binomial sd on the 1000-row pool at p 0.5
 PARAMS = ("gamma", "omega", "epsilon")
-# recorded off the experimental tree (scratch o12tiv = 5ae6726 + DIGEST_PATCH, env
-# TIV_FLIP_P=0.25 TIV_TR_SCALE=0.5, every other TIV_* at its default) with
-# `--src <tree> --record`, on DIGEST_NODE
-DIGEST_PATCH = "~/scratch/runs/o12/eq_tr/o12tiv.patch"  # `git -C <tree> diff`; = tiv2.patch
-DIGEST_PATCH_SHA1 = "8e912244146e15b40b713c4ee10f4d689cf03371"
-DIGEST = "510fa1321fdb41eb8c0a97590184e558890606c4"
+# leg (v)'s own digest, recorded on DIGEST_NODE
+DIGEST = "2f42bf1427b68aab110bf724c977dd7b7fe9410d"
 DIGEST_NODE = "atl1-1-01-005-11-0"
 FAIL = []
 
@@ -264,9 +254,8 @@ def leg_iv():
     print(f"      pool mean max |.| {np.abs(X.mean(axis=0)).max():.2e}")
 
 
-def sweeps(experimental=False):
-    """The arrays (v) hashes, in order: [(name, array)]. The experimental tree takes
-    its probability from the env, not the `augmentation_p` it predates."""
+def sweeps():
+    """The arrays (v) hashes, in order: [(name, array)]."""
     from src.experiments.optical_device import OpticalOrchestrator
     from src.experiments.utils import set_seed
 
@@ -282,7 +271,7 @@ def sweeps(experimental=False):
             hyperparameters={},
             n_jobs=N_JOBS,
             augmentation=CHAIN,
-            **({} if experimental else {"augmentation_p": SWEEP_P}),
+            augmentation_p=SWEEP_P,
         )
         runner = orch.get_sweep_runner_cls(param)(
             methods=orch.methods, method_factory=orch.build_methods, **orch._get_clean_kwargs()
@@ -290,12 +279,11 @@ def sweeps(experimental=False):
         x, results, _ = runner.run(f"a85 {param}")
         oracles = [(runner.get_oracle(j).gamma_star, runner.get_oracle(j).epsilon_star) for j in range(2)]
         strengths = [runner.das[j].strength for j in range(2)]
-        if not experimental:
-            # the factory's DAs: the omega knob overrides p at call time, so the
-            # runner's DAs hold its last step
-            das = (orch._da_factory(), orch._da_factory(append="gaussian-noise"))
-            ps = {a.p for da in das for a in da._augmentations if a.augmentation in ("rotation", "hflip", "vflip")}
-            check(f"(v) {param}: the sweep DA factory's rotation / flip p {SWEEP_P}", ps == {SWEEP_P}, f"{ps}")
+        # the factory's DAs: the omega knob overrides p at call time, so the
+        # runner's DAs hold its last step
+        das = (orch._da_factory(), orch._da_factory(append="gaussian-noise"))
+        ps = {a.p for da in das for a in da._augmentations if a.augmentation in ("rotation", "hflip", "vflip")}
+        check(f"(v) {param}: the sweep DA factory's rotation / flip p {SWEEP_P}", ps == {SWEEP_P}, f"{ps}")
         print(
             f"      {param}: x {np.round(np.asarray(x, dtype=float), 6)} (gamma*, eps*) {oracles} strength {strengths}"
         )
@@ -324,7 +312,7 @@ def digest(arrays):
 
 
 def leg_v(dump=None):
-    print("(v) bit for bit against the experimental implementation")
+    print("(v) the self-regression digest")
     node = platform.node().split(".")[0]
     if node != DIGEST_NODE:
         print(f"  [WARN] (v) on {node}, the digest was recorded on {DIGEST_NODE}: a mismatch means nothing here")
@@ -341,20 +329,12 @@ LEGS = {"i": leg_i, "ii": leg_ii, "iii": leg_iii, "iv": leg_iv, "v": leg_v}
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", choices=sorted(LEGS), default=None)
-    parser.add_argument("--src", default=REPO, help="the tree to import `src` from")
-    parser.add_argument("--record", action="store_true", help="print (v)'s digest of --src and exit")
     parser.add_argument("--dump", default=None, help="save (v)'s arrays to this .npz")
     args = parser.parse_args()
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
-    sys.path.insert(0, os.path.abspath(args.src))
+    sys.path.insert(0, REPO)
     os.chdir(REPO)
-    if args.record:
-        arrays = sweeps(experimental=True)
-        if args.dump:
-            np.savez(args.dump, **dict(arrays))
-        print(digest(arrays))
-        sys.exit(0)
     for name, leg in LEGS.items():
         if args.only in (None, name):
             leg(args.dump) if name == "v" else leg()

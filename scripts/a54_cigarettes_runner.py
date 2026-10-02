@@ -110,11 +110,11 @@ WIDTH_RATIO = {("PI+INV", "PI"): (0.869, 0.03), ("PI+INV+IV", "PI+IV"): (0.868, 
 COVERAGE_DROP = 0.3
 # leg (v): gamma* at t3 under `target: iv`, keyed on "the block declares an
 # instrument": the declared set moves the restricted target. The True value holds
-# under DECLARED_IV's set [tax_s, y, cpi]; another set reads another gamma*
+# under INSTRUMENT_SET's set [tax_s, y, cpi]; another set reads another gamma*
 GAMMA_STAR_T3 = {False: 0.18782108, True: 0.36205260}
 GAMMA_STAR_TOL = 1e-6
 # the other declaration leg (v) runs beside the block's own: the query recipe's set
-DECLARED_IV = {"iv": ["tax_s", "y", "cpi"], "gamma_z": 0.0177}
+INSTRUMENT_SET = {"iv": ["tax_s", "y", "cpi"], "gamma_z": 0.0177}
 PANEL_ROWS = 2450
 STATE_YEARS = 50  # one state history
 
@@ -342,10 +342,10 @@ def _rows_per_state(design_rows, pool_rows, states):
 
 
 def declarations(block):
-    """The block as given, then its other declaration: `DECLARED_IV` added when it
+    """The block as given, then its other declaration: `INSTRUMENT_SET` added when it
     declares no instrument, both keys dropped when it does."""
     declared = bool(block.get("iv"))
-    other = {k: v for k, v in block.items() if k not in DECLARED_IV} if declared else {**block, **DECLARED_IV}
+    other = {k: v for k, v in block.items() if k not in INSTRUMENT_SET} if declared else {**block, **INSTRUMENT_SET}
     return ((f"as given (iv {block.get('iv')!r})", block), (f"the other declaration (iv {other.get('iv')!r})", other))
 
 

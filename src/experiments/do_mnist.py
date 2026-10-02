@@ -244,11 +244,6 @@ def domnist_oracle(sem) -> OracleParameters:
         bias_sq=bias_sq,
         sigma_sq=sigma_sq,
         rho=None,
-        eps_iv_star=0.0,
-        eps_iv_z_star=0.0,
-        eps_rms=0.0,
-        eta=0.0,
-        epsilon_star_pointwise=0.0,
     )
 
 
@@ -604,10 +599,9 @@ class DoMNISTQuerySweep(GenericQuerySweep):
         # instead would be silently overwritten by super's own defaults.
         super().__init__(method_factory=None, default_gamma=default_gamma, default_epsilon=default_epsilon, **kwargs)
 
-        # rebuilt here, not in the base: handing the factory up would make
-        # GenericQuerySweep read `epsilon_iv`, which runs the linear constraint
-        # floor on the pixel design and logs a meaningless number. The T-as-IV
-        # budget is the block epsilon (the reference's `from_eps`)
+        # rebuilt here, not in the base: the methods need the nets, which exist
+        # only now. The T-as-IV budget is the block epsilon (the reference's
+        # `from_eps`)
         if method_factory is not None:
             self.methods = method_factory(
                 gamma=self.default_gamma,
@@ -912,20 +906,6 @@ class DoMNISTMixin:
         `constraint_floor` does not apply to the latent ball."""
         return float(self.default_epsilon)
 
-    def fit_epsilon_iv(
-        self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0, radius: float | None = None
-    ) -> float:
-        """Same reasoning as fit_epsilon: the T-as-IV budget is the block epsilon
-        (the reference's `from_eps`), and `ratio` (the epsilon sweep's per-step
-        call) does not move it. `radius` (the base's floor-report radius) is
-        accepted and not read: there is no floor here."""
-        return float(self.default_epsilon)
-
-    def fit_iv_leaks(self, experiment_index: int, data=None) -> dict[str, float]:
-        """No linear h_* to measure a noise moment at, and the backend reads no
-        leak: 0.0."""
-        return {"leak_t": 0.0, "leak_tz": 0.0}
-
     def fit_rho(self, experiment_index: int, data=None) -> float:
         """rho on the prefit nets' MSE over the step's rows (see `_net_rho`); the
         linear `rho_hat` would refit OLS on pixels, which is not the class here."""
@@ -1095,14 +1075,9 @@ class DoMNISTOrchestrator(ExperimentOrchestrator):
         n_jobs=None,
         rho=1.0,
         outcome_models=None,
-        epsilon_iv_z=0.0,
-        iv_recalibrate=False,
-        leak_t=0.0,
-        leak_tz=0.0,
     ):
-        """Methods at explicit budgets. `n_jobs` overrides the toggle. `epsilon_iv_z`,
-        `iv_recalibrate` and the leaks are accepted because the runner hands them to
-        every factory; the backend has no real-Z instrument and never reads them."""
+        """Methods at explicit budgets. `n_jobs` overrides the toggle. The T-as-IV
+        cone's budget `epsilon_iv` is the block epsilon unless given."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return self._build(
             self.kwargs["methods"],

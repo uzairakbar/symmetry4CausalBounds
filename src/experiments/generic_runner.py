@@ -23,17 +23,14 @@ from src.experiments.configs import (
 from src.experiments.utils import radial_sweep_pcs
 from src.experiments.utils.metrics import rho_hat, sigma_sq_hat, trace_S_over_k
 from src.experiments.utils.model_fitting import instrument_columns
-from src.methods.sensitivity_models import constraint_floor, recalibrated_gamma
+from src.methods.sensitivity_models import recalibrated_gamma
 from src.oracle import (
     compute_oracle_parameters,
-    eps_iv_star,
-    eps_iv_z_star,
     epsilon_star,
     gamma_star,
     pool_oracles,
     preserve_rng,
     recalibrated_da_epsilon,
-    z_moment_star,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -80,9 +77,6 @@ class OracleMixin:
         # seed per draw rather than consecutive calls). A SEM that draws fresh rows
         # every time already averages over replicates and is left alone.
         X, y = pool if pool is not None else (None, None)
-        # the pool stays (X, y); a recorded SEM's instrument rides beside it and
-        # reaches `eps_iv_z_star` only (a generator's is split off its own draw)
-        Z = None if pool is None else getattr(sem, "iv_pool", None)
         draws = ORACLE_POOL_DRAWS if pool is not None else 1
         with preserve_rng():
             oracles = []
@@ -97,7 +91,6 @@ class OracleMixin:
                         y=y,
                         features=features,
                         mean_match=self.mean_match,
-                        Z=Z,
                     )
                 )
         oracle = pool_oracles(oracles)
@@ -149,17 +142,14 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
 
-        # stored, not local: the IV floor report needs the ball these are used with.
         # Subclasses must FORWARD their budgets here rather than assigning before
         # super().__init__, or these defaults silently overwrite them.
         self.default_gamma = default_gamma
         self.default_epsilon = default_epsilon
 
-        # Data FIRST, methods second. The IV budget is oracle-derived and
-        # reported against its floor, and the floor is a property of (GX, G,
-        # gamma), so it does not exist until the draw does. Building methods first
-        # would silently skip the report. (`DoMNISTQuerySweep` passes
-        # method_factory=None and rebuilds after its nets exist; that still works.)
+        # Data FIRST, methods second: rho and the raw gamma's sigma-hat are
+        # properties of the draw. (`DoMNISTQuerySweep` passes method_factory=None
+        # and rebuilds after its nets exist.)
         loaded = self._load_data()
         self.X_raw, self.GX_raw, self.y, self.G = loaded[:4]
         # a 4-tuple (do-MNIST's override) carries no instrument
@@ -172,9 +162,6 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         else:
             self.X = self.X_raw
             self.GX = self.GX_raw
-
-        # the baseline observed-Z budget, once, on this runner's own draw
-        self._epsilon_iv_z = self._baseline_epsilon_iv_z()
 
         # a raw declared gamma into the paper's units: the solver's radius
         # sigma-hat sqrt(gamma / sigma-hat^2) is back at sqrt(gamma)
@@ -191,8 +178,6 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
             self.methods = method_factory(
                 gamma=self.default_gamma,
                 epsilon=default_epsilon,
-                epsilon_iv=self.epsilon_iv,
-                epsilon_iv_z=self.epsilon_iv_z,
                 rho=self.fit_rho(),
             )
 
@@ -221,87 +206,6 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         if rho < 1.0:
             logger.warning(f"rho_hat {rho:.4f} < 1 (DPI says >= 1): sampling noise; the solvers read it as 1.")
         return float(rho)
-
-    @property
-    def epsilon_iv(self) -> float:
-        """The T-as-IV budget r_T, off the knife edge (same tolerance as PI+INV), and
-        reported against the T CONSTRAINT'S OWN floor, the floor measured with the
-        translation amounts alone. Never raised: under the floor every query reads
-        INFEASIBLE (`ParamSweepRunner._floor_report`). The oracle T piece
-        `eps_iv_star` on every path; the observed instrument carries its own budget
-        (`epsilon_iv_z`). Declared path (`declared_iv`, SS2.6): logged against that
-        floor either way."""
-        budget = getattr(self.oracle, "eps_iv_star", None)
-        if budget is None or not np.isfinite(budget):
-            logger.warning("oracle eps_iv_star unavailable; the T budget falls back to the tolerance.")
-            budget = 0.0
-        budget = float(budget) + self.eps_tol
-
-        if getattr(self, "G", None) is None or np.size(self.G) == 0:
-            return budget
-        try:
-            floor = constraint_floor(
-                self.GX,
-                self.y,
-                self.default_gamma,
-                kind="iv",
-                Z=np.asarray(self.G).reshape(len(self.GX), -1),
-                mean_match=self.mean_match,
-                rho=self.fit_rho(),
-                recalibrate=self.recalibrate,
-                absorbed_rate=self.absorbed_rate,
-                gamma_n_alpha=self.gamma_n_alpha,
-                unit_cap=self.unit_cap,
-            )
-        except Exception as error:
-            logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")
-            return budget
-
-        if self.declared_iv:
-            side = "above" if budget**2 >= floor else "BELOW"
-            logger.info(
-                f"epsilon_iv: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the T "
-                f"constraint's own floor {floor:.4g}; left as declared, never raised. The observed "
-                "instrument has its own constraint at r_Z."
-            )
-            return budget
-
-        if budget**2 < floor:
-            logger.info(
-                f"epsilon_iv: oracle {budget:.6g} is BELOW the constraint's own floor (budget^2 "
-                f"{budget**2:.4g} < floor {floor:.4g}); left as is, every query will read "
-                "INFEASIBLE, never raised."
-            )
-        return budget
-
-    def _baseline_epsilon_iv_z(self) -> float:
-        """Baseline observed-Z budget: a pre-DA quantity, read once on this runner's
-        own draw (`X_raw`, `y`, `Z`); never per query. `eps_iv_z_star` on the draw
-        plus `eps_tol`; the sweeps read the leak `z_moment_star` alone
-        (`GenericParamSweep.fit_epsilon_iv_z`), their DA side re-calibrated. Exits
-        first, calling nothing, on a declared radius or an empty Z (optical,
-        do-MNIST's 4-tuple draw)."""
-        if self.declared_iv or np.shape(self.Z)[1] == 0:
-            return 0.0
-        z_piece = eps_iv_z_star(
-            self.sem,
-            self.da,
-            X=self.X_raw,
-            y=self.y,
-            Z=self.Z,
-            features=self._features,
-            mean_match=self.mean_match,
-        )
-        if not np.isfinite(z_piece):
-            return 0.0
-        return float(z_piece) + self.eps_tol
-
-    @property
-    def epsilon_iv_z(self) -> float:
-        """The observed instrument's own budget, as `ParamSweepRunner.fit_epsilon_iv_z`:
-        0.0 under an empty Z or a declared radius, else the baseline observed-Z budget
-        read once on the draw (`_baseline_epsilon_iv_z`), never floor-reported."""
-        return self._epsilon_iv_z
 
     @property
     def _features(self) -> Callable | None:
@@ -432,50 +336,6 @@ class GenericParamSweep(OracleMixin, ParamSweepRunner):
             self._base[key] = (X_raw, X, y, X_test, estimand, instrument_columns(Z, len(X_raw)))
         return self._base[key]
 
-    def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
-        """The observed instrument's measured leak: the noise moment
-        || Q_Z' r* || / sqrt(N), r* = y - h_*(X), on the rows this cell's +IV
-        methods fit (`z_moment_star`; the untiled rows on the m sweep, as PI+IV
-        fits them, the Z moment of a tiling being the same). A pre-DA quantity,
-        measured per cell because the rows change with the step on the n and m
-        sweeps; no tolerance, so at it the Z constraints admit h_* (non-DA) and h#
-        (DA, beside eps: `z_bound` under `iv_recalibrate`) exactly, never
-        floor-reported.
-
-        0.0 on the declared path (gamma_z carries the moment), without data, or
-        under an empty Z, checked before anything else. The query runners keep the
-        shared `eps_iv_z_star` on their own draw."""
-        Z = getattr(data, "Z", None)
-        if self.declared_iv or data is None or Z is None or np.shape(Z)[1] == 0:
-            return 0.0
-        base = getattr(data, "X_base", None) is not None
-        X, y = (data.X_base, data.y_base) if base else (data.X, data.y)
-        Z = data.Z_base if base and getattr(data, "Z_base", None) is not None else Z
-        z_piece = z_moment_star(self.sems[experiment_index], X=X, y=y, Z=Z, mean_match=self.mean_match)
-        if not np.isfinite(z_piece):
-            return 0.0
-        return float(z_piece)
-
-    def fit_iv_leaks(self, experiment_index: int, data=None) -> dict[str, float]:
-        """The noise moments || Q' r* || / sqrt(N), r* = y - h_*(X), of the rows a
-        DA+ IV ball is fitted on (the cell's X, y and translation amounts G, tiled on
-        the m sweep): on span(T) (`leak_t`) and on span(T, Z) (`leak_tz`). They are
-        what the T and joint constraints need to admit h# beyond the invariance
-        error eps, which re-calibrated radii add in quadrature (App. D). On the
-        declared path gamma_z stands for the observed instrument's moment, so the
-        joint leak is T's. 0.0 without data or translation amounts."""
-        G = getattr(data, "G", None)
-        if data is None or G is None or np.size(G) == 0:
-            return {"leak_t": 0.0, "leak_tz": 0.0}
-        sem, X, y = self.sems[experiment_index], data.X, data.y
-        T = np.asarray(G, dtype=float).reshape(len(X), -1)
-        leak_t = float(z_moment_star(sem, X=X, y=y, Z=T, mean_match=self.mean_match))
-        Z = getattr(data, "Z", None)
-        if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
-            return {"leak_t": leak_t, "leak_tz": leak_t}
-        joint = np.hstack([T, np.asarray(Z, dtype=float).reshape(len(X), -1)])
-        return {"leak_t": leak_t, "leak_tz": float(z_moment_star(sem, X=X, y=y, Z=joint, mean_match=self.mean_match))}
-
     def _draw_base(self, experiment_index: int, n_samples: int | None = None):
         """Split site: a SEM with instruments emits them as the trailing columns of
         every draw. Rows are split BEFORE columns on a finite pool, so Z stays
@@ -584,10 +444,9 @@ class EpsilonRatioStrategy(GenericParamSweep):
     ROBUSTNESS_AUGMENTATION[experiment_name] to the configured DA chain where
     that is set (optical: the configured chain has no knob to tune).
 
-    The T-as-IV budget follows the same ratio (`fit_epsilon_iv(..., ratio=r)`),
-    since it is the same misspecification measured on the same DA draw; the
-    observed instrument's budget and gamma_z do not move. Below r = 1 the assumed
-    budgets can fall under what the constraints can attain on the ball, and the
+    Every DA IV row reads the swept epsilon through gamma~_z(eps), the same
+    misspecification on the same DA draw; the declared gamma_z does not move.
+    Below r = 1 the assumed budgets can fall under what the constraints can attain on the ball, and the
     queries then read INFEASIBLE -- which is what an under-budget ratio means,
     what `PI+INV` has always done at the left of this grid, and what every sweep
     now does wherever a budget lands under its floor (no budget is ever raised).
@@ -638,13 +497,8 @@ class EpsilonRatioStrategy(GenericParamSweep):
 
     def get_predict_kwargs(self, param, experiment_index: int):
         eps_star = self._finite(self.get_oracle(experiment_index).epsilon_star, self.default_epsilon, "eps*")
-        # the T-as-IV budget is misstated by the same ratio, through the same
-        # pipeline and with no data, as the epsilon beside it: a DA+ method with a T
-        # constraint re-solves at it, everything else ignores the kwarg
-        return {
-            "epsilon": float(param) * eps_star + EPS_TOL,
-            "epsilon_iv": self.fit_epsilon_iv(experiment_index, ratio=float(param)),
-        }
+        # a DA+ IV method's rows re-solve at it (gamma~_z(eps)); the rest pad by it
+        return {"epsilon": float(param) * eps_star + EPS_TOL}
 
 
 class ExpansionStrategy(GenericParamSweep):
@@ -670,7 +524,6 @@ class ExpansionStrategy(GenericParamSweep):
         self._measured = {}
         self._factors = {}  # (experiment, knob) -> (rho, tr(S)/k)
         self._step_epsilon = {}
-        self._step_epsilon_iv = {}
         super().__init__(**kwargs)
 
     def generate_data(self, experiment_index: int, param) -> SweepData:
@@ -710,24 +563,9 @@ class ExpansionStrategy(GenericParamSweep):
             )
             + EPS_TOL
         )
-        # The T-as-IV budget is driven by the same knob, so a setup-time
-        # eps_iv* is stale for the same reason. Same X and same augment kwargs
-        # as the eps* call above, and `_invariance_signal` draws the
-        # augmentation under `preserve_rng`, so both budgets read the SAME draw
-        # -- that is a property of the helper, not luck. RAW here: `ratio` and
-        # EPS_TOL are applied in `fit_epsilon_iv`, as the base does.
-        self._step_epsilon_iv[experiment_index] = eps_iv_star(
-            self.sems[experiment_index],
-            self.das[experiment_index],
-            X=X_raw,
-            features=self._features_at(experiment_index),
-            mean_match=self.mean_match,
-            **augment_kwargs,
-        )[0]
         # On a recorded SEM the setup oracle pools ORACLE_POOL_DRAWS seeded
-        # draws while this is a single one, so both per-step budgets carry
-        # sampling noise the setup numbers do not. `_step_epsilon` has always
-        # had that asymmetry; the two caches stay consistent with each other.
+        # draws while this is a single one, so the per-step budget carries
+        # sampling noise the setup numbers do not.
 
         return data
 
@@ -739,25 +577,6 @@ class ExpansionStrategy(GenericParamSweep):
         # exactly as the base does, and leave it as is
         self._floor_report(per_step, data, "inv", experiment_index, "epsilon")
         return per_step
-
-    def fit_epsilon_iv(
-        self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0, radius: float | None = None
-    ) -> float | None:
-        """The per-step T budget, shaped exactly like `base.fit_epsilon_iv`:
-        `ratio * raw + EPS_TOL` (the cache holds the raw oracle piece, so the
-        tolerance is never scaled), and the radius solved at (`radius`, else the
-        budget) reported against its floor on both paths and never raised. Without
-        this the knob would move eps* and leave r_T frozen at the setup-time value."""
-        per_step = self._step_epsilon_iv.get(experiment_index)
-        if per_step is None:
-            return super().fit_epsilon_iv(experiment_index, step_index, data, ratio, radius)
-        if not np.isfinite(per_step):
-            return None
-        budget = float(ratio) * float(per_step) + EPS_TOL
-        self._floor_report(
-            budget if radius is None else radius, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
-        )
-        return budget
 
     @property
     def xlabel(self) -> str:

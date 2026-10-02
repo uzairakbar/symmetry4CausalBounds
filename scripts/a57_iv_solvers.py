@@ -1,84 +1,60 @@
-"""A57: the solvers carry ONE CONSTRAINT PER INSTRUMENT, and an empty block is exact.
+"""A57: the IV rows are solved right, and an empty block is exact.
 
-refactor10 touches sensitivity_models.py only: a DA+ IV ball takes the translation
-amounts as `T` and the observed instrument as `Z`, each block getting its own SOC
-constraint at its own radius (`t_bound` from `epsilon_iv`, `z_bound` from
-`epsilon_iv_z` and `gamma_z`), and the intersection hands its baseline branch the
-observed Z alone. Nothing is pooled. Everything is measured on the cigarette design
-(t3, own-tax, sigma-normalised, n = 2450), four coefficient queries, serial solves.
-Legs:
+A DA+ IV ball takes the translation amounts as `T` and the observed instrument as
+`Z`; a fit with one block carries that block's SOC row, a fit with both the rows of
+`IV_LAYOUT` (the joint row on span(T, Z)), each at
+sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) with g the declared `gamma_z`
+(non-DA) or App. D's (eps / sigma~ + sqrt(gamma_z / rho))^2 (DA); the intersection
+hands its baseline branch the observed Z alone. Everything is measured on the
+cigarette design (t3, own-tax, sigma-normalised, n = 2450), four coefficient
+queries, serial solves. Legs:
 
   (D)   the digest leg (scripts/digest_leg.py), as a56: one query panel and one
         gamma sweep step per dataset at the shipped configuration against the
-        reference recorded on 14509db, no tolerance. Catches: the `(n, 0)` spelling
-        of an empty Z not being exactly today's `None`, a T block that is not G
-        elementwise, a T radius that moved at gamma_z = 0. Misses: anything at
-        gamma_z != 0, which is why (vi) exists.
-  (i)   `Z=None` and `Z=zeros((n, 0))` reproduce PartialR2 to EXACTLY 0.0
-        (MEASURED p7). Catches: an empty instrument that is not inert (a jitter
-        block or a stray constraint reaching the problem), a block reading an
-        (n, 0) array as present. Misses: an empty Z on a DA design, which (v)
-        covers through the intersection.
+        recorded reference, no tolerance. Catches: the `(n, 0)` spelling of an
+        empty Z not being exactly `None`, a T row that is not G elementwise.
+        Misses: anything at gamma_z != 0, which (iv) and (vii) cover.
+  (i)   `Z=None` and `Z=zeros((n, 0))` reproduce PartialR2 to EXACTLY 0.0.
+        Catches: an empty instrument that is not inert (a jitter block or a stray
+        row reaching the problem), a block reading an (n, 0) array as present.
   (ii)  PI+INV+IV with an empty Z reproduces PI+INV to 0.0. Catches: the INV cone
-        of the new class differing from InvarianceConstrainedPartialR2's (a wrong
-        GX, a missing centring, `eps_param` never set). Misses: the IV cone, (iv).
-  (iii) a zero Z radius (epsilon_iv_z 0, gamma_z 0) returns INFEASIBLE on every
-        query with NaN bounds, never a silent [0, 0] (MEASURED p3): the jitter block
-        makes ||Q'(y - Xh)||^2 + j||h||^2 <= 0 unsatisfiable, and the class warns.
-        Catches: the jitter block dropped (three moments in four unknowns are then
-        exactly solvable inside the gamma = 0.25 ball and the status flips to OK), a
-        solver failure read as infeasible. Misses: a positive radius the ball cannot
-        reach (a61-ii).
-  (iv)  the phase-b set [tax_s, y, cpi] at gamma 0.25. The two rows whose PROGRAM
-        is unchanged by the decoupling -- PI+IV and PI+INV+IV, which only ever
-        carried a Z constraint -- still reproduce the beta_pn intervals measured at
-        14509db (logs/batchA/a57_reference_probe_14509db.log) to 1e-6 at
-        r_Z = 0.0625: [0.374940, 1.644600] and [0.951673, 1.644600], raw log units.
-        The DA rows changed program: `DA+PI+IV` now carries T at r_T = 0.0625 AND Z
-        at r_Z = 0.0625 instead of one pooled constraint on the stacked matrix at
-        0.0625, so its 14509db row [1.149780, 1.648402] is SUPERSEDED and the leg
-        pins the round-14 values RECORDED here instead. The standalone row and the
-        intersection's DA branch are pinned APART: the branch is fitted through the
-        class, so its declared radius also carries the D20 allowance and it reads
-        wider. Catches: any change to the
-        IV or INV arithmetic, a Z that is not the FWL'd column (p7: +7 moves
-        beta_pn by 0.004), a branch handed the wrong block. Misses: a solver bump
-        under 1e-6, which is why the tolerance is not 1e-9.
-  (v)   the intersection fits its baseline on Z alone and its DA branch on BOTH
-        blocks, read off the fitted attributes: `Z_projector_R` counts the observed
-        instrument (m rows above M) on both branches, `T_projector_R` counts the
-        translation amounts (p rows) on the DA branch and is absent on the
-        baseline, and each residual base is Q'y for its OWN Q, bit for bit, so a
-        stacked QR fails. With Z=None the baseline reads nothing at all, the DA
-        branch reads exactly G in its T block, and its arrays are array_equal to a
-        fit with zeros((n, 0)) and to a direct `T=G` fit. Catches: Z reaching the
-        DA branch only, the two blocks pooled into one QR, `None` reaching
-        column_stack. Misses: the numbers, (iv).
-  (vi)  the two radii. `t_bound` is `epsilon_iv` bit for bit at EVERY gamma_z (the
-        leak budget never touches the T radius), and `z_bound` is
-        sqrt(epsilon_iv_z^2 + (s sqrt(gamma_z))^2): 0.069877 to 1e-9 at
-        epsilon_iv_z 2^-5, gamma_z 2^-8, s 1, strictly below the plain sum 0.09375,
-        and rho-aware (s is the pre-DA sigma). Then at fit: a declared radius at
-        epsilon_iv_z 0, gamma_z 2^-8 reproduces the explicit 0.0625, gamma_z 0
-        interval to 1e-6 (p10 E), and a gamma_z model logs one INFO line, not
-        WARNING, naming gamma_z, s, the allowance and both radii, at its first solve
-        (rho is final there) and not at fit. Catches: gamma_z leaking into the T
-        radius, the plain sum put back, s read post-DA, the old warning, a line
-        printed before an intersection's DA branch knows its rho. Misses: the
-        DA-side allowance on a fitted pair, which a67-(i) pins.
-  (vii) the intersection budgets per branch: BOTH radii travel to both branches and
-        each uses the ones its blocks ask for. The baseline carries no T block, so
-        at epsilon_iv 2^-5, epsilon_iv_z 0, gamma_z 2^-8, s = 1 its Z radius is
-        exactly r_Z = 0.0625 and `_has_t` is False, while the DA branch reads
-        r_T = 2^-5 and the same r_Z at its own s; the oracle case, epsilon_iv_z 0.05
-        and gamma_z 0: both branches read a Z radius of 0.05 and the DA branch's T
-        radius is still its own epsilon_iv; the intersection's own epsilon_iv is
-        untouched; the DA branch's rho is set after fit; under an empty Z the
-        baseline has no constraint at all (so leg (D) cannot move) and the DA branch
-        keeps its T constraint at epsilon_iv. Catches: the T block reaching the
-        baseline, `epsilon_iv` spent on a Z constraint, `epsilon_iv_z` ignored (the
-        oracle baseline would read 0 and be INFEASIBLE). Misses: the numbers under a
-        real Z (a60/a61).
+        of the IV class differing from InvarianceConstrainedPartialR2's.
+  (iii) a non-DA Z row at a zero leak (gamma_z 0) returns INFEASIBLE on every
+        query with NaN bounds, never a silent [0, 0]: the jitter block makes
+        ||Q'(y - Xh)||^2 + j||h||^2 <= 0 unsatisfiable. Catches: the jitter block
+        dropped, a solver failure read as infeasible.
+  (iv)  the phase-b set [tax_s, y, cpi] at gamma 0.25, gamma_z 2^-8, raw: the
+        beta_pn intervals of PI+IV, PI+INV+IV, DA+PI+IV (T and Z, so the joint
+        row) and the intersection's two branches, RECORDED to 1e-6, every solve
+        OK (PI+IV and PI+INV+IV read the old r_Z = 0.0625 pins exactly: s = 1
+        on this panel). Catches: any change to the IV or INV arithmetic, a Z that is not the
+        FWL'd column, a branch handed the wrong block. Misses: a solver bump under
+        1e-6.
+  (v)   the rows on the fitted attributes: PI+IV carries ("z",) of width m, a T
+        only DA fit ("t",) of width p, a T and Z DA fit the joint ("tz",) of
+        width p + m (`IV_LAYOUT`); the intersection's baseline ("z",) and its DA
+        branch ("tz",); each row's moments are Q'y for its own Q, bit for bit,
+        and its intercept column Q'1; with Z=None the baseline carries no row and
+        the DA branch exactly G's ("t",), array_equal to a zeros((n, 0)) fit and
+        to a direct `T=G` fit. Catches: Z reaching the DA branch only, a row
+        built on the wrong block, `None` reaching column_stack.
+  (vi)  the radii: raw (alpha 0) a non-DA Z row is s sqrt(gamma_z) and a DA row
+        eps + sigma~ sqrt(gamma_z / rho) (so a DA row with gamma_z 0 is eps),
+        rho-aware; padded (alpha 0.05) every row is the formula at level
+        alpha / 3 (B = 1 row) on n_eff, d the row's width, and above its raw
+        value; a DA row moves with a predict-time epsilon; a fitted model logs
+        one INFO line naming gamma_z and the row radii at its first solve, not
+        at fit. Catches: the non-DA leak on a DA row, a level not split, the
+        old allowance arithmetic, a line printed before rho is final.
+  (vii) solver equivalence: PI+IV, DA+PI+IV and the intersection (raw and
+        padded) solved through the class equal an independent cvxpy program
+        written here from the raw arrays (centred design, the Lem. 2 ball, the
+        jittered IV rows at the class's radii) to 1e-6 relative to the width,
+        and the CLARABEL and ECOS backends agree to the same tolerance; padded,
+        the written-out program carries the mean row's delta in the objective,
+        the ball and every IV residual.
+        Catches: a constraint the class builds differently from the program it
+        states, a backend-dependent answer.
 
     MPLBACKEND=Agg python scripts/a57_iv_solvers.py [--seed 0] [--reference JSON] [--skip-digest]
 
@@ -90,6 +66,7 @@ import argparse
 import os
 import sys
 
+import cvxpy as cp
 import numpy as np
 from loguru import logger
 
@@ -104,6 +81,7 @@ from src.data_augmentors.cigarettes import ScaleTranslation  # noqa: E402
 from src.experiments.cigarettes import absorbed_rate  # noqa: E402
 from src.experiments.configs import EPS_TOL  # noqa: E402
 from src.methods.sensitivity_models import (  # noqa: E402
+    GAMMA_N_ROWS,
     InstrumentalVariablePartialR2,
     IntersectedInstrumentalVariablePartialR2,
     InvarianceConstrainedInstrumentalVariablePartialR2,
@@ -111,38 +89,26 @@ from src.methods.sensitivity_models import (  # noqa: E402
     PartialR2,
     SolveStatus,
 )
+from src.methods.sensitivity_models import finite_sample_budget as fsb  # noqa: E402
 from src.sem.cigarettes import TREATMENTS, CigaretteSEM, V, build_design  # noqa: E402
 
 GAMMA = 0.25
-IV_BOUND = 0.0625
 GAMMA_Z = 2**-8
+ALPHA = 0.05
 COMMON = dict(clipy=False, mean_match=True, n_jobs=1, recalibrate=True, pad=False)
 PHASE_B = ("tax_s", "y", "cpi")
-# raw beta_pn at 14509db with the p8 prototype, one seed-0 DA draw (the probe log
-# beside this batch's report); the plan's SS4.1 digits in the labels. Re-measured on
-# the n - K sigma, whose raw ball is sqrt(n / (n - K)) = 1.0115x (was
-# [0.374940, 1.644600] and [0.951673, 1.644600])
-REFERENCE = {
+# raw beta_pn, raw log units, one seed-0 DA draw, gamma 0.25, gamma_z 2^-8, eps
+# EPS_TOL, raw program: RECORDED on the gamma_n rows (the non-DA Z row at
+# s sqrt(gamma_z), the DA joint row at eps + sigma~ sqrt(gamma_z / rho))
+RECORDED = {
     "PI+IV": (0.358594946, 1.658163776),
     "PI+INV+IV": (0.941185206, 1.658163802),
-}
-PLAN_DIGITS = {"PI+IV": "[0.359, 1.658]", "PI+INV+IV": "[0.941, 1.658]"}
-# the DA rows changed PROGRAM in round 14: one pooled constraint on the stacked
-# matrix at 0.0625 became a T constraint at r_T = 0.0625 beside a Z constraint at
-# r_Z = 0.0625, which admits more. RECORDED here (re-measured on the n - K sigma),
-# superseding [1.149780, 1.648402]
-# the standalone row is at r_Z = 0.0625 with no `X_pre`; the intersection's DA
-# branch is fitted through the class, so its declared radius also carries the D20
-# allowance and it is a WIDER interval, which is why the two are pinned apart
-RECORDED = {
-    "DA+PI+IV": (0.838358355, 1.662340503),
-    "DA+PI+IV branch": (0.681794682, 1.667460892),
+    "DA+PI+IV": (0.725170893, 1.668974822),
+    "PI&DA+PI+IV baseline": (0.358594946, 1.658163776),
+    "PI&DA+PI+IV DA branch": (0.725170893, 1.668974822),
 }
 INTERVAL_TOL = 1e-6
-RSS_BOUND = 0.069877  # sqrt(0.03125^2 + 0.0625^2)
-ORACLE_Z = 0.05  # the oracle case's epsilon_iv_z in (vii)
-PLAIN_SUM = 0.09375
-BUDGETS = (0.03125, 0.0625, 0.1, 0.017749, 0.3, 1e-3, 0.7071067811865476)
+SOLVER_TOL = 1e-6
 FAIL = []
 
 
@@ -161,11 +127,11 @@ def design_and_draw(seed):
     Z = np.column_stack([design.Z[:, 0] if name == "tax_s" else columns[name] for name in PHASE_B])
     np.random.seed(seed)
     GX, G = ScaleTranslation(V, std=float(np.std(design.X @ (V / np.linalg.norm(V)))))(design.X)
-    return design, Z, GX, G
+    return design, Z, GX, G.reshape(len(G), -1)
 
 
-def bounds(model, k=4):
-    return np.asarray(model.predict(np.eye(k), gamma=GAMMA), dtype=float)
+def bounds(model, k=4, **kwargs):
+    return np.asarray(model.predict(np.eye(k), gamma=GAMMA, **kwargs), dtype=float)
 
 
 def fitted(model, **arrays):
@@ -175,6 +141,25 @@ def fitted(model, **arrays):
         return model.fit(**arrays), None
     except Exception as error:  # reported by the leg
         return None, error
+
+
+def models_at(design, Z, GX, G, alpha=0.0, gamma_z=GAMMA_Z):
+    """PI+IV, PI+INV+IV, DA+PI+IV on both blocks and the intersection, fitted."""
+    X, y = design.X, design.y
+    kw = dict(gamma=GAMMA, epsilon=EPS_TOL, gamma_z=gamma_z, gamma_n_alpha=alpha, **COMMON)
+    pi_iv = InstrumentalVariablePartialR2(**kw).fit(X=X, y=y, Z=Z)
+    pi_inv_iv = InvarianceConstrainedInstrumentalVariablePartialR2(**kw).fit(X=X, y=y, GX=GX, Z=Z)
+    da_pi_iv = InstrumentalVariablePartialR2(**kw).fit(X=GX, y=y, T=G, Z=Z, X_pre=X)
+    da_pi_iv.rho = da_pi_iv.sigma_sq / PartialR2(gamma=GAMMA, **COMMON).fit(X, y).sigma_sq
+    intersection = IntersectedInstrumentalVariablePartialR2(**kw).fit(X=X, y=y, GX=GX, G=G, Z=Z)
+    return {
+        "PI+IV": pi_iv,
+        "PI+INV+IV": pi_inv_iv,
+        "DA+PI+IV": da_pi_iv,
+        "PI&DA+PI+IV baseline": intersection.baseline,
+        "PI&DA+PI+IV DA branch": intersection.augmented,
+        "PI&DA+PI+IV": intersection,
+    }
 
 
 def leg_d(reference):
@@ -188,13 +173,13 @@ def leg_i(design):
     X, y = design.X, design.y
     reference = bounds(PartialR2(gamma=GAMMA, **COMMON).fit(X, y))
     for tag, Z in (("None", None), ("zeros((n, 0))", np.zeros((design.n, 0)))):
-        model, error = fitted(InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=None, **COMMON), X=X, y=y, Z=Z)
+        model, error = fitted(InstrumentalVariablePartialR2(gamma=GAMMA, **COMMON), X=X, y=y, Z=Z)
         check(f"(i) Z={tag}: fits", error is None, repr(error) if error else "")
         if error is not None:
             continue
         gap = float(np.abs(bounds(model) - reference).max())
         check(f"(i) Z={tag}: max |PI+IV - PI| == 0.0", gap == 0.0, f"{gap!r}")
-        check(f"(i) Z={tag}: no instrument read", not model._has_iv)
+        check(f"(i) Z={tag}: no instrument read, no row", not model._has_iv and model.rows == ())
 
 
 def leg_ii(design, GX):
@@ -212,13 +197,13 @@ def leg_ii(design, GX):
 
 
 def leg_iii(design, Z):
-    print("(iii) a zero Z radius is INFEASIBLE, not a silent [0, 0]")
-    model = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=EPS_TOL, epsilon_iv_z=0.0, gamma_z=0.0, **COMMON)
+    print("(iii) a non-DA Z row at a zero leak is INFEASIBLE, not a silent [0, 0]")
+    model = InstrumentalVariablePartialR2(gamma=GAMMA, gamma_z=0.0, **COMMON)
     model, error = fitted(model, X=design.X, y=design.y, Z=Z)
-    check("(iii) fits at a zero radius", error is None, repr(error) if error else "")
+    check("(iii) fits at a zero leak", error is None, repr(error) if error else "")
     if error is not None:
         return
-    check("(iii) z_bound is 0", model.z_bound == 0.0, repr(model.z_bound))
+    check("(iii) the Z radius is 0", model.iv_radius("z") == 0.0, repr(model.iv_radius("z")))
     out = bounds(model)
     status = np.asarray(model.query_status)
     check("(iii) every query INFEASIBLE", np.all(status == SolveStatus.INFEASIBLE), f"status {status.tolist()}")
@@ -226,175 +211,122 @@ def leg_iii(design, Z):
 
 
 def leg_iv(design, Z, GX, G):
-    print("(iv) the phase-b set reproduces the 14509db intervals at gamma 0.25, IV bound 0.0625")
-    X, y, scale = design.X, design.y, design.sigma
-    # the non-DA rows carry the observed instrument alone: `epsilon_iv_z` is its
-    # radius now, `epsilon_iv` is the T one and is inert without a T block
-    pi_iv = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=EPS_TOL, epsilon_iv_z=IV_BOUND, **COMMON).fit(
-        X=X, y=y, Z=Z
-    )
-    pi_inv_iv = InvarianceConstrainedInstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, epsilon_iv_z=IV_BOUND, **COMMON
-    )
-    pi_inv_iv.fit(X=X, y=y, GX=GX, Z=Z)
-    # the DA row carries BOTH blocks, each at 0.0625: a different program from the
-    # 14509db pooled one, hence RECORDED rather than REFERENCE
-    da_pi_iv = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=IV_BOUND, epsilon_iv_z=IV_BOUND, **COMMON)
-    da_pi_iv.fit(X=GX, y=y, T=G, Z=Z)
-    da_pi_iv.rho = da_pi_iv.sigma_sq / PartialR2(gamma=GAMMA, **COMMON).fit(X, y).sigma_sq
-    # both radii travel to both branches and each uses the ones its blocks ask for:
-    # the baseline sees Z alone at r_Z = s sqrt(gamma_z) = 0.0625 (s = 1 on this
-    # sigma-normalised panel), the DA branch sees T at 0.0625 and Z at the same r_Z
-    intersection = IntersectedInstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=IV_BOUND, gamma_z=GAMMA_Z, **COMMON
-    )
-    intersection.fit(X=X, y=y, GX=GX, G=G, Z=Z)
-    models = {
-        "PI+IV": pi_iv,
-        "PI+INV+IV": pi_inv_iv,
-        "DA+PI+IV": da_pi_iv,
-        "PI&DA+PI+IV baseline at r_Z (PI+IV)": intersection.baseline,
-        "PI&DA+PI+IV DA branch on both blocks (DA+PI+IV branch)": intersection.augmented,
-    }
-    for name, model in models.items():
-        key = name.split("(")[-1].rstrip(")") if "(" in name else name
+    print("(iv) the phase-b set at gamma 0.25, gamma_z 2^-8, raw: the RECORDED beta_pn intervals")
+    scale = design.sigma
+    models = models_at(design, Z, GX, G)
+    for name, want in RECORDED.items():
+        model = models[name]
         out = bounds(model)
         status = np.asarray(model.query_status)
         got = scale * out[2]
-        pinned, source = (REFERENCE, "14509db") if key in REFERENCE else (RECORDED, "round 14")
-        want = np.asarray(pinned[key])
-        gap = float(np.abs(got - want).max())
-        digits = PLAN_DIGITS.get(key, f"[{want[0]:.3f}, {want[1]:.3f}]")
+        gap = float(np.abs(got - np.asarray(want)).max())
         check(f"(iv) {name}: every solve OK", np.all(status == SolveStatus.OK), f"status {status.tolist()}")
         check(
-            f"(iv) {name}: beta_pn {digits} to 1e-6 ({source})",
+            f"(iv) {name}: beta_pn [{want[0]:.6f}, {want[1]:.6f}] to 1e-6",
             gap < INTERVAL_TOL,
-            f"got [{got[0]:.9f}, {got[1]:.9f}] vs [{want[0]:.9f}, {want[1]:.9f}], gap {gap:.2e}",
+            f"got [{got[0]:.9f}, {got[1]:.9f}], gap {gap:.2e}",
         )
 
 
-def _expected_moments(Z, y):
-    Q = np.linalg.qr(Z)[0]
-    return Q.T @ (np.asarray(y).ravel() - np.mean(y))
+def _moments(block, y):
+    Q = np.linalg.qr(block)[0]
+    return Q.T @ (np.asarray(y).ravel() - np.mean(y)), Q.T @ np.ones(len(block))
 
 
 def leg_v(design, Z, GX, G):
-    print("(v) the intersection fits its baseline on Z alone and its DA branch on both blocks")
+    print("(v) the rows on the fitted attributes")
     X, y, M = design.X, design.y, design.k
-    z = Z[:, :1]
-    m, p = z.shape[1], G.reshape(len(G), -1).shape[1]
-    common = dict(gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=IV_BOUND, epsilon_iv_z=IV_BOUND, **COMMON)
-    model = IntersectedInstrumentalVariablePartialR2(**common)
-    model.fit(X=X, y=y, GX=GX, G=G, Z=z)
-    base, aug = model.baseline, model.augmented
-    check("(v) baseline read the observed instrument and no T", base._has_z and not base._has_t)
-    check(f"(v) baseline Z width {m}", base.Z_projector_R.shape == (m + M, M), f"{base.Z_projector_R.shape}")
-    check(
-        "(v) baseline moments are Q_Z' y, bit for bit",
-        np.array_equal(base.z_residual_base[:m], _expected_moments(z, y)),
+    m, p = Z.shape[1], G.shape[1]
+    models = models_at(design, Z, GX, G)
+    pi_iv, da, base, aug = (
+        models["PI+IV"],
+        models["DA+PI+IV"],
+        models["PI&DA+PI+IV baseline"],
+        models["PI&DA+PI+IV DA branch"],
     )
-    check("(v) DA branch read both blocks", aug._has_t and aug._has_z)
-    check(f"(v) DA branch T width {p}", aug.T_projector_R.shape == (p + M, M), f"{aug.T_projector_R.shape}")
-    check(f"(v) DA branch Z width {m}", aug.Z_projector_R.shape == (m + M, M), f"{aug.Z_projector_R.shape}")
-    check(
-        "(v) DA branch T moments are Q_G' y, bit for bit",
-        np.array_equal(aug.t_residual_base[:p], _expected_moments(G, y)),
-    )
-    check(
-        "(v) DA branch Z moments are Q_Z' y, bit for bit",
-        np.array_equal(aug.z_residual_base[:m], _expected_moments(z, y)),
-    )
-    stacked = _expected_moments(np.column_stack([G, z]), y)
-    pooled = np.array_equal(aug.t_residual_base[:p], stacked[:p]) and np.array_equal(
-        aug.z_residual_base[:m], stacked[p : p + m]
-    )
-    check("(v) the two blocks are separate: the DA branch's T rows are NOT the stacked QR", not pooled)
-    check(
-        "(v) DA branch design is GX, centred",
-        np.array_equal(aug.T_projector_R[:p], np.linalg.qr(G.reshape(len(G), -1))[0].T @ (GX - GX.mean(axis=0))),
-    )
+    tz = np.column_stack([G, Z])
+    for name, model, row, block in (
+        ("PI+IV", pi_iv, "z", Z),
+        ("DA+PI+IV", da, "tz", tz),
+        ("the intersection's baseline", base, "z", Z),
+        ("the intersection's DA branch", aug, "tz", tz),
+    ):
+        A, b, intercept, d = model.iv_terms_[row]
+        moments, ones = _moments(block, y)
+        width = block.shape[1]
+        check(
+            f"(v) {name}: rows ({row!r},) of width {width}",
+            model.rows == (row,) and d == width and A.shape == (width + M, M),
+            f"{model.rows} {A.shape}",
+        )
+        check(f"(v) {name}: moments Q'y bit for bit", np.array_equal(b[:width], moments) and not b[width:].any())
+        check(f"(v) {name}: intercept column Q'1", np.allclose(intercept[:width], ones, atol=1e-12))
+    t_only = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, **COMMON).fit(X=GX, y=y, T=G, X_pre=X)
+    check(f"(v) a T-only DA fit: rows ('t',) of width {p}", t_only.rows == ("t",) and t_only.iv_terms_["t"][3] == p)
+    check(f"(v) the IV_LAYOUT of a T and Z fit is the joint row, width {p} + {m}", solvers.IV_LAYOUT == ("tz",))
 
-    empty = IntersectedInstrumentalVariablePartialR2(**common)
-    empty.fit(X=X, y=y, GX=GX, G=G, Z=None)
-    zeros = IntersectedInstrumentalVariablePartialR2(**common)
-    zeros.fit(X=X, y=y, GX=GX, G=G, Z=np.zeros((design.n, 0)))
-    direct = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon_iv=IV_BOUND, **COMMON).fit(X=GX, y=y, T=G)
-    check("(v) Z=None: baseline reads no instrument", not empty.baseline._has_iv)
-    check(
-        "(v) Z=None: DA branch reads exactly G in its T block and no Z",
-        empty.augmented._has_t and not empty.augmented._has_z and empty.augmented.T_projector_R.shape == (p + M, M),
-    )
+    common = dict(gamma=GAMMA, epsilon=EPS_TOL, gamma_z=GAMMA_Z, **COMMON)
+    empty = IntersectedInstrumentalVariablePartialR2(**common).fit(X=X, y=y, GX=GX, G=G, Z=None)
+    zeros = IntersectedInstrumentalVariablePartialR2(**common).fit(X=X, y=y, GX=GX, G=G, Z=np.zeros((design.n, 0)))
+    direct = InstrumentalVariablePartialR2(**common).fit(X=GX, y=y, T=G, X_pre=X)
+    check("(v) Z=None: the baseline carries no row", not empty.baseline._has_iv and empty.baseline.rows == ())
+    check("(v) Z=None: the DA branch carries exactly G's ('t',) row", empty.augmented.rows == ("t",))
     for tag, other in (("zeros((n, 0))", zeros.augmented), ("a direct T=G fit", direct)):
-        same = np.array_equal(empty.augmented.T_projector_R, other.T_projector_R) and np.array_equal(
-            empty.augmented.t_residual_base, other.t_residual_base
+        same = all(
+            np.array_equal(left, right)
+            for left, right in zip(empty.augmented.iv_terms_["t"][:3], other.iv_terms_["t"][:3], strict=True)
         )
         check(f"(v) Z=None DA arrays array_equal to {tag}", same)
     check("(v) Z=None and zeros((n, 0)) baselines agree", not zeros.baseline._has_iv)
 
 
-def leg_vi(design, Z):
-    print("(vi) the two radii: gamma_z never touches the T one")
+def leg_vi(design, Z, GX, G):
+    print("(vi) the radii")
     X, y = design.X, design.y
+    raw = models_at(design, Z, GX, G)
+    pi_iv, da = raw["PI+IV"], raw["DA+PI+IV"]
+    want = float(np.sqrt(pi_iv.sigma_sq * GAMMA_Z))
+    got = pi_iv.iv_radius("z")
+    check("(vi) raw non-DA Z row: s sqrt(gamma_z)", abs(got - want) <= 1e-12 * want, f"{got:.9f} vs {want:.9f}")
+    want = EPS_TOL + da.scale * np.sqrt(GAMMA_Z / da.rho)
+    got = da.iv_radius("tz")
+    check("(vi) raw DA joint row: eps + sigma~ sqrt(gamma_z / rho)", abs(got - want) <= 1e-12 * want, f"{got:.9f}")
+    no_z = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, gamma_z=0.0, **COMMON)
+    no_z.fit(X=GX, y=y, T=G, X_pre=X)
+    got = no_z.iv_radius("t")
+    check("(vi) raw DA T row at gamma_z 0 is eps", abs(got - EPS_TOL) <= 1e-12, f"{got!r}")
+    rho_before = da.iv_radius("tz")
+    da.rho = 4.0 * da.rho
+    want = EPS_TOL + da.scale * np.sqrt(GAMMA_Z / da.rho)
+    check("(vi) the DA row is rho-aware", abs(da.iv_radius("tz") - want) <= 1e-12 * want and want < rho_before)
 
-    def radii(epsilon_iv, gamma_z, epsilon_iv_z=0.0, sigma_sq=1.0, rho=1.0):
-        model = InstrumentalVariablePartialR2(
-            gamma=GAMMA, epsilon_iv=epsilon_iv, epsilon_iv_z=epsilon_iv_z, gamma_z=gamma_z, rho=rho, **COMMON
+    padded = models_at(design, Z, GX, G, alpha=ALPHA)
+    for name in ("PI+IV", "PI+INV+IV", "DA+PI+IV", "PI&DA+PI+IV baseline", "PI&DA+PI+IV DA branch"):
+        model = padded[name]
+        (row,) = model.rows
+        d = model.iv_terms_[row][3]
+        budget = model.budget(GAMMA)
+        g = GAMMA_Z if not model._da_fit else (EPS_TOL / model.scale + np.sqrt(GAMMA_Z / model.rho)) ** 2
+        level = ALPHA / (GAMMA_N_ROWS * 1)
+        want = float(np.sqrt(model.sigma_sq * (1 + budget) * fsb(d, g / (1 + budget), model.n_eff, level)))
+        got = model.iv_radius(row)
+        population = float(np.sqrt(model.sigma_sq * g))
+        check(
+            f"(vi) padded {name}: the row formula at alpha / 3 on n_eff {model.n_eff}, d {d}, above raw",
+            abs(got - want) <= 1e-12 * want and got > population,
+            f"{got:.6f} (raw {population:.6f})",
         )
-        model.sigma_sq = sigma_sq
-        return model.t_bound, model.z_bound
-
-    for epsilon_iv in BUDGETS:
-        for gamma_z in (0.0, GAMMA_Z, 0.25):
-            t_radius, _ = radii(epsilon_iv, gamma_z)
-            check(
-                f"(vi) gamma_z {gamma_z!r}: t_bound == epsilon_iv {epsilon_iv!r} bit for bit",
-                t_radius == epsilon_iv,
-            )
-    joint = radii(EPS_TOL, GAMMA_Z, epsilon_iv_z=EPS_TOL)[1]
-    check(
-        "(vi) z_bound sqrt(0.03125^2 + 0.0625^2) = 0.069877 to 1e-9",
-        abs(joint - np.hypot(EPS_TOL, np.sqrt(GAMMA_Z))) < 1e-9 and abs(joint - RSS_BOUND) < 1e-6,
-        f"{joint:.9f}",
-    )
-    check("(vi) strictly below the plain sum 0.09375", joint < PLAIN_SUM, f"{joint:.6f} < {PLAIN_SUM}")
-    check(
-        "(vi) at epsilon_iv_z 0 the Z radius is exactly s sqrt(gamma_z)",
-        radii(EPS_TOL, GAMMA_Z)[1] == np.sqrt(GAMMA_Z),
-        f"{radii(EPS_TOL, GAMMA_Z)[1]!r}",
-    )
-    check(
-        "(vi) at gamma_z 0 the Z radius is exactly epsilon_iv_z",
-        radii(EPS_TOL, 0.0, epsilon_iv_z=IV_BOUND)[1] == IV_BOUND,
-        f"{radii(EPS_TOL, 0.0, epsilon_iv_z=IV_BOUND)[1]!r}",
-    )
-    scaled = radii(EPS_TOL, GAMMA_Z, epsilon_iv_z=EPS_TOL, sigma_sq=4.0, rho=4.0)[1]
-    check(
-        "(vi) s is the pre-DA sigma sqrt(sigma_sq / rho)",
-        abs(scaled - joint) < 1e-12,
-        f"{scaled:.9f} at sigma_sq 4, rho 4",
-    )
-
-    declared = InstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon_iv=EPS_TOL, epsilon_iv_z=0.0, gamma_z=GAMMA_Z, **COMMON
-    ).fit(X=X, y=y, Z=Z)
-    explicit = InstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon_iv=EPS_TOL, epsilon_iv_z=IV_BOUND, gamma_z=0.0, **COMMON
-    ).fit(X=X, y=y, Z=Z)
-    gap = float(np.abs(bounds(declared) - bounds(explicit)).max())
-    check(
-        "(vi) declared gamma_z 2^-8 at epsilon_iv 0 == explicit bound 0.0625, to 1e-6",
-        gap < INTERVAL_TOL,
-        f"gap {gap:.2e}",
-    )
+    da = padded["DA+PI+IV"]
+    before = da.iv_radius("tz")
+    bounds(da, epsilon=2 * EPS_TOL)
+    check("(vi) a DA row moves with a predict-time epsilon", da.iv_radius("tz") > before, f"{before:.6f}")
 
     # the line fires at the first solve, after rho is final, once per fitted model
     records = []
     marker = "IV: gamma_z="
     sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
     try:
-        logged = InstrumentalVariablePartialR2(
-            gamma=GAMMA, epsilon_iv=EPS_TOL, epsilon_iv_z=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
-        )
+        logged = InstrumentalVariablePartialR2(gamma=GAMMA, epsilon=EPS_TOL, gamma_z=GAMMA_Z, **COMMON)
         logged.fit(X=X, y=y, Z=Z)
         at_fit = sum(marker in r["message"] for r in records)
         bounds(logged)
@@ -403,72 +335,76 @@ def leg_vi(design, Z):
         logger.remove(sink)
     lines = [r for r in records if marker in r["message"]]
     check("(vi) nothing logged at fit, rho is not final there", at_fit == 0, f"{at_fit} lines")
-    check("(vi) a gamma_z model logs the two radii once over two solves", len(lines) == 1, f"{len(lines)} lines")
+    check("(vi) a fitted IV model logs its rows once over two solves", len(lines) == 1, f"{len(lines)} lines")
     message = lines[0]["message"] if lines else ""
     check("(vi) at INFO, not WARNING", bool(lines) and all(r["level"].name == "INFO" for r in lines), message)
-    printed = float(message.split("r_Z=")[1].split(",")[0]) if lines else np.nan
-    check("(vi) the line names r_Z", abs(printed - joint) < 1e-6, f"printed {printed!r} vs {joint:.9f}")
-    named = (
-        f"gamma_z={GAMMA_Z:g}" in message
-        and "s=" in message
-        and "allowance" in message
-        and f"r_T={EPS_TOL:.6g}" in message
+    printed = float(message.split("r_Z=")[1].split(" ")[0].rstrip(".")) if "r_Z=" in message else np.nan
+    check(
+        "(vi) the line names gamma_z and the Z row's radius",
+        f"gamma_z={GAMMA_Z:g}" in message and abs(printed - logged.iv_radius("z")) < 1e-5,
+        message,
     )
-    check("(vi) the line names gamma_z, s, the allowance and both radii", named, message)
+
+
+def reference_bounds(model, X, y, blocks, queries):
+    """The program written out from the raw arrays: max / min x_c'h + ybar over the
+    Lem. 2 ball || X_c (h - h_erm) || <= sqrt(N) r and, per IV row,
+    || (Q'(y_c - X_c h), sqrt(j) h) || <= sqrt(N) r_row, j = 1e-6 mean |Q'X_c|,
+    at the class's radii (whose formula (vi) pins). Padded, the mean row's delta
+    joins the objective, the ball (|| (X_c (h - h_erm), sqrt(N) delta) ||) and every
+    IV residual (less delta Q'1), with |delta| <= the mean radius."""
+    N, M = X.shape
+    mu, ybar = X.mean(axis=0), float(np.mean(y))
+    Xc, yc = X - mu, np.asarray(y).ravel() - ybar
+    h_erm = np.linalg.lstsq(Xc, yc, rcond=None)[0]
+    h, delta = cp.Variable(M), cp.Variable()
+    padded = model.gamma_n_alpha > 0.0
+    offset = Xc @ (h - h_erm)
+    ball = cp.hstack([offset, np.sqrt(N) * cp.reshape(delta, (1,), order="F")]) if padded else offset
+    constraints = [cp.norm(ball, 2) <= np.sqrt(N) * model.ball_radius(GAMMA)]
+    constraints += [cp.abs(delta) <= model.mean_radius(GAMMA)] if padded else [delta == 0]
+    for row in model.rows:
+        Q = np.linalg.qr(blocks[row])[0]
+        A = Q.T @ Xc
+        jitter = 1e-6 * np.mean(np.abs(A))
+        jitter = 1e-6 if jitter < 1e-9 else jitter
+        residual = cp.hstack([Q.T @ yc - A @ h - (Q.T @ np.ones(N)) * delta, -np.sqrt(jitter) * h])
+        constraints.append(cp.norm(residual, 2) <= np.sqrt(N) * model.iv_radius(row, GAMMA))
+    out = []
+    for x in queries - mu:
+        lo = cp.Problem(cp.Minimize(x @ h + delta), constraints)
+        lo.solve(solver=cp.CLARABEL)
+        hi = cp.Problem(cp.Maximize(x @ h + delta), constraints)
+        hi.solve(solver=cp.CLARABEL)
+        out.append((lo.value + ybar, hi.value + ybar))
+    return np.asarray(out)
 
 
 def leg_vii(design, Z, GX, G):
-    print("(vii) the intersection budgets per branch: both radii travel, each block uses its own")
+    print("(vii) solver equivalence: the class against the program written out, and across backends")
     X, y = design.X, design.y
-    model = IntersectedInstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
-    )
-    model.fit(X=X, y=y, GX=GX, G=G, Z=Z)
-    base, aug = model.baseline, model.augmented
-    check("(vii) the intersection keeps its own epsilon_iv 2^-5", model.epsilon_iv == EPS_TOL)
-    check("(vii) baseline branch carries no T block", not base._has_t, repr(base._has_t))
-    check("(vii) DA branch T radius is 2^-5", aug.t_bound == EPS_TOL, repr(aug.t_bound))
-    check("(vii) both branches carry gamma_z 2^-8", base.gamma_z == GAMMA_Z and aug.gamma_z == GAMMA_Z)
-    check(
-        "(vii) baseline Z radius is r_Z = 0.0625 to 1e-6 (s = 1)",
-        abs(base.z_bound - IV_BOUND) < 1e-6,
-        f"{base.z_bound:.9f}",
-    )
-    check(
-        "(vii) DA branch Z radius is r_Z at its own s, to 1e-6",
-        abs(aug.z_bound - float(np.sqrt(aug.sigma_sq / aug.rho * GAMMA_Z)) - aug._z_allowance) < 1e-6,
-        f"{aug.z_bound:.9f}",
-    )
-    check("(vii) DA branch rho set after fit", aug.rho == model.rho and aug.rho > 1.0, f"{aug.rho:.6f}")
-    # the oracle case: no declared radius, so both Z constraints read the measured
-    # piece and the DA branch's T radius is still its own epsilon_iv
-    oracle_case = IntersectedInstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, epsilon_iv_z=ORACLE_Z, gamma_z=0.0, **COMMON
-    )
-    oracle_case.fit(X=X, y=y, GX=GX, G=G, Z=Z)
-    base, aug = oracle_case.baseline, oracle_case.augmented
-    check("(vii) oracle case: baseline Z radius is epsilon_iv_z 0.05", base.z_bound == ORACLE_Z, f"{base.z_bound!r}")
-    check("(vii) oracle case: DA branch Z radius is the same 0.05", aug.z_bound == ORACLE_Z, f"{aug.z_bound!r}")
-    check(
-        "(vii) oracle case: epsilon_iv_z never reaches a T radius (both read 2^-5)",
-        aug.t_bound == EPS_TOL and base.t_bound == EPS_TOL,
-        f"{aug.t_bound!r}",
-    )
-    bounds(oracle_case)
-    check(
-        "(vii) oracle case: both branches solve OK on every coefficient query",
-        np.all(np.asarray(base.query_status) == SolveStatus.OK)
-        and np.all(np.asarray(aug.query_status) == SolveStatus.OK),
-    )
-    empty = IntersectedInstrumentalVariablePartialR2(
-        gamma=GAMMA, epsilon=EPS_TOL, epsilon_iv=EPS_TOL, gamma_z=GAMMA_Z, **COMMON
-    )
-    empty.fit(X=X, y=y, GX=GX, G=G, Z=None)
-    check("(vii) empty Z: baseline has no IV constraint at all", not empty.baseline._has_iv)
-    check(
-        "(vii) empty Z: the DA branch keeps its T constraint at epsilon_iv",
-        empty.augmented._has_t and not empty.augmented._has_z and empty.augmented.t_bound == EPS_TOL,
-    )
+    queries = np.eye(design.k)
+    for alpha in (0.0, ALPHA):
+        models = models_at(design, Z, GX, G, alpha=alpha)
+        for name, design_x, blocks in (
+            ("PI+IV", X, {"z": Z}),
+            ("DA+PI+IV", GX, {"tz": np.column_stack([G, Z])}),
+            ("PI&DA+PI+IV baseline", X, {"z": Z}),
+            ("PI&DA+PI+IV DA branch", GX, {"tz": np.column_stack([G, Z])}),
+        ):
+            model = models[name]
+            got = bounds(model)
+            want = reference_bounds(model, design_x, y, blocks, queries)
+            width = float(np.max(want[:, 1] - want[:, 0]))
+            gap = float(np.max(np.abs(got - want))) / width
+            check(f"(vii) alpha {alpha:g} {name}: class == the program written out", gap < SOLVER_TOL, f"{gap:.1e}")
+            per_backend = []
+            for backend in ((cp.CLARABEL, {}), (cp.ECOS, {})):
+                model.backend = backend
+                per_backend.append(bounds(model))
+            model.backend = None
+            gap = float(np.max(np.abs(per_backend[0] - per_backend[1]))) / width
+            check(f"(vii) alpha {alpha:g} {name}: CLARABEL == ECOS", gap < SOLVER_TOL, f"{gap:.1e}")
 
 
 if __name__ == "__main__":
@@ -482,13 +418,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(f"tree: {solvers.__file__}")
     design, Z, GX, G = design_and_draw(args.seed)
-    leg_i(design)
-    leg_ii(design, GX)
-    leg_iii(design, Z)
-    leg_iv(design, Z, GX, G)
-    leg_v(design, Z, GX, G)
-    leg_vi(design, Z)
-    leg_vii(design, Z, GX, G)
+    for tag, leg in (
+        ("(i)", lambda: leg_i(design)),
+        ("(ii)", lambda: leg_ii(design, GX)),
+        ("(iii)", lambda: leg_iii(design, Z)),
+        ("(iv)", lambda: leg_iv(design, Z, GX, G)),
+        ("(v)", lambda: leg_v(design, Z, GX, G)),
+        ("(vi)", lambda: leg_vi(design, Z, GX, G)),
+        ("(vii)", lambda: leg_vii(design, Z, GX, G)),
+    ):
+        try:
+            leg()
+        except Exception as error:  # a raise is a FAIL line, and the later legs still report
+            check(f"{tag} ran without raising", False, f"{type(error).__name__}: {error}")
     if not args.skip_digest:
         leg_d(args.reference)
     else:

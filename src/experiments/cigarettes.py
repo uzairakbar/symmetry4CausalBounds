@@ -498,7 +498,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     raw_gamma=False,
                     # a configured set declares its budget (SS2.6): the runner
                     # hands the solver r_T alone and never raises it
-                    declared_iv=bool(outer.iv_columns),
                     **kwargs,
                 )
 
@@ -508,13 +507,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         self,
         gamma: float,
         epsilon: float,
-        epsilon_iv=None,
         n_jobs=None,
         rho=1.0,
-        epsilon_iv_z=0.0,
-        iv_recalibrate=False,
-        leak_t=0.0,
-        leak_tz=0.0,
     ):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
         toggle -- perf needs serial models to time methods, not the harness."""
@@ -523,11 +517,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             self.kwargs["methods"],
             gamma=gamma,
             epsilon=epsilon,
-            epsilon_iv=epsilon_iv,
-            epsilon_iv_z=epsilon_iv_z,
-            iv_recalibrate=iv_recalibrate,
-            leak_t=leak_t,
-            leak_tz=leak_tz,
             gamma_z=self.gamma_z,
             rho=rho,
             **toggles,
@@ -560,7 +549,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
                     default_gamma=QUERY_GAMMA[outer.spec],
                     default_epsilon=outer._epsilon_budget(CIGARETTE_CONFIG.epsilon, quantile=quantile),
                     experiment_name=EXPERIMENT_NAME,
-                    declared_iv=bool(outer.iv_columns),
                     **kwargs,
                 )
 
@@ -735,11 +723,8 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             )
 
             # F2. The x-axis is the DECLARED leakiness budget gamma_z. A DA+
-            # method solves on the augmented design, so the radius it actually
-            # carries is s sqrt(gamma_z) plus its DA-side allowance
-            # (`_z_allowance`, SS2.6), a fit-time constant: those rows sit a little
-            # to the right of their x-coordinate, and `_z_allowance` is logged at
-            # the first solve
+            # method reads it through gamma~_z(eps) = (eps / sigma~ + sqrt(gamma_z /
+            # rho))^2, so its rows sit at a larger leak than their x-coordinate
             results = {name: np.full((points, 1, 2), np.nan) for name in models}
             for name, model in models.items():
                 if not hasattr(model, "gamma_z"):

@@ -162,7 +162,6 @@ class BaseExperimentRunner(ABC):
         pad: bool = False,
         clipy: bool = True,
         mean_match: bool = True,
-        declared_iv: bool = False,
         gamma_n_alpha: float = 0.0,
         unit_cap: int | None = None,
         n_jobs: int = 1,
@@ -185,13 +184,6 @@ class BaseExperimentRunner(ABC):
         self.pad = pad
         self.clipy = clipy
         self.mean_match = mean_match
-        # the IV budget rule of SS2.6, set per dataset by the orchestrator like
-        # `raw_gamma` and `eps_tol` are. False: oracle, the T piece from
-        # `eps_iv_star` and the Z piece from `eps_iv_z_star`, each the budget of its own
-        # constraint. True: declared, a non-empty `iv:` asserting near-perfect
-        # instruments; the Z radius is then exactly s sqrt(gamma_z) and the T
-        # budget is logged against its floor and never raised (decision 8)
-        self.declared_iv = bool(declared_iv)
         # the finite-sample pads the models solve with (`PartialR2.ball_budget`),
         # explicit for the floor reports' sake as the toggles above: 0.0 is raw
         self.gamma_n_alpha = float(gamma_n_alpha)
@@ -321,8 +313,8 @@ class ParamSweepRunner(BaseExperimentRunner):
         self.experiment_name = experiment_name
         # perf collapses the grid to a single default operating point
         self.param_grid_override = param_grid_override
-        # one cell's budgets, ((j, i), data, budgets): the floor reports inside
-        # `fit_epsilon` / `fit_epsilon_iv` fire once per cell as they always have
+        # one cell's budgets, ((j, i), data, budgets): the floor report inside
+        # `fit_epsilon` fires once per cell as it always has
         self._budgets = None
         self.setup_sems_and_das()
 
@@ -401,7 +393,7 @@ class ParamSweepRunner(BaseExperimentRunner):
             return float(fallback)
         return float(value)
 
-    def _floor_report(self, budget, data, kind: str, experiment_index: int, label: str, declared: bool = False) -> None:
+    def _floor_report(self, budget, data, kind: str, experiment_index: int, label: str) -> None:
         """Log a budget against the constraint's own attainable floor; never change it.
 
         A budget under the floor (`budget^2 < floor`) is no bound at all: `_prepare`
@@ -412,12 +404,10 @@ class ParamSweepRunner(BaseExperimentRunner):
         oracle budget lands under the floor (small n, the m grid, a few omega
         knobs): PLAN v16 SS2.2.
 
-        The IV floor is the T CONSTRAINT'S OWN, measured with the translation
-        amounts alone, as if the observed instrument was never there (SS2.6). A T
-        and a Z constraint can still be jointly infeasible with both floors
-        cleared; that too reads INFEASIBLE, and is not logged here.
-        `declared` (a non-empty `iv:`): the floor is logged beside the budget either
-        way (decision 8). On the oracle path only a budget BELOW the floor is logged.
+        `kind` 'iv' measures the T row's own floor, with the translation amounts
+        alone, on the DA ball; IV rows can still be jointly infeasible with every
+        floor cleared, and that too reads INFEASIBLE, unlogged. Only a budget BELOW
+        the floor is logged.
 
         No `data` means no measurement: that is the epsilon sweep's per-step call,
         where the budget is an ASSUMPTION the figure exists to test (decision 16).
@@ -451,72 +441,12 @@ class ParamSweepRunner(BaseExperimentRunner):
             logger.warning(f"{label}: constraint floor unavailable ({error}); budget left at the oracle value.")
             return
 
-        if declared:
-            side = "above" if budget**2 >= floor else "BELOW"
-            logger.info(
-                f"{label}: declared path, r_T {budget:.6g} (r_T^2 {budget**2:.4g}) is {side} the T "
-                f"constraint's own floor {floor:.4g}; left as declared, never raised. The observed "
-                "instrument has its own constraint at r_Z and its own budget."
-            )
-            return
-
         if budget**2 < floor:
             logger.info(
                 f"{label}: oracle {budget:.6g} is BELOW the constraint's own floor (budget^2 "
                 f"{budget**2:.4g} < floor {floor:.4g}); left as is, every query will read "
                 "INFEASIBLE, never raised."
             )
-
-    def fit_epsilon_iv(
-        self, experiment_index: int, step_index: int = 0, data=None, ratio: float = 1.0, radius: float | None = None
-    ) -> float | None:
-        """The ASSUMED T-as-IV budget r_T: `ratio` times the oracle T piece
-        `eps_iv_star`, plus EPS_TOL. The observed instrument has its own constraint
-        and its own budget (`fit_epsilon_iv_z`), so nothing is pooled here.
-
-        `radius` is the T radius the models actually solve at when it is not this
-        budget: the sweeps re-calibrate it (App. D, `t_bound` under
-        `iv_recalibrate`) to hypot(eps, leak_t) plus the declared gamma_z slack the
-        model adds, and `fit_budgets` passes the former, so the floor report names
-        it. The budget is still returned; a re-calibrated model does not read it.
-
-        `ratio` is 1 at FIT, where `data` is present and the budget is reported
-        against its floor (`_floor_report`). The epsilon sweep passes its grid
-        ratio at PREDICT, with no data, exactly as it passes `r eps* + EPS_TOL`
-        for the swept epsilon. Neither path raises the budget, so fit time and
-        predict time agree at every ratio: a budget under the floor reads
-        INFEASIBLE wherever it is used.
-        """
-        budget = getattr(self.get_oracle(experiment_index), "eps_iv_star", None)
-        if budget is None or not np.isfinite(budget):
-            return None
-        budget = float(ratio) * float(budget) + EPS_TOL
-        self._floor_report(
-            budget if radius is None else radius, data, "iv", experiment_index, "epsilon_iv", declared=self.declared_iv
-        )
-        return budget
-
-    def fit_epsilon_iv_z(self, experiment_index: int, data=None) -> float:
-        """The observed instrument's own budget, one number for every Z constraint
-        (SS2.6): 0.0 under an empty instrument (inert) and on the declared path (the
-        radius is then exactly r_Z = s sqrt(gamma_z)); on the oracle path the measured
-        piece off the knife edge, `eps_iv_z_star + EPS_TOL`, never floor-reported.
-        Every shipped sweep overrides it with the leak alone
-        (`GenericParamSweep.fit_epsilon_iv_z`), which is what `fit_budgets`'s
-        `iv_recalibrate` expects: the pooled one here counts the DA side twice there."""
-        Z = getattr(data, "Z", None)
-        if self.declared_iv or Z is None or np.shape(Z)[1] == 0:
-            return 0.0
-        z_piece = getattr(self.get_oracle(experiment_index), "eps_iv_z_star", None)
-        if z_piece is None or not np.isfinite(z_piece):
-            return 0.0
-        return float(z_piece) + EPS_TOL
-
-    def fit_iv_leaks(self, experiment_index: int, data=None) -> dict[str, float]:
-        """The measured noise moments on span(T) and span(T, Z) the re-calibrated
-        radii read (`leak_t`, `leak_tz`); 0.0 here, where no oracle h_* is at hand.
-        `GenericParamSweep` measures them."""
-        return {"leak_t": 0.0, "leak_tz": 0.0}
 
     def method_kwargs(self, experiment_index: int) -> dict[str, Any]:
         """Extra builder kwargs. Override when methods need per-experiment state
@@ -529,22 +459,10 @@ class ParamSweepRunner(BaseExperimentRunner):
         seen: the second call returns the first's budgets."""
         key = (experiment_index, step_index)
         if self._budgets is None or self._budgets[0] != key or self._budgets[1] is not data:
-            gamma = self.fit_gamma(experiment_index)
-            epsilon = self.fit_epsilon(experiment_index, step_index, data)
-            leaks = self.fit_iv_leaks(experiment_index, data)
-            # the T radius the models solve at, bar the declared gamma_z slack the
-            # model adds from its own sigma~ (`InstrumentalVariablePartialR2._recalibrated`)
-            radius = float(np.hypot(max(epsilon, 0.0), leaks["leak_t"]))
             budgets = dict(
-                gamma=gamma,
-                epsilon=epsilon,
-                epsilon_iv=self.fit_epsilon_iv(experiment_index, step_index, data, radius=radius),
-                epsilon_iv_z=self.fit_epsilon_iv_z(experiment_index, data),
+                gamma=self.fit_gamma(experiment_index),
+                epsilon=self.fit_epsilon(experiment_index, step_index, data),
                 rho=self.fit_rho(experiment_index, data),
-                # App. D: the sweeps re-calibrate the IV radii (`t_bound`, `z_bound`,
-                # `tz_bound`) with the measured leaks, no tolerance
-                iv_recalibrate=True,
-                **leaks,
                 **self.method_kwargs(experiment_index),
             )
             self._budgets = (key, data, budgets)
@@ -691,20 +609,12 @@ class ExperimentOrchestrator(ABC):
         self,
         gamma: float,
         epsilon: float,
-        epsilon_iv: float | None = None,
         n_jobs: int | None = None,
         rho: float = 1.0,
-        epsilon_iv_z: float = 0.0,
-        iv_recalibrate: bool = False,
-        leak_t: float = 0.0,
-        leak_tz: float = 0.0,
     ) -> dict[str, Any]:
         """Build methods at explicit budgets (per-experiment ParamPolicy); `rho`
-        is the step's information-loss factor for the DA+ balls, `epsilon_iv` the
-        DA+ methods' T-side IV term and `epsilon_iv_z` the non-DA +IV methods' own.
-        `iv_recalibrate` is App. D's re-calibration of the IV radii, which only the
-        sweeps (`fit_budgets`) switch on, with the measured leaks `leak_t` and
-        `leak_tz` (`fit_iv_leaks`)."""
+        is the step's information-loss factor for the DA+ balls. The IV rows read
+        `epsilon` and the orchestrator's declared `gamma_z`."""
         pass
 
     @property
