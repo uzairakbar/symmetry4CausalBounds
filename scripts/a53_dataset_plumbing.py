@@ -87,6 +87,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.data_augmentors.optical_device import P  # noqa: E402
 from src.experiments.base import SweepData  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
     CIGARETTE_CONFIG,
@@ -205,11 +206,19 @@ def configured():
     return toggles, draw, str(opt.get("augmentation", SHIPPED_CHAIN))
 
 
+def shipped_p():
+    """config.yaml's optical rotation / flip probability, the DA's `P` when it names none."""
+    with open(os.path.join(REPO, "config.yaml")) as handle:
+        return float(((yaml.safe_load(handle) or {}).get("optical_device") or {}).get("augmentation_p", P))
+
+
 def build(experiment, draw, chain, seed, **toggles):
     common = dict(seed=seed, sweep_samples=SWEEP_SAMPLES, hyperparameters={}, n_jobs=N_JOBS, methods=METHODS, **toggles)
     if experiment == "simulation":
         return SimulationOrchestrator(kernel_dim=0, n_experiments=1, **draw, **common)
-    return OpticalOrchestrator(n_samples=OPTICAL_POOL, augmentation=chain, n_experiments=1, **common)
+    return OpticalOrchestrator(
+        n_samples=OPTICAL_POOL, augmentation=chain, augmentation_p=shipped_p(), n_experiments=1, **common
+    )
 
 
 # =============================================================================

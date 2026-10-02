@@ -14,7 +14,7 @@ rule. Legs:
         lands on it: exactly on sim, whose oracle reads the tuner's draw; on
         optical at the RECORDED pooled value, since the tuner solves on one draw
         and the pooled oracle averages eight, and at 1 R the noise is weak enough
-        that the eight read 8% under the one (at the old 5.0 it was 2%). Catches: a
+        that the eight read 4% under the one (8% under the pixel permutation, 2% at the old 5.0). Catches: a
         multiplier that no longer flows, a target off the oracle, a target the
         tuner cannot reach. Misses: a sweep that never pads with it (a38/a29).
   (ii)  mechanism: the sim target IS the post-DA ball's radius in outcome units,
@@ -98,6 +98,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.data_augmentors.optical_device import P  # noqa: E402
 from src.experiments import generic_runner, optical_device  # noqa: E402
 from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
@@ -125,10 +126,12 @@ COVERAGE_FLOOR = 0.7
 EPSILON_RADII = 1.0
 # RECORDED at seed 42: the confounding radius sigma sqrt(gamma*) of the sim and
 # optical robustness SEMs (the rule's targets), and the optical pooled oracle eps*
-# the tuner's one-draw 0.6345 reads as
+# the tuner's one-draw 0.6345 reads as (re-recorded under the sweeps' chain
+# `rotation > hflip > vflip > translate` at p 0.25; 0.5816 under the pixel
+# permutation at p 0.5)
 SIM_RADIUS = 0.7106
 OPTICAL_RADIUS = 0.6345
-OPTICAL_POOLED_EPS = 0.5816
+OPTICAL_POOLED_EPS = 0.6110
 RADIUS_ATOL = 1e-3
 # RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 0.5 .. 2 in 5 steps): the
 # experiments each DA+ line is feasible on per step, and its one dip (coverage,
@@ -180,13 +183,24 @@ def configured():
     return toggles, draw, str(opt.get("augmentation", SHIPPED_CHAIN))
 
 
+def shipped_p():
+    """config.yaml's optical rotation / flip probability, the DA's `P` when it names none."""
+    with open(os.path.join(REPO, "config.yaml")) as handle:
+        return float(((yaml.safe_load(handle) or {}).get("optical_device") or {}).get("augmentation_p", P))
+
+
 def build(experiment, draw, chain, seed, **toggles):
     set_seed(seed)
     common = dict(seed=seed, sweep_samples=N_STEPS, hyperparameters={}, n_jobs=N_JOBS, **toggles)
     if experiment == "simulation":
         return SimulationOrchestrator(kernel_dim=0, n_experiments=N_EXPERIMENTS, methods=METHODS, **draw, **common)
     return OpticalOrchestrator(
-        n_samples=1000, augmentation=chain, n_experiments=N_EXPERIMENTS_OPTICAL, methods=METHODS_OPTICAL, **common
+        n_samples=1000,
+        augmentation=chain,
+        augmentation_p=shipped_p(),
+        n_experiments=N_EXPERIMENTS_OPTICAL,
+        methods=METHODS_OPTICAL,
+        **common,
     )
 
 
@@ -249,7 +263,7 @@ def leg_i(runners):
         strength = runner.das[0].strength
         # the tuner solves on one frozen draw; a SEM with a fixed pool (optical)
         # then reports the oracle pooled over ORACLE_POOL_DRAWS draws, which at 1 R
-        # reads 8% under the one draw, so the pooled value is RECORDED
+        # reads 4% under the one draw, so the pooled value is RECORDED
         pooled = getattr(sem, "pool", None) is not None
         reference = OPTICAL_POOLED_EPS if pooled else target
         tolerance = POOLED_ORACLE_RTOL if pooled else 1e-6

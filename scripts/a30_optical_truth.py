@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sklearn.preprocessing import PolynomialFeatures  # noqa: E402
 
-from src.data_augmentors.optical_device import ALL_AUGMENTATIONS  # noqa: E402
+from src.data_augmentors.optical_device import ALL_AUGMENTATIONS, P  # noqa: E402
 from src.data_augmentors.optical_device import OpticalDeviceDA as DA  # noqa: E402
 from src.experiments.configs import EPS_TOL, OPTICAL_CONFIG  # noqa: E402
 from src.experiments.optical_device import (  # noqa: E402
@@ -148,6 +148,24 @@ def epsilon_coefficient(sem, Phi):
     return float(np.dot(residual, sem.C.ravel()) / np.dot(sem.C.ravel(), sem.C.ravel()))
 
 
+def optical_block():
+    """config.yaml's optical block, {} without one."""
+    import yaml
+
+    try:
+        with open("config.yaml") as handle:
+            return (yaml.safe_load(handle) or {}).get("optical_device") or {}
+    except OSError:
+        return {}
+
+
+def shipped_p(augmentation):
+    """The rotation / flip probability `augmentation` runs at: config.yaml's
+    `augmentation_p` for the chain its optical block names, the DA's `P` else."""
+    block = optical_block()
+    return float(block.get("augmentation_p", P)) if block.get("augmentation") == augmentation else P
+
+
 def shipped_augmentations():
     """Every augmentation this repo can actually run optical under: whatever
     config.yaml names right now, plus the alternatives sitting commented beside it
@@ -169,6 +187,11 @@ def shipped_augmentations():
                         candidates.append(named)
     except OSError:
         pass
+    # the optical block's own chain, whatever it names (translate sits outside the
+    # registry's "all", and the simulation block names a bare `translate` too)
+    named = optical_block().get("augmentation")
+    if named and named not in candidates:
+        candidates.append(named)
     return candidates
 
 
@@ -177,7 +200,9 @@ def a30_budget():
     the repo can run -- and the CONFIGURED value is the one gated, not a default."""
     budgets = {}
     for augmentation in shipped_augmentations():
-        orchestrator = OpticalOrchestrator(augmentation, methods=["PI"], n_jobs=1)
+        orchestrator = OpticalOrchestrator(
+            augmentation, augmentation_p=shipped_p(augmentation), methods=["PI"], n_jobs=1
+        )
         eps_star = orchestrator.measured_epsilon_star()
         eps_pad = orchestrator.measured_epsilon_pad()
 

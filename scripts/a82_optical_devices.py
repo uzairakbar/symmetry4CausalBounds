@@ -60,6 +60,7 @@ from loguru import logger
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
+from src.data_augmentors.optical_device import P  # noqa: E402
 from src.experiments import generic_runner, optical_device  # noqa: E402
 from src.experiments.cigarettes import CigaretteOrchestrator  # noqa: E402
 from src.experiments.configs import (  # noqa: E402
@@ -117,6 +118,11 @@ def chain():
     return str((shipped().get("optical_device") or {}).get("augmentation", SHIPPED_CHAIN))
 
 
+def augmentation_p():
+    """config.yaml's optical rotation / flip probability, the DA's `P` when it names none."""
+    return float((shipped().get("optical_device") or {}).get("augmentation_p", P))
+
+
 def orchestrator(n_experiments, sweep_samples=2):
     set_seed(SEED)
     return OpticalOrchestrator(
@@ -128,6 +134,7 @@ def orchestrator(n_experiments, sweep_samples=2):
         hyperparameters={},
         n_jobs=N_JOBS,
         augmentation=chain(),
+        augmentation_p=augmentation_p(),
     )
 
 
