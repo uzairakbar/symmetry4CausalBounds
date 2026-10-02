@@ -269,14 +269,21 @@ def _label_major_ticks_only(*axes):
 
 
 def fix_x_ticks(ax, ticks) -> None:
-    """Labelled x majors at exactly `ticks` (plain numbers in math mode) and no
-    minors; a no-op for an empty `ticks`. AFTER the last set_xscale, which
-    reinstalls the scale's own locators. The n sweep: its percentage range's two
-    decade ends, labelled plainly and without the log scale's minors."""
+    """Labelled x majors at exactly `ticks` and no minors; a no-op for an empty
+    `ticks`. AFTER the last set_xscale, which reinstalls the scale's own locators.
+    Ticks that are all exact powers of two (the robustness ratios) read 2^k, any
+    others plain numbers in math mode (the n sweep's two decade ends)."""
     if not len(ticks):
         return
-    ax.xaxis.set_major_locator(FixedLocator([float(t) for t in ticks]))
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"${value:g}$"))
+    ticks = [float(t) for t in ticks]
+    octaves = np.log2(ticks)
+    powers_of_two = bool(np.all(octaves == np.round(octaves)))
+
+    def label(value, _):
+        return f"$2^{{{round(np.log2(value))}}}$" if powers_of_two else f"${value:g}$"
+
+    ax.xaxis.set_major_locator(FixedLocator(ticks))
+    ax.xaxis.set_major_formatter(FuncFormatter(label))
     ax.xaxis.set_minor_locator(NullLocator())
 
 

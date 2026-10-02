@@ -419,9 +419,9 @@ def _RATIO_GRID(dataset, n):
 # exclude h_* and queries read INFEASIBLE; above 1 it runs far enough for the
 # over-budget half to show the bounds widening with the budget.
 EPSILON_RATIO_OCTAVES: float = 4.0
-# the robustness axis' labelled majors: every second octave, ends included, as
-# plain numbers (`fix_x_ticks`); a log axis over 2^-4 .. 2^4 would otherwise
-# label the decades 0.1, 1, 10
+# the robustness axis' labelled majors: every second octave, ends included, read
+# 2^k (`fix_x_ticks`); a log axis over 2^-4 .. 2^4 would otherwise label the
+# decades 0.1, 1, 10
 EPSILON_RATIO_TICKS: tuple[float, ...] = (2.0**-4, 2.0**-2, 1.0, 2.0**2, 2.0**4)
 
 
