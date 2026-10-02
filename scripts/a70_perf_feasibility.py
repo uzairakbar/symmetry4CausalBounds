@@ -26,9 +26,9 @@ Legs:
      feasibility. `epsilon_feasibility_results.pkl` is (grid points, n_queries) per
      method with values in [0, 1]; a method reads 0 at every step where all its
      runs fail, the methods that do are the RECORDED ones and only under r = 1
-     -- none since every DA T row reads gamma~_z(r eps*) (App. D); before it the
-     T family (DA+PI+IV(T) and its intersection), whose oracle T budget fell
-     under its floor, and before the q0.95 eps* PI+INV -- and PI+INV reads 1 at
+     -- on the four-octave grid PI+INV and the T family (DA+PI+IV(T) and its
+     intersection) at r = 2^-4 and 2^-2, where the budget r eps* falls under
+     the defect; none on the one-octave grid before it -- and PI+INV reads 1 at
      r = 1; the per-dataset
      figure, as `_run_perf`
      draws it, is on `CLAMP_YLIM` and linear; the seed_var terms, failures and
@@ -111,8 +111,10 @@ PERF_METHODS = ["PI", "PI+INV", "DA+PI", "DA+PI+IV(T)", "PI&DA+PI+IV(T)"]
 # RECORDED 2026-09-29 on the q0.95 sweep eps* and the 1 R robustness target: the
 # methods refuted at every run of some step of leg 3 (PI+INV before, at two steps).
 # Re-recorded 2026-09-29 under the App. D T radius (gamma~_z(r eps*), which the perf
-# budgets carry): none (the T family was, at r < 1)
-REFUTED_RECORDED = []
+# budgets carry): none (the T family was, at r < 1). Re-recorded 2026-10-02 on the
+# four-octave grid (r 2^-4 .. 2^4 in 5 steps): PI+INV and the T family, at r = 2^-4
+# and 2^-2 only
+REFUTED_RECORDED = ["DA+PI+IV(T)", "PI&DA+PI+IV(T)", "PI+INV"]
 YLABEL = "feasible rate (over backends)"
 FAIL = []
 
@@ -319,9 +321,9 @@ def leg_3_4():
             for k in PERF_METHODS
         ),
     )
-    # which method the data refute moved with the q0.95 sweep eps*: PI+INV's
-    # budget r eps* now clears the RMS defect down to r = 0.5; the T family's rows
-    # read gamma~_z(r eps*) (RECORDED)
+    # which method the data refute: on the four-octave grid PI+INV's budget r eps*
+    # and the T family's gamma~_z(r eps*) fall under their floors at r = 2^-4 and
+    # 2^-2 (RECORDED)
     refuted = {k: failures[k] == n_runs * n_queries for k in PERF_METHODS}
     mid = int(np.argmin(np.abs(np.log(x))))
     for k, steps in refuted.items():

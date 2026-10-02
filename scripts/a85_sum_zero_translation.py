@@ -92,8 +92,8 @@ SLOPE_ATOL = 0.05
 RATE_ATOL = 0.03  # ~ 3.5 binomial sd on the 1000-row pool at p 0.5
 PARAMS = ("gamma", "omega", "epsilon")
 # leg (v)'s own digest, recorded on DIGEST_NODE
-DIGEST = "e49b7e59a7c4e0d413ac9f79b1fd84153cad0e5d"
-DIGEST_NODE = "atl1-1-01-005-11-0"
+DIGEST = "6af8ac0744ce546775176f8481b8c80c55a395ba"
+DIGEST_NODE = "atl1-1-01-002-36-0"
 FAIL = []
 
 

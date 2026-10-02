@@ -412,14 +412,17 @@ def _RATIO_GRID(dataset, n):
     return np.geomspace(2**-6, 2**1, num=n)
 
 
-# how far either side of the oracle budget the ROBUSTNESS grid runs, in octaves.
-# 1 puts four under-budget points at 0.500, 0.595, 0.707, 0.841 and four over at
-# 1.189, 1.414, 1.682, 2.000. Below 1 that reaches the refutation cliff, where a
-# misstated budget excludes h_* and every query reads INFEASIBLE, without spending
-# most of the grid there; above 1 it reaches far enough for the over-budget half
-# to be visibly monotone. At two octaves four of nine points sit in the
-# all-infeasible region.
-EPSILON_RATIO_OCTAVES: float = 1.0
+# how far either side of the oracle budget the ROBUSTNESS grid runs, in octaves:
+# 2^-4 .. 2^4. At the recipes' `sweep_samples: 16` (forced odd: 17 points) that is
+# one point every half octave, eight under-budget and eight over, with r = 1 in the
+# middle. Below 1 it runs past the refutation cliff, where a misstated budget can
+# exclude h_* and queries read INFEASIBLE; above 1 it runs far enough for the
+# over-budget half to show the bounds widening with the budget.
+EPSILON_RATIO_OCTAVES: float = 4.0
+# the robustness axis' labelled majors: every second octave, ends included, as
+# plain numbers (`fix_x_ticks`); a log axis over 2^-4 .. 2^4 would otherwise
+# label the decades 0.1, 1, 10
+EPSILON_RATIO_TICKS: tuple[float, ...] = (2.0**-4, 2.0**-2, 1.0, 2.0**2, 2.0**4)
 
 
 def _EPSILON_RATIO_GRID(dataset, n):
@@ -485,6 +488,7 @@ PARAM_SPECS: dict[str, ParamSpec] = {
         vlines=(1.0,),
         include_ate=False,
         data_constant=True,
+        xticks=EPSILON_RATIO_TICKS,
     ),
     "omega": ParamSpec(
         # knob grid; the x-axis actually plotted is the MEASURED expansion of

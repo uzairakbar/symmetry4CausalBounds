@@ -32,11 +32,13 @@ rule. Legs:
         experiments each line is feasible on, per step, is RECORDED; and so is
         the lowest reading. Stated as it is: every DA IV row reads the swept
         eps = r eps* + EPS_TOL through gamma~_z(eps), in the q0.95 norm the INV
-        budget reads, so every line is feasible on both experiments at every r
-        and none dips on this fixture (the lowest reading is 1.0). Before the App.
-        D radii the T family's RMS-type budget fell under its floor as r shrank
-        (INFEASIBLE at 0.5, one of two experiments at 0.71, a 0.574 dip there).
-        The 0.7 floor binds every line at every r. Catches: a target or a radius
+        budget reads, so a line is INFEASIBLE only where that budget falls under
+        its floor: on the four-octave grid the (T,Z) lines at r = 2^-4 and 2^-2,
+        every line feasible at r >= 1, and none dips on this fixture (the lowest
+        reading is 1.0). Before the App. D radii the T family's RMS-type budget
+        fell under its floor as r shrank (INFEASIBLE at 0.5, one of two
+        experiments at 0.71, a 0.574 dip there). The 0.7 floor binds every line
+        at every all-feasible step. Catches: a target or a radius
         that moves the feasible counts or the dip, a curve that does not recover
         at eps*. Misses: the 10-experiment band.
   (v)   isolation of the appended component: the optical epsilon runner's DA (read
@@ -54,8 +56,10 @@ rule. Legs:
         rest legitimately share it.
   (vi)  optical, mirroring (iii): three experiments, 5 steps, the configured
         toggles, all three pinned to device 8 (`sweep_devices`, patched here), the
-        device the RECORDED numbers were read on; every DA+ line is feasible on all three at every step, 1.0 at
-        r = 1 and above 0.7 throughout, and the lowest DA+ coverage under r = 1 is
+        device the RECORDED numbers were read on; every DA+ line is feasible on
+        the RECORDED experiments per step (all three but DA+PI+IV's one at
+        r = 2^-4), 1.0 at r = 1 and above 0.7 wherever all three are feasible,
+        and the lowest DA+ coverage under r = 1 is
         the RECORDED 1.0. The device caps the
         dip: no multiple of R from 1 to 8 moved it off 1.000 (the comment at
         `ROBUSTNESS_EPSILON_RADII`), and the old 5.0 was already flat on working5.
@@ -131,18 +135,24 @@ EPSILON_RADII = 1.0
 SIM_RADIUS = 0.7106
 OPTICAL_RADIUS = 0.6345
 RADIUS_ATOL = 1e-3
-# RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 0.5 .. 2 in 5 steps): the
-# experiments each DA+ line is feasible on per step, and its one dip (coverage,
-# line, r, feasible experiments behind it). Re-recorded 2026-09-29 under the sweeps'
-# App. D T radius at the swept eps: every line is feasible at every step and none
-# dips (was: the T family empty at r = 0.5, half-feasible at 0.71 with a
-# one-experiment dip of 0.5735 there, under the old RMS-type T budget)
+# RECORDED at seed 42 on (iii)'s fixture (2 experiments, r 2^-4 .. 2^4 in 5 steps):
+# the experiments each DA+ line is feasible on per step, and its one dip (coverage,
+# line, r, feasible experiments behind it). Re-recorded 2026-10-02 on the
+# four-octave grid: the (T,Z) lines are INFEASIBLE on both experiments at r = 2^-4
+# and 2^-2, where the joint row's gamma~_z(r eps*) falls under its floor, and every
+# line is feasible at r >= 1; none dips. On the one-octave grid (r 0.5 .. 2) every
+# line was feasible at every step (2026-09-29, under the sweeps' App. D T radius)
 SIM_FEASIBLE = {
     "DA+PI+IV(Z)": [2, 2, 2, 2, 2],
-    "DA+PI+IV(T,Z)": [2, 2, 2, 2, 2],
+    "DA+PI+IV(T,Z)": [0, 0, 2, 2, 2],
     "PI&DA+PI+IV(Z)": [2, 2, 2, 2, 2],
-    "PI&DA+PI+IV(T,Z)": [2, 2, 2, 2, 2],
+    "PI&DA+PI+IV(T,Z)": [0, 0, 2, 2, 2],
 }
+# RECORDED at seed 42 on (vi)'s fixture (3 experiments on device 8, r 2^-4 .. 2^4 in
+# 5 steps), 2026-10-02 on the four-octave grid: DA+PI+IV is INFEASIBLE on one of the
+# three at r = 2^-4; every line is feasible on all three elsewhere, as on the
+# one-octave grid at every step
+OPTICAL_FEASIBLE = {"DA+PI": [3, 3, 3, 3, 3], "DA+PI+IV": [2, 3, 3, 3, 3]}
 SIM_DIP = (1.0, "", 0, 0)  # at coverage 1.0 the (line, r, count) are not compared
 RECIPE = os.path.join(REPO, "recipes", "robustnessFig11.yaml")
 STD_RATIO_BOUND = 10.0
@@ -403,9 +413,7 @@ def leg_v(orch, opt_eps, chain):
 
 def leg_vi(opt):
     print(f"(vi) the optical curve on {N_EXPERIMENTS_OPTICAL} experiments")
-    return dip(
-        opt, "(vi)", {m: [N_EXPERIMENTS_OPTICAL] * N_STEPS for m in METHODS_OPTICAL if "DA+" in m}, (1.0, "", 0, 0)
-    )
+    return dip(opt, "(vi)", OPTICAL_FEASIBLE, (1.0, "", 0, 0))
 
 
 def leg_vii(opt):

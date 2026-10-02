@@ -551,7 +551,9 @@ def sweep_grid(param: str, datasets: list[str], artifacts: str, out: str | None 
                 axis_pkl = f"{folder}/{param}_axis.pkl"
                 axis = load(axis_pkl) if os.path.exists(axis_pkl) else None
                 found = axis.get("xlabel", spec.xlabel) if axis else (spec.legacy_xlabel or spec.xlabel)
-                ticks = tuple(axis.get("xticks", ())) if axis else ()
+                # the ticks likewise; a designed grid writes no axis pkl and takes the
+                # spec's own (epsilon), a legacy tree none (its x is not the spec's)
+                ticks = tuple(axis.get("xticks", ())) if axis else (() if spec.legacy_xlabel else tuple(spec.xticks))
                 loaded[dataset] = (x[order], order, load(results), found, ticks)
         return loaded[dataset]
 
