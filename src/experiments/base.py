@@ -163,6 +163,8 @@ class BaseExperimentRunner(ABC):
         clipy: bool = True,
         mean_match: bool = True,
         declared_iv: bool = False,
+        gamma_n_alpha: float = 0.0,
+        unit_cap: int | None = None,
         n_jobs: int = 1,
         **kwargs,
     ):
@@ -190,6 +192,10 @@ class BaseExperimentRunner(ABC):
         # instruments; the Z radius is then exactly s sqrt(gamma_z) and the T
         # budget is logged against its floor and never raised (decision 8)
         self.declared_iv = bool(declared_iv)
+        # the finite-sample pads the models solve with (`PartialR2.ball_budget`),
+        # explicit for the floor reports' sake as the toggles above: 0.0 is raw
+        self.gamma_n_alpha = float(gamma_n_alpha)
+        self.unit_cap = unit_cap
         self.n_jobs = n_jobs
 
     @abstractmethod
@@ -437,6 +443,8 @@ class ParamSweepRunner(BaseExperimentRunner):
                 # the ball's own dof: the m sweep's rows are an m-fold tiling
                 n_obs=None if getattr(data, "X_base", None) is None else len(data.X_base),
                 absorbed_rate=self.absorbed_rate,
+                gamma_n_alpha=self.gamma_n_alpha,
+                unit_cap=self.unit_cap,
                 **extra,
             )
         except Exception as error:  # never let a diagnostic break a run

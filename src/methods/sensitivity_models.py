@@ -3,7 +3,8 @@ Partial identification / sensitivity models.
 
 Uniform signature: gamma (budget, in the paper's sigma-scaled units), epsilon
 (invariance error), pad (Thm. 3.A), recalibrate (post-DA budget gamma/rho, SS4.2),
-clipy (clip to observed y range).
+clipy (clip to observed y range), gamma_n_alpha (the finite-sample pads of
+`finite_sample_budget`, 0 = the population budgets).
 """
 
 from enum import IntEnum
@@ -65,6 +66,12 @@ def finite_sample_budget(d, g, n, a) -> float:
     return float(ncx2.ppf(1.0 - a, d, n * g)) / n
 
 
+# the share of `gamma_n_alpha` each padded row gets: the ERM ball, the mean row and
+# the IV rows (together) take alpha / 3 each, on every method, so one solve gives
+# simultaneous (1 - alpha) bands and adding a row can only shrink an interval
+GAMMA_N_ROWS: int = 3
+
+
 class BoundedSA(SA):
     """
     Contract every PI method honours: per-query status, chunk-parallel solve,
@@ -94,6 +101,8 @@ class BoundedSA(SA):
         mean_match=True,
         rho=1.0,
         absorbed_rate=0.0,
+        gamma_n_alpha=0.0,
+        unit_cap=None,
     ):
         if gamma is None:
             raise ValueError("gamma must be explicitly provided")
@@ -127,6 +136,13 @@ class BoundedSA(SA):
         # observation: the sigma-hat dof charge `absorbed_rate * n_obs` (the
         # cigarette FWL controls, prorated to the rows fitted); 0 everywhere else
         self.absorbed_rate = absorbed_rate
+        # the finite-sample pads (`finite_sample_budget`): every padded row at
+        # level gamma_n_alpha / GAMMA_N_ROWS on n_eff = min(n_obs, unit_cap) units,
+        # the original samples (also on the m sweep, whose rows are m copies of
+        # them); 0.0 is the raw program, the population budgets with no pad
+        self.gamma_n_alpha = float(gamma_n_alpha)
+        self.unit_cap = unit_cap
+        self.n_obs_ = None  # the distinct observations behind the fitted rows
         self.query_status = None  # per-query SolveStatus, set on every predict
         self.query_diagnostics = None  # optional per-query extras, set on predict
         self.raw_bounds_ = None  # the last predict's unpadded bounds, for `repad`
@@ -170,6 +186,19 @@ class BoundedSA(SA):
     def budget(self, gamma) -> float:
         """The budget actually solved at: `recalibrated_gamma(gamma, rho, t)`."""
         return recalibrated_gamma(gamma, self.rho, self.recalibrate)
+
+    @property
+    def n_eff(self) -> int:
+        """The units every padded row is sized on: the fit's distinct observations,
+        capped at `unit_cap` (the cigarette panel's 49 states on `target: iv`)."""
+        if self.n_obs_ is None:
+            raise ValueError("n_eff is read after fit: the units are the fit's distinct observations")
+        return self.n_obs_ if self.unit_cap is None else min(self.n_obs_, int(self.unit_cap))
+
+    @property
+    def row_level(self) -> float:
+        """Each padded row's level a = gamma_n_alpha / GAMMA_N_ROWS (0 is raw)."""
+        return self.gamma_n_alpha / GAMMA_N_ROWS
 
     # ------------------------------------------------------------- predict
 
@@ -273,6 +302,8 @@ class PartialR2(BoundedSA):
         mean_match=True,
         rho=1.0,
         absorbed_rate=0.0,
+        gamma_n_alpha=0.0,
+        unit_cap=None,
     ):
         self._supports_closed_form = True
 
@@ -282,6 +313,11 @@ class PartialR2(BoundedSA):
         self.x_param = None
         self.h_var = None
         self.radius_param = None
+        # the padded mean row (`mean_row`): the intercept's offset delta, its own
+        # radius and the query's 1/||x|| that weighs it in the normalised cost
+        self.delta_var = None
+        self.mean_param = None
+        self.weight_param = None
 
         # Fit state
         self.R_constraint = None
@@ -305,6 +341,8 @@ class PartialR2(BoundedSA):
             mean_match=mean_match,
             rho=rho,
             absorbed_rate=absorbed_rate,
+            gamma_n_alpha=gamma_n_alpha,
+            unit_cap=unit_cap,
         )
 
     # ------------------------------------------------------------------ fit
@@ -341,6 +379,9 @@ class PartialR2(BoundedSA):
         self.N_samples = len(X)
         # distinct observations behind the rows: the m sweep tiles them m-fold
         n_obs = len(X) if n_obs is None else int(n_obs)
+        self.n_obs_ = n_obs
+        # the ERM ball's degrees of freedom: h and, on the slice, its intercept
+        self.k_ball_ = X.shape[1] + int(self.mean_match)
 
         # observable outcome limits (clipy) -- on the RAW outcome scale, which is
         # the scale `_finalize` clips on and the scale bounds come back in
@@ -381,27 +422,64 @@ class PartialR2(BoundedSA):
         """s = sigma-hat: the MMSE of the data this ball was fit on (paper's units)."""
         return float(np.sqrt(self.sigma_sq))
 
+    @property
+    def mean_row(self) -> bool:
+        """The padded program's mean row: on the slice, E_n[h(X)] may sit off E_n[Y]
+        by delta, inside the ball and within its own radius (`mean_radius`). The
+        raw program keeps the exact slice (no delta), as does `mean_match: false`,
+        whose ball has no intercept to move."""
+        return self.gamma_n_alpha > 0.0 and bool(self.mean_match)
+
+    def ball_budget(self, gamma) -> float:
+        """The ERM ball's budget gamma_n(k; gamma~) at the row level on n_eff units,
+        gamma~ = `budget(gamma)`; the raw program's is gamma~ itself."""
+        return finite_sample_budget(self.k_ball_, self.budget(gamma), self.n_eff, self.row_level)
+
+    def ball_radius(self, gamma) -> float:
+        """s sqrt(gamma_n(k; gamma~)), the radius of || X (h - h_erm) || / sqrt(N)."""
+        return self.scale * np.sqrt(self.ball_budget(gamma))
+
+    def mean_radius(self, gamma) -> float:
+        """The mean row's |delta| <= s sqrt((1 + gamma~) gamma_n(1; 0)), its own
+        level on n_eff units; only read under `mean_row`."""
+        return self.scale * np.sqrt(
+            (1.0 + self.budget(gamma)) * finite_sample_budget(1, 0.0, self.n_eff, self.row_level)
+        )
+
     # -------------------------------------------------------------- solver
 
     def _get_constraints(self):
-        """SOCP: || R (h - h_erm) ||_2 <= sqrt(N) * radius."""
+        """SOCP: || R (h - h_erm) ||_2 <= sqrt(N) * radius; under `mean_row` the
+        ball holds (R (h - h_erm), sqrt(N) delta) and |delta| <= the mean radius."""
         threshold = np.sqrt(self.N_samples) * self.radius_param
-        return [cp.norm(cp.Constant(self.R_constraint) @ (self.h_var - cp.Constant(self.h_erm)), 2) <= threshold]
+        offset = cp.Constant(self.R_constraint) @ (self.h_var - cp.Constant(self.h_erm))
+        if not self.mean_row:
+            return [cp.norm(offset, 2) <= threshold]
+        ball = cp.hstack([offset, np.sqrt(self.N_samples) * self.delta_var])
+        return [cp.norm(ball, 2) <= threshold, cp.abs(self.delta_var) <= self.mean_param]
 
     def _setup_cvx_problems(self):
         M = len(self.h_erm)
         self.x_param = cp.Parameter(M)
         self.radius_param = cp.Parameter(nonneg=True)
         self.h_var = cp.Variable(M)
+        if self.mean_row:
+            self.delta_var = cp.Variable(1)
+            self.mean_param = cp.Parameter(nonneg=True)
+            self.weight_param = cp.Parameter(nonneg=True)
 
         constraints = self._get_constraints()
         cost = self.x_param @ self.h_var
+        if self.mean_row:
+            cost = cost + self.weight_param * self.delta_var[0]
 
         self.min_problem = cp.Problem(cp.Minimize(cost), constraints)
         self.max_problem = cp.Problem(cp.Maximize(cost), constraints)
 
     def _set_solver_parameters(self, gamma):
-        self.radius_param.value = self.scale * np.sqrt(self.budget(gamma))
+        self.radius_param.value = self.ball_radius(gamma)
+        if self.mean_row:
+            self.mean_param.value = self.mean_radius(gamma)
 
     # ------------------------------------------------------------- predict
 
@@ -410,10 +488,15 @@ class PartialR2(BoundedSA):
         if CLOSED_FORM_SOLUTION and self._supports_closed_form:
             # Cor. 3 on the slice: h_erm(x) +- s sqrt(gamma~) ||g_x||, with the
             # representer norm the Mahalanobis length of the CENTRED query
-            radius = self.scale * np.sqrt(self.budget(gamma))
+            radius = self.ball_radius(gamma)
             X = X - self.mu_
             mahalanobis_sq = np.maximum(0, np.sum((X @ self.invSigmaX) * X, axis=1))
             margins = radius * np.sqrt(mahalanobis_sq)
+            if self.mean_row:
+                # max g'u + delta over ||u||^2 + delta^2 <= r^2, |delta| <= m:
+                # delta* = min(m, r / sqrt(1 + ||g||^2)), the rest of r along g
+                delta = np.minimum(self.mean_radius(gamma), radius / np.sqrt(1.0 + mahalanobis_sq))
+                margins = np.sqrt(mahalanobis_sq) * np.sqrt(np.maximum(radius**2 - delta**2, 0.0)) + delta
             centers = X @ self.h_erm + self.y_offset_
             self.query_status = np.full(len(X), SolveStatus.OK, dtype=int)
             return np.column_stack([centers - margins, centers + margins])
@@ -431,10 +514,13 @@ class PartialR2(BoundedSA):
         norm_x = np.linalg.norm(x)
         if norm_x < 1e-9:
             self.x_param.value = np.zeros_like(x)
-            scale = 0.0
+            # the mean row's delta still moves a query at the design mean
+            scale = 1.0 if self.mean_row else 0.0
         else:
             self.x_param.value = x / norm_x
             scale = norm_x
+        if self.mean_row:
+            self.weight_param.value = 1.0 / scale
 
         def solve_prob(prob):
             status = None
@@ -521,6 +607,8 @@ def constraint_floor(
     recalibrate=True,
     n_obs=None,
     absorbed_rate=0.0,
+    gamma_n_alpha=0.0,
+    unit_cap=None,
 ):
     """Lowest value the extra constraint attains on the PI ball, in BUDGET units.
 
@@ -553,6 +641,12 @@ def constraint_floor(
         n_obs, absorbed_rate: the sigma-hat dof of the ball, as `PartialR2._fit`
             takes them: the distinct observations behind `design`'s rows and the
             controls partialled out per observation.
+        gamma_n_alpha, unit_cap: the finite-sample pads, as the model takes them
+            (`PartialR2.ball_budget`): the ball is gamma_n(k; gamma~) at level
+            gamma_n_alpha / GAMMA_N_ROWS on min(n_obs, unit_cap) units. The floor is
+            taken at delta = 0: with the mean row an IV block sees delta too, so
+            the padded program's own floor can sit lower, and this one is then an
+            upper reference for it.
 
     Returns:
         floor in squared budget units
@@ -571,7 +665,11 @@ def constraint_floor(
     residuals = np.asarray(y).flatten() - design @ h_erm
     n_obs = N if n_obs is None else int(n_obs)
     scale = float(np.sqrt(residual_variance(residuals, M + int(mean_match) + absorbed_rate * n_obs, n_obs)))
-    delta = np.sqrt(N) * scale * np.sqrt(max(recalibrated_gamma(gamma, rho, recalibrate), 0.0))
+    n_eff = n_obs if unit_cap is None else min(n_obs, int(unit_cap))
+    ball = finite_sample_budget(
+        M + int(mean_match), recalibrated_gamma(gamma, rho, recalibrate), n_eff, gamma_n_alpha / GAMMA_N_ROWS
+    )
+    delta = np.sqrt(N) * scale * np.sqrt(max(ball, 0.0))
 
     if kind == "inv":
         if GX is None:
@@ -629,6 +727,15 @@ def iv_constraint_terms(X, y, Z):
 
     M = X.shape[1]
     return _jittered(Z_proj, M), np.concatenate([y_proj, np.zeros(M)])
+
+
+def iv_intercept_terms(Z, M):
+    """The intercept's column in the IV constraint's layout, (Q_Z' 1, 0_M): the
+    padded mean row's delta moves h(x) by a constant, and an instrument block left
+    on its raw scale (`_centre` centres X and y only) has Q_Z' 1 != 0, so the
+    block's residual is || A h + delta (Q_Z' 1, 0) - b ||."""
+    Q_matrix, _ = np.linalg.qr(Z.reshape(len(Z), -1))
+    return np.concatenate([Q_matrix.T @ np.ones(len(Z)), np.zeros(M)])
 
 
 class InvarianceConstrainedPartialR2(PartialR2):
@@ -833,15 +940,21 @@ class InstrumentalVariablePartialR2(PartialR2):
         self._da_fit = X_pre is not None
         if self._has_t and self.epsilon_iv is None and not self.iv_recalibrate:
             raise ValueError("epsilon_iv is required with T-as-IV; pass the oracle `eps_iv_star` (+ EPS_TOL).")
+        # the padded mean row's delta enters every block through its intercept column
+        intercept = {}
         if self._has_t:
             self.T_projector_R, self.t_residual_base = iv_constraint_terms(X, y, T)
+            intercept["t"] = iv_intercept_terms(T, X.shape[1])
         if self._has_z:
             self.Z_projector_R, self.z_residual_base = iv_constraint_terms(X, y, Z)
+            intercept["z"] = iv_intercept_terms(Z, X.shape[1])
             # unused under `iv_recalibrate`, which adds eps in quadrature instead
             self._z_allowance = 0.0 if self.iv_recalibrate else self._declared_allowance(X, Z, X_pre)
         self._has_tz = self.iv_recalibrate and self._da_fit and self._has_t and self._has_z
         if self._has_tz:
             self.TZ_projector_R, self.tz_residual_base = iv_constraint_terms(X, y, np.hstack([T, Z]))
+            intercept["tz"] = iv_intercept_terms(np.hstack([T, Z]), X.shape[1])
+        self.iv_intercept_ = intercept
         if self._has_z and self.z_bound == 0.0:
             # the usual cause is a caller handing the translation amounts as `Z`:
             # T-as-IV goes in the `T` block, and the Z block's radius is 0 until
@@ -890,28 +1003,29 @@ class InstrumentalVariablePartialR2(PartialR2):
         kappa = float(np.linalg.svd(Q_Z.T @ residual_basis, compute_uv=False)[0])
         return kappa * float(self.epsilon)
 
+    def _iv_residual(self, block, base, projector):
+        """One block's residual b - A h, less delta (Q' 1, 0) under the mean row."""
+        residual = cp.Constant(base) - cp.Constant(projector) @ self.h_var
+        if self.mean_row:
+            residual = residual - cp.Constant(self.iv_intercept_[block]) * self.delta_var[0]
+        return residual
+
     def _get_constraints(self):
         constraints = super()._get_constraints()
         # one SOC per non-empty block, T first: the order the cvx problem carries
         # is the ball, then the instrument blocks, then an INV cone on top
         if self._has_t:
             self.t_threshold_param = cp.Parameter(nonneg=True)
-            constraints.append(
-                cp.norm(cp.Constant(self.t_residual_base) - cp.Constant(self.T_projector_R) @ self.h_var, 2)
-                <= self.t_threshold_param
-            )
+            residual = self._iv_residual("t", self.t_residual_base, self.T_projector_R)
+            constraints.append(cp.norm(residual, 2) <= self.t_threshold_param)
         if self._has_z:
             self.z_threshold_param = cp.Parameter(nonneg=True)
-            constraints.append(
-                cp.norm(cp.Constant(self.z_residual_base) - cp.Constant(self.Z_projector_R) @ self.h_var, 2)
-                <= self.z_threshold_param
-            )
+            residual = self._iv_residual("z", self.z_residual_base, self.Z_projector_R)
+            constraints.append(cp.norm(residual, 2) <= self.z_threshold_param)
         if self._has_tz:
             self.tz_threshold_param = cp.Parameter(nonneg=True)
-            constraints.append(
-                cp.norm(cp.Constant(self.tz_residual_base) - cp.Constant(self.TZ_projector_R) @ self.h_var, 2)
-                <= self.tz_threshold_param
-            )
+            residual = self._iv_residual("tz", self.tz_residual_base, self.TZ_projector_R)
+            constraints.append(cp.norm(residual, 2) <= self.tz_threshold_param)
         return constraints
 
     def _set_solver_parameters(self, gamma):
@@ -1057,6 +1171,8 @@ class IntersectedPartialR2(IntersectionMixin, PartialR2):
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
+            gamma_n_alpha=self.gamma_n_alpha,
+            unit_cap=self.unit_cap,
         )
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):
@@ -1144,6 +1260,8 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
             n_jobs=self.n_jobs,
             mean_match=self.mean_match,
             absorbed_rate=self.absorbed_rate,
+            gamma_n_alpha=self.gamma_n_alpha,
+            unit_cap=self.unit_cap,
         )
 
     def _fit_branches(self, X, y, GX, G, Z=None, n_obs=None):

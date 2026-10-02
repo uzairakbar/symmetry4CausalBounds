@@ -975,6 +975,8 @@ class MethodRegistry:
         mean_match: bool = True,
         rho: float = 1.0,
         absorbed_rate: float = 0.0,
+        gamma_n_alpha: float = 0.0,
+        unit_cap: int | None = None,
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
@@ -1041,6 +1043,14 @@ class MethodRegistry:
             absorbed_rate: controls partialled out of the design per observation,
                 charged to every ball's sigma-hat as `absorbed_rate * n_obs` dof
                 (the cigarette FWL); 0 is none. partial_r2 only.
+            gamma_n_alpha: the finite-sample pads' alpha (the yaml's `gamma_n`, 95
+                -> 0.05): every PI ball at gamma_n(k; gamma~) and, on the slice, a
+                mean row, each at level alpha / 3 on min(n_obs, unit_cap) units;
+                0.0, the default and every direct constructor, is the raw program
+                (the population budgets). partial_r2 only.
+            unit_cap: the units the pads are sized on at most (the cigarette
+                panel's states on `target: iv`); None is the fit's n_obs.
+                partial_r2 only.
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
@@ -1093,6 +1103,8 @@ class MethodRegistry:
             n_jobs=n_jobs,
             mean_match=mean_match,
             absorbed_rate=absorbed_rate,
+            gamma_n_alpha=gamma_n_alpha,
+            unit_cap=unit_cap,
         )
         # every IV ball carries BOTH radii; which constraints it ends up with
         # follows from the instrument blocks it is FITTED with (`fit_model`), so
@@ -1239,8 +1251,9 @@ DATASET_KEYS: dict[str, set] = {
 }
 
 # `normalize` is a PLOTTING switch (SS10.1), not a solver one: nothing reads it
-# before `_run_sweeps`, and the pkls never move
-TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize"}
+# before `_run_sweeps`, and the pkls never move. `gamma_n` is the finite-sample pads'
+# confidence level in percent (`finite_sample_budget`), read as `gamma_n_alpha`
+TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "gamma_n"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {
@@ -1403,6 +1416,22 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"config.{name}.normalize must be a bool (divide sweep figures by the baseline); got {normalize!r}."
         )
+    # the pads' confidence level in percent, read as alpha = 1 - level / 100; absent,
+    # 0 or false is the raw program (the population budgets, no pad). bool is an int
+    # subclass, and `true` names no level
+    absent = "gamma_n" not in block
+    level = block.pop("gamma_n", 0)
+    level = 0 if level is False else level
+    if isinstance(level, bool) or not isinstance(level, int | float) or not (level == 0 or 0 < level < 100):
+        raise ValueError(f"config.{name}.gamma_n must be 0/false or a percentage in (0, 100); got {level!r}.")
+    if name == "do_mnist":
+        # `defaults:` reaches every block: the copsens balls are oracle-calibrated
+        if level:
+            logger.info(f"config.do_mnist: gamma_n {level:g} ignored; the copsens balls are never padded.")
+    else:
+        if absent:
+            logger.info(f"config.{name}: gamma_n absent: the raw program (population budgets, no finite-sample pad).")
+        block["gamma_n_alpha"] = (100.0 - float(level)) / 100.0 if level else 0.0
 
     # dataset-specific, unlike the two guards above: these keys exist on one block
     # only, and an unknown spec would otherwise run silently at the loader's default

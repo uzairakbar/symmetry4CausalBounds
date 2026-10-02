@@ -42,6 +42,7 @@ class SimulationOrchestrator(ExperimentOrchestrator):
             clipy=kwargs.get("clipy", True),
             n_jobs=kwargs.get("n_jobs", 1),
             mean_match=kwargs.get("mean_match", True),
+            gamma_n_alpha=kwargs.get("gamma_n_alpha", 0.0),
         )
         toggles = self.toggles
 

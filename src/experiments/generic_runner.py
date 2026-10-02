@@ -250,6 +250,8 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 rho=self.fit_rho(),
                 recalibrate=self.recalibrate,
                 absorbed_rate=self.absorbed_rate,
+                gamma_n_alpha=self.gamma_n_alpha,
+                unit_cap=self.unit_cap,
             )
         except Exception as error:
             logger.warning(f"epsilon_iv: constraint floor unavailable ({error}).")

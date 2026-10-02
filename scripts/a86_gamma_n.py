@@ -13,6 +13,36 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         gamma_n(1; 0) at n 1843, gamma 1 -> 0.0062 (each within 1e-4).
         Catches: a quantile at the wrong level, a dropped 1/n, a noncentrality
         not scaled by n, a raw mode that pads.
+  (ii)  the ERM ball and the mean row off the cvx parameters, through
+        `MethodRegistry.build_methods` and `fit_model` on a synthetic fixture,
+        for PI, PI+INV, PI+IV (empty Z), DA+PI and PI&DA+PI (both branches):
+        the ball s sqrt(gamma_n(k; gamma~)) at a = alpha / 3 with k = d + 1 (the
+        slice's intercept) and n = n_eff, the mean row s sqrt((1 + gamma~)
+        gamma_n(1; 0)); n_eff the original samples on an m = 4 tiling (`X_base`)
+        and `unit_cap` when set; raw (alpha 0) the population ball s sqrt(gamma~)
+        bit for bit and no mean row; the cigarette orchestrator's `unit_cap` is
+        the panel's 49 states on `target: iv` and None on `plasmode`, and the
+        simulation and optical toggles carry none.
+        Catches: a ball at the wrong level, dof or n, the m sweep counting its
+        copies, a cap leaking onto the plasmode sweeps, a raw run that pads.
+  (iii) the mean row: at a query at the design mean the padded PI interval is
+        ybar +- the mean radius exactly (delta binds; raw: the point ybar); on
+        20 queries the padded interval contains the raw one for PI and DA+PI;
+        the closed form (`CLOSED_FORM_SOLUTION`) equals cvxpy within 1e-6
+        relative to the width, padded and raw. The IV rows see delta: padded
+        PI+IV on an instrument off its mean (Q' 1 != 0), at every bound on 20
+        queries the solved (h, delta) keeps the block's data residual
+        || Q'(y_c - X_c h - delta 1) || (with the jitter rows) under its
+        threshold, and the same program with delta dropped from the IV row
+        breaks that at some query.
+        Catches: a delta outside the ball, a cost that drops delta at the
+        design mean, a closed form off the program, an IV row blind to delta.
+  (vi)  config: `gamma_n` 95 -> `gamma_n_alpha` 0.05, absent / 0 / false -> 0.0
+        with one INFO line when absent; `true`, 100, -5 and "95" raise; every
+        non-do-MNIST recipe and config.yaml resolve to `RECIPE_ALPHA`; the
+        retired `im-ci` key raises; do-MNIST accepts `gamma_n` and carries no
+        `gamma_n_alpha`.
+        Catches: a level read as alpha, a bool taken as a level, a silent pad.
   (vii) one record: `_run_sweeps` writes `<param>_values`, `_results`,
         `_statuses` and `_axis` and nothing else, the aggregate's sweep grid reads
         `_values` and `_results`, the runner takes no CI level, `BoundedSA` has no
@@ -71,6 +101,10 @@ REFERENCES = (
 MEAN_ROW = (1843, 1.0, 0.0062)  # n, gamma, (1 + gamma) gamma_n(1; 0)
 TMPROOT = os.environ.get("A86_TMPROOT", os.path.expanduser("~/scratch/tmp/a86"))
 DATASETS = ("simulation", "optical_device", "cigarettes")
+# what config.yaml and every non-do-MNIST recipe resolve `gamma_n` to
+RECIPE_ALPHA = 0.0
+# the cigarette panel's states, the pads' units on `target: iv`
+CIGARETTE_STATES = 49
 # the retired Imbens-Manski CI's symbols (the yaml key, its parsed name, the
 # constants, the helpers, the raw record and its reader, the pad tolerance)
 IM_CI_SYMBOLS = re.compile(
@@ -153,6 +187,231 @@ def workdir(prefix):
         yield path
     finally:
         os.chdir(REPO)
+
+
+def fixture(seed=0, n=400, d=8, m=1):
+    """A synthetic linear draw: X, y, a perturbed GX and one translation column,
+    tiled m-fold with the untiled rows beside it, as the m sweep fits."""
+    rng = np.random.default_rng(seed)
+    X = rng.normal(size=(n, d))
+    y = X @ rng.normal(size=d) + rng.normal(size=n)
+    G = rng.normal(size=(n * m, 1))
+    GX = np.tile(X, (m, 1)) + 0.1 * rng.normal(size=(n * m, d))
+    arrays = dict(X=np.tile(X, (m, 1)), y=np.tile(y, m), GX=GX, G=G)
+    if m > 1:
+        arrays.update(X_base=X, y_base=y, Z_base=np.zeros((n, 0)))
+    return arrays, rng.normal(size=(20, d))
+
+
+def balls(model):
+    """The fitted PartialR2 balls of a model: itself, or an intersection's branches."""
+    return [model.baseline, model.augmented] if hasattr(model, "baseline") else [model]
+
+
+def leg_ii():
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+    from src.methods.sensitivity_models import finite_sample_budget as fsb
+
+    print("(ii) the ERM ball and the mean row off the cvx parameters")
+    names = ["PI", "PI+INV", "PI+IV", "DA+PI", "PI&DA+PI"]
+    gamma, d, n = 0.5, 8, 400
+    for alpha, m, cap in ((0.0, 1, None), (ALPHA, 1, None), (ALPHA, 4, None), (ALPHA, 1, 100), (0.0, 4, 100)):
+        arrays, queries = fixture(n=n, d=d, m=m)
+        builders = MethodRegistry.build_methods(
+            names, gamma=gamma, epsilon=1.0, rho=1.3, pad=True, gamma_n_alpha=alpha, unit_cap=cap
+        )
+        n_eff = n if cap is None else min(n, cap)
+        tag = f"alpha {alpha:g}, m {m}, cap {cap}"
+        for name in names:
+            model = builders[name]()
+            fit_model(model=model, method_name=name, **arrays)
+            model.predict(queries)
+            for ball in balls(model):
+                g = ball.budget(gamma)
+                want = ball.scale * np.sqrt(fsb(d + 1, g, n_eff, alpha / 3))
+                got = ball.radius_param.value
+                exact = got == ball.scale * np.sqrt(g) if alpha == 0.0 else abs(got - want) <= 1e-12 * want
+                check(f"(ii) {tag}: {name} ball", ball.n_eff == n_eff and exact, f"{got:.6g} (want {want:.6g})")
+                if alpha:
+                    mean = ball.scale * np.sqrt((1 + g) * fsb(1, 0.0, n_eff, alpha / 3))
+                    got = ball.mean_param.value
+                    check(f"(ii) {tag}: {name} mean row", abs(got - mean) <= 1e-12 * mean, f"{got:.6g}")
+                else:
+                    check(f"(ii) {tag}: {name} has no mean row", ball.delta_var is None and not ball.mean_row)
+    from src.experiments.cigarettes import CigaretteOrchestrator
+    from src.experiments.configs import resolve_dataset_block
+    from src.experiments.simulation import SimulationOrchestrator
+
+    with open(os.path.join(REPO, "config.yaml")) as handle:
+        config = yaml.safe_load(handle) or {}
+    block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
+    block.pop("experiment", None)
+    for target, want in (("iv", CIGARETTE_STATES), ("plasmode", None)):
+        resolved = resolve_dataset_block("cigarettes", {**block, "target": target})
+        orch = CigaretteOrchestrator(**{**resolved, "n_jobs": 1}, hyperparameters={})
+        check(
+            f"(ii) cigarettes target {target}: unit_cap {want}",
+            orch.toggles["unit_cap"] == want and orch.kwargs["unit_cap"] == want,
+            f"{orch.toggles['unit_cap']}",
+        )
+    sim = SimulationOrchestrator(seed=42, kernel_dim=0, treatment_dim=32, methods=["PI"], gamma_n_alpha=ALPHA)
+    check(
+        "(ii) the simulation toggles carry gamma_n_alpha and no unit_cap",
+        sim.toggles["gamma_n_alpha"] == ALPHA and "unit_cap" not in sim.toggles,
+    )
+
+
+def leg_iii():
+    import src.methods.sensitivity_models as sm
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+
+    print("(iii) the mean row")
+    arrays, queries = fixture()
+    queries[0] = arrays["X"].mean(axis=0)
+    gamma, ybar = 0.5, float(np.mean(arrays["y"]))
+    bounds = {}
+    for alpha in (0.0, ALPHA):
+        for closed in (False, True):
+            sm.CLOSED_FORM_SOLUTION = closed
+            try:
+                builders = MethodRegistry.build_methods(
+                    ["PI", "DA+PI"], gamma=gamma, epsilon=0.0, rho=1.3, pad=False, gamma_n_alpha=alpha
+                )
+                for name in ("PI", "DA+PI"):
+                    model = builders[name]()
+                    fit_model(model=model, method_name=name, **arrays)
+                    bounds[alpha, closed, name] = (model, model.predict(queries))
+            finally:
+                sm.CLOSED_FORM_SOLUTION = False
+    model, padded = bounds[ALPHA, False, "PI"]
+    radius = model.mean_radius(gamma)
+    check(
+        "(iii) at the design mean the padded PI interval is ybar +- the mean radius",
+        np.allclose(padded[0], [ybar - radius, ybar + radius], rtol=0, atol=1e-6 * radius),
+        f"{padded[0]} vs {ybar:.6f} +- {radius:.6f}",
+    )
+    check("(iii) ... where delta binds", abs(abs(float(model.delta_var.value[0])) - radius) <= 1e-6 * radius)
+    raw = bounds[0.0, False, "PI"][1]
+    check("(iii) the raw PI interval at the design mean is the point ybar", np.allclose(raw[0], ybar, atol=1e-9))
+    for name in ("PI", "DA+PI"):
+        raw, padded = bounds[0.0, False, name][1], bounds[ALPHA, False, name][1]
+        inside = np.all(padded[:, 0] <= raw[:, 0] + 1e-9) and np.all(padded[:, 1] >= raw[:, 1] - 1e-9)
+        check(f"(iii) {name}: padded contains raw on 20 queries", inside)
+        for alpha in (0.0, ALPHA):
+            cvx, closed = bounds[alpha, False, name][1], bounds[alpha, True, name][1]
+            gap = float(np.max(np.abs(cvx - closed)) / np.max(cvx[:, 1] - cvx[:, 0]))
+            check(f"(iii) {name} alpha {alpha:g}: the closed form == cvxpy", gap < 1e-6, f"(relative {gap:.1e})")
+    worst = iv_sees_delta()
+    check(
+        "(iii) PI+IV: the solved (h, delta) keeps the IV data residual under its threshold",
+        worst[False] < 1e-6,
+        f"(worst excess {worst[False]:.2e})",
+    )
+    check(
+        "(iii) ... and fails it with delta dropped from the IV row",
+        worst[True] > 1e-3,
+        f"(worst excess {worst[True]:.2e})",
+    )
+
+
+def iv_violation(model, X, y, Z):
+    """The excess of the Z block's data residual over its threshold at the (h, delta)
+    of the problem just solved."""
+    Q, _ = np.linalg.qr(Z)
+    A = model.Z_projector_R  # (Q' X_c; sqrt(jitter) I)
+    jitter = A[Q.shape[1] :]
+    h, delta = model.h_var.value, float(model.delta_var.value[0])
+    residual = np.concatenate([Q.T @ (y - model.y_offset_ - (X - model.mu_) @ h - delta), -jitter @ h])
+    return float(np.linalg.norm(residual) - model.z_threshold_param.value)
+
+
+def iv_sees_delta():
+    from src.experiments.configs import MethodRegistry
+    from src.experiments.utils import fit_model
+
+    arrays, queries = fixture(seed=1)
+    queries[0] = arrays["X"].mean(axis=0)
+    rng = np.random.default_rng(2)
+    X, y = arrays["X"], arrays["y"]
+    # an instrument off its mean, correlated with X: Q' 1 is far from zero
+    Z = (X[:, :1] + 0.5 * rng.normal(size=(len(X), 1))) + 3.0
+    worst = {}
+    for dropped in (False, True):
+        builders = MethodRegistry.build_methods(["PI+IV"], gamma=0.5, epsilon=0.0, gamma_z=2**-6, gamma_n_alpha=ALPHA)
+        model = builders["PI+IV"]()
+        fit_model(model=model, method_name="PI+IV", X=X, y=y, Z=Z)
+        if dropped:
+            model.iv_intercept_ = {k: np.zeros_like(v) for k, v in model.iv_intercept_.items()}
+            model._setup_cvx_problems()
+        model._set_solver_parameters(model.gamma)
+        excess = []
+        for query in queries - model.mu_:
+            # as `_solve_single` normalises: a query at the design mean keeps delta
+            norm = np.linalg.norm(query)
+            norm = 1.0 if norm < 1e-9 else norm
+            model.x_param.value = query / norm
+            model.weight_param.value = 1.0 / norm
+            for problem in (model.min_problem, model.max_problem):
+                problem.solve(solver="CLARABEL")
+                excess.append(iv_violation(model, X, y, Z))
+        worst[dropped] = max(excess)
+    return worst
+
+
+def leg_vi():
+    from src.experiments.configs import resolve_dataset_block
+
+    print("(vi) config")
+    minimal = {"seed": 42, "kernel_dim": 0}
+    for level, want in ((95, 0.05), (0, 0.0), (False, 0.0), (90.0, 0.1)):
+        got = resolve_dataset_block("simulation", {**minimal, "gamma_n": level})["gamma_n_alpha"]
+        check(f"(vi) gamma_n {level!r} -> {want}", got == want, f"{got!r}")
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    try:
+        got = resolve_dataset_block("simulation", dict(minimal))["gamma_n_alpha"]
+    finally:
+        logger.remove(sink)
+    absent = [m for m in messages if "gamma_n absent" in m]
+    check("(vi) absent -> 0.0 with one INFO line", got == 0.0 and len(absent) == 1, f"{absent}")
+    for level in (True, 100, -5, "95"):
+        try:
+            resolve_dataset_block("simulation", {**minimal, "gamma_n": level})
+            raised = False
+        except ValueError:
+            raised = True
+        check(f"(vi) gamma_n {level!r} raises", raised)
+    for retired in ({"im-ci": 95}, {"gamma_n_alpha": 0.05}):
+        try:
+            resolve_dataset_block("simulation", {**minimal, **retired})
+            raised = False
+        except ValueError:
+            raised = True
+        check(f"(vi) {sorted(retired)[0]} in the yaml raises (unknown)", raised)
+    sources = ["config.yaml", *sorted(glob.glob(os.path.join(REPO, "recipes", "*.yaml")))]
+    for source in sources:
+        with open(os.path.join(REPO, source)) as handle:
+            config = yaml.safe_load(handle) or {}
+        defaults = config.get("defaults") or {}
+        for dataset in DATASETS:
+            if dataset not in config:
+                continue
+            block = {**defaults, **config[dataset]}
+            block.pop("experiment", None)
+            got = resolve_dataset_block(dataset, block)["gamma_n_alpha"]
+            check(f"(vi) {os.path.basename(source)} {dataset}: alpha {RECIPE_ALPHA:g}", got == RECIPE_ALPHA, f"{got}")
+    domnist = {
+        "seed": 42,
+        "augmentation": "translate",
+        "gamma": 0.085,
+        "epsilon": 0.04,
+        "methods": ["PI"],
+        "gamma_n": 95,
+    }
+    resolved = resolve_dataset_block("do_mnist", domnist)
+    check("(vi) do-MNIST accepts gamma_n and carries no gamma_n_alpha", "gamma_n_alpha" not in resolved)
 
 
 def leg_vii():
@@ -381,7 +640,7 @@ def leg_xi():
     check("(xi) no NEW machine-specific value outside the launcher's labelled example", not hits, f"{hits[:6]}")
 
 
-LEGS = {"i": leg_i, "vii": leg_vii, "x": leg_x, "xi": leg_xi}
+LEGS = {"i": leg_i, "ii": leg_ii, "iii": leg_iii, "vi": leg_vi, "vii": leg_vii, "x": leg_x, "xi": leg_xi}
 
 
 if __name__ == "__main__":

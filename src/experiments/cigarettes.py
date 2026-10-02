@@ -355,6 +355,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             clipy=kwargs.get("clipy", True),
             n_jobs=kwargs.get("n_jobs", 1),
             mean_match=kwargs.get("mean_match", True),
+            gamma_n_alpha=kwargs.get("gamma_n_alpha", 0.0),
         )
         toggles = self.toggles
 
@@ -370,6 +371,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         # rows it fits: sigma-hat^2 = 1 on the full panel, a few dof on a small cell
         self.absorbed_rate = absorbed_rate(design, toggles["mean_match"])
         toggles["absorbed_rate"] = self.absorbed_rate
+        # the pads' units: the real panel's state-years are dependent, so the
+        # restricted-IV target (cigarettesFig7) sizes them on its states; the
+        # plasmode's errors are iid per state-year given X, so its rows count
+        toggles["unit_cap"] = len(np.unique(design.state)) if target == "iv" else None
+        kwargs["unit_cap"] = toggles["unit_cap"]
 
         # DECLARED, per spec, and only the query panel ever sees it: the sweeps
         # solve at gamma*(target) through `ParamSweepRunner.fit_gamma`. See

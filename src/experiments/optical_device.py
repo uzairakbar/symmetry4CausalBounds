@@ -77,6 +77,7 @@ class OpticalOrchestrator(ExperimentOrchestrator):
             clipy=kwargs.get("clipy", True),
             n_jobs=kwargs.get("n_jobs", 1),
             mean_match=kwargs.get("mean_match", True),
+            gamma_n_alpha=kwargs.get("gamma_n_alpha", 0.0),
         )
         toggles = self.toggles
         epsilon = self._epsilon_budget(OPTICAL_CONFIG.epsilon, quantile=OPTICAL_CONFIG.epsilon_quantile)
