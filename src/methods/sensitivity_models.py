@@ -12,6 +12,7 @@ import cvxpy as cp
 import numpy as np
 from joblib import Parallel, delayed, effective_n_jobs, parallel_config
 from loguru import logger
+from scipy.stats import chi2, ncx2
 from threadpoolctl import threadpool_limits
 
 from src.methods.abstract import sensitivityAnalyzer as SA
@@ -46,6 +47,22 @@ def recalibrated_gamma(gamma, rho, t) -> float:
     so the post-DA budget never exceeds the inherited gamma.
     """
     return float(gamma) * ((1.0 - float(t)) + float(t) / max(float(rho), 1.0))
+
+
+def finite_sample_budget(d, g, n, a) -> float:
+    """The finite-sample budget gamma_n(d; g) = F^-1_{chi2_d(n g)}(1 - a) / n.
+
+    The (1 - a) quantile of a noncentral chi-square on d degrees of freedom with
+    noncentrality n g, per unit: the population budget g plus the sampling room a
+    d-dimensional quadratic statistic on n samples needs at level a. g <= 0 is the
+    central chi-square. a = 0 is the raw (population) budget: g itself.
+    """
+    if not a:
+        return float(g)
+    d, g, n = int(d), float(g), float(n)
+    if g <= 0.0:
+        return float(chi2.ppf(1.0 - a, d)) / n
+    return float(ncx2.ppf(1.0 - a, d, n * g)) / n
 
 
 class BoundedSA(SA):
