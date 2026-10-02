@@ -61,7 +61,8 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         Catches: a row that widens an interval (a split that is not fixed).
   (vi)  config: `gamma_n` 95 -> `gamma_n_alpha` 0.05, absent / 0 / false -> 0.0
         with one INFO line when absent; `true`, 100, -5 and "95" raise; every
-        non-do-MNIST recipe and config.yaml resolve to `RECIPE_ALPHA`; the
+        non-do-MNIST recipe and config.yaml resolve to `RECIPE_ALPHA` but the
+        population-level illustration (`RAW_RECIPES`: opticalDeviceFig6, 0.0); the
         retired `im-ci` key raises; do-MNIST accepts `gamma_n` and carries no
         `gamma_n_alpha`. The one tolerance: `EPS_TOL` is 2^-8 and no dataset config
         carries a tolerance or pad budget of its own; the optical
@@ -116,6 +117,17 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         `iv: 1`, the cigarettes' to 0.0177; optical has no Z, so its gamma_z 0 is
         exempt and its DA T rows are positive through eps.
         Catches: a budget that silently degenerates to an exact constraint.
+  (xiii) `oracle_t_leak`, the optical query's T row at its population radius: a
+        non-bool, a `true` off the optical block or beside a sweep raise; off
+        (the default) the query measures no leak and DA+PI+IV(T)'s T row is the
+        row formula; on, opticalDeviceFig6 (device 8, raw) measures the oracle T
+        leak ||E-hat[W# | T]|| / sqrt(N), RMS-pooled over the oracle's seeded
+        draws, at the RECORDED 0.014733 (1e-6), the T row's radius is exactly
+        leak + EPS_TOL (0.018639), and the panel's mean widths over its 64
+        queries are the RECORDED DA+PI 1.935, DA+PI+IV(T) 0.971 and PI+INV 0.547
+        (1e-3, the optical12 figure's), h* covered at every query.
+        Catches: a leak off the wrong draws or W#, a radius padded or at the
+        formula, a toggle that leaks onto another dataset or a sweep.
 
     uv run python scripts/a86_gamma_n.py [--only LEG]
 
@@ -129,6 +141,7 @@ import glob
 import importlib.util
 import inspect
 import os
+import pickle
 import py_compile
 import re
 import shutil
@@ -158,6 +171,12 @@ DATASETS = ("simulation", "optical_device", "cigarettes")
 # what config.yaml and every non-do-MNIST recipe resolve `gamma_n` to
 RECIPE_ALPHA = 0.05
 GAMMA_Z_SIM = 2**-8
+# opticalDeviceFig6 (device 8, raw, `oracle_t_leak`), RECORDED 2026-10-02: c29af19's
+# oracle T leak and the panel's mean widths over its 64 queries (the optical12 figure's)
+T_LEAK_STAR_DEVICE_8 = 0.0147326
+ORACLE_T_WIDTHS = {"DA+PI": 1.9353, "DA+PI+IV(T)": 0.9709, "PI+INV": 0.5465}
+# the population-level illustrations among the recipes: raw, no finite-sample pad
+RAW_RECIPES = ("opticalDeviceFig6.yaml",)
 # the query panels' budgets at c29af19 (`_epsilon_budget(query_epsilon, tol=eps,
 # quantile=None)` on opticalDeviceFig6's and cigarettesFig7's blocks)
 QUERY_EPSILON_C29AF19 = {"optical_device": 0.3335209199891572, "cigarettes": 0.003906250000000246}
@@ -643,7 +662,8 @@ def leg_vi():
             block = {**defaults, **config[dataset]}
             block.pop("experiment", None)
             got = resolve_dataset_block(dataset, block)["gamma_n_alpha"]
-            check(f"(vi) {os.path.basename(source)} {dataset}: alpha {RECIPE_ALPHA:g}", got == RECIPE_ALPHA, f"{got}")
+            want = 0.0 if os.path.basename(source) in RAW_RECIPES else RECIPE_ALPHA
+            check(f"(vi) {os.path.basename(source)} {dataset}: alpha {want:g}", got == want, f"{got}")
     domnist = {
         "seed": 42,
         "augmentation": "translate",
@@ -1133,6 +1153,89 @@ def leg_xi():
     check("(xi) no NEW machine-specific value outside the launcher's labelled example", not hits, f"{hits[:6]}")
 
 
+def optical_query(oracle_t_leak):
+    """The opticalDeviceFig6 block with `oracle_t_leak` set: (orchestrator, query runner)."""
+    from munch import munchify
+
+    from src.experiments.configs import resolve_dataset_block
+    from src.experiments.utils import set_seed
+    from src.main import ORCHESTRATORS
+
+    with open(os.path.join(REPO, "recipes", "opticalDeviceFig6.yaml")) as handle:
+        config = yaml.safe_load(handle)
+    block = {**config["defaults"], **config["optical_device"], "n_jobs": 4, "oracle_t_leak": oracle_t_leak}
+    block = resolve_dataset_block("optical_device", block)
+    set_seed(block["seed"])
+    orch = ORCHESTRATORS["optical_device"](**block, hyperparameters=munchify({}))
+    return orch, orch.get_query_runner_cls()(methods=orch.methods, **orch._get_clean_kwargs())
+
+
+def leg_xiii():
+    from src.experiments.configs import EPS_TOL, parse_experiment_plan, resolve_dataset_block
+    from src.experiments.utils import fit_model
+    from src.methods.sensitivity_models import finite_sample_budget as fsb
+
+    print("(xiii) the optical query's T row at its oracle leak (`oracle_t_leak`)")
+    optical = {"seed": 42, "augmentation": "rotation > hflip > vflip > random-permutation"}
+    for name, block, experiment in (
+        ("optical_device", {**optical, "oracle_t_leak": "yes"}, {"query": True}),
+        ("simulation", {"seed": 42, "kernel_dim": 0, "oracle_t_leak": True}, {"query": True}),
+        ("optical_device", {**optical, "oracle_t_leak": True}, {"query": True, "sweep": {"param": ["gamma"]}}),
+    ):
+        try:
+            resolve_dataset_block(name, {**block, "experiment": experiment})
+            raised = False
+        except ValueError:
+            raised = True
+        check(f"(xiii) {name} oracle_t_leak {block['oracle_t_leak']!r} with {sorted(experiment)} raises", raised)
+    resolved = resolve_dataset_block(
+        "optical_device", {**optical, "oracle_t_leak": True, "experiment": {"query": True}}
+    )
+    check("(xiii) the optical query block accepts it", resolved["oracle_t_leak"] is True)
+
+    for on in (False, True):
+        orch, runner = optical_query(on)
+        model = runner.methods["DA+PI+IV(T)"]()
+        fit_model(model=model, method_name="DA+PI+IV(T)", X=runner.X, y=runner.y, GX=runner.GX, G=runner.G, Z=runner.Z)
+        got = model.iv_radius("t", model.gamma)
+        if not on:
+            budget = model.budget(model.gamma)
+            level = model.row_level / len(model.rows)
+            dof = model.iv_terms_["t"][3]
+            want = np.sqrt(model.sigma_sq * (1 + budget) * fsb(dof, model.iv_leak() / (1 + budget), model.n_eff, level))
+            check(
+                "(xiii) off: no leak measured, the T row at the row formula",
+                runner.t_leak_star is None and model.t_radius is None and abs(got - want) <= 1e-12 * want,
+                f"{got:.6f} (want {want:.6f})",
+            )
+            continue
+        leak = runner.t_leak_star
+        check(
+            f"(xiii) on: the oracle T leak is the RECORDED {T_LEAK_STAR_DEVICE_8:g} on device 8",
+            abs(leak - T_LEAK_STAR_DEVICE_8) < 1e-6,
+            f"{leak:.6f}",
+        )
+        check(
+            "(xiii) on: the T row's radius is the leak + EPS_TOL, raw",
+            model.rows == ("t",) and got == leak + EPS_TOL and model.gamma_n_alpha == 0.0,
+            f"{got:.6f}",
+        )
+        with workdir("oracle_t_leak_"):
+            orch.run(parse_experiment_plan({"query": True}))
+            with open("artifacts/optical_device/query/outcome_values.pkl", "rb") as handle:
+                values = pickle.load(handle)  # noqa: S301 - this run's own artifact
+        truth = values["ATE"][:, 0]
+        for name, want in ORACLE_T_WIDTHS.items():
+            lower, upper = values[name][:, 0, 0], values[name][:, 0, 1]
+            width = float(np.mean(upper - lower))
+            covered = bool(np.all((lower - 1e-9 <= truth) & (truth <= upper + 1e-9)))
+            check(
+                f"(xiii) on: the panel's {name} width is the RECORDED {want:g} (1e-3), h* covered",
+                abs(width - want) < 1e-3 and covered,
+                f"{width:.6f}",
+            )
+
+
 LEGS = {
     "i": leg_i,
     "ii": leg_ii,
@@ -1146,6 +1249,7 @@ LEGS = {
     "x": leg_x,
     "xi": leg_xi,
     "xii": leg_xii,
+    "xiii": leg_xiii,
 }
 
 

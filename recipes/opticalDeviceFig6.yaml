@@ -4,7 +4,11 @@ defaults:
     clipy: false
     mean_match: false
     normalize: true
-    gamma_n: 95
+    # a population-level illustration, like do-MNIST unpadded: the raw program and the
+    # DA T row at its oracle leak + 2^-8. The T row's bite on optical is a large-sample
+    # effect; at n = 1000 the padded T row is slack
+    gamma_n: 0
+    oracle_t_leak: true
     n_jobs: -1
 optical_device:
     seed: 42

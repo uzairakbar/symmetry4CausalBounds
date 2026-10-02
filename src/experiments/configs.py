@@ -962,6 +962,7 @@ class MethodRegistry:
         rho: float = 1.0,
         absorbed_rate: float = 0.0,
         gamma_n_alpha: float = 0.0,
+        t_radius: float | None = None,
         backend: Literal["partial_r2", "copsens"] = "partial_r2",
         outcome_models: dict[str, Any] | None = None,
         n_components: int = 32,
@@ -1012,6 +1013,10 @@ class MethodRegistry:
                 mean row, each at level alpha / 3 on the fit's n_obs units;
                 0.0, the default and every direct constructor, is the raw program
                 (the population budgets). partial_r2 only.
+            t_radius: the DA T row's radius, fixed (the optical query's
+                `oracle_t_leak`: the oracle T leak + EPS_TOL, raw); None, the
+                default, is the row formula at gamma~_z(eps). Reaches the T row
+                alone, never a joint (T, Z) row. partial_r2 only.
             mean_match: solve on the mean-matched slice E_n[h(X)] = E_n[Y]
                 (Lem. 2). False keeps the pre-2026-09 uncentred geometry.
             backend: which PI machinery. 'partial_r2' is the linear SOCP;
@@ -1068,7 +1073,7 @@ class MethodRegistry:
         # which IV rows a ball ends up with follows from the instrument blocks it
         # is FITTED with (`fit_model`), so one kwarg set serves the non-DA
         # methods, the DA+ ones and every mode
-        iv_common = dict(common, gamma_z=gamma_z)
+        iv_common = dict(common, gamma_z=gamma_z, t_radius=t_radius)
         # the standalone DA+ balls carry the step's rho; the intersections read
         # theirs off their two branches (`IntersectedPartialR2.rho`)
         da_common = dict(common, rho=rho)
@@ -1202,8 +1207,10 @@ DATASET_KEYS: dict[str, set] = {
 
 # `normalize` is a PLOTTING switch (SS10.1), not a solver one: nothing reads it
 # before `_run_sweeps`, and the pkls never move. `gamma_n` is the finite-sample pads'
-# confidence level in percent (`finite_sample_budget`), read as `gamma_n_alpha`
-TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "gamma_n"}
+# confidence level in percent (`finite_sample_budget`), read as `gamma_n_alpha`.
+# `oracle_t_leak` puts the optical query's DA T row at its oracle leak + EPS_TOL
+# (`GenericQuerySweep`); false, the default, keeps the row formula
+TOGGLE_KEYS: set = {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "gamma_n", "oracle_t_leak"}
 
 # no sensible default: the run is not reproducible / constructible without them
 REQUIRED_KEYS: dict[str, set] = {
@@ -1382,6 +1389,19 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         if absent:
             logger.info(f"config.{name}: gamma_n absent: the raw program (population budgets, no finite-sample pad).")
         block["gamma_n_alpha"] = (100.0 - float(level)) / 100.0 if level else 0.0
+
+    # the T row at its population radius is the optical query panel's illustration
+    # (opticalDeviceFig6), measured on the query's own SEM and DA: no other dataset
+    # and no sweep reads it, so asking for it there is an error, not a no-op
+    oracle_t_leak = block.get("oracle_t_leak", False)
+    if not isinstance(oracle_t_leak, bool):
+        raise ValueError(f"config.{name}.oracle_t_leak must be a bool; got {oracle_t_leak!r}.")
+    if oracle_t_leak:
+        if name != "optical_device":
+            raise ValueError(f"config.{name}.oracle_t_leak is the optical query's alone; got true on {name}.")
+        extra = sorted(k for k in ("sweep", "perf") if (experiment or {}).get(k) is not None)
+        if extra:
+            raise ValueError(f"config.{name}.oracle_t_leak is the query's alone; the block also runs {extra}.")
 
     # dataset-specific, unlike the two guards above: these keys exist on one block
     # only, and an unknown spec would otherwise run silently at the loader's default

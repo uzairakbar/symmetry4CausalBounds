@@ -51,7 +51,7 @@ The generated figures and artifacts are saved in the `./artifacts/` directory af
 ## Finite-sample tolerance (gamma_n)
 Every linear PI program carries finite-sample pads, so one solve gives a
 simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` in
-`config.yaml`'s `defaults:` and in every recipe.
+`config.yaml`'s `defaults:` and in every recipe but `opticalDeviceFig6` (below).
 
 - **The pads.** With `gamma_n(d; g) = F^-1_{chi2_d(n g)}(1 - a) / n`
   (`sensitivity_models.finite_sample_budget`), the ERM ball is
@@ -86,6 +86,14 @@ simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` i
   inside the `(Z)` one; raw, it does. Every +IV interval still sits inside its
   non-IV counterpart.
 - do-MNIST accepts the key and ignores it: its CopSens balls are oracle-calibrated.
+- **The unpadded exceptions.** Besides do-MNIST, `opticalDeviceFig6` runs
+  `gamma_n: 0` with `oracle_t_leak: true`, a population-level illustration: the
+  DA T row's radius is the oracle T leak `||E-hat[W# | T]|| / sqrt(N)` (W# the part
+  of W that OLS on Phi(GX) leaves; RMS-pooled over the oracle's seeded DA draws) +
+  2^-8, raw, in place of the row formula at `(eps / sigma~)^2`. The T row's bite on
+  optical is a large-sample effect: at n = 1000 the padded T row is slack. The
+  toggle (default false) is the optical query's alone; anywhere else it is a
+  config error.
 
 ## do-MNIST
 The `do_mnist:` block runs the query path on the CopSens latent-factor ball around

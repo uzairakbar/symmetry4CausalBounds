@@ -793,9 +793,12 @@ class InstrumentalVariablePartialR2(PartialR2):
     and nothing is inflated to hide it.
     """
 
-    def __init__(self, gamma=None, gamma_z=0.0, **kwargs):
+    def __init__(self, gamma=None, gamma_z=0.0, t_radius=None, **kwargs):
         # the observed instrument's declared leak budget (SS2.6); 0 with no Z
         self.gamma_z = gamma_z
+        # the T row's radius, fixed (`oracle_t_leak`: the oracle T leak + EPS_TOL,
+        # raw); None is the row formula below. Never a joint (T, Z) row's
+        self.t_radius = t_radius
         super().__init__(gamma=gamma, **kwargs)
         # per row ("t", "z", "tz"): (Q'X, jitter) and (Q'y, 0), the intercept's
         # column for the padded mean row, the block width d and the threshold
@@ -836,9 +839,11 @@ class InstrumentalVariablePartialR2(PartialR2):
     def iv_radius(self, row: str, gamma=None) -> float:
         """sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~))) of one row, at its
         level gamma_n_alpha / (GAMMA_N_ROWS B) on n_eff units, B the fit's rows;
-        raw it is s sqrt(g)."""
+        raw it is s sqrt(g). A fixed `t_radius` is the T row's radius as is."""
         if row not in self.rows:
             raise KeyError(f"no IV row {row!r} on this fit; its rows are {self.rows}")
+        if row == "t" and self.t_radius is not None:
+            return float(self.t_radius)
         budget = self.budget(self.gamma if gamma is None else gamma)
         level = self.row_level / len(self.rows)
         dof = self.iv_terms_[row][3]
@@ -1056,11 +1061,12 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
     gamma~_z(eps). An empty Z makes the baseline plain PI and the DA branch
     T-only."""
 
-    def __init__(self, gamma_z=0.0, instrument="T,Z", **kwargs):
+    def __init__(self, gamma_z=0.0, instrument="T,Z", t_radius=None, **kwargs):
         if instrument not in ("T,Z", "Z", "T"):
             raise ValueError(f"instrument must be 'T,Z', 'Z' or 'T'; got {instrument!r}")
         self.gamma_z = gamma_z
         self.instrument = instrument
+        self.t_radius = t_radius  # the DA branch's T row, as `InstrumentalVariablePartialR2`
         super().__init__(**kwargs)
 
     def _branch(self, pad):
@@ -1069,6 +1075,7 @@ class IntersectedInstrumentalVariablePartialR2(IntersectedPartialR2):
         return InstrumentalVariablePartialR2(
             gamma=self.gamma,
             gamma_z=self.gamma_z,
+            t_radius=self.t_radius,
             epsilon=self.epsilon,
             pad=pad,
             recalibrate=self.recalibrate,

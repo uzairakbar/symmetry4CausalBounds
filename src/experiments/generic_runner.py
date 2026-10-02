@@ -33,6 +33,7 @@ from src.oracle import (
     preserve_rng,
     recalibrated_da_epsilon,
     sweep_sem,
+    t_leak_star,
 )
 
 # per-experiment DA seed offset: common random numbers across a knob grid
@@ -125,6 +126,7 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         default_gamma: float = 1.0,
         default_epsilon: float | None = 2**-8,
         raw_gamma: bool = False,
+        oracle_t_leak: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -144,6 +146,14 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
         self.poly = poly_transform
         self.epsilon_true = epsilon_true
         self.oracle = self.prepare_pair(self.sem, self.da, features=self._features)
+        # `oracle_t_leak`: the DA T row at its population radius, the oracle T leak
+        # (`oracle.t_leak_star`, pooled as `prepare_pair` pools) + EPS_TOL, in place
+        # of the row formula at gamma~_z(eps). Opt-in, the optical query only
+        # (`resolve_dataset_block`); None leaves every T row on the formula
+        self.t_leak_star = self.pooled_t_leak_star() if oracle_t_leak else None
+        t_radius = None if self.t_leak_star is None else self.t_leak_star + EPS_TOL
+        if t_radius is not None:
+            logger.info(f"oracle T leak {self.t_leak_star:.6g}; the T row's radius {t_radius:.6g} (+ EPS_TOL)")
 
         # Subclasses must FORWARD their budgets here rather than assigning before
         # super().__init__, or these defaults silently overwrite them. A None
@@ -187,7 +197,28 @@ class GenericQuerySweep(OracleMixin, QuerySweepRunner):
                 gamma=self.default_gamma,
                 epsilon=default_epsilon,
                 rho=self.fit_rho(),
+                **({} if t_radius is None else {"t_radius": t_radius}),
             )
+
+    def pooled_t_leak_star(self) -> float:
+        """The oracle T leak of this panel's (SEM, DA, features), RMS-pooled over the
+        same seeded draws on the same rows as `prepare_pair`'s oracle."""
+        pool = getattr(self.sem, "pool", None)
+        draws = ORACLE_POOL_DRAWS if pool is not None else 1
+        with preserve_rng():
+            leaks = []
+            for draw in range(draws):
+                np.random.seed(ORACLE_POOL_SEED + draw)
+                leaks.append(
+                    t_leak_star(
+                        self.sem,
+                        self.da,
+                        X=None if pool is None else pool[0],
+                        features=self._features,
+                        mean_match=self.mean_match,
+                    )
+                )
+        return float(np.sqrt(np.mean(np.square(leaks))))
 
     def extent(self, queries) -> np.ndarray:
         """Target-set half-width at each query, beside `self.sem.f(queries)`. Zeros

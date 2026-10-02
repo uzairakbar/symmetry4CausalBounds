@@ -243,6 +243,33 @@ def epsilon_star_q95(
     return float(np.quantile(np.concatenate(pooled), W_QUANTILE))
 
 
+def t_leak_star(
+    sem,
+    da,
+    X: NDArray | None = None,
+    features: Callable | None = None,
+    n_samples: int = CALIBRATION_SAMPLES,
+    mean_match: bool = False,
+) -> float:
+    """The oracle T leak || E-hat[W# | T] || / sqrt(N) of ONE augmentation draw.
+
+        w   = h_*(X) - h_*(X~)
+        W#  = w less its OLS fit on Phi(GX) (both centred under `mean_match`)
+        leak = RMS of W#'s projection onto span(T)
+
+    What T-as-IV needs: T is independent of (U, xi), so h_*'s moment on T is W#'s
+    alone. Read only by the opt-in `oracle_t_leak` toggle (the optical query's T row
+    at its population radius, `GenericQuerySweep`); every other T row reads
+    gamma~_z(eps)."""
+    w, Phi, G = _invariance_signal(sem, da, X, features, n_samples)
+    if mean_match:
+        Phi = Phi - Phi.mean(axis=0)
+        w = w - np.mean(w)
+    w_sharp = w - Phi @ np.linalg.lstsq(Phi, w, rcond=None)[0]
+    Q, _ = np.linalg.qr(G)
+    return float(np.sqrt(np.mean((Q @ (Q.T @ w_sharp)) ** 2)))
+
+
 def sweep_sem(sem) -> bool:
     """Whether a SEM is a sweep's, i.e. reads eps* as the shared q0.95 reading.
     `epsilon_quantile` is a routing marker: W_QUANTILE (a sweep) or None (a query

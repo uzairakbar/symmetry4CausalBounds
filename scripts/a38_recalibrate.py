@@ -368,7 +368,7 @@ def leg_viii():
     print("(viii) config")
     check(
         "(viii) TOGGLE_KEYS",
-        {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "gamma_n"} == TOGGLE_KEYS,
+        {"recalibrate", "pad", "clipy", "n_jobs", "mean_match", "normalize", "gamma_n", "oracle_t_leak"} == TOGGLE_KEYS,
         f"{sorted(TOGGLE_KEYS)}",
     )
     try:

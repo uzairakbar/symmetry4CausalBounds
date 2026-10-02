@@ -199,15 +199,18 @@ class OpticalOrchestrator(ExperimentOrchestrator):
         epsilon: float,
         n_jobs=None,
         rho=1.0,
+        t_radius=None,
     ):
         """Methods at explicit (per-experiment) budgets. `n_jobs` overrides the
-        toggle -- perf needs serial models to time methods, not the harness."""
+        toggle -- perf needs serial models to time methods, not the harness.
+        `t_radius` fixes the DA T row's radius (the query's `oracle_t_leak`)."""
         toggles = self.toggles if n_jobs is None else {**self.toggles, "n_jobs": n_jobs}
         return MethodRegistry.build_methods(
             self.kwargs["methods"],
             gamma=gamma,
             epsilon=epsilon,
             rho=rho,
+            t_radius=t_radius,
             **toggles,
         )
 
