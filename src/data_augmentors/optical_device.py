@@ -13,6 +13,8 @@ P = 0.5
 # every row was permuted before this class honoured p.
 P_RANDOM_PERMUTATION = 1.0
 NOISE_COEFF = np.sqrt(0.01)
+# translate's step, in units of std(X): t ~ N(0, (s std(X))^2 I) at p = 1
+TRANSLATION_SCALE = 0.5
 
 
 class Permutation(DA):
@@ -180,6 +182,37 @@ class GaussianNoise(DA):
         return X + self._strength * np.std(X) * G
 
 
+class SumZeroTranslation(DA):
+    """Sum-zero pixel translation x -> x + B t, B an orthonormal basis of the
+    sum-zero subspace 1-perp of the pixel space (8 dims for 9 pixels) and
+    t ~ N(0, (s std(X))^2 I), s = `scale` times the call's `p` (the omega knob).
+
+    The linearisation of the pixel-permutation symmetry: a linear h_* invariant
+    under every pixel permutation has equal weights, hence is invariant to moving
+    brightness along B (assumed exactly invariant, like the permutations). G = t /
+    (s std(X)) is the standardised draw, and on the centred X the SEM hands over
+    E[GX | t] = B t, which is what makes T informative."""
+
+    def __init__(self, scale: float = TRANSLATION_SCALE, n_pixels: int = 9):
+        self.scale = float(scale)
+        # orthonormal basis of 1-perp: the centring projector's leading singular vectors
+        U, _, _ = np.linalg.svd(np.eye(n_pixels) - 1.0 / n_pixels)
+        self.B = U[:, : n_pixels - 1]
+        super().__init__()
+
+    def __call__(self, X, p: float | None = None, **kwargs):
+        s = self.scale * (1.0 if p is None else float(p))
+        G = np.random.randn(len(X), self.B.shape[1])
+        return self.augment(X, G, s), G
+
+    @property
+    def augmentation(self):
+        return "translate"
+
+    def augment(self, X, G, s):
+        return X + s * np.std(X) * G @ self.B.T
+
+
 class Identity(DA):
     """Identity augmentation (no change)."""
 
@@ -191,7 +224,7 @@ class Identity(DA):
         return X, X
 
 
-Augmentation = Literal["rotation", "hflip", "vflip", "gaussian-noise", "random-permutation"]
+Augmentation = Literal["rotation", "hflip", "vflip", "gaussian-noise", "random-permutation", "translate"]
 
 # constructors, NOT instances: augmenters carry per-DA state (p, strength)
 ALL_AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {
@@ -201,6 +234,9 @@ ALL_AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {
     "gaussian-noise": GaussianNoise,
     "random-permutation": RandomPermutation,
 }
+# every name a chain may carry; translate stays out of "all", which keeps its
+# historical meaning
+AUGMENTATIONS: dict[Augmentation, Callable[[], DA]] = {**ALL_AUGMENTATIONS, "translate": SumZeroTranslation}
 
 
 class OpticalDeviceDA(DA):
@@ -215,7 +251,7 @@ class OpticalDeviceDA(DA):
             augmentations: list[Augmentation] = augmentations.replace(" ", "").split(">")
 
         if augmentations:
-            self._augmentations: list[DA] = [ALL_AUGMENTATIONS[augmentation]() for augmentation in augmentations]
+            self._augmentations: list[DA] = [AUGMENTATIONS[augmentation]() for augmentation in augmentations]
         else:
             self._augmentations: list[DA] = [Identity()]
 
