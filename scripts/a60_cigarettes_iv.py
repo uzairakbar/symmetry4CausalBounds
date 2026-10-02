@@ -9,7 +9,9 @@ replicate rule of decision 9), plus `gamma_z > 0` under a non-empty set in
 digest blocks) drop `gamma_n` and stay on the raw program after the recipes go to
 `gamma_n: 95`; the recipe legs read whatever the recipe sets, and every radius
 check reads the row formula at the model's own `gamma_n_alpha` (raw: exactly
-s sqrt(g)). Legs:
+s sqrt(g)). (v)'s replicate coverage leg runs the recipe raw (`gamma_n: 0`): the
+padded PI+IV covers every replicate, so its "resampling rate under 1" is a reading
+of the raw program. Legs:
 
   (D)   the digest leg (scripts/digest_leg.py), as a56 to a59: the shipped blocks,
         no `iv` key, against the reference recorded on 14509db, no tolerance.
@@ -387,7 +389,9 @@ def leg_iv():
 def leg_v():
     print("(v) the replicate mechanism of decision 9, and the declared budget in the solver")
     block_methods = recipe_methods()
-    orch = orchestrator(recipe_block(n_experiments=REPLICATES, sweep_samples=4, n_jobs=1))
+    # the coverage leg stays raw after 3c: the padded PI+IV covers every replicate,
+    # so "a resampling rate under 1" is a reading of the raw program
+    orch = orchestrator(recipe_block(n_experiments=REPLICATES, sweep_samples=4, n_jobs=1, gamma_n=0))
     gamma_z = float(recipe_block()["gamma_z"])
     check(
         f"(v) the orchestrator reads iv and the block's gamma_z {gamma_z:g}",

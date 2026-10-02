@@ -50,6 +50,9 @@ pinned upper left. Legs:
         before (pkls and tex only; a figure's edges are not hashed).
 
     MPLBACKEND=Agg python scripts/a66_elasticity_grid.py [--reference JSON] [--skip-digest]
+
+The yaml blocks are read raw (their `gamma_n` dropped), so these checks stay on
+the raw program after the recipes went to `gamma_n: 95`.
 """
 
 import argparse
@@ -158,6 +161,10 @@ def recipe_block(**overrides):
     defaults = config.pop("defaults", {}) or {}
     block = {**defaults, **config["cigarettes"]}
     block.pop("experiment", None)
+    # stays raw after 3c: the checks pin the raw program (the recipes' `gamma_n: 95`
+    # is dropped); under the pads the joint (T, Z) row is not nested in the Z row
+    # (more columns at the same level)
+    block.pop("gamma_n", None)
     return resolve_dataset_block("cigarettes", {**block, "n_jobs": 1, **overrides})
 
 

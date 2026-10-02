@@ -9,6 +9,9 @@ defaults:
                         # by centring); a 2-SE band on the do-MNIST nets, where the
                         # constraint is nonlinear (see MEAN_BAND_SE).
                         # false = the pre-2026-09 uncentred, intercept-free ball.
+    gamma_n: 95         # finite-sample pads (gamma_n): every PI ball, mean row and IV row
+                        # padded so one solve gives simultaneous 95% bands; absent,
+                        # 0 or false = the raw population budgets. do-MNIST ignores it.
     n_jobs: 16          # query-solve workers. 1 = serial, -1 = all cores.
                         # Shared node: keep <= 16. Perf plot always runs serial.
 # The IV budgets are not toggles: every linear method's instrument rows take the

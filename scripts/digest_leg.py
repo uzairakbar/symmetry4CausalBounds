@@ -46,7 +46,7 @@ import numpy as np
 from threadpoolctl import threadpool_limits
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_REFERENCE = os.path.expanduser("~/scratch/runs/gamma_n/digests/reference_3bp.json")
+DEFAULT_REFERENCE = os.path.expanduser("~/scratch/runs/gamma_n/digests/reference_3c.json")
 
 DATASETS = ("simulation", "optical_device", "cigarettes")
 QUERY_SAMPLES = 8  # even, so the cigarette query grids never touch the origin
@@ -61,8 +61,9 @@ SKIP_KEYS = ("wall_clock",)  # a timer, never reproducible
 
 # config.yaml at 14509db, resolved: the `defaults` toggles, the `hyperparameters`
 # block (inert on the linear experiments, passed for fidelity) and the three
-# dataset blocks, the sim and optical ones as they read uncommented
-TOGGLES = dict(recalibrate=True, pad=True, clipy=False, mean_match=True, n_jobs=N_JOBS)
+# dataset blocks, the sim and optical ones as they read uncommented; plus the
+# finite-sample pads every recipe now runs at (`gamma_n: 95`)
+TOGGLES = dict(recalibrate=True, pad=True, clipy=False, mean_match=True, n_jobs=N_JOBS, gamma_n=95)
 HYPERPARAMETERS = dict(lr=0.01, batch=256, epochs=1, optimizer="adam", betas=[0.7, 0.9], onecycle=True, loss="mse")
 METHODS = ["PI+INV", "PI", "DA+PI", "DA+PI+IV", "PI&DA+PI", "PI&DA+PI+IV"]
 BLOCKS = {

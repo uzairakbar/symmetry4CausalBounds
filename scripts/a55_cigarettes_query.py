@@ -45,6 +45,9 @@ through `create_query_sweep_plot` and Q7 through `create_sweep_plot` with the
 
 Runs the query sweep ONCE at `sweep_samples=32` and reads the artifacts back.
 Never touches do-MNIST.
+
+The yaml blocks are read raw (their `gamma_n` dropped), so these checks stay on
+the raw program after the recipes went to `gamma_n: 95`.
 """
 
 import argparse
@@ -123,6 +126,8 @@ def shipped_block():
     with open(os.path.join(REPO, "config.yaml")) as handle:
         config = yaml.safe_load(handle) or {}
     merged = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
+    # stays raw after 3c: the checks pin the raw program (the recipes' `gamma_n: 95` is dropped)
+    merged.pop("gamma_n", None)
     return merged, config.get("cigarettes") or {}
 
 

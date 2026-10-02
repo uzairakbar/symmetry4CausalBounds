@@ -18,6 +18,9 @@ PI+INV has always followed on the epsilon sweep (PLAN v16 SS2.2, SS5.9). Four le
      the two sentences allowed to name it.
 
     python scripts/a25_floor_guard.py [--only LEG]
+
+The yaml blocks are read raw (their `gamma_n` dropped), so these checks stay on
+the raw program after the recipes went to `gamma_n: 95`.
 """
 
 import argparse
@@ -174,6 +177,8 @@ def recipe_runner(dataset, param, n_experiments=1, steps=8, methods=None, **over
         raise KeyError(f"recipes/{OMEGA_RECIPE} carries no `{dataset}:` block, only {sorted(config)}")
     block = {**defaults, **config[dataset]}
     block.pop("experiment", None)
+    # stays raw after 3c: the checks pin the raw program (the recipes' `gamma_n: 95` is dropped)
+    block.pop("gamma_n", None)
     block.update(n_experiments=n_experiments, sweep_samples=steps, n_jobs=1, **overrides)
     if methods is not None:
         block["methods"] = list(methods)

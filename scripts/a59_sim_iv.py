@@ -62,6 +62,9 @@ refactor4 touches `src/sem/simulation.py` (the `iv_dim` argument, the guarded
 
 `--skip-digest` drops leg (D) and exists for the break-it runs of the other legs;
 the committed state is always gated with it on.
+
+The yaml blocks are read raw (their `gamma_n` dropped), so these checks stay on
+the raw program after the recipes went to `gamma_n: 95`.
 """
 
 import argparse
@@ -156,6 +159,8 @@ def recipe_block():
     with open(os.path.join(REPO, "recipes", RECIPE)) as handle:
         config = yaml.safe_load(handle)
     defaults = config.pop("defaults", {}) or {}
+    # stays raw after 3c: the checks pin the raw program (the recipes' `gamma_n: 95` is dropped)
+    defaults.pop("gamma_n", None)
     return {**defaults, **config["simulation"]}
 
 

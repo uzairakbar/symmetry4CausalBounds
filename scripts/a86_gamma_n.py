@@ -84,6 +84,14 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         config.yaml, README.md or scripts/README.md (this script and a77's
         unknown-key check aside, which name it to reject it).
         Catches: a second sweep record, a leftover of the bootstrap path.
+  (viii) a sanity report, not a pass/fail: cigarette plasmode coverage at the
+        rows the pads count (`n_obs`), over `PLASMODE_DRAWS` resimulations of the
+        nEfficiencyFig13 / mEfficiencyFig14 blocks at gamma_n 95: the n sweep's
+        10% and 100% cells (220 and 2205 fit rows) and the m sweep's base (331
+        rows, m = 4). Printed per method: the mean per-query coverage, the
+        simultaneous coverage (every test query covered), each against 0.95 -
+        3 SE (0.90 for an intersection), and the per-query minimum; a reading under
+        it is a WARN for the user, never a FAIL, and changes nothing.
   (ix)  the purge: a grep over src/, scripts/, recipes/, config.yaml, README.md
         and scripts/README.md for every retired symbol (`RETIRED`, whole words,
         case-sensitive; this script and a77's unknown-key lines aside),
@@ -150,7 +158,7 @@ MEAN_ROW = (1843, 1.0, 0.0062)  # n, gamma, (1 + gamma) gamma_n(1; 0)
 TMPROOT = os.environ.get("A86_TMPROOT", os.path.expanduser("~/scratch/tmp/a86"))
 DATASETS = ("simulation", "optical_device", "cigarettes")
 # what config.yaml and every non-do-MNIST recipe resolve `gamma_n` to
-RECIPE_ALPHA = 0.0
+RECIPE_ALPHA = 0.05
 # the cigarette panel's states, the pads' units on `target: iv`
 CIGARETTE_STATES = 49
 GAMMA_Z_SIM = 2**-8
@@ -158,6 +166,7 @@ GAMMA_Z_SIM = 2**-8
 # quantile=None)` on opticalDeviceFig6's and cigarettesFig7's blocks)
 QUERY_EPSILON_C29AF19 = {"optical_device": 0.3335209199891572, "cigarettes": 0.003906250000000246}
 GAMMA_Z_CIGARETTES = 0.0177
+PLASMODE_DRAWS = 100
 VALIDITY_ROWS_DRAWS = 400
 VALIDITY_SOLVE_DRAWS = 250
 VALIDITY_GAMMA = 0.25
@@ -847,6 +856,53 @@ def leg_x():
     check("(x) no 16 / 17 literal left in either", not any(literals.values()), f"{literals}")
 
 
+def plasmode_cell(recipe, param, grid, n_experiments):
+    """{method: (n_experiments, n_test) covered} at each grid value of one block."""
+    from src.experiments.base import SweepData
+    from src.experiments.configs import percent_of
+    from src.experiments.utils import set_seed
+    from src.main import ORCHESTRATORS
+
+    block = {**recipe_block(recipe, "cigarettes"), "n_experiments": n_experiments, "n_jobs": -1}
+    set_seed(block["seed"])
+    orch = ORCHESTRATORS["cigarettes"](**block, hyperparameters={})
+    runner = orch.get_sweep_runner_cls(param)(
+        methods=orch.methods, method_factory=orch.build_methods, **orch._get_clean_kwargs()
+    )
+    if param == "n":
+        grid = [percent_of(block["n_samples"], p) for p in grid]
+    covered = {}
+    for i, value in enumerate(grid):
+        for j in range(n_experiments):
+            data = SweepData.coerce(runner.generate_data(j, value))
+            models = runner.build_models(j, i, data)
+            extent = 0.0 if data.extent is None else np.asarray(data.extent)
+            truth = np.asarray(data.estimand).ravel()
+            for name, model in models.items():
+                if not hasattr(model, "epsilon"):
+                    continue
+                bounds = model.predict(data.X_test, **runner.get_predict_kwargs(value, j))
+                hit = (bounds[:, 0] <= truth - extent + 1e-9) & (truth + extent <= bounds[:, 1] + 1e-9)
+                covered.setdefault((value, name), []).append(hit)
+    return {key: np.asarray(rows) for key, rows in covered.items()}
+
+
+def leg_viii():
+    print(f"(viii) cigarette plasmode coverage at n_obs over {PLASMODE_DRAWS} resimulations (a report)")
+    cells = plasmode_cell("nEfficiencyFig13", "n", [10, 100], PLASMODE_DRAWS)
+    cells.update(plasmode_cell("mEfficiencyFig14", "m", [4], PLASMODE_DRAWS))
+    for (value, name), hit in sorted(cells.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+        nominal = 0.90 if name.startswith("PI&") else 0.95
+        se = np.sqrt(nominal * (1 - nominal) / len(hit))
+        per_query = hit.mean(axis=0)
+        simultaneous = float(np.all(hit, axis=1).mean())
+        low = simultaneous < nominal - 3 * se
+        print(
+            f"  [{'WARN' if low else 'OK'}] (viii) cell {value} {name}: mean per-query {per_query.mean():.3f}, "
+            f"simultaneous {simultaneous:.3f} (>= {nominal - 3 * se:.3f}), per-query min {per_query.min():.3f}"
+        )
+
+
 def leg_ix():
     print("(ix) the purge: no retired symbol, every script loads")
     # case-sensitive, whole words: `EPS_TOL`, the one tolerance, is not `eps_tol`
@@ -1092,6 +1148,7 @@ LEGS = {
     "iv": leg_iv,
     "v": leg_v,
     "vi": leg_vi,
+    "viii": leg_viii,
     "vii": leg_vii,
     "ix": leg_ix,
     "x": leg_x,

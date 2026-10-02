@@ -55,6 +55,9 @@ Reads the cigarettes block of `--config` (default config.yaml) the way main.py
 does, and never assumes which methods it lists: every leg derives its witness from
 the block and reports when one is missing. `--config` points the gate at a block
 listing the IV pair (a recipe, or a temp copy of one). Never touches do-MNIST.
+
+The yaml blocks are read raw (their `gamma_n` dropped), so these checks stay on
+the raw program after the recipes went to `gamma_n: 95`.
 """
 
 import argparse
@@ -141,6 +144,8 @@ def shipped_block(path):
         config = yaml.safe_load(handle) or {}
     block = {**(config.get("defaults") or {}), **(config.get("cigarettes") or {})}
     block.pop("experiment", None)
+    # stays raw after 3c: the checks pin the raw program (the recipes' `gamma_n: 95` is dropped)
+    block.pop("gamma_n", None)
     return block
 
 
