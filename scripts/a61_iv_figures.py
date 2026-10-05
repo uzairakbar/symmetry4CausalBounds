@@ -1,4 +1,4 @@
-"""A61: the neighbour-price figures and tables, and the normalised sweep figures.
+"""A61: the neighbor-price figures and tables, and the normalised sweep figures.
 
 refactor6 touches `src/experiments/cigarettes.py` (F1, F2, the T1 benchmark column
 and the T2 benchmark table, all under a configured instrument set only, so the

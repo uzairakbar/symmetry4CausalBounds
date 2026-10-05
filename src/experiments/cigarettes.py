@@ -102,7 +102,7 @@ MOMENT_SEED: int = 0
 # (the left edge), then the rest, all far below the feasibility floor
 BENCHMARK_NAMES: dict[str, str] = {
     "lag_q": r"$\log q_{s,t-1}$ (addiction stock)",
-    "tax_diff": r"$\tau_s - \tau_{sn}$ (own minus lowest-neighbour excise)",
+    "tax_diff": r"$\tau_s - \tau_{sn}$ (own minus lowest-neighbor excise)",
     "log_tax_s": r"$\log \tau_s$",
     "log_tax_ratio": r"$\log(\tau_s / \tau_{sn})$",
     "log_pop": r"$\log \mathrm{pop}$",
@@ -111,7 +111,7 @@ BENCHMARK_NAMES: dict[str, str] = {
     "log_pop_n": r"$\log \mathrm{pop}_n$",
     "log_pop_ratio": r"$\log(\mathrm{pop}_n / \mathrm{pop})$",
 }
-NEIGHBOURS_FILE: str = "neighbors.csv"
+NEIGHBORS_FILE: str = "neighbors.csv"
 
 
 def _cosines(points, precision):
@@ -142,8 +142,8 @@ def _two_stage_interval(design, by: str):
 
 def benchmark_covariates(panel) -> dict[str, np.ndarray]:
     """The candidate omitted variables W, one array per BENCHMARK_NAMES key, NaN
-    where a row has none (the first year has no lag; a state with no neighbour in
-    the panel has no neighbour population)."""
+    where a row has none (the first year has no lag; a state with no neighbor in
+    the panel has no neighbor population)."""
     state, year = panel["st"], panel["year"]
     position = {(s, t): i for i, (s, t) in enumerate(zip(state, year, strict=True))}
     lag = np.array(
@@ -152,9 +152,9 @@ def benchmark_covariates(panel) -> dict[str, np.ndarray]:
             for s, t in zip(state, year, strict=True)
         ]
     )
-    neighbour_population = _neighbour_population(panel)
+    neighbor_population = _neighbor_population(panel)
     with np.errstate(divide="ignore", invalid="ignore"):
-        log_pop_n = np.where(neighbour_population > 0, np.log(np.maximum(neighbour_population, 1.0)), np.nan)
+        log_pop_n = np.where(neighbor_population > 0, np.log(np.maximum(neighbor_population, 1.0)), np.nan)
     return {
         "lag_q": lag,
         "tax_diff": panel["tax_s"] - panel["tax_sn"],
@@ -168,22 +168,22 @@ def benchmark_covariates(panel) -> dict[str, np.ndarray]:
     }
 
 
-def _neighbour_population(panel) -> np.ndarray:
-    """Summed population of each state's neighbours in the panel, per row; zeros
+def _neighbor_population(panel) -> np.ndarray:
+    """Summed population of each state's neighbors in the panel, per row; zeros
     when the adjacency file is not beside the raw sources."""
-    path = os.path.join(data_directory(), "raw", NEIGHBOURS_FILE)
+    path = os.path.join(data_directory(), "raw", NEIGHBORS_FILE)
     state, year = panel["st"], panel["year"]
     if not os.path.isfile(path):
-        logger.warning(f"{path} missing; the neighbour-population benchmarks are skipped.")
+        logger.warning(f"{path} missing; the neighbor-population benchmarks are skipped.")
         return np.zeros(len(state))
-    neighbours: dict[str, list[str]] = {}
+    neighbors: dict[str, list[str]] = {}
     with open(path, newline="") as handle:
         for row in csv.reader(handle):
             if len(row) >= 2 and row[0] != "StateCode":
-                neighbours.setdefault(row[0].strip(), []).append(row[1].strip())
+                neighbors.setdefault(row[0].strip(), []).append(row[1].strip())
     population = {(s, t): value for s, t, value in zip(state, year, panel["pop"], strict=True)}
     return np.array(
-        [sum(population.get((q, t), 0.0) for q in neighbours.get(s, [])) for s, t in zip(state, year, strict=True)]
+        [sum(population.get((q, t), 0.0) for q in neighbors.get(s, [])) for s, t in zip(state, year, strict=True)]
     )
 
 

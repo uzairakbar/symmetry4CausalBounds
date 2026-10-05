@@ -94,7 +94,7 @@ apart from (vi). Legs:
          merged figure saves to PDF under usetex ([SKIP] without latex); amssymb
          is in the preamble. An all-null tree and a tree whose only Z dataset is
          a blank column carry no suffix. Catches: the suffix on a Z column or an
-         unmerged grid, a suffix that collides with its neighbour or the legend,
+         unmerged grid, a suffix that collides with its neighbor or the legend,
          a preamble without `\varnothing`. Misses: the single-dataset figures,
          which carry no dataset title.
 

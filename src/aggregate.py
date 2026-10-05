@@ -33,7 +33,7 @@ two to a column. `epsilon_wall_clock.pdf` is the wall-clock row alone;
 `epsilon_seed_var.pdf` stacks the feasible rate (on `CLAMP_YLIM`) under the
 stability. A row is drawn only where some dataset ran its metric. From the
 cigarette query pkls, the 2 x 2 elasticity grid (`cigarettes_elasticities.pdf`):
-rows the state and neighbour price coefficients, columns the confounding budget
+rows the state and neighbor price coefficients, columns the confounding budget
 gamma and the leakiness budget gamma_z, x shared within a column, y within a row,
 x clipped to each column's grid with the budget the other column holds fixed
 marked, one legend inside the top-right panel, pinned upper left, in the repo's

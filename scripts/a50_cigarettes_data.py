@@ -10,7 +10,7 @@ The loader is numpy and the stdlib `csv` module; every number below is read off
         AND in the pin at once.
   (ii)  shape: 2450 rows, 49 states, 50 years, balanced, nothing missing, and the
         minimum state excise is $0.02 so the logs need no floor. Catches: AK and
-        HI back in (no land neighbour, so p_n is undefined there), a broken join.
+        HI back in (no land neighbor, so p_n is undefined there), a broken join.
         Misses: whether the VALUES are right; that is (iii) and (iv).
   (iii) nominal: the loader's `p` IS the CDC "Average Cost per pack" column, and
         the raw share of Var(log X) along v = (1,1,1,1) is 0.9422 against an
@@ -21,7 +21,7 @@ The loader is numpy and the stdlib `csv` module; every number below is read off
   (iv)  the trend ladder reproduces: rho_max, the classical iid statistic and the
         state- and year-clustered Walds at all five specs. Catches: a trend that
         is not t = (year - 1994)/25, a control matrix without the state dummies,
-        a different neighbour aggregator. Misses: nothing about the instrument.
+        a different neighbor aggregator. Misses: nothing about the instrument.
   (v)   units: the FWL residuals are exactly mean zero (the state dummies span the
         intercept, so `mean_match`'s mu is zero) and sigma-hat^2 of the design is
         1, which is what makes `EPS_TOL` -- a module constant in outcome units --
@@ -126,7 +126,7 @@ def leg_ii(panel):
     check("(ii) states", len(states) == STATES, f"{len(states)}")
     check("(ii) years", len(years) == YEARS, f"{years.min()}-{years.max()}")
     check("(ii) balanced", bool(np.all(counts == YEARS)), f"min {counts.min()} max {counts.max()}")
-    check("(ii) AK and HI dropped", not ({"AK", "HI"} & set(states)), "no land neighbour, so p_n is undefined")
+    check("(ii) AK and HI dropped", not ({"AK", "HI"} & set(states)), "no land neighbor, so p_n is undefined")
     missing = {name: int(np.isnan(panel[name]).sum()) for name in panel if panel[name].dtype.kind == "f"}
     check("(ii) no NaN", not any(missing.values()), f"{ {k: v for k, v in missing.items() if v} }")
     excise = float(panel["tax_s"].min())

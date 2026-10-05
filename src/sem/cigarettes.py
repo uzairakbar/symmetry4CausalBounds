@@ -60,10 +60,10 @@ TREND_SCALE: float = 25.0
 # anchor -> (instrument columns, indices of X they instrument)
 ANCHORS: dict[str, tuple[tuple[str, ...], tuple[int, ...]]] = {
     "own-tax": (("tax_s",), (0,)),
-    "own-and-neighbour-tax": (("tax_s", "tax_sn"), (0, 2)),
+    "own-and-neighbor-tax": (("tax_s", "tax_sn"), (0, 2)),
 }
-# neighbour aggregator: `min` is Baltagi's bootlegging term, `mean` the robustness row
-NEIGHBOURS: dict[str, tuple[str, str]] = {"min": ("pn", "tax_sn"), "mean": ("pn_mean", "tax_sn_mean")}
+# neighbor aggregator: `min` is Baltagi's bootlegging term, `mean` the robustness row
+NEIGHBORS: dict[str, tuple[str, str]] = {"min": ("pn", "tax_sn"), "mean": ("pn_mean", "tax_sn_mean")}
 
 
 # plasmode defaults; the config dataclass overrides them (SS6)
@@ -206,14 +206,14 @@ def build_design(
     panel: dict[str, NDArray],
     spec: str = "t3",
     anchor: str = "own-tax",
-    neighbour: str = "min",
+    neighbor: str = "min",
 ) -> PanelDesign:
     """FWL the spec's controls out of (log q, log X, log Z) and normalise by sigma."""
     if anchor not in ANCHORS:
         raise ValueError(f"anchor {anchor!r} is not one of {sorted(ANCHORS)}.")
-    if neighbour not in NEIGHBOURS:
-        raise ValueError(f"neighbour aggregator {neighbour!r} is not one of {sorted(NEIGHBOURS)}.")
-    price_column, tax_column = NEIGHBOURS[neighbour]
+    if neighbor not in NEIGHBORS:
+        raise ValueError(f"neighbor aggregator {neighbor!r} is not one of {sorted(NEIGHBORS)}.")
+    price_column, tax_column = NEIGHBORS[neighbor]
     columns = {"pn": price_column, "tax_sn": tax_column}
 
     C = controls(panel, spec)
@@ -479,7 +479,7 @@ class CigaretteSEM(SEM):
         spec: str = "t3",
         target: Literal["iv", "plasmode"] = "iv",
         anchor: str = "own-tax",
-        neighbour: str = "min",
+        neighbor: str = "min",
         bootstrap: bool = False,
         sliver: bool = False,
         gamma_z: float = GAMMA_Z,
@@ -499,7 +499,7 @@ class CigaretteSEM(SEM):
             # ellipsoid would need that set's geometry. Not defined here.
             raise ValueError("the leaky-IV sliver is defined on the anchor set; it does not combine with `iv`.")
 
-        self.design = build_design(self.panel(), spec=spec, anchor=anchor, neighbour=neighbour)
+        self.design = build_design(self.panel(), spec=spec, anchor=anchor, neighbor=neighbor)
         self.target = target
         self.bootstrap = bool(bootstrap)
         self._sliver = bool(sliver)
@@ -599,7 +599,7 @@ class CigaretteSEM(SEM):
         confounder contains income and the CPI outright and correlates with the
         excise, so the instrument set the config declares is invalid at the very
         target the experiment measures coverage of (R8.0). Projected, what is left
-        touches own price and neighbour price alone -- the two endogenous
+        touches own price and neighbor price alone -- the two endogenous
         coefficients the experiment reports -- which is the design's own story.
         """
         if direction not in CONFOUND_DIRECTIONS:

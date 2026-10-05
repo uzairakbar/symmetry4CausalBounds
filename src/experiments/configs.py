@@ -762,7 +762,7 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
         "xlabel": r"$c$",
         "xscale": "linear",
     },
-    # the two headline figures of the neighbour-price run (SS10): beta_pn against
+    # the two headline figures of the neighbor-price run (SS10): beta_pn against
     # the confounding budget on the benchmarked range, and against the declared
     # real-Z leakiness budget gamma_z (the radius r_Z = s sqrt(gamma_z)) at the
     # held gamma (the addiction-stock benchmark), which the gamma figure marks
@@ -1410,7 +1410,7 @@ def resolve_dataset_block(name: str, block: dict[str, Any]) -> dict[str, Any]:
         for key, allowed in (
             ("target", {"iv", "plasmode"}),
             ("spec", {"s", "t1", "t2", "t3", "t4"}),
-            ("anchor", {"own-tax", "own-and-neighbour-tax"}),
+            ("anchor", {"own-tax", "own-and-neighbor-tax"}),
         ):
             value = block.get(key, ...)
             if value is not ... and value not in allowed:

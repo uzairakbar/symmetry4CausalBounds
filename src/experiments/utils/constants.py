@@ -212,7 +212,7 @@ def iv_mode(name: str) -> str:
 # h_*(x) = theta_*' x on the four log treatments
 COEFFICIENT_LABELS: dict[str, str] = {
     "p": r"$\theta_{\mathrm{state\,price}}$",
-    "pn": r"$\theta_{\mathrm{neighbour\,price}}$",
+    "pn": r"$\theta_{\mathrm{neighbor\,price}}$",
 }
 
 # Visual style configuration (`line_style`): a point estimate dashed, every interval

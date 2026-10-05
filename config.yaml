@@ -212,7 +212,7 @@ cigarettes:
     # pre-registered falsification rows: reported, not run.
     spec: t3
     # own-tax = Z is the own state excise, only log p endogenous (F 68 state /
-    #           324 year). own-and-neighbour adds the min-neighbour excise for
+    #           324 year). own-and-neighbor adds the min-neighbor excise for
     #           log p_n: weak at t1 (F 10.0 / 4.8) and the sliver is empty.
     anchor: own-tax
     n_samples: 2_450        # the whole panel; more resamples WITH replacement
@@ -237,7 +237,7 @@ cigarettes:
     # `PanelDesign.instruments` already builds for the target. Legal: [], [tax_s],
     # [tax_sn], [tax_s, tax_sn], [tax_s, y, cpi]. Omitted or [] = the anchor set
     # decides the target (b_r) and every solver sees an empty instrument, which is
-    # exactly today's run. The neighbour-price run is recipes/neighbour-price_fig12.yaml.
+    # exactly today's run. The neighbor-price run is recipes/neighbor-price_fig12.yaml.
     # iv: [tax_s, y, cpi]
     # the IV leakiness budget for the instruments listed in `iv:`, DECLARED on every
     # path (SS2.6). The radius is s*sqrt(gamma_z), a fraction of the residual sd;
