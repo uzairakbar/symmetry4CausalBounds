@@ -5,9 +5,10 @@ omitted W onto the configured instrument set instead of the treatments (Cinelli
 and Hazlett's IV framework, paper [12]); `direct_effect_gamma_z` converts a direct
 tax elasticity to gamma_z (Conley, Hansen and Rossi); T3 (`benchmarks_iv.tex`)
 prints both; F1 and F2 now come in a pair per coefficient (`beta_pn_*`, `beta_p_*`).
-refactor20 draws F2 in gamma_z units: the grid is `GAMMA_Z_RANGE` and each model is
-handed gamma_z itself. F2 marks only the declared gamma_z, the budget F1 holds
-fixed. Legs:
+refactor20 draws F2 in gamma_z units: each model is handed gamma_z itself, on
+[`GAMMA_Z_MIN`, held gamma], the held gamma being the lag-q benchmark F1 marks and
+F2 is solved at. F2 marks only the declared gamma_z, the budget F1 holds fixed.
+Legs:
 
   (i)   T2 does not move: the `benchmark_gamma` refactor keeps lag-q 0.3121 and
         tax-diff 0.1502 to 1e-3 and the OVB / CH identity to 1e-9 on every row.
@@ -26,23 +27,21 @@ fixed. Legs:
   (iv)  the recipe's query leg at reduced scale (1 experiment, 4 grid points): every
         `beta_p_*` and `beta_pn_*` file and T3 exist; F2's marks are exactly
         (GAMMA_Z_DEFAULT,) on both coefficients; F2's grid spans
-        GAMMA_Z_RANGE, the square of the old r_Z grid (`OLD_BUDGET_RANGE`); the
-        precondition that makes the relabelling exact holds, s^2 = sigma_sq / rho is 1
-        to 1e-12 on every swept model and on the runner the marks are read at; F2's
-        bands equal, per model and to 1e-9, the old r_Z loop run literally (the old
-        radii, gamma_z = r^2 / (sigma_sq / rho)) on the figure's own fitted models,
-        whose gamma_z is back at the declared value after the figure; the F1 and F2
-        outcomes of both coefficients are keyed by the headline methods THE RECIPE
-        LISTS (the intersection, as `cigarettes.py` keys the figure), asserted
-        non-empty; whichever of the nesting pairs the block draws holds on F1; on
-        beta_pn's F2, when the block lists both, the PI+IV band equals PI's at the
-        largest gamma_z to 1e-3, the addiction-stock leak having slackened the
-        instrument, and whatever the block lists, every band the gamma_z axis moves
-        widens along it monotonically and strictly end to end. Catches: the loop
-        writing one coefficient twice, a benchmark mark back on F2, the leak grid not
-        reaching the benchmark, the relabelling moving a curve (or a model whose s^2
-        left 1, where it would), a model left at a swept gamma_z, a band that stops
-        respecting nesting.
+        [GAMMA_Z_MIN, lag-q gamma], its right edge F1's one mark (the lag-q
+        benchmark, 0.3121 to 1e-3); s^2 = sigma_sq / rho is 1 to 1e-12 on every
+        swept model and on the runner the marks are read at; the figure's own
+        fitted models have their gamma_z back at the declared value after the
+        figure; the F1 and F2 outcomes of both coefficients are keyed by the
+        headline methods THE RECIPE LISTS (the intersection, as `cigarettes.py`
+        keys the figure), asserted non-empty; whichever of the nesting pairs the
+        block draws holds on F1; on beta_pn's F2, when the block lists both, the
+        PI+IV band equals PI's at the right edge, gamma_z = the held gamma, to
+        1e-3, the addiction-stock leak having slackened the instrument, and
+        whatever the block lists, every band the gamma_z axis moves widens along
+        it monotonically and strictly end to end. Catches: the loop writing one
+        coefficient twice, a benchmark mark back on F2, the leak grid not
+        reaching the held gamma, a model whose s^2 left 1, a model left at a
+        swept gamma_z, a band that stops respecting nesting.
   (D)   the digest leg (scripts/digest_leg.py): with `iv: []` nothing here runs
         and the shipped artifacts hash as before.
 
@@ -69,8 +68,7 @@ from munch import munchify  # noqa: E402
 from threadpoolctl import threadpool_limits  # noqa: E402
 
 from src.experiments.cigarettes import (  # noqa: E402
-    GAMMA_Z_RANGE,
-    HEADLINE_COEFFICIENTS,
+    GAMMA_Z_MIN,
     HEADLINE_METHODS,
     benchmark_covariates,
     benchmark_gamma,
@@ -87,13 +85,9 @@ from src.experiments.utils.constants import (  # noqa: E402
 )
 from src.experiments.utils.metrics import sigma_sq_hat  # noqa: E402
 from src.main import ORCHESTRATORS  # noqa: E402
-from src.sem.cigarettes import TREATMENTS, CigaretteSEM, build_design  # noqa: E402
+from src.sem.cigarettes import CigaretteSEM, build_design  # noqa: E402
 
 SPEC, IV = "t3", ("tax_s", "y", "cpi")
-# the r_Z range F2 swept before refactor20, written out literally so (iv) can
-# redraw the old figure: GAMMA_Z_RANGE is its square, the same curves when every
-# swept model's s^2 = sigma_sq / rho is 1
-OLD_BUDGET_RANGE = (2**-8, 2**-0.5)
 # the declared budget read back as a direct tax elasticity,
 # delta = sqrt(gamma_z / E[z^2]) * sigma  (`cigarettes.py::_write_benchmarks_iv`).
 # At the panel's E[z^2] = 0.149006 and sigma = 0.147199 (SSR / (n - K)) the
@@ -159,31 +153,6 @@ def both_listed(pairs, available, label):
     kept = tuple(pair for pair in pairs if pair[0] in available and pair[1] in available)
     check(f"{label}: the block lists at least one comparable pair", bool(kept), f"lists {sorted(available)}")
     return kept
-
-
-def old_loop_bands(orch, runner, models, points):
-    """F2's bands exactly as the r_Z loop drew them before refactor20: the old grid
-    `geomspace(*OLD_BUDGET_RANGE, points)` of radii, each handed to the model as
-    gamma_z = r^2 / (sigma_sq / rho) at its own s. Every `gamma_z` is put back."""
-    design = runner.sem.design
-    radii = np.geomspace(*OLD_BUDGET_RANGE, points)
-    bands = {}
-    for coefficient in HEADLINE_COEFFICIENTS:
-        query = np.eye(design.k)[TREATMENTS.index(coefficient)][None, :]
-        results = {name: np.full((points, 1, 2), np.nan) for name in models}
-        for name, model in models.items():
-            if not hasattr(model, "gamma_z"):
-                results[name][:, 0] = design.sigma * model.predict(query, gamma=orch.gamma)[0]
-                continue
-            declared = model.gamma_z
-            try:
-                for i, radius in enumerate(radii):
-                    model.gamma_z = float(radius**2 / (model.sigma_sq / model.rho))
-                    results[name][i, 0] = design.sigma * model.predict(query, gamma=orch.gamma)[0]
-            finally:
-                model.gamma_z = declared
-        bands[coefficient] = results
-    return bands
 
 
 def recipe_block(**overrides):
@@ -252,7 +221,7 @@ def leg_iv():
     block = recipe_block(n_experiments=1, sweep_samples=4)
     folder = os.path.join(ARTIFACTS_DIRECTORY, "cigarettes", SUBDIR_QUERY)
     shutil.rmtree(folder, ignore_errors=True)
-    # the figure's own runner and fitted models, for the old-loop equivalence below
+    # the figure's own runner and fitted models, for the scale and restore checks below
     seen, cls = {}, ORCHESTRATORS["cigarettes"]
     original = cls._plot_headline
 
@@ -286,24 +255,22 @@ def leg_iv():
     check("(iv) F2 marks only the declared gamma_z", np.array_equal(marks, [GAMMA_Z_DEFAULT]), f"{marks}")
     check("(iv) beta_p and beta_pn F2 marks agree", np.array_equal(marks, load(folder, "beta_p_budget_vlines.pkl")))
     gamma_zs = load(folder, "beta_pn_budget_values.pkl")
+    # the right edge is the held gamma: F1's one mark, the lag-q benchmark
+    held = load(folder, "beta_pn_gamma_vlines.pkl")
     check(
-        "(iv) F2 grid spans GAMMA_Z_RANGE",
-        gamma_zs[0] == GAMMA_Z_RANGE[0] and gamma_zs[-1] == GAMMA_Z_RANGE[1],
+        "(iv) F1 marks only the lag-q gamma 0.3121 to 1e-3", len(held) == 1 and abs(held[0] - 0.3121) < 1e-3, f"{held}"
+    )
+    check(
+        "(iv) F2 grid spans [GAMMA_Z_MIN, lag-q gamma]",
+        len(held) == 1 and gamma_zs[0] == GAMMA_Z_MIN and gamma_zs[-1] == held[0],
         f"{gamma_zs}",
     )
     check(
         "(iv) F2 grid is the same on both coefficients",
         np.array_equal(gamma_zs, load(folder, "beta_p_budget_values.pkl")),
     )
-    old_sq = np.geomspace(*OLD_BUDGET_RANGE, len(gamma_zs)) ** 2
-    check(
-        "(iv) F2 grid is the old r_Z grid squared to relative 1e-12",
-        bool(np.max(np.abs(gamma_zs - old_sq) / old_sq) < 1e-12),
-        f"{np.max(np.abs(gamma_zs - old_sq) / old_sq):.1e}",
-    )
-    # the relabelling moves no curve: the old r_Z loop, run literally on the
-    # figure's own models. Exact only where s^2 = sigma_sq / rho is 1, so that
-    # precondition is checked first, per model and on the runner the marks read
+    # gamma_z reads in outcome units at s = 1: s^2 = sigma_sq / rho is 1 per model
+    # and on the runner the marks read, and every swept model is put back
     check("(iv) the spy saw the figure's runner and models", {"orch", "runner", "fitted"} <= set(seen))
     if {"orch", "runner", "fitted"} <= set(seen):
         orch, runner = seen["orch"], seen["runner"]
@@ -321,17 +288,6 @@ def leg_iv():
             len(restored) == sum(hasattr(m, "gamma_z") for m in models.values()) > 0,
             f"{restored} at {orch.gamma_z:g}",
         )
-        bands = old_loop_bands(orch, runner, models, len(gamma_zs))
-        for coefficient in HEADLINE_COEFFICIENTS:
-            drawn = load(folder, f"beta_{coefficient}_budget_outcomes.pkl")
-            for name in models:
-                gap = np.nanmax(np.abs(drawn[name] - bands[coefficient][name]))
-                same_nan = np.array_equal(np.isnan(drawn[name]), np.isnan(bands[coefficient][name]))
-                check(
-                    f"(iv) beta_{coefficient} F2: {name} equals the old r_Z loop to 1e-9",
-                    bool(same_nan and gap < 1e-9),
-                    f"{gap:.2e}",
-                )
     want = expected(block["methods"], "(iv) F1")
     p_gamma = load(folder, "beta_p_gamma_outcomes.pkl")
     check("(iv) beta_p F1 keyed by the headline methods the recipe lists", tuple(p_gamma) == want, f"{tuple(p_gamma)}")
@@ -363,7 +319,11 @@ def leg_iv():
     z_pairs = (("PI", "PI+IV"),)
     for wide, narrow in [pair for pair in z_pairs if pair[0] in pn_budget and pair[1] in pn_budget]:
         slack = np.abs(pn_budget[narrow][-1, 0] - pn_budget[wide][-1, 0]).max()
-        check(f"(iv) beta_pn F2: {narrow} equals {wide} at the largest radius to 1e-3", slack < 1e-3, f"{slack:.5f}")
+        check(
+            f"(iv) beta_pn F2: {narrow} equals {wide} at the right edge, gamma_z = the held gamma, to 1e-3",
+            slack < 1e-3,
+            f"{slack:.5f}",
+        )
         tight = pn_budget[narrow][0, 0, 0] - pn_budget[wide][0, 0, 0]
         check(
             f"(iv) beta_pn F2: {narrow}'s lower end above {wide}'s by > 0.5 at the smallest radius",

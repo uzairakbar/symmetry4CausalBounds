@@ -18,12 +18,13 @@ toggle) and both recipes (`normalize: true`). Legs:
         column, T2, and the four gamma sweep figures; F1's own grid
         (`beta_pn_gamma_values.pkl`) spans exactly `GAMMA_RANGE` and its outcomes
         carry no NaN cell, so (ii)'s "shipped grid" is the figure's; F1 marks only
-        the query gamma and F2 only the declared gamma_z; `_run_sweeps` handed
-        `normalize=True` to every sweep figure of both runs. `create_sweep_plot`
-        swallows exceptions and only logs them, so existence is the check that
-        bites. Catches: a figure that raises inside the plotter, the toggle not
-        reaching `_run_sweeps`. Misses: what the figures show, which (ii), (iii)
-        and (vi) read off the same models and pkls.
+        the held gamma (the lag-q benchmark, `BENCHMARK_PINS` to 1e-3) and F2
+        only the declared gamma_z; `_run_sweeps` handed `normalize=True` to
+        every sweep figure of both runs. `create_sweep_plot` swallows exceptions
+        and only logs them, so existence is the check that bites. Catches: a
+        figure that raises inside the plotter, the toggle not reaching
+        `_run_sweeps`. Misses: what the figures show, which (ii), (iii) and (vi)
+        read off the same models and pkls.
   (ii)  no INFEASIBLE cell and no OPTIMAL_INACCURATE solve for PI, PI+IV, PI+INV+IV
         and DA+PI+IV on F1's grid (`GAMMA_RANGE`, 0.005 steps) on beta_pn, read
         off the raw cvxpy status of both problems after every solve, since
@@ -125,7 +126,6 @@ from src.experiments.cigarettes import (  # noqa: E402
 )
 from src.experiments.configs import (  # noqa: E402
     EPS_TOL,
-    QUERY_GAMMA,
     MethodRegistry,
     parse_experiment_plan,
     resolve_dataset_block,
@@ -452,12 +452,17 @@ def leg_i():
     )
     check("(i) F1's grid spans exactly GAMMA_RANGE", spans, f"{f1_grid}")
     check("(i) F1's outcomes carry no NaN cell", all(np.all(np.isfinite(v)) for v in outcomes.values()))
-    # each figure marks only the budget the other holds fixed: F1 the query gamma,
-    # F2 the declared gamma_z (the gate's own radius, `GATE_GAMMA_Z`)
-    gamma = QUERY_GAMMA[recipe("cigarettes")["spec"]]
+    # each figure marks only the budget the other holds fixed: F1 the held gamma
+    # (the addiction-stock lag-q benchmark, which F2 is solved at), F2 the
+    # declared gamma_z (the gate's own radius, `GATE_GAMMA_Z`)
+    lag = BENCHMARK_PINS["lag_q"]
     with open(os.path.join(query, "beta_pn_gamma_vlines.pkl"), "rb") as handle:
         vlines = pickle.load(handle)  # noqa: S301
-    check(f"(i) F1 marks only the query gamma {gamma:g}", np.array_equal(vlines, [gamma]), f"{vlines}")
+    check(
+        f"(i) F1 marks only the held gamma, the lag-q benchmark {lag:g} to 1e-3",
+        len(vlines) == 1 and abs(vlines[0] - lag) < 1e-3,
+        f"{vlines}",
+    )
     with open(os.path.join(query, "beta_pn_budget_vlines.pkl"), "rb") as handle:
         marks = pickle.load(handle)  # noqa: S301
     check(f"(i) F2 marks only the declared gamma_z {GATE_GAMMA_Z:g}", np.array_equal(marks, [GATE_GAMMA_Z]), f"{marks}")

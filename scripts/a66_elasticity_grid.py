@@ -32,9 +32,10 @@ pinned upper left. Legs:
         `DA+PI+IV(Z)` inside `PI` to 0.02 (its ball is recalibrated) is asserted on
         BOTH axes of both figures, while `DA+PI+IV` inside `DA+PI+IV(Z)` is asserted
         on `gamma` only, MEASURED false on `budget`; `DA+PI+IV(Z)` equals PI on
-        beta_pn's F2 at the largest gamma_z to 0.02 and sits above PI's lower end by
-        more than 0.5 at the smallest; and every band the gamma_z axis moves widens
-        along it monotonically and strictly end to end. Catches: the (Z) headline missing,
+        beta_pn's F2 at the right edge, gamma_z = the held gamma, to 0.02 and sits
+        above PI's lower end by more than 0.5 at the smallest; and every band the
+        gamma_z axis moves widens along it monotonically and strictly end to end.
+        Catches: the (Z) headline missing,
         a band that leaves PI, a figure keyed by anything but the recipe's list.
   (v)   `elasticity_grid` on those artifacts: the file exists; four live panels;
         one legend, in the top-right panel pinned upper left, one entry per
@@ -298,13 +299,14 @@ def leg_iv():
                 inside = np.all(a[:, 0, 0] >= b[:, 0, 0] - DA_TOL) and np.all(a[:, 0, 1] <= b[:, 0, 1] + DA_TOL)
                 check(f"(iv) beta_{coefficient}_{axis}: {narrow} inside {wide} to {DA_TOL}", bool(inside))
     # F2 sweeps gamma_z, so it can only pair a method against its no-IV parent, which it
-    # collapses onto once the radius stops binding. (Z) against (T,Z) is NOT such a
-    # pair: they differ by the T constraint, which this axis never relaxes
+    # collapses onto once the radius stops binding, by the right edge, gamma_z = the
+    # held gamma. (Z) against (T,Z) is NOT such a pair: they differ by the T
+    # constraint, which this axis never relaxes
     outcomes = load(os.path.join(folder, "beta_pn_budget_outcomes.pkl"))
     for wide, narrow in [p for p in (("PI", "DA+PI+IV(Z)"),) if p[0] in outcomes and p[1] in outcomes]:
         slack = np.abs(outcomes[narrow][-1, 0] - outcomes[wide][-1, 0]).max()
         check(
-            f"(iv) beta_pn F2: {narrow} equals {wide} at the largest gamma_z to {DA_TOL}",
+            f"(iv) beta_pn F2: {narrow} equals {wide} at the right edge, gamma_z = the held gamma, to {DA_TOL}",
             slack < DA_TOL,
             f"{slack:.5f}",
         )

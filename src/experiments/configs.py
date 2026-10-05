@@ -765,7 +765,7 @@ ANNOTATE_SWEEP_PLOT: dict[str, dict[str, Any]] = {
     # the two headline figures of the neighbour-price run (SS10): beta_pn against
     # the confounding budget on the benchmarked range, and against the declared
     # real-Z leakiness budget gamma_z (the radius r_Z = s sqrt(gamma_z)) at the
-    # query budget
+    # held gamma (the addiction-stock benchmark), which the gamma figure marks
     "beta_pn_gamma": {
         "xlabel": r"$\gamma$",
         "xscale": "linear",
