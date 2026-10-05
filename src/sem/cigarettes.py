@@ -69,16 +69,6 @@ NEIGHBORS: dict[str, tuple[str, str]] = {"min": ("pn", "tax_sn"), "mean": ("pn_m
 # plasmode defaults; the config dataclass overrides them (SS6)
 GAMMA_TRUE: float = 0.25
 OUTCOME_NOISE_STD: float = 0.1
-CONFOUND_DIRECTIONS: tuple[str, ...] = ("v", "own_price", "worst_case")
-# a confounder almost entirely inside the declared-exogenous block leaves nothing
-# to confound with; below this surviving fraction the plasmode raises rather than
-# inject a rounding error. MEASURED on the shipped panel: 0.954 at `[tax_s]`,
-# 0.829 at `[tax_s, y, cpi]`, 1.0 with nothing declared. In practice `_calibrate`'s
-# kappa^2 > 1 guard trips FIRST (at gamma_true 0.25 it trips near q = 0.25, a
-# surviving fraction around 0.5); this one is the cruder tripwire for the
-# degenerate case where the direction is inside the block and standardising the
-# leftover is meaningless.
-MIN_CONFOUNDER_SURVIVING: float = 0.10
 # the leaky-IV guard (SS5): FIXED, never swept
 GAMMA_Z: float = 2**-8
 # one state history; the cluster bootstrap deals in these, not in rows
@@ -452,9 +442,9 @@ class CigaretteSEM(SEM):
                what probes the assumptions is the compatibility statistic above
                and the sliver below.
     `plasmode` the real FWL'd design with a synthetic exactly homogeneous h_* and
-               synthetic confounding of known strength, in the simulation SEM's
-               convention, so gamma* == `gamma_true` exactly. Validity against a
-               truth nobody has to believe in.
+               synthetic confounding of known strength, a fresh direction per
+               SEM, in the simulation SEM's convention, so gamma* == `gamma_true`
+               exactly. Validity against a truth nobody has to believe in.
 
     Units: y and every coefficient vector are divided by the OLS residual sd, so
     sigma^2 = 1 on the `iv` path and gamma* = bias^2. `EPS_TOL` is a module constant
@@ -484,7 +474,6 @@ class CigaretteSEM(SEM):
         sliver: bool = False,
         gamma_z: float = GAMMA_Z,
         gamma_true: float = GAMMA_TRUE,
-        confound_direction: str = "v",
         outcome_noise_std: float = OUTCOME_NOISE_STD,
         iv_columns=(),
     ):
@@ -526,16 +515,16 @@ class CigaretteSEM(SEM):
             self._noise_std = float(outcome_noise_std)
             # the confounder first: the calibration inverts against the share of
             # it the treatments explain, which the projection changes
-            confounder, q, surviving = self._confounder(confound_direction)
+            confounder, q = self._confounder()
             self._kappa_sq = self._calibrate(float(gamma_true), q)
             self.y = self._draw_outcome(confounder)
             self._bias_sq = self._kappa_sq * q
             self._sigma_sq = 1.0 - self._kappa_sq * q + self._noise_std**2
+            corr = np.corrcoef(confounder, self.X[:, self.confound_free].T)[0, 1:]
             logger.info(
-                f"plasmode: confounder along {confound_direction} projected off "
-                f"{self._exogenous_block().shape[1]} declared-exogenous column(s), "
-                f"{100 * surviving:.1f}% surviving; kappa^2 {self._kappa_sq:.6f}, "
-                f"q {q:.6f}, gamma* {self._bias_sq / self._sigma_sq:.6f}"
+                f"plasmode: fresh confounder on {[TREATMENTS[j] for j in self.confound_free]}, weights "
+                f"{np.round(self.confound_weights, 3)}, corr {np.round(corr, 3)}; "
+                f"kappa^2 {self._kappa_sq:.6f}, q {q:.6f}, gamma* {self._bias_sq / self._sigma_sq:.6f}"
             )
 
     # ------------------------------------------------------------- plasmode
@@ -590,48 +579,32 @@ class CigaretteSEM(SEM):
         blocks = [np.asarray(b, dtype=float).reshape(len(self.X), -1) for b in (self._Z_iv, self._Z) if np.size(b)]
         return np.column_stack(blocks) if blocks else np.zeros((len(self.X), 0))
 
-    def _confounder(self, direction: str) -> tuple:
-        """(u, q, surviving): the unit-variance confounder, the share of it the
-        treatments explain, and the fraction of it the projection left.
+    def _confounder(self) -> tuple:
+        """(u, q): a fresh unit-variance confounder and the share of it the
+        treatments explain.
 
-        u is the design along `direction`, orthogonalised against the
-        declared-exogenous block and then standardised. Without the projection the
-        confounder contains income and the CPI outright and correlates with the
-        excise, so the instrument set the config declares is invalid at the very
-        target the experiment measures coverage of (R8.0). Projected, what is left
-        touches own price and neighbor price alone -- the two endogenous
-        coefficients the experiment reports -- which is the design's own story.
+        Drawn per SEM, as the simulation draws W_XXi: isotropic in an orthonormal
+        basis of the treatments not declared exogenous, residualised on the
+        declared-exogenous block, so it is orthogonal to Z (under `iv: [tax_s, y,
+        cpi]` only own and neighbor price are confounded).
         """
-        if direction not in CONFOUND_DIRECTIONS:
-            raise ValueError(f"confound_direction {direction!r} is not one of {list(CONFOUND_DIRECTIONS)}.")
-        if direction == "v":
-            # the spec-S story made explicit: an unobserved taste drift co-moving
-            # with the price level, which is the direction the symmetry is about
-            d = V / np.linalg.norm(V)
-        elif direction == "own_price":
-            d = np.eye(self.design.k)[0]
-        else:
-            d = np.linalg.solve(self.design.Sigma, self.W_XY.ravel())
-
-        raw = self.X @ d
+        free = [j for j, name in enumerate(TREATMENTS) if name not in self.iv_columns]
+        if not free:
+            raise ValueError("every treatment is declared exogenous; there is nothing to confound.")
+        block = self.X[:, free]
         exogenous = self._exogenous_block()
-        if exogenous.shape[1] == 0:
-            # nothing declared exogenous: no projection, and q is 1 BY
-            # CONSTRUCTION (u stays in span(X)), so the calibration is the old one
-            # to the bit and every shipped plasmode number is untouched
-            return raw / raw.std(), 1.0, 1.0
-
-        residual = raw - exogenous @ np.linalg.lstsq(exogenous, raw, rcond=None)[0]
-        surviving = float(np.linalg.norm(residual) / np.linalg.norm(raw))
-        if surviving < MIN_CONFOUNDER_SURVIVING:
-            raise ValueError(
-                f"the confounding direction {direction!r} is {100 * (1 - surviving):.1f}% inside the "
-                "declared-exogenous block; there is almost no confounder left to inject. Choose "
-                "another `confound_direction` or declare fewer columns exogenous."
-            )
-        u = residual / residual.std()
+        if exogenous.shape[1]:
+            block = block - exogenous @ np.linalg.lstsq(exogenous, block, rcond=None)[0]
+        basis = np.linalg.qr(block)[0] * np.sqrt(len(block))
+        self.confound_free = free
+        self.confound_weights = np.random.randn(len(free))
+        u = basis @ self.confound_weights
+        u = u / u.std()
+        if not exogenous.shape[1]:
+            # u lies in span(X) by construction: q is 1, exactly
+            return u, 1.0
         fitted = self.X @ np.linalg.lstsq(self.X, u, rcond=None)[0]
-        return u, float(fitted @ fitted / len(u)), surviving
+        return u, float(fitted @ fitted / len(u))
 
     def _draw_outcome(self, confounder: NDArray) -> NDArray:
         """Y = h_*(X) + kappa u + sqrt(1 - kappa^2) e + s nu, with u the

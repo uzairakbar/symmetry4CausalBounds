@@ -256,11 +256,9 @@ class CigaretteConfig:
     # empty at every spec but t3 with the own-tax anchor, which is what makes its
     # non-emptiness a falsification rather than a p-value.
     gamma_z: float = 2**-8
-    # plasmode: the confounding is drawn along `confound_direction` and calibrated
-    # so gamma* == gamma_true exactly. v is the spec-S story made explicit, a taste
-    # drift co-moving with the price level.
+    # plasmode: a fresh confounder per SEM, orthogonal to Z, calibrated so
+    # gamma* == gamma_true exactly
     gamma_true: float = 0.25
-    confound_direction: Literal["v", "own_price", "worst_case"] = "v"
     outcome_noise_std: float = 0.1
 
 

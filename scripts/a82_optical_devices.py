@@ -33,9 +33,9 @@ one-experiment runner stays on `dataset_index`. Legs:
         shared transform: their runners' `polys[j]` is the shared `poly` (None) at
         every j. Simulation: every experiment is a freshly drawn SEM (`W_XY`
         pairwise distinct). Cigarettes (the robustness recipe's plasmode block):
-        the covariate panel is identical across experiments, the synthetic
-        outcome is redrawn (pairwise distinct), and experiment j splits with
-        `random_state = seed + j`.
+        the covariate panel is identical across experiments, the confounder and
+        the synthetic outcome are redrawn (pairwise distinct), and experiment j
+        splits with `random_state = seed + j`.
   (v)   setup on all ten devices: the gamma runner's oracles have finite gamma*;
         every strategy runner's SEMs carry `epsilon_quantile` (q0.95); the
         epsilon runner's DA, retuned per device in the shared q0.95 reading of

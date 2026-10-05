@@ -18,10 +18,15 @@ SS6 says, and never lets the real instrument near a solver.
          was inverted for, exactly, so gamma* == gamma_true; and the sample
          gamma-hat* of a construction draw tracks it. Catches: a bias read off the
          draw. The sample band is wide because it has to be -- see BAND below.
-  (iv)   all three confounding directions calibrate, in the declared value AND in
-         the draw. The draw half is what makes this falsifiable: the declared
-         gamma* is analytic in kappa alone, so it cannot see a confounder that was
-         never standardised, and the sample ratio can.
+  (iv)   every fresh confounder calibrates, in the declared value AND in the
+         draw: from one seed, a few SEMs with nothing declared exogenous and a few
+         under `iv: [tax_s, y, cpi]` each read gamma* == gamma_true to 1e-12, draw
+         pairwise different confounder weights, share one h_* (`W_XY`), and
+         re-seeding reproduces the first draw; the draw half runs under the
+         instrument set (nothing declared is (iii)'s band). The draw half is what
+         makes this falsifiable: the declared gamma* is analytic in kappa alone, so
+         it cannot see a confounder that was never standardised, and the sample
+         ratio can.
   (v)    the real instrument never reaches a solver. `fit_model` hands DA+PI+IV the
          DA's translation amounts as Z, so (a) what the method received is not the
          tax column and is uncorrelated with it, and (b) the IV constraint it built
@@ -76,6 +81,8 @@ NOISE_STD = 0.1
 # draws is pinned tightly and the individual draws loosely; the plan's [0.85, 1.15]
 # on 20 draws is a 1.9-sigma band and rejects a correct SEM most of the time.
 PLASMODE_DRAWS = 40
+# SEMs per instrument set that leg (iv) draws from one seed
+FRESH_SEMS = 4
 BAND_MEAN = (0.96, 1.07)
 BAND_DRAW = (0.6, 1.5)
 BOOTSTRAP_SEEDS = 20
@@ -258,11 +265,9 @@ def sample_ratio(sem):
     return float(gap @ sem.design.Sigma @ gap) / sigma_sq_hat(X, y, intercept=True) / GAMMA_TRUE
 
 
-def plasmode_band(direction, tag):
+def plasmode_band(tag, **kwargs):
     np.random.seed(SEED)
-    ratios = np.array(
-        [sample_ratio(CigaretteSEM(target="plasmode", confound_direction=direction)) for _ in range(PLASMODE_DRAWS)]
-    )
+    ratios = np.array([sample_ratio(CigaretteSEM(target="plasmode", **kwargs)) for _ in range(PLASMODE_DRAWS)])
     print(
         f"      {tag}: gamma-hat*/gamma_true over {PLASMODE_DRAWS} draws "
         f"min {ratios.min():.3f} mean {ratios.mean():.3f} max {ratios.max():.3f}"
@@ -287,17 +292,38 @@ def leg_iii():
         f"{sem.sigma_sq!r}",
     )
     check("(iii) v' b_* == 0", abs(float(V @ sem.solution.ravel())) < 1e-12, f"{float(V @ sem.solution.ravel()):.2e}")
-    plasmode_band("v", "(iii)")
+    plasmode_band("(iii)")
 
 
 def leg_iv():
-    print("(iv) every confounding direction calibrates")
-    for direction in ("v", "own_price", "worst_case"):
+    print("(iv) every fresh confounder calibrates")
+    for tag, iv_columns in (("no iv", ()), ("iv [tax_s, y, cpi]", ("tax_s", "y", "cpi"))):
         np.random.seed(SEED)
-        sem = CigaretteSEM(target="plasmode", confound_direction=direction)
-        gamma = gamma_star(sem)
-        check(f"(iv) {direction}: gamma* == gamma_true", abs(gamma - GAMMA_TRUE) < 1e-12, f"{gamma:.15f}")
-        plasmode_band(direction, f"(iv) {direction}")
+        sems = [CigaretteSEM(target="plasmode", iv_columns=iv_columns) for _ in range(FRESH_SEMS)]
+        gammas = [gamma_star(sem) for sem in sems]
+        check(
+            f"(iv) {tag}: gamma* == gamma_true on every SEM",
+            all(abs(g - GAMMA_TRUE) < 1e-12 for g in gammas),
+            f"{max(abs(g - GAMMA_TRUE) for g in gammas):.1e}",
+        )
+        weights = [sem.confound_weights for sem in sems]
+        check(
+            f"(iv) {tag}: the confounder weights differ pairwise",
+            all(not np.allclose(a, b) for i, a in enumerate(weights) for b in weights[i + 1 :]),
+        )
+        check(
+            f"(iv) {tag}: h_* is fixed across them",
+            all(np.array_equal(sem.W_XY, sems[0].W_XY) for sem in sems),
+        )
+        np.random.seed(SEED)
+        again = CigaretteSEM(target="plasmode", iv_columns=iv_columns)
+        check(
+            f"(iv) {tag}: re-seeding reproduces the first draw",
+            np.array_equal(again.confound_weights, weights[0]) and np.array_equal(again.y, sems[0].y),
+        )
+        if iv_columns:
+            # the no-iv draw band is leg (iii)'s, same seed and same SEMs
+            plasmode_band(f"(iv) {tag}", iv_columns=iv_columns)
 
 
 def leg_v(sem):

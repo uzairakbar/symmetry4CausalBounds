@@ -218,8 +218,9 @@ cigarettes:
     n_samples: 2_450        # the whole panel; more resamples WITH replacement
     n_experiments: 8        # iv: state-cluster bootstrap replicates of the fit
                             # sample with h* held fixed from the full pool, so
-                            # the bars are a resampling RATE. plasmode: fresh
-                            # (U, xi) per experiment on the fixed design.
+                            # the bars are a resampling RATE. plasmode: a fresh
+                            # confounder and outcome per experiment on the
+                            # fixed design.
     sweep_samples: 8      # also the per-dimension query grids, forced EVEN so
                             # the exact zero stays off them
     m_sweep_n_percent: 6.25 # m sweep n, % of n_samples; n grid: `sweep_samples` log-spaced points on 10..100 %
