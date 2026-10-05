@@ -52,7 +52,7 @@ cigarettes:
     spec: t3
     anchor: own-tax
     iv: [tax_s, y, cpi]
-    gamma_z: 0.0177
+    gamma_z: 0.02
     n_samples: 2_450
     n_experiments: 10
     sweep_samples: 16

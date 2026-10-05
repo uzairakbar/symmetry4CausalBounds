@@ -342,9 +342,9 @@ def leg_i():
         f"{plasmode_block.get('target')!r}, {plasmode_block.get('gamma_z')!r}",
     )
     block, _ = load_recipe("cigarettesFig7", "cigarettes")
-    written_out = block.get("target") == "iv" and block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.0177
+    written_out = block.get("target") == "iv" and block.get("gamma_z") == GAMMA_Z_DEFAULT == 0.02
     check(
-        "(i) the cigarette query recipe is the restricted-2sls target, gamma_z written out (Conley delta 0.05)",
+        "(i) the cigarette query recipe is the restricted-2sls target, gamma_z written out (Conley delta 0.054)",
         written_out,
         f"{block.get('target')!r}, {block.get('gamma_z')!r}",
     )
