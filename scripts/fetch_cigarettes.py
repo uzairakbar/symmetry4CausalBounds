@@ -5,8 +5,8 @@ and symlinks `data/cigarettes` at it, so the 17 MB BEA zip never lands in the
 repo or under $HOME. Raw files already present with the right digest are kept.
 
 Panel: 49 states x 50 years, nominal throughout -- no deflation anywhere, CPI is
-a regressor. AK and HI are dropped: they have no land neighbour, so the
-minimum-neighbour price is undefined there.
+a regressor. AK and HI are dropped: they have no land neighbor, so the
+minimum-neighbor price is undefined there.
 
     python scripts/fetch_cigarettes.py [--directory DIR] [--force]
 """
@@ -168,20 +168,20 @@ def read_cpi(raw_dir: str) -> dict:
     return {year: sum(values) / len(values) for year, values in monthly.items()}
 
 
-def read_neighbours(raw_dir: str) -> dict:
-    """{state: [neighbours]}, symmetrised, AK and HI removed on both sides."""
+def read_neighbors(raw_dir: str) -> dict:
+    """{state: [neighbors]}, symmetrised, AK and HI removed on both sides."""
     header, rows = read_csv(os.path.join(raw_dir, "neighbors.csv"))
     column = {name: index for index, name in enumerate(header)}
     pairs = set()
     for row in rows:
-        state, neighbour = row[column["StateCode"]], row[column["NeighborStateCode"]]
-        if state in DROP_STATES or neighbour in DROP_STATES:
+        state, neighbor = row[column["StateCode"]], row[column["NeighborStateCode"]]
+        if state in DROP_STATES or neighbor in DROP_STATES:
             continue
-        pairs.add((state, neighbour))
-        pairs.add((neighbour, state))
+        pairs.add((state, neighbor))
+        pairs.add((neighbor, state))
     out: dict = {}
-    for state, neighbour in sorted(pairs):
-        out.setdefault(state, []).append(neighbour)
+    for state, neighbor in sorted(pairs):
+        out.setdefault(state, []).append(neighbor)
     return out
 
 
@@ -190,9 +190,9 @@ def build_panel(raw_dir: str) -> list[dict]:
     cdc, names = read_cdc(raw_dir)
     bea = read_bea(raw_dir, names)
     cpi = read_cpi(raw_dir)
-    neighbours = read_neighbours(raw_dir)
+    neighbors = read_neighbors(raw_dir)
 
-    # CDC joined to BEA and CPI first: the neighbour aggregate is taken over the
+    # CDC joined to BEA and CPI first: the neighbor aggregate is taken over the
     # states that survive THAT join, as the probe's merge order does
     joined = {}
     for key, measures in cdc.items():
@@ -207,9 +207,9 @@ def build_panel(raw_dir: str) -> list[dict]:
 
     panel = []
     for (state, year), row in sorted(joined.items()):
-        if state in DROP_STATES or state not in neighbours:
+        if state in DROP_STATES or state not in neighbors:
             continue
-        near = [joined[(other, year)] for other in neighbours[state] if (other, year) in joined]
+        near = [joined[(other, year)] for other in neighbors[state] if (other, year) in joined]
         if not near:
             continue
         row = dict(row, st=state, year=year)

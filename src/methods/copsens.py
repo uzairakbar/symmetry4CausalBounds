@@ -580,7 +580,7 @@ class CopSensPI(BoundedSA):
         SLSQP on both signs. The fraction counts the starts (over both sides) that
         SLSQP rejected or that landed outside the feasible set.
 
-        Do NOT warm-start from a neighbouring query's optimum: the problem is
+        Do NOT warm-start from a neighboring query's optimum: the problem is
         non-convex (that is why there is a multi-start), so seeding from a nearby
         solution biases toward a local optimum and yields NARROWER, i.e. silently
         invalid, bounds.

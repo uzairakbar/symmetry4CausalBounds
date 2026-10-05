@@ -5,7 +5,7 @@ refactor9 is on top of refactor8. The hue is the family and a real Z on top of i
 shows only in the label (`constants.label`); a (T) spelling is its base in hue, line
 and label; the query figures draw both band edges of every interval solid
 (`_draw_bands`, `constants.line_style`); the price coefficients are
-labelled theta_{state price} and theta_{neighbour price} (`COEFFICIENT_LABELS`);
+labelled theta_{state price} and theta_{neighbor price} (`COEFFICIENT_LABELS`);
 `HEADLINE_METHODS` carries DA+PI+IV(Z); `elasticity_grid` tiles the four headline
 figures with y shared per row, x per column, the legend inside the top-right panel
 pinned upper left. Legs:
@@ -16,7 +16,7 @@ pinned upper left. Legs:
         the real-Z names and their families alike, with and without a Z.
         Catches: any of the rules moved back.
   (ii)  the labels: both COEFFICIENT_LABELS carry \\theta and neither carries
-        \\beta or p_n; T1's benchmark column is labelled with the neighbour-price
+        \\beta or p_n; T1's benchmark column is labelled with the neighbor-price
         theta. Catches: the old notation on a figure or the table.
   (iii) `_draw_bands` on a synthetic pair: one fill and two edge lines per
         interval method, the edges in `line_style`'s pattern, a (patch, line)
@@ -44,7 +44,7 @@ pinned upper left. Legs:
         the gamma column linear and the gamma_z (leak) column log; each panel
         carries exactly one mark, the budget its row's other figure holds fixed
         (the panel's own `_vlines.pkl`), and its x-limits are its grid's ends;
-        on a copy with the neighbour-price pkls removed the bottom row is off and
+        on a copy with the neighbor-price pkls removed the bottom row is off and
         the top row still draws. Catches: the grid not wired, the legend shared,
         a missing pair taking the grid down.
   (D)   the digest leg (scripts/digest_leg.py): the shipped artifacts hash as
@@ -408,7 +408,7 @@ def leg_v(artifacts):
         fig = aggregate.elasticity_grid(tmp, None)
         axes = np.array(fig.axes).reshape(2, 2)
         check(
-            "(v) without the neighbour-price pkls the bottom row is off, the top row draws",
+            "(v) without the neighbor-price pkls the bottom row is off, the top row draws",
             all(ax.axison for ax in axes[0]) and not any(ax.axison for ax in axes[1]),
         )
         check("(v) the legend still sits in the top-right panel", axes[0, 1].get_legend() is not None)
