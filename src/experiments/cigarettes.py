@@ -69,18 +69,21 @@ NORMAL_95: float = 1.959963984540054
 
 # the headline figures under a configured instrument set (SS10), one pair per
 # coefficient in HEADLINE_COEFFICIENTS. F1: the coefficient against the
-# confounding budget on the benchmarked range, 1x to 3x the tax-differential
-# benchmark. F2: the coefficient against the real-Z leakiness budget gamma_z
-# (Asm. 3; the radius r_Z = s sqrt(gamma_z)) at the query budget. Each marks only
-# the budget the other holds fixed (F1 the query gamma, F2 the declared gamma_z),
-# on an x-axis clipped to its own grid; the benchmarks are logged and tabled.
-# Both are read off the query panel's fitted models, one band per method. The gamma_z range reaches
-# the addiction-stock leak (gamma_z 0.311); it is the square of the r_Z range
-# (2^-8, 2^-0.5) the figure swept before, the same curves at s = 1.
+# confounding budget gamma on GAMMA_RANGE, 1x to 3x the tax-differential
+# benchmark, at the declared gamma_z; it marks the held gamma (the addiction-stock
+# lag-q benchmark). F2: the coefficient against the real-Z leakiness budget
+# gamma_z (Asm. 3; the radius r_Z = s sqrt(gamma_z)) on [GAMMA_Z_MIN, held gamma]
+# at the held gamma; it marks the declared gamma_z. Each marks only the budget the
+# other holds fixed, on an x-axis clipped to its own grid; the benchmarks are
+# logged and tabled. Both are read off the query panel's fitted models, one band
+# per method.
 HEADLINE_METHODS: tuple[str, ...] = ("PI", "PI+IV", "PI+INV+IV", "DA+PI+IV(Z)", "DA+PI+IV")
 HEADLINE_COEFFICIENTS: tuple[str, ...] = ("pn", "p")
 GAMMA_RANGE: tuple[float, float] = (0.150, 0.450)
-GAMMA_Z_RANGE: tuple[float, float] = (2**-16, 2**-1)
+# F2's left edge; its right edge is the gamma both headline figures hold (the
+# addiction-stock benchmark, ~0.31 at t3), so the leak runs from negligible to
+# as large as the confounding itself
+GAMMA_Z_MIN: float = 1e-4
 PN: int = TREATMENTS.index("pn")
 # the gamma_z benchmarks marked on F2 and read in the IV benchmark table, by
 # BENCHMARK_NAMES key: the primary and the channel-specific one, as on F1
@@ -636,13 +639,13 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         HEADLINE_COEFFICIENTS entry (`beta_pn_*`, `beta_p_*`).
 
         F1: the coefficient's interval of each headline method against gamma on
-        the benchmarked range, at the declared gamma_z, which F2 holds fixed.
+        the benchmarked range, at the declared gamma_z, which F2 marks.
         Reading on beta_pn: the lower bound flattens by 0.19 and only the upper
         end grows with the budget (that PI never separates from PI+INV is T1's
         row, not a band here).
-        F2: the same methods against the leakiness budget gamma_z at the query
-        budget gamma, which F1 holds fixed. Every model's `gamma_z` is put back
-        after.
+        F2: the same methods against the leakiness budget gamma_z on
+        [GAMMA_Z_MIN, held gamma], at the held gamma (the lag-q benchmark), which
+        F1 marks. Every model's `gamma_z` is put back after.
         Each figure marks only the budget the other holds fixed, on an x-axis
         clipped to its own grid. The PI+IV feasibility floor, the gamma
         benchmarks (1x tax-differential, 1x addiction stock, 3x tax-differential),
@@ -661,6 +664,11 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         points = int(self.kwargs["sweep_samples"])
         Z, b = runner.sem.iv_pool, runner.sem.solution.ravel()
         tax_diff, lag = self.benchmarks()["tax_diff"][3], self.benchmarks()["lag_q"][3]
+        # the confounding budget both figures hold: the addiction-stock benchmark
+        # (SS6.2), not the query panel's QUERY_GAMMA. F1 marks it, F2 is solved at it
+        held = float(lag)
+        if not held > GAMMA_Z_MIN:
+            raise ValueError(f"the held gamma {held:g} must exceed GAMMA_Z_MIN {GAMMA_Z_MIN:g}.")
         # the floor at PI+IV's bound s sqrt(gamma_z): the panel is sigma-normalised
         # (`build_design` divides y by the OLS residual sd), so PI+IV's s is 1 and
         # the bound is sqrt(gamma_z) in outcome units, what SS3.3's floor (0.1074) is
@@ -672,7 +680,7 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             f"gamma*(b) {gamma_star:.4f}, 3x tax-diff {3.0 * tax_diff:.4f}"
         )
         # each figure marks only the budget the other holds fixed
-        f1_marks, f2_marks = (self.gamma,), (self.gamma_z,)
+        f1_marks, f2_marks = (held,), (self.gamma_z,)
         # the moment is a radius in outcome units: over the runner's s^2 it reads
         # as the gamma_z whose bound s sqrt(gamma_z) it would fill (s is 1 here)
         median, p95 = moment_quantiles(design, Z, b)
@@ -681,12 +689,12 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
         logger.info(
             f"F2 benchmarks: cluster-bootstrap moment at the target, median {median:.4f}, p95 {p95:.4f} (gamma_z "
             f"{median**2 / s_sq:.6f}, {p95**2 / s_sq:.6f} at s^2 {s_sq:.6f}); declared gamma_z {self.gamma_z:.4f}; "
-            f"leak gamma_z {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
+            f"held gamma {held:.4f}; leak gamma_z {dict(zip(IV_BENCHMARKS, leaks, strict=True))}"
         )
         gammas = np.linspace(*GAMMA_RANGE, points)
         # F2: each model is handed gamma_z itself; its bound s sqrt(gamma_z) is at
         # its own s. PI carries no such term
-        gamma_zs = np.geomspace(*GAMMA_Z_RANGE, points)
+        gamma_zs = np.geomspace(GAMMA_Z_MIN, held, points)
 
         for coefficient in HEADLINE_COEFFICIENTS:
             query = np.eye(design.k)[TREATMENTS.index(coefficient)][None, :]
@@ -722,13 +730,13 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             results = {name: np.full((points, 1, 2), np.nan) for name in models}
             for name, model in models.items():
                 if not hasattr(model, "gamma_z"):
-                    results[name][:, 0] = interval(model, self.gamma)
+                    results[name][:, 0] = interval(model, held)
                     continue
                 declared = model.gamma_z
                 try:
                     for i, gamma_z in enumerate(gamma_zs):
                         model.gamma_z = float(gamma_z)
-                        results[name][i, 0] = interval(model, self.gamma)
+                        results[name][i, 0] = interval(model, held)
                 finally:
                     model.gamma_z = declared
             stem = f"beta_{coefficient}_budget"
