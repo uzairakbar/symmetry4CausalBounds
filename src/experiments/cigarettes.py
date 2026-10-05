@@ -418,7 +418,6 @@ class CigaretteOrchestrator(ExperimentOrchestrator):
             iv_columns=self.iv_columns,
             gamma_z=CIGARETTE_CONFIG.gamma_z,
             gamma_true=CIGARETTE_CONFIG.gamma_true,
-            confound_direction=CIGARETTE_CONFIG.confound_direction,
             outcome_noise_std=CIGARETTE_CONFIG.outcome_noise_std,
         )
         sem.epsilon_quantile = epsilon_quantile

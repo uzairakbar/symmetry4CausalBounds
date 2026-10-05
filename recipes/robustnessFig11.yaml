@@ -54,7 +54,7 @@ cigarettes:
     iv: [tax_s, y, cpi]
     gamma_z: 0.02
     n_samples: 2_450
-    n_experiments: 10   # 10 plasmode resimulations of the one panel, split seed + j
+    n_experiments: 10   # 10 fresh plasmode DGPs (new confounder and Y) on the one panel, split seed + j
     sweep_samples: 16
     da_amplitude: 2.0
     sliver: false
