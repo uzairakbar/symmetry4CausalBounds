@@ -66,6 +66,15 @@ def finite_sample_budget(d, g, n, a) -> float:
     return float(ncx2.ppf(1.0 - a, d, n * g)) / n
 
 
+def erm_ball_budget(d, g, n, a) -> float:
+    """The ERM ball's finite-sample budget, App. D: s^2 / sigma^2 = 1 + g, so
+    (1 + g) gamma_n(d; g / (1 + g)). Raw (a = 0) it is g itself, bit for bit."""
+    if not a:
+        return float(g)
+    g = float(g)
+    return (1.0 + g) * finite_sample_budget(d, g / (1.0 + g), n, a)
+
+
 # the share of `gamma_n_alpha` each padded row gets: the ERM ball, the mean row and
 # the IV rows (together) take alpha / 3 each, on every method, so one solve gives
 # simultaneous (1 - alpha) bands and adding a row can only shrink an interval
@@ -414,12 +423,14 @@ class PartialR2(BoundedSA):
         return self.gamma_n_alpha > 0.0 and bool(self.mean_match)
 
     def ball_budget(self, gamma) -> float:
-        """The ERM ball's budget gamma_n(k; gamma~) at the row level on n_eff units,
-        gamma~ = `budget(gamma)`; the raw program's is gamma~ itself."""
-        return finite_sample_budget(self.k_ball_, self.budget(gamma), self.n_eff, self.row_level)
+        """The ERM ball's budget (1 + gamma~) gamma_n(k; gamma~ / (1 + gamma~)) at the
+        row level on n_eff units, gamma~ = `budget(gamma)`; the raw program's is
+        gamma~ itself."""
+        return erm_ball_budget(self.k_ball_, self.budget(gamma), self.n_eff, self.row_level)
 
     def ball_radius(self, gamma) -> float:
-        """s sqrt(gamma_n(k; gamma~)), the radius of || X (h - h_erm) || / sqrt(N)."""
+        """s sqrt((1 + gamma~) gamma_n(k; gamma~ / (1 + gamma~))), the radius of
+        || X (h - h_erm) || / sqrt(N)."""
         return self.scale * np.sqrt(self.ball_budget(gamma))
 
     def mean_radius(self, gamma) -> float:
@@ -624,11 +635,11 @@ def constraint_floor(
             takes them: the distinct observations behind `design`'s rows and the
             controls partialled out per observation.
         gamma_n_alpha: the finite-sample pads, as the model takes them
-            (`PartialR2.ball_budget`): the ball is gamma_n(k; gamma~) at level
-            gamma_n_alpha / GAMMA_N_ROWS on n_obs units. The floor is
-            taken at delta = 0: with the mean row an IV block sees delta too, so
-            the padded program's own floor can sit lower, and this one is then an
-            upper reference for it.
+            (`PartialR2.ball_budget`): the ball is (1 + gamma~)
+            gamma_n(k; gamma~ / (1 + gamma~)) at level gamma_n_alpha /
+            GAMMA_N_ROWS on n_obs units. The floor is taken at delta = 0: with
+            the mean row an IV block sees delta too, so the padded program's own
+            floor can sit lower, and this one is then an upper reference for it.
 
     Returns:
         floor in squared budget units
@@ -647,7 +658,7 @@ def constraint_floor(
     residuals = np.asarray(y).flatten() - design @ h_erm
     n_obs = N if n_obs is None else int(n_obs)
     scale = float(np.sqrt(residual_variance(residuals, M + int(mean_match) + absorbed_rate * n_obs, n_obs)))
-    ball = finite_sample_budget(
+    ball = erm_ball_budget(
         M + int(mean_match), recalibrated_gamma(gamma, rho, recalibrate), n_obs, gamma_n_alpha / GAMMA_N_ROWS
     )
     delta = np.sqrt(N) * scale * np.sqrt(max(ball, 0.0))

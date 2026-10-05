@@ -54,18 +54,18 @@ simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` i
 `config.yaml`'s `defaults:` and in every recipe but `opticalDeviceFig6` (below).
 
 - **The pads.** With `gamma_n(d; g) = F^-1_{chi2_d(n g)}(1 - a) / n`
-  (`sensitivity_models.finite_sample_budget`), the ERM ball is
-  `sigma-hat sqrt(gamma_n(k; gamma~))`, the mean-matched slice gets a mean row
-  `|delta| <= sigma-hat sqrt((1 + gamma~) gamma_n(1; 0))` (delta inside the ball;
-  none with `mean_match: false`), and every IV row is
-  `sqrt(s^2 (1 + gamma~) gamma_n(d; g / (1 + gamma~)))`. alpha = 0.05 is split the
-  same way on every method: alpha/3 to the ball, alpha/3 to the mean row, alpha/3
-  shared by the IV rows. A non-DA IV row's leak `g` is the declared `gamma_z`; a DA
-  row's is App. D's post-DA `(eps / sigma~ + sqrt(gamma_z / rho))^2`. A DA fit with
-  both the translation amounts T and an observed instrument Z carries one joint row
-  on span(T, Z) (`IV_LAYOUT`, chosen by a pilot). The invariance budget and the
-  +-eps pad stay unpadded: eps = eps* + 2^-8 (`EPS_TOL`), eps* the q0.95 of |W| on
-  the sweeps and its RMS on the query panels.
+  (`sensitivity_models.finite_sample_budget`), the ERM ball is `sigma-hat sqrt((1 +
+  gamma~) gamma_n(k; gamma~ / (1 + gamma~)))`, the mean-matched slice gets a mean
+  row `|delta| <= sigma-hat sqrt((1 + gamma~) gamma_n(1; 0))` (delta inside the
+  ball; none with `mean_match: false`), and every IV row is `sqrt(s^2 (1 + gamma~)
+  gamma_n(d; g / (1 + gamma~)))`. alpha = 0.05 is split the same way on every
+  method: alpha/3 to the ball, alpha/3 to the mean row, alpha/3 shared by the IV
+  rows. A non-DA IV row's leak `g` is the declared `gamma_z`; a DA row's is App. D's
+  post-DA `(eps / sigma~ + sqrt(gamma_z / rho))^2`. A DA fit with both the
+  translation amounts T and an observed instrument Z carries one joint row on
+  span(T, Z) (`IV_LAYOUT`, chosen by a pilot). The invariance budget and the +-eps
+  pad stay unpadded: eps = eps* + 2^-8 (`EPS_TOL`), eps* the q0.95 of |W| on the
+  sweeps and its RMS on the query panels.
 - **Raw mode.** Without the key (or `gamma_n: 0` / `false`) the programs use the
   population budgets: the ball `sigma-hat sqrt(gamma~)`, the exact mean match and
   the IV rows `s sqrt(g)`. A genuine but optimistic band. Every model built
