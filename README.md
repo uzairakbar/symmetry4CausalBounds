@@ -77,7 +77,7 @@ simultaneous 95% band. The level is the `gamma_n` key, in percent, set to `95` i
   the real-panel query `cigarettesFig7`'s state-year rows, counted the same way.
 - **Intersections.** PI & DA+... intersects two simultaneous 95% sets, so its band
   is 90%.
-- **Declared instrument leaks.** The cigarettes declare `gamma_z: 0.02`; the
+- **Declared instrument leaks.** The cigarettes declare `gamma_z: 0.01`; the
   simulation declares `SimulationConfig.gamma_z = 2^-8` for its generated
   instrument (not to be confused with `CigaretteConfig.gamma_z`, a sliver guard);
   optical has no observed instrument.

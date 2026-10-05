@@ -115,7 +115,7 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
         config.yaml (one experiment, the block's sweep params' runners and its
         query runner), every built interval model's epsilon, ball budget, IV leak
         g and IV radius is > 0; the simulation's gamma_z resolves to 2^-8 under
-        `iv: 1`, the cigarettes' to 0.02; optical has no Z, so its gamma_z 0 is
+        `iv: 1`, the cigarettes' to 0.01; optical has no Z, so its gamma_z 0 is
         exempt and its DA T rows are positive through eps.
         Catches: a budget that silently degenerates to an exact constraint.
   (xiii) `oracle_t_leak`, the optical query's T row at its population radius: a
@@ -181,7 +181,7 @@ RAW_RECIPES = ("opticalDeviceFig6.yaml",)
 # the query panels' budgets at c29af19 (`_epsilon_budget(query_epsilon, tol=eps,
 # quantile=None)` on opticalDeviceFig6's and cigarettesFig7's blocks)
 QUERY_EPSILON_C29AF19 = {"optical_device": 0.3335209199891572, "cigarettes": 0.003906250000000246}
-GAMMA_Z_CIGARETTES = 0.02
+GAMMA_Z_CIGARETTES = 0.01
 PLASMODE_DRAWS = 100
 VALIDITY_ROWS_DRAWS = 400
 VALIDITY_SOLVE_DRAWS = 250

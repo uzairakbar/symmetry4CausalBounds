@@ -42,7 +42,7 @@ Legs:
   (v)   the replicate mechanism follows decision 9 and the declared leak reaches
         the solver: with a non-empty `iv:` the sweep runner's SEMs carry
         `bootstrap` False (90% row splits); the orchestrator reads the block's
-        `gamma_z` (0.02); every padded row is sized on the fit's n_obs
+        `gamma_z` (0.01); every padded row is sized on the fit's n_obs
         (n_eff, no cap on the units); PI+IV carries one Z row at
         sqrt(s^2 (1 + gamma~) gamma_n(3; gamma_z / (1 + gamma~))) (raw: exactly
         s sqrt(gamma_z)), DA+PI+IV and the intersection's DA branch one joint
