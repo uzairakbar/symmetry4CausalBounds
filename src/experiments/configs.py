@@ -1010,8 +1010,9 @@ class MethodRegistry:
                 charged to every ball's sigma-hat as `absorbed_rate * n_obs` dof
                 (the cigarette FWL); 0 is none. partial_r2 only.
             gamma_n_alpha: the finite-sample pads' alpha (the yaml's `gamma_n`, 95
-                -> 0.05): every PI ball at gamma_n(k; gamma~) and, on the slice, a
-                mean row, each at level alpha / 3 on the fit's n_obs units;
+                -> 0.05): every PI ball at (1 + gamma~) gamma_n(k; gamma~ /
+                (1 + gamma~)) and, on the slice, a mean row, each at level
+                alpha / 3 on the fit's n_obs units;
                 0.0, the default and every direct constructor, is the raw program
                 (the population budgets). partial_r2 only.
             t_radius: the DA T row's radius, fixed (the optical query's

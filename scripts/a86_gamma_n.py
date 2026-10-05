@@ -16,12 +16,13 @@ with noncentrality n g; a = 0 is the raw (population) budget g. Legs:
   (ii)  the ERM ball and the mean row off the cvx parameters, through
         `MethodRegistry.build_methods` and `fit_model` on a synthetic fixture,
         for PI, PI+INV, PI+IV (empty Z), DA+PI and PI&DA+PI (both branches):
-        the ball s sqrt(gamma_n(k; gamma~)) at a = alpha / 3 with k = d + 1 (the
-        slice's intercept) and n = n_eff, the mean row s sqrt((1 + gamma~)
-        gamma_n(1; 0)); n_eff the fit's n_obs, the original samples on an m = 4
-        tiling (`X_base`); raw (alpha 0) the population ball s sqrt(gamma~) bit
-        for bit and no mean row; the cigarette orchestrator caps no units on
-        either target (`iv`, `plasmode`), and the simulation toggles carry none.
+        the ball s sqrt((1 + gamma~) gamma_n(k; gamma~ / (1 + gamma~))) at
+        a = alpha / 3 with k = d + 1 (the slice's intercept) and n = n_eff, the
+        mean row s sqrt((1 + gamma~) gamma_n(1; 0)); n_eff the fit's n_obs, the
+        original samples on an m = 4 tiling (`X_base`); raw (alpha 0) the
+        population ball s sqrt(gamma~) bit for bit and no mean row; the
+        cigarette orchestrator caps no units on either target (`iv`,
+        `plasmode`), and the simulation toggles carry none.
         The IV rows on a fixture with an observed Z and T, gamma_z 2^-8: PI+IV,
         PI+INV+IV and the intersection's baseline carry the Z row at the declared
         gamma_z; DA+PI+IV(Z) / (T) the one row at gamma~_z(eps) = eps^2 / s~^2 +
@@ -323,7 +324,7 @@ def leg_ii():
             model.predict(queries)
             for ball in balls(model):
                 g = ball.budget(gamma)
-                want = ball.scale * np.sqrt(fsb(d + 1, g, n, alpha / 3))
+                want = ball.scale * np.sqrt((1 + g) * fsb(d + 1, g / (1 + g), n, alpha / 3))
                 got = ball.radius_param.value
                 exact = got == ball.scale * np.sqrt(g) if alpha == 0.0 else abs(got - want) <= 1e-12 * want
                 check(f"(ii) {tag}: {name} ball", ball.n_eff == n and exact, f"{got:.6g} (want {want:.6g})")
