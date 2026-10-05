@@ -244,10 +244,10 @@ def leg_iii():
         x_lo > 0 and x_hi >= 0.5579 and marks == [0.5579],
     )
     grid = np.geomspace(2**-16, 2**-1, 4)
-    x_lo, x_hi, marks = plotting._mark_frame(grid, (0.02, 0.5579, np.nan), "log", clip=True)
+    x_lo, x_hi, marks = plotting._mark_frame(grid, (0.01, 0.5579, np.nan), "log", clip=True)
     check(
         "(iii) a clipped frame is the grid's ends and keeps only the marks inside it",
-        (x_lo, x_hi) == (grid[0], grid[-1]) and marks == [0.02],
+        (x_lo, x_hi) == (grid[0], grid[-1]) and marks == [0.01],
         f"{x_lo} {x_hi} {marks}",
     )
 

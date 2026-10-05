@@ -34,7 +34,7 @@ the replicate scheme from the `bootstrap` flag the two runners are built with. L
         reach the DA.
   (v)   `target` routes, and the two runners get DIFFERENT replicate schemes. Run
         on the block as given AND on its other declaration (`iv: [tax_s, y, cpi]`
-        with `gamma_z: 0.02` added, or both keys dropped), so both schemes are
+        with `gamma_z: 0.01` added, or both keys dropped), so both schemes are
         exercised whichever the block declares. gamma* at t3 is
         `GAMMA_STAR_T3[declared]` under `iv` and gamma_true under `plasmode`;
         `pool` and `solution` are identical across the sweep SEMs under both, so
@@ -117,7 +117,7 @@ COVERAGE_DROP = 0.3
 GAMMA_STAR_T3 = {False: 0.18782108, True: 0.36205260}
 GAMMA_STAR_TOL = 1e-6
 # the other declaration leg (v) runs beside the block's own: the query recipe's set
-INSTRUMENT_SET = {"iv": ["tax_s", "y", "cpi"], "gamma_z": 0.02}
+INSTRUMENT_SET = {"iv": ["tax_s", "y", "cpi"], "gamma_z": 0.01}
 PANEL_ROWS = 2450
 STATE_YEARS = 50  # one state history
 

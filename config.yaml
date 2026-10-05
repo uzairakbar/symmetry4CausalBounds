@@ -242,9 +242,9 @@ cigarettes:
     # iv: [tax_s, y, cpi]
     # the IV leakiness budget for the instruments listed in `iv:`, DECLARED on every
     # path (SS2.6). The radius is s*sqrt(gamma_z), a fraction of the residual sd;
-    # 0.02 gives 14.1%. Omit the key and that default is used. It is the radius of
+    # 0.01 gives 10%. Omit the key and that default is used. It is the radius of
     # the observed instrument's own constraint; the T-as-IV budget is separate.
-    # gamma_z: 0.02     # the default (GAMMA_Z_DEFAULT); present here only to be explicit
+    # gamma_z: 0.01     # the default (GAMMA_Z_DEFAULT); present here only to be explicit
     methods:
         # - ATE
         # - ERM

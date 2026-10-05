@@ -335,12 +335,12 @@ EPS_TOL: float = 2**-8
 # path, never oracle: listing instruments asserts they are near perfect. Read only
 # when the instrument set is non-empty; an absent key means this.
 #
-# the DECLARED leak budget of a configured instrument set: a round 0.02 on
-# Conley's direct-effect scale, r_Z = s sqrt(gamma_z) = 0.141, which reads as a
-# direct tax elasticity delta ~ 0.054 (T3 prints the exact value), i.e. doubling
-# the excise moves taxed sales by about 5% outside the four prices. 2^-8 shipped
+# the DECLARED leak budget of a configured instrument set: a round 0.01 on
+# Conley's direct-effect scale, r_Z = s sqrt(gamma_z) = 0.1, which reads as a
+# direct tax elasticity delta ~ 0.038 (T3 prints the exact value), i.e. doubling
+# the excise moves taxed sales by about 4% outside the four prices. 2^-8 shipped
 # before and sat below the bootstrap noise floor 0.104 of the moment it bounds.
-GAMMA_Z_DEFAULT: float = 0.02
+GAMMA_Z_DEFAULT: float = 0.01
 
 # the robustness sweep -- and ONLY it -- recalibrates a strength-knob DA to a
 # true invariance error, so that eps/eps* is a meaningful ratio axis. The target

@@ -91,10 +91,10 @@ SPEC, IV = "t3", ("tax_s", "y", "cpi")
 # the declared budget read back as a direct tax elasticity,
 # delta = sqrt(gamma_z / E[z^2]) * sigma  (`cigarettes.py::_write_benchmarks_iv`).
 # At the panel's E[z^2] = 0.149006 and sigma = 0.147199 (SSR / (n - K)) the
-# round default 0.02 gives 0.05393 (0.05331 at the 1/n sigma 0.145507).
+# round default 0.01 gives 0.03813 (0.03769 at the 1/n sigma 0.145507).
 # RE-DERIVE this whenever GAMMA_Z_DEFAULT moves: it was 0.0236 at the old 2^-8 and
 # went stale when f2b1101 adopted the Conley scale.
-DECLARED_DELTA = 0.0539
+DECLARED_DELTA = 0.0381
 FAIL = []
 
 
