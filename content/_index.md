@@ -1,5 +1,5 @@
 +++
-title = "Symmetry-Constrained Causal Partial Identification"
+title = "Symmetry-Informed Causal Partial Identification"
 description = "Data symmetries—invariances of the causal effect under data transformations—as constraints that provably sharpen causal partial identification bounds."
 [extra]
 authors = [
@@ -31,7 +31,8 @@ favicon = true
 .figrow > figure { flex: 1 1 300px; margin: 0; }
 .figrow > figure > div { width: auto; max-width: 100%; margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; }
 .figrow > figure > img { align-self: center; }
-img[src$="simulation-query-sweep.svg"], img[src$="optical-query-sweep.svg"] { max-width: 80%; }
+img[src$="optical-query-sweep.svg"] { max-width: 80%; }
+img[src$="cigarettes.svg"] { max-width: min(100%, 460px); }
 </style>
 
 **TLDR**: 
@@ -56,11 +57,11 @@ Causal effects are generally not identifiable from observational data alone: hid
   <img class="dark-invert" loading="lazy" src="pi-x.svg" alt="PI interval at a query point" style="max-height:200px">
   <img class="dark-invert" loading="lazy" src="pi-metrics.svg" alt="identified set with PI metrics" style="max-height:192.5px">
 </div>
-<figcaption><b>Figure 2:</b> The PI interval at a query point (left) and the identified-set geometry behind common PI metrics (right).</figcaption>
+<figcaption><b>Figure 2:</b> PI sets <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}}(\boldsymbol{x})$</code> (left) and <code>$\mathcal{H}_{\mathrm{p}\textnormal{\i}}$</code> (right) for various sensitivity parameters <code>$\boldsymbol{\gamma}$</code> and different metrics of interest: estimation, approximation, and worst-case errors.</figcaption>
 </figure>
 </div>
 
-# Symmetry Constraints
+# Symmetry-Informed Bounds
 
 Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of the data under which the causal effect is invariant by design, `$h_{\star}(\tau \boldsymbol{x}) = h_{\star}(\boldsymbol{x})$` for all `$\tau \in \mathcal{T}$`. We show how to exploit them for PI—*explicitly*, by constraining candidate models to have small invariance error, or *implicitly*, by augmenting the data before running an off-the-shelf PI method. Both routes provably sharpen the resulting bounds.
 
@@ -102,25 +103,25 @@ Many domains come with *known symmetries* `$\mathcal{T}$`: transformations of th
 
 # Experimental Results
 
-Across simulations, an optical-device dataset, and a do-MNIST benchmark, symmetry constraints consistently tighten PI bounds obtained by canonical PI methods.
-
-{% figure(src=["simulation-query-sweep.svg"], alt=["simulation query sweeps"], dark_invert=[true]) %}
-**Figure 5:** Query sweeps on simulated data: symmetry constraints consistently tighten PI bounds.
-{% end %}
+On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchmark, symmetry-informed PI stays valid while sharpening the bounds obtained by canonical PI methods.
 
 {% figure(src=["optical-query-sweep.svg"], alt=["optical device query sweeps"], dark_invert=[true]) %}
-**Figure 6:** Query sweeps on the optical-device dataset.
+**Figure 5:** Optical device. Across queries along the principal components of the inputs and a radial sweep, symmetries reduce interval width and worst-case error over baseline while maintaining validity.
+{% end %}
+
+{% figure(src=["cigarettes.svg"], alt=["US cigarette demand price elasticity bounds"], dark_invert=[true]) %}
+**Figure 6:** US cigarette demand. State (top) and neighbor (bottom) price elasticity across confounding (left) and IV (right) budgets: imposing the symmetry makes the neighbor-price effect clearly positive unless the IV is heavily leaky.
 {% end %}
 
 {% figure(src=["do-mnist-sweep.svg"], alt=["do-MNIST digit sweep"], dark_invert=[true]) %}
-**Figure 7:** do-MNIST digit sweep: post-DA bounds with invariance constraints are the sharpest valid bounds.
+**Figure 7:** do-MNIST. Bounds on 10 exemplar images with alternating colors: ERM follows color, while symmetries sharpen PI.
 {% end %}
 
 # Citation
 
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
-      title={Symmetry-Constrained Causal Partial Identification},
+      title={Symmetry-Informed Causal Partial Identification},
       author={Uzair Akbar and Zulfiqar Zaidi and Niki Kilbertus and Krikamol Muandet and Bo Dai},
       year={2026},
       eprint={TBD},
