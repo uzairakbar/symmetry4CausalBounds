@@ -1,5 +1,5 @@
 ---
-title: Symmetry-Constrained Causal Partial Identification
+title: Symmetry-Informed Causal Partial Identification
 # TODO-for-user: replace arXiv:TBD with the real link once it exists
 # subtitle: |
 #   <span style="float: right;">arXiv:TBD</span>
@@ -92,7 +92,7 @@ The width and position of the identified set determine how useful the bound is.
 :::
 :::
 
-# Symmetry-Constrained Bounds
+# Symmetry-Informed Bounds
 
 ## Data augmentation behaves like a soft intervention
 
@@ -144,15 +144,15 @@ Explicit constraints prune the baseline set; DA can recenter and tighten it; the
 
 # Experimental Results
 
-## Simulated query sweeps: symmetry consistently tightens bounds
-
-![](https://uzairakbar.github.io/symmetry4CausalBounds/simulation-query-sweep.svg){fig-alt="Query sweeps on simulated data" width=90%}
-
-## Optical-device query sweeps confirm the pattern
+## Optical device: symmetries sharpen bounds while staying valid
 
 ![](https://uzairakbar.github.io/symmetry4CausalBounds/optical-query-sweep.svg){fig-alt="Query sweeps on the optical-device dataset" width=90%}
 
-## do-MNIST: post-DA invariance gives the sharpest valid bounds
+## US cigarette demand: symmetry reveals cross-border shopping
+
+![](https://uzairakbar.github.io/symmetry4CausalBounds/cigarettes.svg){fig-alt="Price elasticity bounds for US cigarette demand" width=45%}
+
+## do-MNIST: symmetries sharpen bounds where ERM follows color
 
 ![](https://uzairakbar.github.io/symmetry4CausalBounds/do-mnist-sweep.svg){fig-alt="do-MNIST digit sweep" width=90%}
 
