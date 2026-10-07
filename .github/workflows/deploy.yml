@@ -46,6 +46,22 @@ jobs:
       - name: Copy KaTeX CSS and fonts
         run: cp node_modules/katex/dist/katex.min.css public; cp -r node_modules/katex/dist/fonts public/fonts
         if: ${{ env.SERVER_SIDE_KATEX == 'true' }}
+      # The slides live on the presentation branch but take their figures from static/,
+      # so they are rendered here against the same files the website serves.
+      - name: Checkout presentation branch
+        uses: actions/checkout@v7
+        with:
+          ref: presentation
+          path: slides
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.8.25
+      - name: Render presentation
+        run: |
+          ln -s ../static slides/images
+          quarto render slides/presentation.qmd
+          cp slides/presentation.html public/presentation.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
