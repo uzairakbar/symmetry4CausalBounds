@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "symmetry4CausalBounds"
 version = "0.1.0"
-description = "Symmetry Constrained Causal Partial Identification"
+description = "Symmetry-Informed Causal Partial Identification"
 requires-python = ">=3.13"
 dependencies = [
     "cvxpy>=1.6",

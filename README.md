@@ -168,7 +168,7 @@ Run experiments from a scratch directory holding the `config.yaml` (`save` write
 If you find our work helpful, consider citing our paper and leaving a star :star:.
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
-      title={Symmetry-Constrained Causal Partial Identification},
+      title={Symmetry-Informed Causal Partial Identification},
       author={Uzair Akbar and Zulfiqar Zaidi and Niki Kilbertus and Krikamol Muandet and Bo Dai},
       year={2026},
       eprint={TBD},
