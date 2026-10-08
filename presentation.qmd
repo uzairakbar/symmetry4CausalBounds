@@ -1,8 +1,6 @@
 ---
-title: Symmetry-Informed Causal Partial Identification
-# TODO-for-user: replace arXiv:TBD with the real link once it exists
-# subtitle: |
-#   <span style="float: right;">arXiv:TBD</span>
+title: '<span>Symmetry-Informed<br>Causal Partial Identification</span><span class="arxiv-tag">[arXiv:2610.09230](https://arxiv.org/abs/2610.09230)</span>'
+pagetitle: Symmetry-Informed Causal Partial Identification
 format:
   metropolis-beamer-revealjs:
     theme: style.scss
@@ -333,6 +331,8 @@ Augment with shifts, rotations and color jitter. Over 2,000 test queries:
 Project page: [uzairakbar.github.io/symmetry4CausalBounds](https://uzairakbar.github.io/symmetry4CausalBounds)
 
 Code: [github.com/uzairakbar/symmetry4CausalBounds](https://github.com/uzairakbar/symmetry4CausalBounds)
+
+Paper: [arXiv:2610.09230](https://arxiv.org/abs/2610.09230)
 
 LinkedIn: [in/uzair25](https://www.linkedin.com/in/uzair25/) · X: [&#64;uzairakbar25](https://x.com/uzairakbar25/)
 

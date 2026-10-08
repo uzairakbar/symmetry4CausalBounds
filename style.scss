@@ -129,6 +129,21 @@ shape-rendering: geometricPrecision;
 
 /*-- scss:rules --*/
 
+/* title slide: arXiv label right-aligned, on the baseline of the title's last line */
+.reveal #title-slide h1.title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: last baseline;
+  column-gap: 1em;
+}
+.reveal #title-slide h1.title .arxiv-tag {
+  font-family: $font-family-sans-serif;
+  font-size: 0.45em;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
 /* title slide: all authors on one line, names never wrapping */
 .reveal .quarto-title-authors {
   display: flex;
