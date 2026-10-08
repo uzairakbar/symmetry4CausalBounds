@@ -11,9 +11,9 @@ authors = [
 ]
 venue = {name = "Preprint", date = 2026-08-30}          # TODO-for-user: venue TBD; add url (and award) keys when known
 buttons = [
-    {name = "Paper", url = "#"},                         # TODO-for-user: OpenReview/arXiv abs link
-    {name = "PDF", url = "#"},                           # TODO-for-user: arXiv pdf link
-    # {name = "Reviews", url = "#", no_icon = true},     # TODO-for-user: uncomment when OpenReview exists (theme has no reviews icon)
+    # {name = "Paper", url = "#"},                       # TODO-for-user: venue paper link once published
+    {name = "PDF", url = "https://arxiv.org/pdf/2610.09230"},
+    {name = "Reviews", url = "https://openreview.net/forum?id=OeK46xQ84V"},
     {name = "Code", url = "https://github.com/uzairakbar/symmetry4CausalBounds"},
     {name = "Slides", url = "presentation.html"},
     # {name = "Poster", url = "poster.pdf"},             # TODO-for-user: uncomment when poster exists
@@ -124,9 +124,9 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
       title={Symmetry-Informed Causal Partial Identification},
       author={Uzair Akbar and Zulfiqar Zaidi and Niki Kilbertus and Krikamol Muandet and Bo Dai},
       year={2026},
-      eprint={TBD},
+      eprint={2610.09230},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={TBD},
+      url={https://arxiv.org/abs/2610.09230},
 }
 ```
