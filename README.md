@@ -6,7 +6,7 @@
     width="33%">
 </p>
 <p align="center">
-  <a href="https://arxiv.org/abs/#"><img src="https://img.shields.io/badge/arXiv-2510.25128-B31B1B.svg?logo" alt="arXiv Manuscript"></a>
+  <a href="https://arxiv.org/abs/2610.09230"><img src="https://img.shields.io/badge/arXiv-2610.09230-B31B1B.svg?logo" alt="arXiv Manuscript"></a>
   <a href="https://uzairakbar.github.io/symmetry4CausalBounds"><img src="https://img.shields.io/badge/WEB-page-0eb077.svg" alt="Project Webpage"></a>
   <a href="https://colab.research.google.com/github/uzairakbar/symmetry4CausalBounds/blob/colab/s4cb.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Google Colab"></a>
 </p>
@@ -171,9 +171,9 @@ If you find our work helpful, consider citing our paper and leaving a star :star
       title={Symmetry-Informed Causal Partial Identification},
       author={Uzair Akbar and Zulfiqar Zaidi and Niki Kilbertus and Krikamol Muandet and Bo Dai},
       year={2026},
-      eprint={TBD},
+      eprint={2610.09230},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={TBD},
+      url={https://arxiv.org/abs/2610.09230},
 }
 ```
