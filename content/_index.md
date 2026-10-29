@@ -119,6 +119,8 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
 
 # Citation
 
+A non-archival summary of this work was presented at the UAI 2026 Workshop on Causality for Decision Making.[^cdm-uai26]
+
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
       title={Symmetry-Informed Causal Partial Identification},
@@ -130,3 +132,7 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
       url={https://arxiv.org/abs/2610.09230},
 }
 ```
+
+# References
+
+[^cdm-uai26]: Uzair Akbar, Zulfiqar Zaidi, Niki Kilbertus, Krikamol Muandet, and Bo Dai. [Bounding Treatment Effects with Symmetry Sensitivity Models](https://openreview.net/forum?id=eENswma7t9). *UAI 2026 Workshop on Causality for Decision Making*, 2026. [[PDF](symmetry4CausalBoundsUAI.pdf)]
