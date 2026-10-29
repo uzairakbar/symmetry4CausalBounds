@@ -119,7 +119,7 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
 
 # Citation
 
-A non-archival summary of this work was presented at the UAI 2026 Workshop on Causality for Decision Making.[^cdm-uai26]
+A non-archival summary of this work was presented at the CDM workshop @ UAI 2026.[^cdm-uai26]
 
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
