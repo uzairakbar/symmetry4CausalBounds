@@ -9,7 +9,7 @@ authors = [
     {name = "Krikamol Muandet", url = "https://www.krikamol.org"},
     {name = "Bo Dai", url = "https://bo-dai.github.io/"},
 ]
-venue = {name = "Preprint", date = 2026-08-30}          # TODO-for-user: venue TBD; add url (and award) keys when known
+venue = {name = "Preprint", date = 2026-10-06, url = "https://arxiv.org/abs/2610.09230"}  # TODO-for-user: venue TBD; update name/url (and award) when known
 buttons = [
     # {name = "Paper", url = "#"},                       # TODO-for-user: venue paper link once published
     {name = "PDF", url = "https://arxiv.org/pdf/2610.09230"},
