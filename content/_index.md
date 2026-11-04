@@ -119,7 +119,7 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
 
 # Citation
 
-A non-archival summary of this work was presented at the CDM workshop @ UAI 2026.[^cdm-uai26]
+This work extends our [prior work](https://uzairakbar.com/causal-data-augmentation/)[^causal-data-augmentation] on causal estimation with DA. A non-archival summary was presented at the CDM workshop @ UAI 2026.[^cdm-uai26]
 
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
@@ -134,5 +134,7 @@ A non-archival summary of this work was presented at the CDM workshop @ UAI 2026
 ```
 
 # References
+
+[^causal-data-augmentation]: Uzair Akbar, Niki Kilbertus, Hao Shen, Krikamol Muandet, and Bo Dai. [An Analysis of Causal Effect Estimation using Outcome Invariant Data Augmentation](https://papers.nips.cc/paper_files/paper/2025/hash/8dc00b61cdf8739c892f855c672b5daf-Abstract-Conference.html). *NeurIPS*, 2025.
 
 [^cdm-uai26]: Uzair Akbar, Zulfiqar Zaidi, Niki Kilbertus, Krikamol Muandet, and Bo Dai. [Bounding Treatment Effects with Symmetry Sensitivity Models](https://openreview.net/forum?id=eENswma7t9). *UAI 2026 Workshop on Causality for Decision Making*, 2026. [[PDF](symmetry4CausalBoundsUAI.pdf)]
