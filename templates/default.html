@@ -14,6 +14,9 @@
         {% if this.extra.favicon %}
             <link rel="shortcut icon" type="image/x-icon" href="{{ get_url(path = 'favicon.ico') }}">
             <link rel="apple-touch-icon" href="{{ get_url(path = 'apple-touch-icon.png') }}" type="image/png">
+            <link rel="icon" type="image/svg+xml" href="{{ get_url(path = 'favicon.svg') }}">
+            <link rel="icon" type="image/png" sizes="96x96" href="{{ get_url(path = 'favicon-96x96.png') }}">
+            <link rel="manifest" href="{{ get_url(path = 'site.webmanifest') }}">
         {% endif %}
 
         {% if this.extra.katex %}{% include "includes/katex.html" %}{% endif %}
