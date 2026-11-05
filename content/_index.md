@@ -119,7 +119,7 @@ On an optical-device benchmark, US cigarette demand data, and a do-MNIST benchma
 
 # Citation
 
-This work extends our [prior work](https://uzairakbar.com/causal-data-augmentation/)[^causal-data-augmentation] on causal estimation with DA. A non-archival summary was presented at the CDM workshop @ UAI 2026.[^cdm-uai26]
+This work extends our [prior work](https://uzairakbar.com/causal-data-augmentation/)[^causal-data-augmentation] on causal point-estimation with DA. A non-archival summary was also presented at the CDM workshop @ UAI 2026.[^cdm-uai26]
 
 ```bibtex
 @misc{akbar2026symmetry4CausalBounds,
